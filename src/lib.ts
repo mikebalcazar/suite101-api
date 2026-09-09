@@ -98,7 +98,13 @@ export function igualSeguro(a: string, b: string): boolean {
  * Un PIN no se guarda: se guarda lo que sale de estirarlo con PBKDF2 y su sal.
  * Si alguien se lleva la base, no se lleva los PIN. */
 
-export const VUELTAS = 120000;
+/* 100,000 y no más: es el tope de vueltas que el runtime de Workers acepta en
+ * PBKDF2. Con 120,000 —lo que decía este archivo— `deriveBits` truena y la
+ * ruta contesta 500. Nunca se vio en las pruebas porque workerd local no
+ * aplica ese límite: solo salió cuando la prueba de humo fijó un PIN contra el
+ * Worker publicado. Ningún PIN quedó guardado con el valor viejo, porque con
+ * el valor viejo no se podía guardar ninguno. */
+export const VUELTAS = 100000;
 
 export function salNueva(): string {
   return b64url(crypto.getRandomValues(new Uint8Array(16)));
