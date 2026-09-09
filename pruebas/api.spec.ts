@@ -40,6 +40,20 @@ describe('1 · el Worker responde', () => {
   });
 });
 
+describe('1 · la portada dice qué es esto', () => {
+  it('/ contesta 200 y se nombra', async () => {
+    const r = await pedir('/');
+    expect(r.estado).toBe(200);
+    expect(r.data.servicio).toBe('suite101-api');
+  });
+
+  it('una ruta que no existe contesta 404, no 500', async () => {
+    const r = await pedir('/inventada');
+    expect(r.estado).toBe(404);
+    expect(r.error).toBe('no_encontrado');
+  });
+});
+
 describe('3 · un usuario entra con código por correo', () => {
   it('sin sesión, /yo contesta 401', async () => {
     const r = await pedir('/yo');

@@ -80,6 +80,19 @@ app.get('/salud', async (c) => {
   });
 });
 
+// La portada de una API tiene que decir qué es y por dónde se empieza. Además
+// es lo primero que mide el verificador, y una raíz que no contesta 200 deja el
+// despliegue en rojo con el servicio perfecto.
+app.get('/', (c) =>
+  ok(c, {
+    servicio: 'suite101-api',
+    que_es: 'La unica puerta a los datos de la suite 101. Ninguna app toca una base directo.',
+    contrato: VERSION_CONTRATO,
+    empieza_en: ['/salud', '/auth/codigo', '/yo', '/orgs/:org'],
+    manda: 'la cookie de sesion y la cabecera X-App',
+  }),
+);
+
 app.get('/yo', yo);
 app.route('/auth', auth);
 app.route('/orgs', orgs);
