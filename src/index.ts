@@ -12,6 +12,7 @@ import { Hono } from 'hono';
 import auth, { conSesion, yo } from './rutas/auth';
 import orgs from './rutas/orgs';
 import admin from './rutas/admin';
+import importar, { paginaImportar } from './rutas/importar';
 import { err, ok, type Vars } from './http';
 import type { Env } from './entorno';
 import { VERSION_CONTRATO } from '../schema/tipos';
@@ -96,7 +97,16 @@ app.get('/', (c) =>
 app.get('/yo', yo);
 app.route('/auth', auth);
 app.route('/orgs', orgs);
+
+/* La página del importador va ANTES del router de /admin, que exige sesión
+ * para todo lo que cuelga de él. Quien abre esta página todavía no ha entrado
+ * —viene a entrar— y un 401 en JSON no le sirve de nada a un humano con un
+ * navegador. La página es solo la pantalla: el POST que escribe sí está detrás
+ * de la sesión y del superadmin. */
+app.get('/admin/importar', paginaImportar);
+
 app.route('/admin', admin);
+app.route('/admin', importar);
 
 app.notFound((c) => err(c as never, 'no_encontrado', 404, { ruta: c.req.path }));
 
