@@ -86,29 +86,55 @@ se arregla en conta-master, y se vuelve a sacar el archivo.
 
 ---
 
-## 4. Un defecto de la fase 1 que encontró esta fase
+## 4. Un defecto de la fase 1 que encontró esta fase — y una explicación mía que resultó falsa
 
 **El PIN no se podía guardar en producción, y nadie lo sabía.**
 
-`POST /auth/pin` contestaba `500 falla_interna` en 148 ms. No era CPU: el
-runtime de Workers no acepta más de **100,000 vueltas en PBKDF2**, y `lib.ts`
-pedía 120,000. Con eso, `POST /auth/pin` y `POST /orgs/:o/clientes/:id/acceso`
-estaban rotos desde la fase 1 —o sea, ningún cliente ni ninguna persona del
-taller podía tener PIN—.
+`POST /auth/pin` contestaba `500 falla_interna` en 148 ms. Con eso, esa ruta y
+`POST /orgs/:o/clientes/:id/acceso` estaban rotas desde la fase 1 —o sea,
+ningún cliente ni ninguna persona del taller podía tener PIN—. Se bajaron las
+vueltas de PBKDF2 de 120,000 a 100,000 en `lib.ts` y la ruta pasó a contestar
+200; el humo ahora comprueba las dos mitades, fijar el PIN (347 ms) y después
+entrar con él (449 ms), no solo una.
 
-Lo que vale la pena guardar de esto: **las 85 pruebas de vitest pasan igual con
-120,000**, porque workerd local no aplica ese límite. Solo lo vio el corredor,
-contra el Worker de verdad. Es exactamente lo que `OPERAR.md §6` dice y la
-razón de que el humo exista.
+**Lo que está medido, y lo que no:**
 
-No hubo PIN que migrar: con el valor viejo no se pudo guardar ninguno. Se bajó
-a 100,000, que es el máximo, y el humo ahora comprueba las dos mitades —fijarlo
-y entrar con él—, no solo una.
+| | |
+|---|---|
+| Medido | Con 120,000, `/auth/pin` dio 500 en **dos** corridas del humo contra el Worker publicado |
+| Medido | Con 100,000, contesta 200 y se puede entrar con ese PIN |
+| Medido | Las 85 pruebas de vitest pasan **igual** con 120,000: workerd local no reproduce la falla |
+| **NO medido** | **Por qué.** La causa sigue sin identificar |
 
-**Y una advertencia para el chat coordinador:** el defecto era de la fase 1 y su
-cierre decía que el PIN estaba «probado». Lo estaba, pero dentro de workerd.
-Conviene mirar con esa desconfianza todo lo criptográfico de roster101, que usa
-el mismo molde.
+Escribí primero que el runtime de Workers no acepta más de 100,000 vueltas en
+PBKDF2. **Eso es falso y lo comprobé después**: `roster101` deriva con 120,000
+en producción hoy y contesta bien —`POST /api/admin/entrar` con una clave
+incorrecta devuelve 401 en 1.02 s, o sea el PBKDF2 corrió entero—, con la misma
+`compatibility_date` (`2026-08-01`) y las mismas banderas. Mismo runtime, mismo
+tope, distinto resultado.
+
+Así que el cambio arregla el síntoma y está medido, pero **la explicación que le
+puse no se sostiene**. Lo que queda en pie: 148 ms es demasiado poco para
+haber computado 120,000 vueltas —roster101 tarda ~300 ms en hacerlo—, así que
+la llamada falló pronto, sin llegar a calcular. Eso apunta a una validación de
+parámetros o a un límite de la invocación, no a lentitud.
+
+**Cómo cerrarlo, para quien lo retome:** el humo ya imprime el `detalle` del
+500, que es el mensaje de la excepción; en las dos corridas rojas todavía no lo
+imprimía y por eso nunca se vio. Basta con volver a poner 120,000 en una rama y
+leer el comentario del commit. No lo hice porque `desplegar.yml` publica staging
+y producción del mismo commit, y eso deja el PIN roto en producción mientras
+dure el experimento.
+
+**Corrección importante para el chat coordinador:** en una versión anterior de
+este documento dije que convenía mirar con desconfianza lo criptográfico de
+roster101, «que usa el mismo molde». **Roster101 no tiene el defecto**: está
+medido arriba. Que nadie le baje las vueltas por esto.
+
+Y la lección que sí queda entera: las 85 pruebas locales pasan con el valor que
+rompe producción, porque workerd no reproduce la condición. Solo lo vio el
+corredor. Es exactamente lo que `OPERAR.md §6` dice y la razón de que el humo
+exista.
 
 ---
 
