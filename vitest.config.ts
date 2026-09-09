@@ -16,7 +16,11 @@ export default defineConfig({
     cloudflareTest({
       wrangler: { configPath: './wrangler.toml' },
       miniflare: {
-        bindings: { MIGRACIONES_D1: migraciones, ENTORNO: 'prueba', ORIGENES: '*' },
+        // ORIGENES NO se toca: las pruebas de CORS tienen que medir la lista
+        // de verdad, la de wrangler.toml. Con un comodin aqui, la prueba de
+        // que un origen desconocido no recibe permiso saldria verde siempre y
+        // no probaria nada.
+        bindings: { MIGRACIONES_D1: migraciones, ENTORNO: 'prueba' },
       },
     }),
   ],
