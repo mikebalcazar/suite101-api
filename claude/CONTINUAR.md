@@ -53,14 +53,27 @@ Esto es lo que hay que mirar con desconfianza hasta que alguien lo mida:
 2. **Google no se probó.** No hay `GOOGLE_CLIENT_ID` ni `GOOGLE_CLIENT_SECRET`.
    Las dos rutas están escritas y contestan `501 google_no_configurado` mientras
    no existan. El intercambio con Google no lo ha ejercido nadie.
-3. **R2 no se ejerció.** El bucket se crea en el despliegue y las rutas están,
-   pero la prueba de humo no sube ni baja un archivo. Sin medir.
-4. **CORS con un navegador de verdad.** La lista de orígenes y
-   `SameSite=None` están puestas, pero solo se han hecho peticiones desde
-   `curl` y desde Node, que no aplican la política del navegador. La primera app
-   que se conecte es la que lo va a descubrir.
-5. **Concurrencia.** Un solo hilo por empresa debería bastar, pero nadie ha
-   metido dos escrituras al mismo tiempo a ver qué pasa.
+
+Los otros tres huecos de esta lista **ya se cerraron**, y con números:
+
+3. ~~R2 no se ejerció~~ → un archivo sube por multipart y vuelve byte por byte,
+   en las pruebas y contra el bucket de verdad. La llave lleva la org por
+   delante, y sin sesión no se baja (401).
+4. ~~CORS con un navegador de verdad~~ → preflight medido en el borde: 204, el
+   origen exacto (no un comodín, que con credenciales el navegador tiraría),
+   `Allow-Credentials: true`, `X-App` entre las cabeceras permitidas, y un
+   origen ajeno sin permiso. **De paso apareció un defecto en las propias
+   pruebas:** la configuración de vitest ponía `ORIGENES: '*'`, así que
+   cualquier prueba de CORS habría salido verde sin probar nada. Se quitó: las
+   pruebas miden la lista real de `wrangler.toml`.
+5. ~~Concurrencia~~ → diez ingresos en paralelo sobre el mismo proyecto: los
+   diez aceptados, diez ids distintos, y el `cobrado` exacto. El hilo único del
+   Durable Object hace gratis lo que en conta-master pedía transacciones y aun
+   así podía perder una carrera.
+
+Y una que no estaba en la lista y ahora sí está medida: **matar la sesión la
+mata de verdad**. Después de `/auth/salir`, la misma cookie devuelta a mano ya
+no sirve (401).
 
 ---
 
