@@ -12,8 +12,8 @@ la cuenta de en qué va, quién lo hace y qué falta comprobar.
 | Fase | Qué | Estado |
 |---|---|---|
 | 0 | Congelar: no más UI sobre Firestore ni sobre `productos[]` | **en vigor** |
-| 1 | `suite101-api` v0 — Worker, D1 master, OrgDB, auth101, permisos, WebSocket | **lista para empezar**, chat aparte |
-| 2 | Importar desde Firestore | esperando la 1 |
+| 1 | `suite101-api` v0 — Worker, D1 master, OrgDB, auth101, permisos, WebSocket | **terminada y rectificada** (9-sep 01:26) |
+| 2 | Importar desde Firestore | **bloqueada**: falta `RESEND_API_KEY` y una decisión de Mike |
 | 3 | `peek101` → `/peek` | esperando la 1 |
 | 4 | `dash101` → API | esperando la 1 |
 | 5 | `cotizador101` → `/items/vender` | esperando la 1 |
@@ -65,6 +65,26 @@ pueden contestar mientras se construye. En orden de cuándo empiezan a estorbar:
 
 Si no contestas, se sigue la propuesta del documento y se anota aquí.
 
+## Fase 1 — qué comprobé yo (9-sep)
+
+No se dio por buena con la palabra del chat que la construyó:
+
+- `publicar: needs: pruebas` — las pruebas son puerta, no adorno.
+- Sospeché del paso «Que el resultado del humo mande», que salía `skipped`.
+  Fui a leerlo: `if: steps.medir.outcome != 'success'`. Skipped = el humo pasó.
+  El patrón está bien hecho; la sospecha era mía y era infundada.
+- `permisos.ts` es código que niega, no una lista: `filter` de campos fuera,
+  403 con la lista de permitidos. Las pruebas afirman **18 rechazos contra 17
+  éxitos** — probó más veces que dice que no que que dice que sí.
+- Humo del corredor: **42/42**, con el DO naciendo solo, la sesión sobreviviendo,
+  el WebSocket avisando a otra pantalla y $150,000.00 guardado como `15000000`.
+- Mi verificación independiente salió **roja y el error fue mío**: pedí `/orgs`
+  y `/admin/orgs` esperando 200, y contestaron 404 y 401, que es lo correcto.
+
+Pendiente de re-medir: **las negativas de permisos se midieron en staging**, no
+en producción. Mismo código desplegado, pero conviene repetirlo con datos reales
+después de la fase 2.
+
 ## Riesgo que estoy vigilando
 
 **Dos chats sobre el mismo repositorio.** Pasó dos veces el 8-sep. La segunda
@@ -87,4 +107,15 @@ Cuando un chat diga que terminó su fase, no lo doy por bueno con su palabra:
 
 ## Siguiente movimiento
 
-Abrir un chat para la fase 1 con `ENCARGO-fase1-suite101-api.md`.
+Dos cosas de Mike antes de soltar la fase 2:
+
+1. **`RESEND_API_KEY` en los secretos de `suite101-api`.** Sin él,
+   `/auth/codigo` contesta `503 correo_no_configurado` y nadie entra en
+   producción. Es el único bloqueo real de toda la migración ahora mismo.
+2. **Cómo importa la fase 2**, que la fase 1 dejó planteado y no le tocaba
+   decidir: `POST /admin/importar` por debajo de `permisos.ts`, o importar por
+   las rutas normales recorriendo las etapas una por una. La primera es honesta;
+   la segunda inventa un historial de avances que el taller nunca tuvo.
+
+`GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` no bloquean nada: Google es para
+socios y el código por correo alcanza.
