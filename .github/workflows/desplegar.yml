@@ -1,0 +1,184 @@
+# Publica suite101-api en Cloudflare y luego mide lo que publicó.
+#
+# El chat no alcanza api.cloudflare.com ni *.workers.dev: el proxy de salida se
+# lo rechaza. Aquí sí hay internet, así que todo lo que hay que saber se mide
+# aquí y se devuelve por api.github.com —comentario del commit—, que es el
+# único canal de vuelta que el chat puede leer (OPERAR.md §6).
+#
+# Secretos del repositorio (ya puestos):
+#   CLOUDFLARE_API_TOKEN   Workers Scripts:Edit, D1:Edit, Workers R2 Storage:Edit,
+#                          Account Settings:Read, User Details:Read
+#   CLOUDFLARE_ACCOUNT_ID
+#
+# El identificador de las bases D1 no está escrito en wrangler.toml: dice
+# PENDIENTE, y este flujo lo sustituye por el real después de crear la base si
+# no existe. La razón es que quien escribe wrangler.toml no alcanza Cloudflare
+# y no puede saberlo. Así el repositorio se puede clonar y publicar en una
+# cuenta nueva sin tocar nada a mano.
+
+name: Publicar API
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'claude/**'
+      - 'README.md'
+      - 'OPERAR.md'
+  workflow_dispatch:
+
+concurrency:
+  group: despliegue-api
+  cancel-in-progress: false
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Revisar los tipos
+        run: npx tsc --noEmit
+      - name: Pruebas contra el Durable Object y el D1 de verdad
+        run: npx vitest run --reporter=verbose
+
+  publicar:
+    needs: pruebas
+    runs-on: ubuntu-latest
+    outputs:
+      prod: ${{ steps.publicar.outputs.prod }}
+      staging: ${{ steps.publicar.outputs.staging }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      - name: Crear la base y el bucket si no existen
+        id: infra
+        run: |
+          set -euo pipefail
+          crear_base () {
+            local nombre="$1"
+            local id
+            # wrangler ha cambiado la forma de esta salida entre versiones: a
+            # veces es una lista, a veces viene envuelta en .result. Se aceptan
+            # las dos, y el identificador tanto en .uuid como en .database_id.
+            local jqf='(if type=="array" then . else .result end)[] | select(.name==$n) | (.uuid // .database_id)'
+            id=$(npx wrangler d1 list --json | jq -r --arg n "$nombre" "$jqf" | head -1)
+            if [ -z "$id" ] || [ "$id" = "null" ]; then
+              echo "no existe $nombre: se crea" >&2
+              npx wrangler d1 create "$nombre" >&2
+              id=$(npx wrangler d1 list --json | jq -r --arg n "$nombre" "$jqf" | head -1)
+            fi
+            if [ -z "$id" ] || [ "$id" = "null" ]; then echo "no pude obtener el id de $nombre" >&2; exit 1; fi
+            echo "$id"
+          }
+          PROD_ID=$(crear_base suite101-master)
+          STAG_ID=$(crear_base suite101-master-staging)
+          echo "prod_id=$PROD_ID" >> "$GITHUB_OUTPUT"
+          echo "stag_id=$STAG_ID" >> "$GITHUB_OUTPUT"
+
+          npx wrangler r2 bucket create suite101 || echo "el bucket suite101 ya estaba"
+          npx wrangler r2 bucket create suite101-staging || echo "el bucket suite101-staging ya estaba"
+
+      - name: Poner los identificadores reales en wrangler.toml
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, pathlib, re
+          p = pathlib.Path('wrangler.toml')
+          t = p.read_text()
+          ids = [os.environ['PROD_ID'], os.environ['STAG_ID']]  # en el orden en que aparecen
+          i = iter(ids)
+          t = re.sub(r'database_id = "PENDIENTE"', lambda m: f'database_id = "{next(i)}"', t)
+          p.write_text(t)
+          PY
+          grep -n 'database_id' wrangler.toml | sed 's/= ".\{8\}.*/= "…(puesto)"/'
+        env:
+          PROD_ID: ${{ steps.infra.outputs.prod_id }}
+          STAG_ID: ${{ steps.infra.outputs.stag_id }}
+
+      - name: Aplicar las migraciones del D1
+        run: |
+          set -euo pipefail
+          npx wrangler d1 migrations apply suite101-master --remote
+          npx wrangler d1 migrations apply suite101-master-staging --remote --env staging
+
+      - name: Publicar
+        id: publicar
+        run: |
+          set -euo pipefail
+          npx wrangler deploy --env staging | tee /tmp/staging.txt
+          npx wrangler deploy | tee /tmp/prod.txt
+          # La liga la dice el propio wrangler: asi no hay que traer de ningun
+          # lado el subdominio de la cuenta.
+          stag=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/staging.txt | head -1)
+          prod=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/prod.txt | head -1)
+          if [ -z "$stag" ] || [ -z "$prod" ]; then echo 'no pude sacar las ligas de la salida de wrangler' >&2; exit 1; fi
+          echo "staging=$stag" >> "$GITHUB_OUTPUT"
+          echo "prod=$prod" >> "$GITHUB_OUTPUT"
+          echo "publicado: $prod  ·  $stag"
+
+  humo:
+    needs: publicar
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      - name: Medir lo publicado
+        id: medir
+        continue-on-error: true
+        env:
+          PROD: ${{ needs.publicar.outputs.prod }}
+          STAGING: ${{ needs.publicar.outputs.staging }}
+        run: |
+          set -u
+          exec > >(tee /tmp/salida.txt) 2>&1
+          echo "Prueba de humo — suite101-api"
+          sleep 10   # el Worker recién publicado tarda unos segundos en servir
+          node pruebas/humo.mjs
+
+      # Aquí está el canal de vuelta. El log de Actions no sirve: descargarlo
+      # redirige a un host que el proxy del chat también rechaza.
+      - name: Dejar lo medido en el commit
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -u
+          [ -f /tmp/salida.txt ] || echo "No hubo salida que reportar." > /tmp/salida.txt
+          jq -Rs '{body: ("**Humo**\n\n```\n" + .[-60000:] + "\n```")}' /tmp/salida.txt > /tmp/comentario.json
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/commits/$SHA/comments" \
+            -d @/tmp/comentario.json -o /tmp/respuesta.json -w 'comentario: %{http_code}\n'
+          head -c 200 /tmp/respuesta.json || true
+
+      - name: Que el resultado del humo mande
+        if: steps.medir.outcome != 'success'
+        run: exit 1
+
+  verificar:
+    needs: publicar
+    uses: ./.github/workflows/verificar.yml
+    with:
+      url: ${{ needs.publicar.outputs.prod }}
+      rutas: /salud

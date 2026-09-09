@@ -1,0 +1,25 @@
+{
+  "name": "suite101-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "La unica puerta a los datos de la suite 101 \u2014 Worker + D1 master + un Durable Object con SQLite por empresa",
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "tipos": "tsc --noEmit",
+    "prueba": "vitest run",
+    "humo": "node pruebas/humo.mjs"
+  },
+  "dependencies": {
+    "hono": "^4.13.7"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/workers-types": "^5.20260908.1",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.130.0",
+    "ws": "^8.18.0",
+    "@types/ws": "^8.5.13"
+  }
+}
