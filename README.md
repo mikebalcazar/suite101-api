@@ -1,7 +1,8 @@
 # suite101-api
 
 > **¿Eres un chat que acaba de abrirse para trabajar aquí?**
-> Tu encargo completo está en **`claude/ENCARGO-fase1.md`**. Léelo antes que
+> Tu encargo completo está en **`claude/ENCARGO-fase2.md`** — la fase 1 ya
+> está terminada y medida; su cierre está en `claude/CONTINUAR.md`. Léelo antes que
 > nada, junto con `OPERAR.md`. Trae el alcance, lo que ya está resuelto para que
 > no lo repitas, cómo medir sin alcanzar producción y las siete condiciones para
 > dar la fase por terminada. No empieces a escribir código sin haberlo leído.

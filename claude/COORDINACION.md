@@ -13,7 +13,7 @@ la cuenta de en qué va, quién lo hace y qué falta comprobar.
 |---|---|---|
 | 0 | Congelar: no más UI sobre Firestore ni sobre `productos[]` | **en vigor** |
 | 1 | `suite101-api` v0 — Worker, D1 master, OrgDB, auth101, permisos, WebSocket | **terminada y rectificada** (9-sep 01:26) |
-| 2 | Importar desde Firestore | **bloqueada**: falta `RESEND_API_KEY` y una decisión de Mike |
+| 2 | Importar desde Firestore | **lista para empezar**, chat aparte |
 | 3 | `peek101` → `/peek` | esperando la 1 |
 | 4 | `dash101` → API | esperando la 1 |
 | 5 | `cotizador101` → `/items/vender` | esperando la 1 |
@@ -85,6 +85,18 @@ Pendiente de re-medir: **las negativas de permisos se midieron en staging**, no
 en producción. Mismo código desplegado, pero conviene repetirlo con datos reales
 después de la fase 2.
 
+## Un error mío, para no repetirlo
+
+El encargo de la fase 1 afirmaba que el token de Actions de `suite101-api`
+estaba en modo escritura. **Estaba en `read`.** Yo lo puse en `write` en cuatro
+repositorios el 8-sep y di por hecho que este también, sin comprobarlo — este
+repositorio ni siquiera existía en aquella lista. El chat de la fase 1 lo
+comprobó antes de escribir código, lo encontró y lo arregló.
+
+De ahí sale la regla, que ya está en `OPERAR.md §3` y ahora también aquí:
+**tampoco lo que escribe el coordinador es prueba de nada.** Comprobado hoy:
+los siete repositorios están en `write`.
+
 ## Riesgo que estoy vigilando
 
 **Dos chats sobre el mismo repositorio.** Pasó dos veces el 8-sep. La segunda
@@ -107,15 +119,11 @@ Cuando un chat diga que terminó su fase, no lo doy por bueno con su palabra:
 
 ## Siguiente movimiento
 
-Dos cosas de Mike antes de soltar la fase 2:
+Las dos cosas que bloqueaban la fase 2 quedaron resueltas el 9-sep:
+`RESEND_API_KEY` está puesto, y Mike eligió **la opción A** para importar —
+`POST /admin/importar`, superadmin, por debajo de `permisos.ts` a propósito.
 
-1. **`RESEND_API_KEY` en los secretos de `suite101-api`.** Sin él,
-   `/auth/codigo` contesta `503 correo_no_configurado` y nadie entra en
-   producción. Es el único bloqueo real de toda la migración ahora mismo.
-2. **Cómo importa la fase 2**, que la fase 1 dejó planteado y no le tocaba
-   decidir: `POST /admin/importar` por debajo de `permisos.ts`, o importar por
-   las rutas normales recorriendo las etapas una por una. La primera es honesta;
-   la segunda inventa un historial de avances que el taller nunca tuvo.
+Abrir un chat para la fase 2 con `claude/ENCARGO-fase2.md`.
 
-`GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` no bloquean nada: Google es para
-socios y el código por correo alcanza.
+`GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` siguen sin poner y no bloquean nada:
+Google es para socios y el código por correo alcanza.
