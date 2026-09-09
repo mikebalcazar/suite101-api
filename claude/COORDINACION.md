@@ -13,7 +13,8 @@ la cuenta de en qué va, quién lo hace y qué falta comprobar.
 |---|---|---|
 | 0 | Congelar: no más UI sobre Firestore ni sobre `productos[]` | **en vigor** |
 | 1 | `suite101-api` v0 — Worker, D1 master, OrgDB, auth101, permisos, WebSocket | **terminada y rectificada** (9-sep 01:26) |
-| 2 | Importar desde Firestore | **lista para empezar**, chat aparte |
+| 2 | Importar desde Firestore (conta-master) | **en curso**, corriendo desde el navegador de Mike |
+| 2b | **Importar quell101** — no estaba en el plan, ver abajo | **falta escribir el encargo** |
 | 3 | `peek101` → `/peek` | esperando la 1 |
 | 4 | `dash101` → API | esperando la 1 |
 | 5 | `cotizador101` → `/items/vender` | esperando la 1 |
@@ -96,6 +97,52 @@ comprobó antes de escribir código, lo encontró y lo arregló.
 De ahí sale la regla, que ya está en `OPERAR.md §3` y ahora también aquí:
 **tampoco lo que escribe el coordinador es prueba de nada.** Comprobado hoy:
 los siete repositorios están en `write`.
+
+## El hueco que encontró Mike (9-sep)
+
+El plan no tiene ninguna fase que migre los datos de **quell101**, y son los
+más importantes del taller.
+
+`suite101-arquitectura.md` §11 pone quell101 en la fase 6 como si fuera a
+*nacer* sobre la API. Pero quell101 ya existe, con 34 despliegues y aplicaciones
+en campo, y tiene datos reales: dos proyectos (Holcim y Sanje) con sus ítems. La
+fase 2 dice «importar desde Firestore», y quell101 nunca estuvo en Firestore:
+vive en su propio D1.
+
+Se descubrió porque la lectura de conta-master devolvió **cero productos**, y al
+decirlo Mike contestó que los ítems sí existen, en la otra aplicación.
+
+Lo que hay que traer, con el mapeo ya identificado:
+
+| quell101 (D1) | Suite 101 (OrgDB) |
+|---|---|
+| `projects` | `proyectos` |
+| `elements` | **`items`** — código, tipo, nombre, responsable, posición en el plano |
+| `element_etapas` | **`avances`** — fecha y persona de cada etapa cumplida |
+| `punch_items` | punchlist |
+| `plans`, `photos` | R2 |
+
+**Esto corrige la razón por la que se eligió la opción A.** Se descartó importar
+por las rutas normales porque «dejaría un historial de avances inventado». Con
+quell101 en la mesa, ese historial **no hay que inventarlo: existe y es real**,
+en `element_etapas`, con su fecha y su responsable. La opción A sigue siendo la
+correcta para conta-master; para quell101 hay que traer el historial tal cual.
+
+Si se hubiera seguido el plan al pie de la letra, se habría migrado la
+contabilidad y se habrían dejado atrás los ítems y su historial.
+
+## Decisión de Mike (9-sep): CONTA MASTER pasa a llamarse dash101
+
+Son cuatro cosas y tienen riesgos distintos. En este orden:
+
+1. **El contrato de la API** — ya nació con `dash101` (`permisos.ts` lo usa 8
+   veces). Nada que hacer.
+2. **El nombre visible** (`<title>`, el logotipo del login). Sin riesgo.
+3. **El repositorio** `conta-master` → `dash101`. Bajo: GitHub redirige lo viejo
+   y el sitio de Netlify no cuelga del nombre del repo.
+4. **La URL** `conta-master.netlify.app`. **Alto**, y va al final: está en
+   `ORIGENES` de la API. Cambiar el sitio y la lista de CORS tiene que ser un
+   solo movimiento, o el navegador bloquea todo entre un paso y otro.
 
 ## Riesgo que estoy vigilando
 
