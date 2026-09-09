@@ -305,7 +305,7 @@ async function importacion() {
   const entS = await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: 'socia@ejemplo.mx', codigo: codS.data?.codigo_prueba } });
   rev(entS.estado === 200, 'entra con «olvidé mi PIN»', `${entS.ms} ms`);
   const pin = await pedir(STAGING, '/auth/pin', { method: 'POST', body: { pin: '482913' } });
-  rev(pin.data?.puesto === true, 'fija su PIN nuevo', `${pin.estado} ${pin.error || ''} ${pin.no_json || ''} · ${pin.ms} ms`);
+  rev(pin.data?.puesto === true, 'fija su PIN nuevo', `${pin.estado} ${pin.error || ''} ${JSON.stringify(pin.detalle ?? '')} ${pin.no_json || ''} · ${pin.ms} ms`);
   // PBKDF2 con 120,000 vueltas cuesta CPU, y el Worker tiene un limite. Si
   // esto tarda de mas o se cae, el PIN no se puede usar en produccion y hay
   // que saberlo aqui y no el dia que un cliente lo intente.
