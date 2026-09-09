@@ -120,6 +120,7 @@ Lo que hay que traer, con el mapeo ya identificado:
 | `elements` | **`items`** — código, tipo, nombre, responsable, posición en el plano |
 | `element_etapas` | **`avances`** — fecha y persona de cada etapa cumplida |
 | `punch_items` | punchlist |
+| `plans`, `photos`, `log_entries`, dudas, notas | **faltan en el OrgDB del §3** |
 | `plans`, `photos` | R2 |
 
 **Esto corrige la razón por la que se eligió la opción A.** Se descartó importar
@@ -130,6 +131,18 @@ correcta para conta-master; para quell101 hay que traer el historial tal cual.
 
 Si se hubiera seguido el plan al pie de la letra, se habría migrado la
 contabilidad y se habrían dejado atrás los ítems y su historial.
+
+**Dos correcciones al documento, señaladas por MASTER CODER y confirmadas:**
+
+1. §11 fase 6 dice «quell101 nace sobre la API». No nace: existe, está publicado
+   y lleva más de 46 PR.
+2. `items.etapa` está fijo con `CHECK BETWEEN 0 AND 7`. En quell101 **agregar una
+   etapa es un `INSERT` en la tabla `etapas`, no un despliegue.** Si el OrgDB
+   nace con el rango cerrado, la primera etapa nueva obliga a migrar la tabla en
+   todas las orgs. Tiene que ser una llave foránea a `etapas`, no un `CHECK`.
+
+Y al OrgDB del §3 le faltan las tablas de quell101: planos, pines, punchlist,
+dudas y notas.
 
 ## Decisión de Mike (9-sep): CONTA MASTER pasa a llamarse dash101
 
@@ -143,6 +156,45 @@ Son cuatro cosas y tienen riesgos distintos. En este orden:
 4. **La URL** `conta-master.netlify.app`. **Alto**, y va al final: está en
    `ORIGENES` de la API. Cambiar el sitio y la lista de CORS tiene que ser un
    solo movimiento, o el navegador bloquea todo entre un paso y otro.
+
+## Quién es dueño de qué (9-sep) — decidido tras el reporte del choque
+
+Llegó un reporte de MASTER CODER sobre dos chats trabajando a la vez en
+`bitacora-obra` el 8-sep. Atribuía los PR #40 a #44 a «presumiblemente el chat de
+quell101». **No: era este chat, el coordinador.** La confusión es el problema en
+sí, así que queda esto por escrito:
+
+**Un repositorio, un chat dueño. El coordinador no es dueño de ninguno.**
+
+| Repositorio | Dueño |
+|---|---|
+| `suite101-api` | el chat de la fase en curso |
+| `bitacora-obra` (quell101) | el chat de quell101 |
+| `conta-master` (→ dash101) | el chat de peek101/dash101 |
+| `cotizador-t101` | el chat del cotizador |
+| `t101-portal-trabajadores` | el chat del portal |
+| `descargas`, `taller101` | sin dueño fijo: se toma con semáforo |
+
+El coordinador entra a un repositorio solo para: leer, verificar lo publicado,
+y arreglar algo que bloquee a otra fase. Cuando entre, **escribe el semáforo
+como cualquiera**. Si lo que hay que hacer no es urgente, se le manda al dueño.
+
+El semáforo no basta por sí solo — depende de que todos lo lean — pero con dueño
+fijo el semáforo pasa a ser la excepción y no la regla, y ahí sí funciona.
+
+## Un error mío con el PR abierto de conta-master
+
+El reporte dice que el PR de `OPERAR.md` en `conta-master` se dejó **abierto a
+propósito** porque ahí trabaja el chat de peek101. Yo no lo sabía: al limpiar
+ramas huérfanas revisé `claude/operar`, vi 188 líneas que `main` no tenía, las
+rescaté a `main` y borré la rama. Borrar la rama cerró el PR #1 sin fusionar.
+
+**El contenido no se perdió** —`OPERAR.md` y `verificar-publicado.yml` están en
+`main`, y este último además ampliado a los dos sitios del repo— pero cerré el
+PR de otro chat sin saber que existía. Comprobé antes que no se perdiera nada;
+no comprobé si alguien lo estaba usando, que era la otra mitad de la pregunta.
+
+De ahí sale la regla de arriba: si hubiera habido dueño, habría preguntado.
 
 ## Riesgo que estoy vigilando
 
