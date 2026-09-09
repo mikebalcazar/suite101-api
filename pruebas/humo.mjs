@@ -44,8 +44,12 @@ async function pedir(base, ruta, { app, method = 'GET', body } = {}) {
   const r = await fetch(`${base}${ruta}`, { method, headers: cabeceras, body: body ? JSON.stringify(body) : undefined, redirect: 'manual' });
   const puesta = r.headers.get('set-cookie');
   if (puesta) galleta = puesta.split(';')[0];
+  // Si no vuelve JSON hay que poder verlo: un Worker que se pasa de CPU
+  // contesta una pagina de error de Cloudflare, y un `catch {}` que la tira
+  // deja la falla sin explicacion.
+  const texto = await r.text();
   let cuerpo = {};
-  try { cuerpo = await r.json(); } catch { cuerpo = {}; }
+  try { cuerpo = JSON.parse(texto); } catch { cuerpo = { no_json: texto.slice(0, 200) }; }
   return { estado: r.status, ms: Date.now() - t0, ...cuerpo };
 }
 
@@ -301,7 +305,12 @@ async function importacion() {
   const entS = await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: 'socia@ejemplo.mx', codigo: codS.data?.codigo_prueba } });
   rev(entS.estado === 200, 'entra con «olvidé mi PIN»', `${entS.ms} ms`);
   const pin = await pedir(STAGING, '/auth/pin', { method: 'POST', body: { pin: '482913' } });
-  rev(pin.data?.puesto === true, 'fija su PIN nuevo');
+  rev(pin.data?.puesto === true, 'fija su PIN nuevo', `${pin.estado} ${pin.error || ''} ${pin.no_json || ''} · ${pin.ms} ms`);
+  // PBKDF2 con 120,000 vueltas cuesta CPU, y el Worker tiene un limite. Si
+  // esto tarda de mas o se cae, el PIN no se puede usar en produccion y hay
+  // que saberlo aqui y no el dia que un cliente lo intente.
+  const conPin = await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: 'socia@ejemplo.mx', pin: '482913' } });
+  rev(conPin.estado === 200, 'y despues entra con ese PIN', `${conPin.estado} ${conPin.error || ''} ${conPin.no_json || ''} · ${conPin.ms} ms`);
   const noPuede = await pedir(STAGING, '/admin/importar', { method: 'POST', body: { org: ORGI, modo: 'escribir', docs } });
   rev(noPuede.estado === 403, 'quien no es superadmin NO abre la puerta de servicio', `${noPuede.estado} ${noPuede.error}`);
   galleta = guardada;
