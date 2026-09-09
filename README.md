@@ -1,5 +1,15 @@
 # suite101-api
 
+> **¿Eres un chat que acaba de abrirse para trabajar aquí?**
+> Tu encargo completo está en **`claude/ENCARGO-fase1.md`**. Léelo antes que
+> nada, junto con `OPERAR.md`. Trae el alcance, lo que ya está resuelto para que
+> no lo repitas, cómo medir sin alcanzar producción y las siete condiciones para
+> dar la fase por terminada. No empieces a escribir código sin haberlo leído.
+>
+> El token para clonar sale de `CONTEXTO.md`, en el conocimiento del proyecto;
+> el procedimiento está en `OPERAR.md §1`.
+
+
 La única puerta a los datos de la suite 101. Un Worker de Cloudflare con un
 Durable Object por empresa, cada uno con su propio SQLite, y un D1 «master»
 aparte que hace de directorio.
