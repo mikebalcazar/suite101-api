@@ -181,4 +181,5 @@ jobs:
     uses: ./.github/workflows/verificar.yml
     with:
       url: ${{ needs.publicar.outputs.prod }}
+      marca: suite101-api
       rutas: /salud
