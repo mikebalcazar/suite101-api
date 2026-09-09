@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Importar de Firestore — Suite 101</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;500;600&family=Raleway:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Identidad Taller 101: azul #0080C1, Raleway en el texto, Sansation en la
+     marca, y Fira Sans con cifras tabulares en TODO número. Las cifras de las
+     tablas de cuadre se leen en columna: sin tabular-nums no se alinean y el
+     que compara dos totales tiene que contar dígitos con el dedo. */
+  :root {
+    --azul: #0080C1;
+    --tinta: #16202a;
+    --suave: #5b6b78;
+    --linea: #dfe6eb;
+    --fondo: #f6f8fa;
+    --verde: #1a7f4b;
+    --rojo: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--fondo); color: var(--tinta);
+    font-family: Raleway, "Segoe UI", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.55;
+  }
+  .marca { font-family: Sansation, Raleway, sans-serif; font-weight: 700; letter-spacing: .02em; }
+  .cifra, td.n, .n, input, textarea, pre, code {
+    font-family: "Fira Sans", "Segoe UI", system-ui, sans-serif;
+    font-variant-numeric: tabular-nums lining-nums;
+    font-feature-settings: "tnum" 1, "lnum" 1;
+  }
+  header { background: var(--azul); color: #fff; padding: 18px 22px; }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 4px 0 0; opacity: .9; font-size: 13px; }
+  main { max-width: 980px; margin: 0 auto; padding: 20px 16px 64px; }
+  section {
+    background: #fff; border: 1px solid var(--linea); border-radius: 10px;
+    padding: 16px 18px; margin: 0 0 16px;
+  }
+  h2 { font-size: 15px; margin: 0 0 10px; color: var(--azul); text-transform: uppercase; letter-spacing: .06em; }
+  p.nota { color: var(--suave); font-size: 13px; margin: 6px 0; }
+  label { display: block; font-size: 13px; color: var(--suave); margin: 10px 0 4px; }
+  input, textarea {
+    width: 100%; padding: 9px 10px; border: 1px solid var(--linea);
+    border-radius: 7px; font-size: 14px; background: #fff; color: var(--tinta);
+  }
+  textarea { min-height: 76px; resize: vertical; }
+  button {
+    background: var(--azul); color: #fff; border: 0; border-radius: 7px;
+    padding: 9px 16px; font-family: Raleway, sans-serif; font-weight: 600;
+    font-size: 14px; cursor: pointer; margin: 10px 8px 0 0;
+  }
+  button.gris { background: #63757f; }
+  button.rojo { background: var(--rojo); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  pre {
+    background: #0f1a22; color: #d7e3ea; padding: 12px; border-radius: 8px;
+    overflow-x: auto; font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+  }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 13.5px; }
+  th, td { border-bottom: 1px solid var(--linea); padding: 6px 8px; text-align: left; }
+  th { color: var(--suave); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  td.n, th.n { text-align: right; }
+  .si { color: var(--verde); font-weight: 600; }
+  .no { color: var(--rojo); font-weight: 600; }
+  .aviso { border-left: 3px solid var(--azul); padding-left: 12px; margin: 10px 0; }
+  .estado { font-size: 13px; margin-top: 8px; }
+  .puerta { background: #fff6e5; border: 1px solid #e8c98a; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span class="marca">Taller 101</span> · Importar de Firestore a Suite 101</h1>
+  <p>Fase 2 de la migración. Esta página solo se usa una vez por empresa.</p>
+</header>
+
+<main>
+
+<section class="puerta">
+  <h2>Qué es esto</h2>
+  <p>Trae a la Suite 101 lo que hoy vive en Firestore (CONTA MASTER): negocios, cuentas,
+  clientes, proveedores, proyectos, sus productos —que aquí se llaman <b>ítems</b>—,
+  movimientos y gastos recurrentes.</p>
+  <p class="nota"><b>Se conservan los ids.</b> Un <code>producto_id</code> viejo sigue apuntando
+  al mismo ítem. <b>Los PIN no se migran</b>: cada quien vuelve a fijar el suyo con
+  «olvidé mi PIN». <b>No se inventa historial</b>: la etapa que un ítem ya traía se
+  conserva, pero no se le fabrican avances con fechas que nunca ocurrieron.</p>
+  <p class="nota">Escribe por <code>POST /admin/importar</code>, que es una puerta de servicio:
+  solo el superadmin, y a propósito por debajo de los permisos normales. Correrla dos veces
+  no duplica nada.</p>
+</section>
+
+<section>
+  <h2>1 · Entrar a la API</h2>
+  <div id="quien" class="estado">Comprobando la sesión…</div>
+  <div id="login" hidden>
+    <label for="correo">Correo del superadmin</label>
+    <input id="correo" type="email" autocomplete="email" placeholder="mike@forespot.com">
+    <button id="bPedir">Mandar código</button>
+    <span id="pedirEstado" class="estado"></span>
+    <div id="paso2" hidden>
+      <label for="codigo">Código de 6 dígitos</label>
+      <input id="codigo" inputmode="numeric" maxlength="6" placeholder="123456">
+      <button id="bEntrar">Entrar</button>
+    </div>
+  </div>
+  <div id="orgs" hidden>
+    <label for="org">Empresa (org) a la que se importa</label>
+    <input id="org" list="listaOrgs" placeholder="forespot">
+    <datalist id="listaOrgs"></datalist>
+    <p class="nota" id="orgsNota"></p>
+  </div>
+</section>
+
+<section>
+  <h2>2 · Sacar los datos de Firestore</h2>
+  <p>Firebase solo tiene autorizado el dominio de CONTA MASTER, así que la lectura se hace
+  desde ahí, donde tu sesión ya está viva. Abre
+  <a href="https://conta-master.netlify.app" target="_blank" rel="noopener">conta-master.netlify.app</a>,
+  entra si hace falta, abre la consola del navegador (F12 → Console) y pega esto:</p>
+  <pre id="receta"></pre>
+  <button id="bCopiar" class="gris">Copiar la receta</button>
+  <p class="nota">Descarga un archivo <code>contamaster-export.json</code>. Nada sale de tu
+  navegador hacia ningún lado: el archivo se queda en tu computadora y de ahí lo subes aquí.</p>
+
+  <label for="archivo">El archivo que descargaste</label>
+  <input id="archivo" type="file" accept="application/json,.json">
+  <div id="leido" class="estado"></div>
+</section>
+
+<section>
+  <h2>3 · Ensayo</h2>
+  <p class="nota">Escribe de verdad dentro de una transacción y la deshace al terminar. Mide
+  exactamente lo mismo que la corrida buena, incluidas las validaciones del esquema, y no
+  deja nada.</p>
+  <button id="bSeco" disabled>Correr en seco</button>
+  <button id="bEscribir" class="rojo" disabled>Importar de verdad</button>
+  <div id="corriendo" class="estado"></div>
+</section>
+
+<section id="reporte" hidden>
+  <h2>4 · El cuadre</h2>
+  <div id="veredicto"></div>
+  <div id="tablas"></div>
+  <div id="dinero"></div>
+  <div id="extras"></div>
+  <details><summary class="nota">La respuesta completa, tal cual</summary><pre id="crudo"></pre></details>
+</section>
+
+</main>
+
+<script>
+const RECETA = [
+  "(async () => {",
+  "  const P = 'contamaster-fs';",
+  "  const abrir = () => new Promise((ok, no) => { const r = indexedDB.open('firebaseLocalStorageDb'); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });",
+  "  const db = await abrir();",
+  "  const filas = await new Promise((ok, no) => { const t = db.transaction('firebaseLocalStorage', 'readonly').objectStore('firebaseLocalStorage').getAll(); t.onsuccess = () => ok(t.result); t.onerror = () => no(t.error); });",
+  "  const u = filas.map(f => f.value).find(v => v && v.stsTokenManager);",
+  "  if (!u) throw new Error('no hay sesion de Firebase en esta pestana: entra a CONTA MASTER primero');",
+  "  if (Date.now() + 60000 > Number(u.stsTokenManager.expirationTime || 0)) throw new Error('el token ya vencio: recarga la pagina y vuelve a pegar esto');",
+  "  const tok = u.stsTokenManager.accessToken;",
+  "  const cols = ['negocios', 'cuentas', 'clientes', 'proveedores', 'proyectos', 'movimientos', 'opex', 'usuarios'];",
+  "  const docs = {}, errores = {};",
+  "  for (const c of cols) {",
+  "    let pageToken = '', out = [];",
+  "    do {",
+  "      const url = 'https://firestore.googleapis.com/v1/projects/' + P + '/databases/(default)/documents/' + c + '?pageSize=300' + (pageToken ? '&pageToken=' + pageToken : '');",
+  "      const r = await fetch(url, { headers: { Authorization: 'Bearer ' + tok } });",
+  "      const j = await r.json();",
+  "      if (j.error) { errores[c] = j.error.message; break; }",
+  "      out = out.concat(j.documents || []);",
+  "      pageToken = j.nextPageToken || '';",
+  "    } while (pageToken);",
+  "    docs[c] = out;",
+  "    console.log(c, out.length);",
+  "  }",
+  "  const blob = new Blob([JSON.stringify({ origen: 'conta-master', leido_at: new Date().toISOString(), errores, docs })], { type: 'application/json' });",
+  "  const a = document.createElement('a');",
+  "  a.href = URL.createObjectURL(blob); a.download = 'contamaster-export.json'; a.click();",
+  "  console.log('listo', errores);",
+  "})()"
+].join("\n");
+
+document.getElementById('receta').textContent = RECETA;
+document.getElementById('bCopiar').onclick = async () => {
+  try { await navigator.clipboard.writeText(RECETA); document.getElementById('bCopiar').textContent = 'Copiada'; }
+  catch { document.getElementById('bCopiar').textContent = 'Selecciónala a mano'; }
+};
+
+const $ = (id) => document.getElementById(id);
+let DOCS = null;
+
+async function api(ruta, opciones = {}) {
+  const r = await fetch(ruta, {
+    ...opciones,
+    headers: { 'Content-Type': 'application/json', 'X-App': 'master101', ...(opciones.headers || {}) },
+    credentials: 'same-origin',
+  });
+  const cuerpo = await r.json().catch(() => ({}));
+  return { estado: r.status, ...cuerpo };
+}
+
+/* ─── 1 · sesión ─── */
+
+async function mirarSesion() {
+  const yo = await api('/yo');
+  if (yo.estado === 200 && yo.data && yo.data.superadmin) {
+    $('quien').innerHTML = 'Sesión de <b>' + yo.data.usuario.correo + '</b> · superadmin.';
+    $('login').hidden = true;
+    $('orgs').hidden = false;
+    const lista = $('listaOrgs');
+    lista.innerHTML = '';
+    for (const o of (yo.data.orgs || [])) {
+      const op = document.createElement('option');
+      op.value = o.id; op.label = o.nombre; lista.appendChild(op);
+    }
+    if ((yo.data.orgs || []).length === 1) $('org').value = yo.data.orgs[0].id;
+    $('orgsNota').textContent = (yo.data.orgs || []).length
+      ? 'Empresas: ' + yo.data.orgs.map((o) => o.id).join(', ')
+      : 'No hay ninguna empresa todavía: hay que crearla con POST /admin/orgs antes de importar.';
+    revisarListos();
+    return true;
+  }
+  $('quien').textContent = yo.estado === 200
+    ? 'Entraste, pero esta cuenta no es superadmin: la importación no la puede correr.'
+    : 'Sin sesión.';
+  $('login').hidden = false;
+  return false;
+}
+
+$('bPedir').onclick = async () => {
+  const correo = $('correo').value.trim();
+  $('pedirEstado').textContent = 'Mandando…';
+  const r = await api('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo }) });
+  if (r.ok) {
+    $('paso2').hidden = false;
+    $('pedirEstado').textContent = r.data && r.data.codigo_prueba
+      ? 'Código (fuera de producción): ' + r.data.codigo_prueba
+      : 'Revisa tu correo.';
+  } else {
+    $('pedirEstado').textContent = 'No se pudo: ' + (r.error || r.estado);
+  }
+};
+
+$('bEntrar').onclick = async () => {
+  const r = await api('/auth/entrar', {
+    method: 'POST',
+    body: JSON.stringify({ correo: $('correo').value.trim(), codigo: $('codigo').value.trim() }),
+  });
+  if (r.ok) await mirarSesion();
+  else $('pedirEstado').textContent = 'No entró: ' + (r.error || r.estado);
+};
+
+/* ─── 2 · el archivo ─── */
+
+$('archivo').onchange = async (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  try {
+    const texto = await f.text();
+    const j = JSON.parse(texto);
+    DOCS = j.docs || j;
+    const cuenta = Object.keys(DOCS).map((k) => k + ': ' + (DOCS[k] || []).length).join(' · ');
+    let aviso = '';
+    if (j.errores && Object.keys(j.errores).length) {
+      aviso = ' — Firestore se negó a dar: ' + Object.keys(j.errores).join(', ')
+            + '. Eso llega vacío y el cuadre lo va a decir.';
+    }
+    $('leido').innerHTML = '<span class="cifra">' + cuenta + '</span>' + aviso;
+    revisarListos();
+  } catch (err) {
+    $('leido').textContent = 'No pude leer el archivo: ' + err.message;
+  }
+};
+
+function revisarListos() {
+  const listo = !!DOCS && !!$('org').value.trim();
+  $('bSeco').disabled = !listo;
+  $('bEscribir').disabled = !listo;
+}
+$('org').addEventListener('input', revisarListos);
+
+/* ─── 3 · correr ─── */
+
+async function correr(modo) {
+  $('corriendo').textContent = modo === 'seco' ? 'Ensayando…' : 'Importando…';
+  $('bSeco').disabled = true; $('bEscribir').disabled = true;
+  const r = await api('/admin/importar', {
+    method: 'POST',
+    body: JSON.stringify({ org: $('org').value.trim(), modo, docs: DOCS }),
+  });
+  $('corriendo').textContent = '';
+  revisarListos();
+  pintar(r);
+}
+
+$('bSeco').onclick = () => correr('seco');
+$('bEscribir').onclick = () => {
+  if (!confirm('Esto escribe de verdad en la empresa ' + $('org').value.trim() + '. ¿Seguimos?')) return;
+  correr('escribir');
+};
+
+/* ─── 4 · el reporte ─── */
+
+const pesos = (n) => (n / 100).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
+const sino = (b) => b ? '<span class="si">sí</span>' : '<span class="no">NO</span>';
+
+function tabla(cabeceras, filas) {
+  let h = '<table><thead><tr>';
+  for (const c of cabeceras) h += '<th class="' + (c.n ? 'n' : '') + '">' + c.t + '</th>';
+  h += '</tr></thead><tbody>';
+  for (const f of filas) {
+    h += '<tr>';
+    for (let i = 0; i < cabeceras.length; i++) {
+      h += '<td class="' + (cabeceras[i].n ? 'n cifra' : '') + '">' + f[i] + '</td>';
+    }
+    h += '</tr>';
+  }
+  return h + '</tbody></table>';
+}
+
+function pintar(r) {
+  $('reporte').hidden = false;
+  $('crudo').textContent = JSON.stringify(r, null, 2);
+
+  if (!r.ok) {
+    $('veredicto').innerHTML = '<p class="no">La API dijo que no: ' + (r.error || r.estado) + '</p>';
+    $('tablas').innerHTML = ''; $('dinero').innerHTML = ''; $('extras').innerHTML = '';
+    return;
+  }
+  const d = r.data;
+  const cuadra = d.veredicto === 'cuadra';
+  $('veredicto').innerHTML = '<p class="aviso"><b class="' + (cuadra ? 'si' : 'no') + '">'
+    + d.veredicto + '</b> · modo: ' + d.modo + ' · empresa: <b>' + d.org + '</b></p>';
+
+  $('tablas').innerHTML = '<h2>Filas</h2>' + tabla(
+    [{ t: 'Tabla' }, { t: 'En Firestore', n: 1 }, { t: 'Rechazadas', n: 1 }, { t: 'Nuevas', n: 1 },
+     { t: 'Actualizadas', n: 1 }, { t: 'En el OrgDB', n: 1 }, { t: 'Cuadra' }],
+    d.cuadre.tablas.map((f) => [f.tabla, f.firestore, f.rechazadas, f.nuevas, f.actualizadas, f.en_orgdb, sino(f.cuadra)]),
+  );
+
+  $('dinero').innerHTML = '<h2>Dinero</h2>' + tabla(
+    [{ t: 'Campo' }, { t: 'Firestore (pesos)', n: 1 }, { t: 'Convertido', n: 1 },
+     { t: 'Guardado en esas filas', n: 1 }, { t: 'Dif. por redondeo', n: 1 }, { t: 'Cuadra' }],
+    d.cuadre.dinero.map((f) => [
+      f.campo,
+      f.firestore_pesos.toLocaleString('es-MX', { minimumFractionDigits: 2 }),
+      pesos(f.centavos), pesos(f.en_orgdb), f.diferencia_centavos, sino(f.cuadra),
+    ]),
+  ) + '<p class="nota">«Guardado en esas filas» se relee de la base por id, no del total de la tabla: '
+    + 'así la segunda corrida no cuenta dos veces lo que ya estaba.</p>'
+    + ((d.cuadre.recalculado || []).length
+        ? '<h2>Cachés que recalculó la API</h2>' + tabla(
+            [{ t: 'Campo' }, { t: 'Quedó en', n: 1 }],
+            d.cuadre.recalculado.map((f) => [f.campo, pesos(f.en_orgdb)]))
+          + '<p class="nota">Estos no se importan: salen de los ítems y los movimientos que ya se contaron arriba. '
+          + 'Compararlos contra Firestore sería comparar contra la opinión de otra base.</p>'
+        : '');
+
+  const u = d.usuarios;
+  let extra = '<h2>Usuarios</h2><p class="cifra">leídos ' + u.leidos + ' · creados ' + u.creados
+    + ' · ya estaban ' + u.ya_estaban + ' · miembros ' + u.miembros + ' · accesos de cliente ' + u.accesos + '</p>'
+    + '<p class="nota">' + u.pin + '</p>';
+
+  extra += '<h2>Enlaces</h2><p class="cifra">movimientos que apuntan a un ítem: ' + d.enlaces.movimientos_con_item
+    + ' · apuntan a un ítem que no existe: ' + d.enlaces.item_que_no_existe.length + '</p>';
+
+  if (d.rechazos.length) {
+    extra += '<h2>Rechazos</h2>' + tabla(
+      [{ t: 'Colección' }, { t: 'Id' }, { t: 'Campo' }, { t: 'Motivo' }],
+      d.rechazos.map((x) => [x.coleccion, x.id, x.campo || '', x.motivo]));
+  }
+  if (d.fallos.length) {
+    extra += '<h2>Fallos al escribir</h2>' + tabla(
+      [{ t: 'Tabla' }, { t: 'Id' }, { t: 'Motivo' }], d.fallos.map((x) => [x.tabla, x.id, x.motivo]));
+  }
+  if (d.redondeos.length) {
+    extra += '<h2>Redondeos al centavo</h2>' + tabla(
+      [{ t: 'Colección' }, { t: 'Id' }, { t: 'Campo' }, { t: 'Venía' }, { t: 'Quedó', n: 1 }],
+      d.redondeos.map((x) => [x.coleccion, x.id, x.campo, x.origen, pesos(x.centavos)]));
+  }
+  const ign = Object.keys(d.campos_ignorados || {});
+  if (ign.length) {
+    extra += '<h2>Campos que no se copiaron</h2>' + tabla(
+      [{ t: 'Colección' }, { t: 'Campos' }],
+      ign.map((k) => [k, d.campos_ignorados[k].join(', ')]));
+    extra += '<p class="nota">Casi todos son cachés o nombres denormalizados: la API los recalcula. Se enseñan para que nadie descubra dentro de un año que algo se perdió sin ruido.</p>';
+  }
+  $('extras').innerHTML = extra;
+}
+
+mirarSesion();
+</script>
+</body>
+</html>

@@ -156,8 +156,41 @@ export async function ponerAcceso(env: Env, a: { usuario_id: string; org_id: str
   ).bind(a.usuario_id, a.org_id, a.tipo, a.ref_id).run();
 }
 
-export async function esSuperadmin(env: Env, usuario_id: string): Promise<boolean> {
-  const f = await env.MASTER.prepare(`SELECT 1 AS x FROM superadmins WHERE usuario_id = ?`).bind(usuario_id).first();
+/* ─────────────── importación (fase 2) ───────────────
+ * Un usuario que viene de Firebase Auth conserva su uid como `id`: es lo que
+ * `clientes.usuario_id` ya apunta del otro lado, y cambiarlo rompería el
+ * enlace del portal. El PIN no viaja: está hasheado con otro esquema y no se
+ * puede traducir. Se vuelve a fijar por «olvidé mi PIN». */
+
+export type SuerteUsuario = 'creado' | 'ya_estaba' | 'correo_de_otro';
+
+export async function importarUsuario(
+  env: Env,
+  u: { id: string; correo: string; nombre: string | null },
+): Promise<{ usuario_id: string; suerte: SuerteUsuario }> {
+  const correo = normalizaCorreo(u.correo);
+
+  // `usuarios.correo` es UNIQUE. Si ese correo ya es de otro id, manda el que
+  // ya existe: duplicar a la persona sería peor que perder su uid viejo, y se
+  // dice cuál pasó para que quede en el reporte.
+  const porCorreo = await env.MASTER.prepare(`SELECT id FROM usuarios WHERE correo = ?`).bind(correo).first<{ id: string }>();
+  if (porCorreo && porCorreo.id !== u.id) {
+    return { usuario_id: porCorreo.id, suerte: 'correo_de_otro' };
+  }
+
+  const porId = await env.MASTER.prepare(`SELECT id FROM usuarios WHERE id = ?`).bind(u.id).first<{ id: string }>();
+  if (porId) {
+    await env.MASTER.prepare(`UPDATE usuarios SET correo = ?, nombre = COALESCE(?, nombre) WHERE id = ?`)
+      .bind(correo, u.nombre, u.id).run();
+    return { usuario_id: u.id, suerte: 'ya_estaba' };
+  }
+
+  await env.MASTER.prepare(`INSERT INTO usuarios (id, correo, nombre, creado_at) VALUES (?,?,?,?)`)
+    .bind(u.id, correo, u.nombre, ahora()).run();
+  return { usuario_id: u.id, suerte: 'creado' };
+}
+
+export async function esSuperadmin(env: Env, usuario_id: string): Promise<boolean> {  const f = await env.MASTER.prepare(`SELECT 1 AS x FROM superadmins WHERE usuario_id = ?`).bind(usuario_id).first();
   return !!f;
 }
 

@@ -13,10 +13,10 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.1.0 (fase 1)
+ * Versión del contrato: 0.2.0 (fase 2 — importación)
  */
 
-export const VERSION_CONTRATO = '0.1.0';
+export const VERSION_CONTRATO = '0.2.0';
 
 /* ─────────────── envoltura de toda respuesta ─────────────── */
 
@@ -394,10 +394,99 @@ export function formatearDinero(centavos: number, moneda: Moneda = 'MXN'): strin
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: moneda }).format(centavos / 100);
 }
 
+/* ─────────────── pesos → centavos ───────────────
+ * Esta conversión se hace SIN multiplicar por 100. `1500.5 * 100` no da
+ * 150050 por suerte, da 150049.99999999999 por accidente, y `Math.round` lo
+ * tapa casi siempre — casi. Con `1.005 * 100` sale 100.49999999999999 y el
+ * redondeo se va para abajo: un centavo perdido, en silencio, dentro de un
+ * número que ya nadie va a volver a mirar.
+ *
+ * Así que el número se lee como texto, se parte en el punto y se cuentan los
+ * dígitos. Los decimales que sobran redondean al centavo más cercano, y medio
+ * centavo sube. Que hubo redondeo se devuelve dicho, porque en una migración
+ * redondear dinero sin avisar es peor que no convertirlo. */
+
+export interface Centavos {
+  ok: boolean;
+  /** Entero. Vale 0 cuando `ok` es falso: no se usa. */
+  centavos: number;
+  /** Había dígitos más allá del centavo y se tuvo que redondear. */
+  redondeo: boolean;
+  /** El campo venía vacío o nulo. Se cuenta como 0, pero se sabe que faltaba. */
+  vacio: boolean;
+  /** Por qué no se pudo convertir. */
+  motivo?: string;
+}
+
+/** Un número en notación exponencial, escrito con todos sus dígitos.
+ *  `String(1.5e-7)` es '1.5e-7' y ahí no hay dónde poner el punto decimal. */
+function sinExponente(n: number): string {
+  const s = String(n);
+  if (!/e/i.test(s)) return s;
+  const [mantisa, potencia] = s.split(/e/i);
+  const exp = Number(potencia);
+  const negativo = mantisa.startsWith('-');
+  const [entero, decimales = ''] = mantisa.replace('-', '').split('.');
+  const digitos = entero + decimales;
+  const punto = entero.length + exp;
+  let salida: string;
+  if (punto <= 0) salida = '0.' + '0'.repeat(-punto) + digitos;
+  else if (punto >= digitos.length) salida = digitos + '0'.repeat(punto - digitos.length);
+  else salida = digitos.slice(0, punto) + '.' + digitos.slice(punto);
+  return (negativo ? '-' : '') + salida;
+}
+
+/** Pesos (número o texto) → centavos enteros. `'1,500.50'` → `150050`. */
+export function aCentavosExacto(valor: unknown): Centavos {
+  const nada: Centavos = { ok: true, centavos: 0, redondeo: false, vacio: true };
+  if (valor === null || valor === undefined || valor === '') return nada;
+  if (typeof valor === 'boolean') {
+    return { ok: false, centavos: 0, redondeo: false, vacio: false, motivo: 'un booleano no es dinero' };
+  }
+
+  let texto: string;
+  if (typeof valor === 'number') {
+    if (!Number.isFinite(valor)) {
+      return { ok: false, centavos: 0, redondeo: false, vacio: false, motivo: `no es un número finito: ${valor}` };
+    }
+    texto = sinExponente(valor);
+  } else {
+    // Se le quitan símbolo de moneda, separadores de millar y espacios (los
+    // duros también: los pega Excel al copiar).
+    texto = String(valor).replace(/[\s\u00a0$,]/g, '');
+    if (texto === '') return nada;
+  }
+
+  if (!/^[+-]?\d*(\.\d*)?$/.test(texto) || !/\d/.test(texto)) {
+    return { ok: false, centavos: 0, redondeo: false, vacio: false, motivo: `no parece un número: ${String(valor)}` };
+  }
+
+  const negativo = texto.startsWith('-');
+  const limpio = texto.replace(/^[+-]/, '');
+  const [entero = '', decimales = ''] = limpio.split('.');
+  if (entero.length > 13) {
+    return { ok: false, centavos: 0, redondeo: false, vacio: false, motivo: 'demasiados dígitos para un entero exacto' };
+  }
+
+  const dosDecimales = (decimales + '00').slice(0, 2);
+  const sobra = decimales.slice(2);
+  let centavos = Number(entero || '0') * 100 + Number(dosDecimales);
+  // Medio centavo sube, y en los negativos sube en valor absoluto: -1.005 es
+  // -101, no -100. Redondear hacia cero de un lado y no del otro descuadraría
+  // una transferencia consigo misma.
+  if (sobra && sobra[0] >= '5') centavos += 1;
+
+  return {
+    ok: true,
+    centavos: negativo ? -centavos : centavos,
+    redondeo: /[1-9]/.test(sobra),
+    vacio: false,
+  };
+}
+
 /** Texto tecleado → centavos enteros. '1,500.50' → 150050. */
 export function aCentavos(texto: string | number): number {
-  const n = typeof texto === 'number' ? texto : Number(String(texto).replace(/[^0-9.-]/g, ''));
-  return Math.round(n * 100);
+  return aCentavosExacto(texto).centavos;
 }
 
 /** minúsculas sin acentos — para `nombre_norm` y para el autocompletar. */

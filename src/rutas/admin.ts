@@ -24,7 +24,9 @@ rutas.use('/*', async (c, next) => {
   await next();
 });
 
-async function soySuper(c: Ctx): Promise<boolean> {
+/** ¿Es superadmin quien pregunta? Lo usa /admin y también la puerta de
+ *  servicio de la importación, que no puede tener su propia idea de esto. */
+export async function soySuper(c: Ctx): Promise<boolean> {
   const s = c.get('sesion');
   return !!s && (s.superadmin || (await esSuperadmin(c.env, s.usuario_id)));
 }

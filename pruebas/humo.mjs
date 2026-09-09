@@ -212,10 +212,116 @@ async function recorrido() {
   rev(muerta.estado === 401, 'despues de /auth/salir la misma cookie ya no sirve', String(muerta.estado));
 }
 
+/* ─────────────── fase 2: la importación, contra el Worker de verdad ───────────────
+ * Las pruebas de vitest ya la miden dentro de workerd. Esto la mide contra el
+ * Durable Object publicado: la transacción del ensayo, los CHECK del esquema y
+ * el recálculo de cachés corren en el runtime real, no en el de las pruebas.
+ */
+
+async function importacion() {
+  linea('');
+  linea('== Importación (fase 2) ==');
+  galleta = '';
+
+  const cod = await pedir(STAGING, '/auth/codigo', { method: 'POST', body: { correo: CORREO } });
+  await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO, codigo: cod.data?.codigo_prueba } });
+
+  const ORGI = `imp-${process.env.GITHUB_RUN_ID || Date.now()}`.slice(0, 40);
+  const nueva = await pedir(STAGING, '/admin/orgs', { method: 'POST', body: { id: ORGI, nombre: 'Importada' } });
+  rev(nueva.estado === 201, `se crea la org ${ORGI}`);
+
+  // La plata puesta a propósito donde duele: 1500.5 y el medio centavo de
+  // 20000.005, que la fórmula vieja (Math.round(v * 100)) perdía.
+  const docs = {
+    negocios: [{ id: 'NEG1', nombre: 'Taller', moneda: 'MXN', creado_at: '2025-06-01T00:00:00Z' }],
+    cuentas: [{ id: 'CTA1', nombre: 'Banco', tipo: 'banco', moneda: 'MXN', saldo_inicial: 10000.5, negocio_id: 'NEG1' }],
+    clientes: [{ id: 'CLI1', nombre: 'Áurea Pérez', email: 'aurea@ejemplo.mx', negocio_id: 'NEG1' }],
+    proyectos: [{
+      id: 'PRO1', nombre: 'Casa Pérez', cliente_id: 'CLI1', negocio_id: 'NEG1', estado: 'activo',
+      creado_at: '2026-01-15T12:00:00Z', precio_venta: 999999,
+      partidas: [{ proveedor_nombre: 'Maderas', concepto: 'Madera', monto_acordado: 20000.005, monto_pagado: 1000 }],
+      productos: [
+        { id: 'p1a2b3c4', nombre: 'Cocina', monto: 150000 },
+        { id: 'p9z8y7x6', nombre: 'Clóset', monto: 25000.5, etapa: 4 },
+      ],
+    }],
+    movimientos: [{ id: 'MOV1', tipo: 'ingreso', monto: 60000, fecha: '2026-03-01', cuenta_id: 'CTA1', negocio_id: 'NEG1', proyecto_id: 'PRO1', producto_id: 'p1a2b3c4', contraparte_tipo: 'cliente', contraparte_id: 'CLI1' }],
+    usuarios: [{ id: 'UID-SOCIA', email: 'socia@ejemplo.mx', nombre: 'Socia', memberships: { NEG1: { rol: 'socio' } } }],
+  };
+  const ITEMS = 15000000 + 2500050;
+
+  // El ensayo mide sin dejar nada.
+  const seco = await pedir(STAGING, '/admin/importar', { method: 'POST', body: { org: ORGI, modo: 'seco', docs } });
+  rev(seco.estado === 200 && seco.data?.veredicto === 'cuadra', 'el ensayo cuadra', String(seco.data?.veredicto));
+  const vacia = await pedir(STAGING, `/orgs/${ORGI}/items`, { app: 'dash101' });
+  rev(vacia.data?.total === 0, 'el ensayo no dejó nada escrito', `${vacia.data?.total} ítems`);
+
+  // La corrida buena.
+  const uno = await pedir(STAGING, '/admin/importar', { method: 'POST', body: { org: ORGI, modo: 'escribir', docs } });
+  rev(uno.estado === 200 && uno.data?.veredicto === 'cuadra', 'la importación cuadra', `${uno.ms} ms`);
+  rev((uno.data?.rechazos || []).length === 0 && (uno.data?.fallos || []).length === 0, 'sin rechazos ni fallos');
+
+  const porTabla = Object.fromEntries((uno.data?.cuadre?.tablas || []).map((t) => [t.tabla, t]));
+  rev(porTabla.items?.firestore === 2 && porTabla.items?.en_orgdb === 2, 'los 2 productos son 2 ítems', `${porTabla.items?.en_orgdb} en el OrgDB`);
+
+  const plata = Object.fromEntries((uno.data?.cuadre?.dinero || []).map((d) => [d.campo, d]));
+  rev(plata['items.monto']?.en_orgdb === ITEMS, 'el dinero de los ítems cuadra al centavo', `${plata['items.monto']?.en_orgdb} de ${ITEMS}`);
+  rev(plata['proyectos.partidas.monto_acordado']?.en_orgdb === 2000001, 'el medio centavo de 20000.005 subió, no se perdió', String(plata['proyectos.partidas.monto_acordado']?.en_orgdb));
+  rev((uno.data?.cuadre?.dinero || []).every((d) => d.cuadra), 'todas las sumas de dinero cuadran');
+
+  // Los ids son los mismos, y el producto_id viejo apunta al ítem correcto.
+  const item = await pedir(STAGING, `/orgs/${ORGI}/items/p1a2b3c4`, { app: 'dash101' });
+  rev(item.estado === 200 && item.data?.id === 'p1a2b3c4', 'el id de Firestore se conservó', String(item.data?.nombre));
+  const mov = await pedir(STAGING, `/orgs/${ORGI}/movimientos/MOV1`, { app: 'dash101' });
+  rev(mov.data?.item_id === 'p1a2b3c4', 'el producto_id viejo apunta al item_id correcto', String(mov.data?.item_id));
+
+  // La etapa que ya traía se conserva, pero no se le inventó historial.
+  const clo = await pedir(STAGING, `/orgs/${ORGI}/items/p9z8y7x6`, { app: 'dash101' });
+  rev(clo.data?.etapa === 4, 'la etapa que ya traía se conservó', `etapa ${clo.data?.etapa}`);
+  const av = await pedir(STAGING, `/orgs/${ORGI}/avances`, { app: 'dash101' });
+  rev(av.data?.total === 0, 'no se inventó historial: avances quedó vacío', `${av.data?.total} avances`);
+
+  // Los cachés los recalculó la API, no se copiaron de Firestore.
+  const proy = await pedir(STAGING, `/orgs/${ORGI}/proyectos/PRO1`, { app: 'dash101' });
+  rev(proy.data?.precio_venta === ITEMS, 'el precio del proyecto lo recalculó la API, no lo copió', `${proy.data?.precio_venta} (Firestore decía 999999)`);
+  rev(proy.data?.cobrado === 6000000, 'el cobrado sale de los movimientos importados', String(proy.data?.cobrado));
+
+  // Correrlo dos veces no duplica.
+  const dos = await pedir(STAGING, '/admin/importar', { method: 'POST', body: { org: ORGI, modo: 'escribir', docs } });
+  const nuevas = (dos.data?.cuadre?.tablas || []).reduce((s, t) => s + t.nuevas, 0);
+  rev(nuevas === 0 && dos.data?.veredicto === 'cuadra', 'correrlo dos veces no duplica nada', `${nuevas} filas nuevas en la segunda`);
+  const otra = await pedir(STAGING, `/orgs/${ORGI}/items`, { app: 'dash101' });
+  rev(otra.data?.total === 2, 'siguen siendo 2 ítems, no 4', `${otra.data?.total}`);
+
+  // El usuario importado existe y puede fijar su PIN por correo.
+  const guardada = galleta;
+  galleta = '';
+  const codS = await pedir(STAGING, '/auth/codigo', { method: 'POST', body: { correo: 'socia@ejemplo.mx' } });
+  rev(/^\d{6}$/.test(String(codS.data?.codigo_prueba)), 'al usuario importado le llega código: existe de verdad');
+  const entS = await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: 'socia@ejemplo.mx', codigo: codS.data?.codigo_prueba } });
+  rev(entS.estado === 200, 'entra con «olvidé mi PIN»', `${entS.ms} ms`);
+  const pin = await pedir(STAGING, '/auth/pin', { method: 'POST', body: { pin: '482913' } });
+  rev(pin.data?.puesto === true, 'fija su PIN nuevo');
+  const noPuede = await pedir(STAGING, '/admin/importar', { method: 'POST', body: { org: ORGI, modo: 'escribir', docs } });
+  rev(noPuede.estado === 403, 'quien no es superadmin NO abre la puerta de servicio', `${noPuede.estado} ${noPuede.error}`);
+  galleta = guardada;
+
+  // La página se sirve desde el propio Worker: mismo origen, sin CORS nuevo.
+  const pag = await fetch(`${STAGING}/admin/importar`);
+  const html = await pag.text();
+  rev(pag.status === 200 && String(pag.headers.get('content-type')).includes('text/html'), 'la página del importador se sirve', String(pag.status));
+  rev(html.includes('Taller 101') && html.includes('#0080C1'), 'y trae la identidad Taller 101');
+
+  // En producción la puerta también está, y también cerrada.
+  const enProd = await fetch(`${PROD}/admin/importar`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  rev(enProd.status === 401, 'en producción la puerta pide sesión', String(enProd.status));
+}
+
 const t0 = Date.now();
 try {
   await produccion();
   await recorrido();
+  await importacion();
 } catch (e) {
   fallas++;
   linea(`  FALLA se rompió a medias: ${e?.message}`);

@@ -16,7 +16,7 @@ import { DurableObject } from 'cloudflare:workers';
 import inicial from '../migrations/org/0001_inicial.sql';
 import { DEFS, type Def, type Tipo } from './tablas';
 import { ahora, normalizar, ulid } from './lib';
-import type { Aviso, Etapa, Peek, Pool, Tabla } from '../schema/tipos';
+import { TABLAS, type Aviso, type Etapa, type Peek, type Pool, type Tabla } from '../schema/tipos';
 import type { Env } from './entorno';
 
 /* Las migraciones del OrgDB, en orden. Para agregar una: se escribe el .sql,
@@ -69,7 +69,31 @@ export interface ApiOrgDB {
   pool(): Promise<Pool>;
   peek(cliente_id: string): Promise<Peek | null>;
   conectados(): Promise<number>;
+  /** Puerta de servicio: solo la usa POST /admin/importar (fase 2). */
+  importar(args: { filas: Record<string, Fila[]>; seco: boolean }): Promise<Importacion>;
+  conteos(): Promise<{ filas: Record<string, number>; sumas: Record<string, number> }>;
   fetch(req: Request): Promise<Response>;
+}
+
+/** Lo que devuelve una corrida del importador. Todo son números medidos
+ *  dentro del SQLite, no lo que el importador creyó escribir. */
+export interface Importacion {
+  antes: Record<string, number>;
+  despues: Record<string, number>;
+  nuevas: Record<string, number>;
+  actualizadas: Record<string, number>;
+  fallos: Array<{ tabla: string; id: string; motivo: string }>;
+  /** Toda la plata que hay en la base, en centavos. Informativo. */
+  sumas: Record<string, number>;
+  /** La plata SOLO de las filas que trajo esta corrida, leída de la base
+   *  después de escribir. Es contra esto que se compara lo convertido: el
+   *  total de la tabla no sirve, porque a la segunda corrida ya está adentro
+   *  y compararlo contra lo convertido lo contaría dos veces. */
+  sumas_importadas: Record<string, number>;
+  /** Tres ids por tabla, releídos de la base: sirven para enseñar que son los mismos. */
+  muestra: Array<{ tabla: string; id: string }>;
+  enlaces: { movimientos_con_item: number; item_que_no_existe: string[] };
+  proyectos_recalculados: number;
 }
 
 export class OrgDB extends DurableObject<Env> {
@@ -418,6 +442,232 @@ export class OrgDB extends DurableObject<Env> {
       datos.de_tabla, datos.de_id, datos.subido_por, ahora(),
     );
     return this.obtener('archivos', datos.id)!;
+  }
+
+  /* ─────────────── puerta de servicio: importación (fase 2) ───────────────
+   *
+   * ESTO NO ES UNA RUTA NORMAL. Entra por debajo de `permisos.ts` a propósito
+   * y escribe columnas que ninguna app puede escribir: `etapa`, `creado_at`,
+   * `creado_por`, los ids que vengan. Existe para una sola cosa —traer lo que
+   * ya vivía en Firestore sin inventarle historial— y solo la alcanza el
+   * superadmin por `POST /admin/importar`. Si alguien la encuentra abierta
+   * dentro de un año: es la puerta de servicio de la migración, y la razón de
+   * que exista está en `claude/CONTINUAR.md`.
+   *
+   * Escribe por id, así que correrla dos veces no duplica: la segunda vez
+   * actualiza las mismas filas. `seco` hace el trabajo completo dentro de una
+   * transacción y la deshace al final, para poder medir sin escribir.
+   */
+
+  importar(args: { filas: Record<string, Fila[]>; seco: boolean }): Importacion {
+    const antes = this.contarFilas();
+    const salida: Importacion = {
+      antes,
+      despues: antes,
+      nuevas: {},
+      actualizadas: {},
+      fallos: [],
+      sumas: {},
+      sumas_importadas: {},
+      muestra: [],
+      enlaces: { movimientos_con_item: 0, item_que_no_existe: [] },
+      proyectos_recalculados: 0,
+    };
+
+    const trabajo = (): void => {
+      // El orden de TABLAS ya respeta las dependencias: negocios antes que
+      // cuentas, clientes antes que proyectos, proyectos antes que ítems,
+      // ítems antes que movimientos.
+      for (const tabla of TABLAS) {
+        const filas = args.filas[tabla];
+        if (!filas?.length) continue;
+        let nuevas = 0;
+        let actualizadas = 0;
+        for (const fila of filas) {
+          try {
+            if (this.grabarImportada(tabla, fila)) nuevas++;
+            else actualizadas++;
+          } catch (e) {
+            salida.fallos.push({ tabla, id: String(fila.id ?? '(sin id)'), motivo: (e as Error).message });
+          }
+        }
+        salida.nuevas[tabla] = nuevas;
+        salida.actualizadas[tabla] = actualizadas;
+      }
+
+      // Los cachés del proyecto NO se importan: se recalculan aquí, una vez
+      // por proyecto y no una vez por fila. Importar un caché sería importar
+      // una opinión de otra base sobre lo que suman estos movimientos.
+      const proyectos = this.sql.exec(`SELECT id FROM proyectos`).toArray() as Fila[];
+      for (const p of proyectos) this.recalcularProyecto(String(p.id));
+      salida.proyectos_recalculados = proyectos.length;
+
+      // Que un movimiento apunte a un ítem que no existe se dice, no se calla:
+      // es justo el enlace que la migración tiene que conservar.
+      const conItem = this.sql
+        .exec(`SELECT m.id, m.item_id FROM movimientos m WHERE m.item_id IS NOT NULL`)
+        .toArray() as Fila[];
+      salida.enlaces.movimientos_con_item = conItem.length;
+      for (const m of conItem) {
+        const hay = this.sql.exec(`SELECT 1 AS x FROM items WHERE id = ?`, m.item_id).toArray().length;
+        if (!hay) salida.enlaces.item_que_no_existe.push(String(m.id));
+      }
+
+      salida.despues = this.contarFilas();
+      salida.sumas = this.sumarDinero();
+      salida.sumas_importadas = this.sumarDineroDe(args.filas);
+      salida.muestra = this.muestraDeIds();
+    };
+
+    if (args.seco) {
+      // Se hace el trabajo de verdad y se deshace: es la única manera de que
+      // un ensayo mida lo mismo que la corrida buena, incluidos los CHECK del
+      // esquema, que solo gritan cuando se escribe.
+      const marcha = new Error('__ensayo__');
+      try {
+        this.ctx.storage.transactionSync(() => {
+          trabajo();
+          throw marcha;
+        });
+      } catch (e) {
+        if (e !== marcha) throw e;
+      }
+      return salida;
+    }
+
+    this.ctx.storage.transactionSync(trabajo);
+    return salida;
+  }
+
+  /** Una fila importada. Devuelve `true` si era nueva. */
+  private grabarImportada(tabla: Tabla, datos: Fila): boolean {
+    const def = DEFS[tabla];
+    const id = String(datos.id ?? '').trim();
+    if (!id) throw new Error('la fila no trae id');
+
+    const fila: Fila = { ...datos, id };
+    // `nombre_norm` lo pone la API, nunca el importador (CONTINUAR §5).
+    if (def.cols.nombre_norm) fila.nombre_norm = normalizar(datos.nombre_norm ?? datos.nombre);
+    if (def.cols.creado_at && !fila.creado_at) fila.creado_at = ahora();
+    if (def.cols.creado_por && !fila.creado_por) fila.creado_por = 'importacion';
+    if (def.cols.creado_en_app && !fila.creado_en_app) fila.creado_en_app = 'importacion';
+
+    const cols = Object.keys(fila).filter((c) => c in def.cols);
+    const valores = cols.map((c) => this.adentro(def.cols[c], fila[c]));
+    const existe = this.sql.exec(`SELECT 1 AS x FROM ${tabla} WHERE id = ?`, id).toArray().length > 0;
+
+    if (existe) {
+      const set = cols.filter((c) => c !== 'id');
+      if (set.length) {
+        this.sql.exec(
+          `UPDATE ${tabla} SET ${set.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`,
+          ...set.map((c) => this.adentro(def.cols[c], fila[c])),
+          id,
+        );
+      }
+      return false;
+    }
+
+    this.sql.exec(
+      `INSERT INTO ${tabla} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`,
+      ...valores,
+    );
+    return true;
+  }
+
+  private contarFilas(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const t of TABLAS) out[t] = (this.sql.exec(`SELECT COUNT(*) AS n FROM ${t}`).one() as { n: number }).n;
+    return out;
+  }
+
+  /** Toda la plata que hay en la base, en centavos, columna por columna. Es la
+   *  cifra que tiene que cuadrar contra Firestore. */
+  private sumarDinero(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const tabla of TABLAS) {
+      for (const [col, tipo] of Object.entries(DEFS[tabla].cols)) {
+        if (tipo !== 'dinero') continue;
+        out[`${tabla}.${col}`] = (this.sql
+          .exec(`SELECT COALESCE(SUM(${col}),0) AS s FROM ${tabla}`)
+          .one() as { s: number }).s;
+      }
+    }
+    // El dinero de las partidas vive dentro de un JSON y no lo alcanza un SUM.
+    let acordado = 0;
+    let pagado = 0;
+    for (const p of this.sql.exec(`SELECT partidas FROM proyectos`).toArray() as Fila[]) {
+      let lista: Array<Record<string, unknown>> = [];
+      try { lista = JSON.parse(String(p.partidas || '[]')); } catch { lista = []; }
+      for (const par of Array.isArray(lista) ? lista : []) {
+        acordado += Number(par.monto_acordado || 0);
+        pagado += Number(par.monto_pagado || 0);
+      }
+    }
+    out['proyectos.partidas.monto_acordado'] = acordado;
+    out['proyectos.partidas.monto_pagado'] = pagado;
+    return out;
+  }
+
+  /** La plata de un puñado de filas concretas, leída de la base por su id.
+   *  Se hace en tandas porque un `IN (?)` con demasiados marcadores no lo
+   *  aguanta SQLite, y porque un día habrá más de dos proyectos. */
+  private sumarDineroDe(filas: Record<string, Fila[]>): Record<string, number> {
+    const out: Record<string, number> = {};
+    const TANDA = 200;
+    for (const tabla of TABLAS) {
+      const ids = (filas[tabla] ?? []).map((f) => String(f.id ?? '')).filter(Boolean);
+      if (!ids.length) continue;
+      for (const [col, tipo] of Object.entries(DEFS[tabla].cols)) {
+        if (tipo !== 'dinero') continue;
+        let suma = 0;
+        for (let i = 0; i < ids.length; i += TANDA) {
+          const tanda = ids.slice(i, i + TANDA);
+          suma += (this.sql
+            .exec(`SELECT COALESCE(SUM(${col}),0) AS s FROM ${tabla} WHERE id IN (${tanda.map(() => '?').join(',')})`, ...tanda)
+            .one() as { s: number }).s;
+        }
+        out[`${tabla}.${col}`] = suma;
+      }
+      if (tabla === 'proyectos') {
+        let acordado = 0;
+        let pagado = 0;
+        for (let i = 0; i < ids.length; i += TANDA) {
+          const tanda = ids.slice(i, i + TANDA);
+          for (const p of this.sql
+            .exec(`SELECT partidas FROM proyectos WHERE id IN (${tanda.map(() => '?').join(',')})`, ...tanda)
+            .toArray() as Fila[]) {
+            let lista: Array<Record<string, unknown>> = [];
+            try { lista = JSON.parse(String(p.partidas || '[]')); } catch { lista = []; }
+            for (const par of Array.isArray(lista) ? lista : []) {
+              acordado += Number(par.monto_acordado || 0);
+              pagado += Number(par.monto_pagado || 0);
+            }
+          }
+        }
+        out['proyectos.partidas.monto_acordado'] = acordado;
+        out['proyectos.partidas.monto_pagado'] = pagado;
+      }
+    }
+    return out;
+  }
+
+  /** Tres ids por tabla, releídos de la base. Para poder enseñar el mismo id
+   *  de los dos lados en vez de afirmarlo. */
+  private muestraDeIds(): Array<{ tabla: string; id: string }> {
+    const out: Array<{ tabla: string; id: string }> = [];
+    for (const t of TABLAS) {
+      for (const f of this.sql.exec(`SELECT id FROM ${t} LIMIT 3`).toArray() as Fila[]) {
+        out.push({ tabla: t, id: String(f.id) });
+      }
+    }
+    return out;
+  }
+
+  /** Cuántas filas y cuánto dinero hay ahora. Lo lee el reporte de cuadre sin
+   *  tener que importar nada. */
+  conteos(): { filas: Record<string, number>; sumas: Record<string, number> } {
+    return { filas: this.contarFilas(), sumas: this.sumarDinero() };
   }
 
   /* ─────────────── pool para autocompletar (§7) ─────────────── */
