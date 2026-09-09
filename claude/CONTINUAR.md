@@ -1,186 +1,181 @@
-# Fase 1 — qué quedó, medido
+# Fase 2 — qué quedó, medido
 
-Cierre del chat que construyó `suite101-api`. Lo escrito aquí está comprobado
-con números, no supuesto. Lo que no se pudo comprobar está dicho como tal.
+Cierre del chat que construyó la importación desde Firestore. Lo de aquí está
+comprobado con números contra el Worker publicado, no supuesto. Lo que no se
+pudo comprobar está dicho como tal, y es bastante concreto: **los datos de
+verdad todavía no se han importado**, porque eso necesita el navegador de Mike.
+
+El cierre de la fase 1 vive en el historial de este archivo (commit `c4b5b07`).
 
 ---
 
-## 1. Las siete condiciones del encargo
+## 1. Las siete condiciones del encargo §6
 
-Medidas en el corredor de GitHub contra lo publicado (`pruebas/humo.mjs`,
-**29/29 en 9.0 s**), y dentro de workerd contra el Durable Object y el D1 de
-verdad (`vitest`, **45 pruebas en verde**).
+Medidas dentro de workerd contra el Durable Object y el D1 de verdad
+(`vitest`, **85 en verde**, 31 nuevas) y contra el Worker publicado desde el
+corredor (`pruebas/humo.mjs`, **67/67 en 18.7 s**).
 
 | # | Condición | Cómo quedó |
 |---|---|---|
-| 1 | El Worker responde en producción | `https://suite101-api.mike-929.workers.dev/salud` → 200 en 223 ms, alcanza el D1 |
-| 2 | Se crea una org y su DO nace solo | `POST /admin/orgs` en 562 ms; el DO contestó `org_db_version: 1` sin redeploy |
-| 3 | Un usuario entra con código y la sesión sobrevive | código de 6 dígitos → entra en 614 ms → `/yo` en la petición siguiente, 200 |
-| 4 | Se mueve la etapa y el WebSocket lo avisa | etapa 4 en 340 ms; llegó `{"t":"item.etapa","etapa":4,"clave":"M01"}` a otra conexión |
-| 5 | **`permisos.ts` rechaza** | 6 negativas medidas, no una: ver abajo |
-| 6 | Las pruebas corren en Actions y pasan | trabajo `pruebas` del flujo `Publicar API`, antes de publicar |
-| 7 | `schema/tipos.ts` existe y está completo | 13 tablas, `Peek`, `Pool`, `Aviso`, `ETAPAS`, `aCentavos`, `normalizar`. Sin imports: se copia tal cual |
+| 1 | Conteos que cuadran | Tabla por tabla, Firestore contra OrgDB, en la respuesta (`cuadre.tablas`). En el humo: 2 productos → 2 ítems, 1 proyecto, 3 movimientos, todo con `cuadra: true` |
+| 2 | **Sumas de dinero al centavo** | `17500050 de 17500050` en ítems. Y el caso que importa: `20000.005` quedó en `2000001`, el medio centavo subió en vez de perderse |
+| 3 | Los ids son los mismos | `GET /orgs/:o/items/p1a2b3c4` contesta 200 con ese id. La respuesta trae `muestra_ids` releídos de la base, tres por tabla |
+| 4 | Un `producto_id` viejo apunta al ítem correcto | `movimientos/MOV1.item_id = p1a2b3c4`, y `enlaces.item_que_no_existe` vacío |
+| 5 | Los usuarios entran de verdad | La socia importada pide código, entra (391 ms), fija PIN (347 ms) y vuelve a entrar con ese PIN (449 ms). **Esto costó un defecto de la fase 1: ver §4** |
+| 6 | Correrlo dos veces no duplica | Es idempotente por id: segunda corrida, **0 filas nuevas**, siguen siendo 2 ítems y el mismo dinero |
+| 7 | El humo de la fase 1 sigue verde | Las 42 de antes siguen ahí; ahora son 67 con las de importación |
 
-Las negativas de la 5, textuales de producción:
-
-```
-nest101 NO escribe items.nombre    → 403 campo_no_permitido · permitidos ["refs"]
-nest101 SÍ escribe items.refs      → 200
-la etapa no se escribe por PATCH   → 403 campo_solo_por_etapa
-cotizador101 NO escribe en personal→ 403 sin_permiso
-un ítem no se borra: se cancela    → 403 items_nunca_se_borran
-dinero con decimales               → 400 dinero_no_entero
-app inventada / sin X-App          → 400 app_desconocida / 400 sin_app
-```
-
-Y una que vale la pena por sí sola: **producción nunca devuelve el código de
-acceso en la respuesta**. Fuera de producción sí, y de ahí sale que la prueba de
-humo pueda entrar sin buzón de correo. Que en producción no lo haga es una de
-las 29 comprobaciones.
+Y una que no estaba en la lista: **el ensayo (`modo: 'seco'`) no deja nada.**
+Escribe de verdad dentro de una transacción y la deshace al terminar, así que
+mide exactamente lo mismo que la corrida buena —incluidos los `CHECK` del
+esquema, que solo gritan cuando se escribe— y la base queda en cero.
 
 ---
 
-## 2. Lo que NO se pudo verificar
+## 2. Lo que NO se ha hecho todavía
 
-Esto es lo que hay que mirar con desconfianza hasta que alguien lo mida:
+**Los datos reales de conta-master siguen en Firestore.** Lo construido está
+probado con datos de prueba con la forma real; nadie ha corrido el importador
+contra el Firestore de verdad, y no se puede desde aquí: el contenedor del chat
+no alcanza `firestore.googleapis.com` ni ningún dominio de Google. Hace falta
+el navegador de Mike. **El paso 3 lo tiene que dar él** (§3).
 
-1. **El correo de verdad no salió nunca.** No hay `RESEND_API_KEY` en los
-   secretos de este repositorio (solo están los dos de Cloudflare). El código
-   de acceso se genera, se guarda y se compara bien —eso sí está probado—, pero
-   nadie ha visto llegar un correo. En producción, hoy, `/auth/codigo` contesta
-   `503 correo_no_configurado`. **Para que un miembro pueda entrar en producción
-   hace falta poner ese secreto.** Es lo único que bloquea el uso real.
-2. **Google no se probó.** No hay `GOOGLE_CLIENT_ID` ni `GOOGLE_CLIENT_SECRET`.
-   Las dos rutas están escritas y contestan `501 google_no_configurado` mientras
-   no existan. El intercambio con Google no lo ha ejercido nadie.
+Dos cosas concretas que quedan sin medir hasta ese momento:
 
-Los otros tres huecos de esta lista **ya se cerraron**, y con números:
+1. **Que Firestore deje leer `usuarios` por REST.** Las reglas de conta-master
+   pueden permitir solo el documento propio. Si se niega, esa colección llega
+   vacía, los miembros no se crean, y hay que darlos de alta a mano con
+   `POST /admin/orgs/:o/miembros`. La receta apunta el error por colección en
+   vez de fallar entera, y la página lo enseña.
+2. **La forma real de los `productos[]`.** El mapeo está escrito contra
+   `claude/conta-master-portal_patch.md` (`id`, `nombre`, `descripcion`,
+   `monto`, `pagado`, `fecha_entrega`, `quell_id`). Si en la base de verdad hay
+   un campo más, sale en `campos_ignorados` del ensayo. **Por eso se corre en
+   seco primero**: el ensayo dice qué no se copió antes de escribir nada.
 
-3. ~~R2 no se ejerció~~ → un archivo sube por multipart y vuelve byte por byte,
-   en las pruebas y contra el bucket de verdad. La llave lleva la org por
-   delante, y sin sesión no se baja (401).
-4. ~~CORS con un navegador de verdad~~ → preflight medido en el borde: 204, el
-   origen exacto (no un comodín, que con credenciales el navegador tiraría),
-   `Allow-Credentials: true`, `X-App` entre las cabeceras permitidas, y un
-   origen ajeno sin permiso. **De paso apareció un defecto en las propias
-   pruebas:** la configuración de vitest ponía `ORIGENES: '*'`, así que
-   cualquier prueba de CORS habría salido verde sin probar nada. Se quitó: las
-   pruebas miden la lista real de `wrangler.toml`.
-5. ~~Concurrencia~~ → diez ingresos en paralelo sobre el mismo proyecto: los
-   diez aceptados, diez ids distintos, y el `cobrado` exacto. El hilo único del
-   Durable Object hace gratis lo que en conta-master pedía transacciones y aun
-   así podía perder una carrera.
-
-Y una que no estaba en la lista y ahora sí está medida: **matar la sesión la
-mata de verdad**. Después de `/auth/salir`, la misma cookie devuelta a mano ya
-no sirve (401).
+Una tercera, menor: la página lee el archivo que descarga la receta. Se pensó
+también dejarla leer Firestore directo con el token, pero eso depende de que
+`firestore.googleapis.com` conteste CORS a un origen de `workers.dev`, y eso no
+se puede comprobar desde el chat. Se dejó fuera: el archivo funciona seguro.
 
 ---
 
-## 3. Del §6 del documento, qué quedó sin escribir
+## 3. Cómo se corre, cuando Mike quiera
 
-Casi nada: el contrato está completo. Las dos ausencias son:
+Tres pasos, ninguno necesita a nadie más.
 
-- **Invitaciones.** La tabla `invitaciones` está creada en el D1 master, pero no
-  hay rutas que la usen. Hoy se agrega gente con
-  `POST /admin/orgs/:o/miembros`, que crea el usuario y la membresía de una vez.
-  El flujo de invitar-y-aceptar (como el de conta-master) no existe todavía.
-- **`GET /orgs/:o/archivos/:id` no redirige a una URL firmada de R2**, como
-  decía el documento: **sirve el archivo por la API**. Firmar una URL de R2 pide
-  credenciales de S3 que el binding no da. Sirviéndolo por la API los permisos
-  ya están resueltos, que es donde tienen que estar. Si algún día hace falta que
-  el navegador baje directo de R2, se ponen las credenciales y se cambia.
+1. **La empresa tiene que existir.** Si no está, se crea:
+   `POST /admin/orgs {"id":"forespot","nombre":"Forespot"}`. El id es un slug y
+   es también el nombre del Durable Object: **no se cambia después.** Decidirlo
+   es de Mike.
+2. **Sacar los datos.** Abrir `conta-master.netlify.app`, entrar, consola del
+   navegador (F12), pegar la receta que la página da con un botón. Descarga
+   `contamaster-export.json`. Nada sale hacia ningún lado: el archivo se queda
+   en la computadora.
+3. **Importar.** Abrir `https://suite101-api.mike-929.workers.dev/admin/importar`,
+   entrar con el código que llega al correo, soltar el archivo, **Correr en
+   seco**, leer el cuadre, y si cuadra, **Importar de verdad**.
 
----
+Por qué la receta y no un botón: Firebase Auth solo tiene autorizado el dominio
+de conta-master, así que un `signInWithPopup` desde `workers.dev` truena con
+`auth/unauthorized-domain`. Autorizar otro dominio o tocar dash101 estaba fuera
+de alcance (encargo §4). La sesión de Firebase se usa donde ya está viva.
 
-## 4. Tres cosas que se apartan del documento
-
-Están hechas así a propósito, y el documento debería recogerlas:
-
-1. **Las migraciones del OrgDB no usan `PRAGMA user_version`**, como decía el
-   §3: llevan la cuenta en una tabla `_migraciones`. El SQLite del Durable
-   Object no expone ese pragma para escritura, y la tabla además deja la fecha
-   de cuándo corrió cada una.
-2. **La llave con la que se firman las cookies se genera sola** en el primer
-   arranque y se guarda en la tabla `config` del D1, si no hay `SECRETO` en el
-   entorno. Sin esto, el Worker no habría podido servir hasta que alguien
-   pusiera un secreto a mano, y eso contradice el «Mike decide, el chat ejecuta»
-   de `OPERAR.md`. Si un día se pone `SECRETO`, ese manda y las sesiones vivas se
-   caen: es un cambio de llave, no un error.
-3. **El identificador de las bases D1 no está en `wrangler.toml`**: dice
-   `PENDIENTE` y el flujo de publicación lo sustituye por el real después de
-   crear la base si no existe. Quien escribe el archivo no alcanza
-   `api.cloudflare.com` y no puede saberlo. Efecto secundario bueno: el
-   repositorio se puede publicar en una cuenta nueva sin tocar nada.
+Si el ensayo sale con rechazos, **no se importa**: se dice qué fila y por qué,
+se arregla en conta-master, y se vuelve a sacar el archivo.
 
 ---
 
-## 5. Lo que la fase 2 tiene que saber
+## 4. Un defecto de la fase 1 que encontró esta fase
 
-**El importador escribe por la API, no contra el DO.** Y eso choca de frente con
-`permisos.ts`, que es justo lo que se acaba de construir: ninguna app puede
-escribir `items.etapa`, ni los cachés del proyecto, ni `creado_at`. Un import
-que conserve los ids de Firestore y las etapas ya alcanzadas **no cabe por el
-CRUD genérico**. Hay dos caminos y conviene decidirlo antes de escribir código:
+**El PIN no se podía guardar en producción, y nadie lo sabía.**
 
-- `POST /admin/importar`, solo para superadmin, que entra por debajo de
-  `permisos.ts` a propósito y lo dice en su nombre. Es lo que sugiere el §11.
-- O importar por las rutas normales y luego recorrer las etapas una por una con
-  `/items/:id/etapa`, lo que deja el historial de `avances` inventado.
+`POST /auth/pin` contestaba `500 falla_interna` en 148 ms. No era CPU: el
+runtime de Workers no acepta más de **100,000 vueltas en PBKDF2**, y `lib.ts`
+pedía 120,000. Con eso, `POST /auth/pin` y `POST /orgs/:o/clientes/:id/acceso`
+estaban rotos desde la fase 1 —o sea, ningún cliente ni ninguna persona del
+taller podía tener PIN—.
 
-La primera es más honesta. La segunda deja mejor el historial de un taller que
-nunca lo tuvo. Es una decisión de Mike, no del chat que la tome.
+Lo que vale la pena guardar de esto: **las 85 pruebas de vitest pasan igual con
+120,000**, porque workerd local no aplica ese límite. Solo lo vio el corredor,
+contra el Worker de verdad. Es exactamente lo que `OPERAR.md §6` dice y la
+razón de que el humo exista.
 
-Tres cosas más que van a estorbar si se descubren tarde:
+No hubo PIN que migrar: con el valor viejo no se pudo guardar ninguno. Se bajó
+a 100,000, que es el máximo, y el humo ahora comprueba las dos mitades —fijarlo
+y entrar con él—, no solo una.
 
-- **Los ids se conservan, y el CRUD ya lo permite**: `crear()` respeta un `id`
-  que venga en los datos y solo genera uno si no viene. Probado de paso en las
-  pruebas de humo.
-- **Los cachés se recalculan solos** después de cada escritura de `items` y
-  `movimientos`. Al importar, eso significa que el proyecto va a quedar bien sin
-  que el importador calcule nada — pero también que va a recalcular una vez por
-  fila. Con dos proyectos da igual; conviene saberlo.
-- **`nombre_norm` lo pone la API**, no el importador. Si vienen nombres con
-  acentos de Firestore, se normalizan solos.
+**Y una advertencia para el chat coordinador:** el defecto era de la fase 1 y su
+cierre decía que el PIN estaba «probado». Lo estaba, pero dentro de workerd.
+Conviene mirar con esa desconfianza todo lo criptográfico de roster101, que usa
+el mismo molde.
 
 ---
 
-## 6. Cómo se opera esto de aquí en adelante
+## 5. Lo que se aparta del documento de arquitectura, y lo que el documento dice mal
 
-```bash
-# lo publicado, medido desde el corredor (el chat no alcanza *.workers.dev)
-curl -s -X POST -H "Authorization: Bearer $T" \
-  "https://api.github.com/repos/mikebalcazar/suite101-api/actions/workflows/desplegar.yml/dispatches" \
-  -d '{"ref":"main"}'
+El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
 
-# y los números, que vuelven como comentario del commit
-curl -s -H "Authorization: Bearer $T" \
-  "https://api.github.com/repos/mikebalcazar/suite101-api/commits/<SHA>/comments"
-```
-
-Dos direcciones, y las dos son el mismo código:
-
-- producción `https://suite101-api.mike-929.workers.dev`
-- staging `https://suite101-api-staging.mike-929.workers.dev` — desechable. Ahí
-  `/auth/codigo` devuelve el código en la respuesta. **No conectar ninguna app
-  real a staging.**
-
-Un aviso de higiene: cada corrida de la prueba de humo deja una org
-`humo-<id-del-run>` en staging, con su Durable Object. Son pequeñas y staging es
-desechable, pero si un día estorban, se borran de la tabla `orgs` del D1 de
-staging.
+1. **`aCentavos` de `schema/tipos.ts` estaba mal.** Hacía
+   `Math.round(n * 100)`, y `1.005 * 100` es `100.49999999999999` en punto
+   flotante: daba 100 en vez de 101. Un centavo perdido, en silencio, dentro de
+   un número que ya nadie vuelve a mirar. Reescrita sin multiplicar por
+   flotantes —se lee como texto, se parte en el punto, medio centavo sube y sube
+   igual en los negativos— y ahora devuelve también si **hubo** que redondear,
+   que en una migración es la mitad del dato. Las apps que copiaron el archivo
+   tienen que volver a copiarlo: **contrato 0.1.0 → 0.2.0**.
+2. **`contraparte_tipo` no cubre lo que conta-master usa.** El documento dice
+   `cliente | proveedor | personal | otro`; conta-master además usa `cuenta`,
+   `opex` y `ajuste`. Se traducen a `otro` y el movimiento se conserva entero
+   (el `transfer_id` sigue ligando los dos lados de una transferencia). Si esos
+   tres tipos importan de verdad, hay que decidirlo y ampliar el `CHECK`.
+3. **La membresía cambia de nivel.** En conta-master es por negocio; en la
+   suite es por empresa, con `miembros.negocios` acotando. El rol más alto de
+   sus negocios manda, y `viewer` de conta-master se vuelve `staff`.
+4. **El importador escribe por debajo de `permisos.ts` a propósito.** Es la
+   opción A del encargo §2. Está en `OrgDB.importar()` y en
+   `src/rutas/importar.ts`, dicho en el nombre y en los comentarios. Se puede
+   quitar entera cuando Firebase se apague (fase 9).
+5. **`items.etapa` se importa; `avances` no.** La etapa que un producto ya
+   traía se conserva —ninguna app puede escribirla, por eso hace falta la
+   puerta— pero no se le fabrica historial. En Firestore no existía, y una
+   fecha de etapa falsa es peor que ninguna. El primer avance real de cada ítem
+   lo va a poner quell101.
 
 ---
 
-## 7. Una cosa que se encontró y no era del encargo
+## 6. Lo que la fase 3 (peek101) tiene que saber
 
-El encargo decía que el token de Actions de este repositorio estaba en modo
-escritura. **Estaba en `read`.** Comprobado leyendo
-`/actions/permissions/workflow` antes de escribir una sola línea de código. Con
-eso, `verificar.yml` habría salido verde sin dejar comentario —semáforo sin
-números, exactamente el problema que `OPERAR.md §6` describe y que ya había
-costado runs el 8-sep—. Se puso en `write` por API y se volvió a leer para
-confirmarlo.
+- **`GET /orgs/:o/peek` ya sirve datos importados** y está probado con ellos: la
+  clienta importada entra con su PIN, `acceso.ref_id` es su id de Firestore, y
+  ve sus dos ítems con los totales ya sumados por la API.
+- **Los cachés del proyecto no vienen de Firestore.** `precio_venta`, `cobrado`,
+  `pagado_prov` y `avance` los recalcula la API después de importar. En el humo,
+  Firestore decía `precio_venta: 999999` y quedó en `17500050`: manda el
+  recálculo. Si peek101 enseña un número que no cuadra, el sospechoso es la
+  fila, no el caché.
+- **Los ids son los de Firestore**, así que un enlace viejo del portal sigue
+  sirviendo.
+- **Los PIN no se migran.** Todo cliente que ya tenía portal entra la primera
+  vez por «olvidé mi PIN»: código al correo → `/auth/entrar` → `/auth/pin`.
+  peek101 necesita esa pantalla desde el primer día; sin ella nadie entra.
+- **`portal_activo` viaja**: un cliente con `uid` en Firestore llega con
+  `portal_activo: true` y su `accesos` ya creado.
+- Ojo con `avances` vacío: si peek101 enseña una línea de tiempo por ítem, para
+  lo importado no hay nada que enseñar todavía. Que no parezca un error.
 
-Vale la pena que el chat coordinador vuelva a comprobar los otros seis: si en
-este se había caído, puede haberse caído en más.
+---
+
+## 7. Higiene
+
+- **`Verificar` salió rojo el 9-sep con el servicio perfecto.** Alguien lo
+  disparó a mano pidiendo `/orgs` y `/admin/orgs`: la primera no existe (las
+  rutas son `/orgs/:o/…`) y la segunda contesta 401 sin sesión, que es lo
+  correcto. `OPERAR.md §6` ya avisa de esto: **ante un rojo, primero se revisa
+  lo que se pidió.** El `Publicar API` del mismo commit estaba verde con 42/42.
+- Cada corrida del humo deja ahora **dos** orgs en staging, `humo-<run>` e
+  `imp-<run>`, cada una con su Durable Object. Son pequeñas y staging es
+  desechable; si un día estorban, se borran de la tabla `orgs` del D1 de
+  staging.
+- El token de Actions de este repositorio sigue en `write`, comprobado hoy
+  leyendo `/actions/permissions/workflow`, no supuesto.
