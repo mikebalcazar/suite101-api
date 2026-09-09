@@ -1,0 +1,254 @@
+# Los ojos del chat.
+#
+# El chat que desarrolla no alcanza producción: el proxy de salida le rechaza
+# *.workers.dev, *.netlify.app y api.cloudflare.com. El corredor de GitHub sí
+# tiene internet abierto. Así que la verificación se hace aquí y se escribe en
+# el log, con números; el chat lee el log por API y de ahí sale lo que se le
+# reporta a Mike.
+#
+# Dos maneras de usarlo:
+#
+#   1. Desde el workflow que publica, al final:
+#        verificar:
+#          needs: publicar
+#          uses: ./.github/workflows/verificar.yml
+#          with:
+#            url:   https://bitacora-obra.mike-929.workers.dev
+#            marca: quell101
+#            rutas: /api/salud
+#
+#   2. A mano, sin publicar nada, desde el chat:
+#        POST /repos/mikebalcazar/<REPO>/actions/workflows/verificar.yml/dispatches
+#        {"ref":"main","inputs":{"url":"https://…","marca":"quell101","rutas":"/api/salud"}}
+
+name: Verificar
+
+on:
+  workflow_call:
+    inputs:
+      url:
+        description: Dirección que tiene que responder
+        required: true
+        type: string
+      marca:
+        description: Texto que debe aparecer en la portada (vacío = no se revisa)
+        required: false
+        type: string
+        default: ''
+      rutas:
+        description: Rutas extra a comprobar, separadas por espacios
+        required: false
+        type: string
+        default: ''
+      cifras:
+        description: Pila de fuentes a medir en el navegador (vacio = no se mide)
+        required: false
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Dirección que tiene que responder
+        required: true
+        type: string
+      marca:
+        description: Texto que debe aparecer en la portada
+        required: false
+        type: string
+        default: ''
+      rutas:
+        description: Rutas extra, separadas por espacios
+        required: false
+        type: string
+        default: ''
+      cifras:
+        description: Pila de fuentes a medir en el navegador (vacio = no se mide)
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verificar que responda
+        id: medir
+        env:
+          URL: ${{ inputs.url }}
+          MARCA: ${{ inputs.marca }}
+          RUTAS: ${{ inputs.rutas }}
+        run: |
+          set -u
+          # Todo lo que se imprima queda también en /tmp/salida.txt, para poder
+          # mandárselo al chat. El proxy de salida del chat rechaza el host al
+          # que redirige la descarga de logs de Actions
+          # (results-receiver.actions.githubusercontent.com), así que el log NO
+          # es un canal de vuelta: lo único que el chat ve de aquí es el
+          # comentario que deja el paso siguiente.
+          exec > >(tee /tmp/salida.txt) 2>&1
+          fallas=0
+
+          # Sin subshell a propósito: si esto viviera dentro de $( ), el
+          # contador se perdería al terminar y todo saldría verde siempre.
+          medir () {
+            local u="$1" dest="$2" datos codigo bytes segundos
+            datos=$(curl -sS -L --max-time 30 -o "$dest" \
+                    -w '%{http_code} %{size_download} %{time_total} %{content_type}' "$u" 2>/dev/null) \
+                    || datos="000 0 0 -"
+            codigo=${datos%% *}; datos=${datos#* }
+            bytes=${datos%% *}; datos=${datos#* }
+            segundos=${datos%% *}; tipo=${datos#* }
+            echo "  $u"
+            echo "    codigo=$codigo  bytes=$bytes  segundos=$segundos"
+            if [ "$codigo" != "200" ]; then
+              echo "    FALLA: se esperaba 200"
+              fallas=$((fallas + 1))
+            fi
+          }
+
+          echo "== Portada =="
+          medir "$URL" /tmp/portada
+
+          if [ -n "$MARCA" ]; then
+            if grep -qi -- "$MARCA" /tmp/portada 2>/dev/null; then
+              echo "    marca '$MARCA': presente"
+            else
+              echo "    FALLA: no aparece '$MARCA' en la respuesta"
+              echo "    primeros 400 caracteres de lo que llegó:"
+              head -c 400 /tmp/portada 2>/dev/null || true
+              echo
+              fallas=$((fallas + 1))
+            fi
+          fi
+
+          for r in $RUTAS; do
+            echo "== $r =="
+            medir "${URL%/}${r}" /tmp/ruta
+            # Solo se enseña el cuerpo si es texto. Una .woff2 volcada aquí
+            # llena el comentario de bytes crudos y tapa lo que sí importa;
+            # además bash avisa de los nulos y ensucia más. El tipo lo dice
+            # el servidor, así que no hay que adivinarlo.
+            case "$tipo" in
+              text/*|application/json*|application/xml*|*+json*)
+                echo "    respuesta: $(head -c 200 /tmp/ruta 2>/dev/null)" ;;
+              *)
+                echo "    tipo: ${tipo:-desconocido} (binario, no se vuelca)" ;;
+            esac
+          done
+
+          echo
+          if [ "$fallas" -gt 0 ]; then
+            echo "RESULTADO: $fallas comprobación(es) fallaron"
+            echo "### Verificación: $fallas fallaron en $URL" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            exit 1
+          fi
+          echo "RESULTADO: todo verde"
+          echo "### Verificación verde en $URL" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+      # Punto 3 de la norma de tipografía. Que una .woff2 responda 200 no dice
+      # que se esté aplicando: basta un unicode-range mal escrito, un nombre de
+      # familia distinto entre el @font-face y la regla que lo usa, o un orden
+      # de pila equivocado, y el navegador se calla y usa la fuente de al lado.
+      # La única prueba es medir el ancho del texto ya pintado.
+      - name: Medir las cifras en el navegador
+        if: inputs.cifras != ''
+        env:
+          URL: ${{ inputs.url }}
+          PILA: ${{ inputs.cifras }}
+        run: |
+          set -u
+          exec > >(tee -a /tmp/salida.txt) 2>&1
+          echo
+          echo "== Cifras =="
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.49 --no-audit --no-fund --silent
+          npx playwright install chromium --only-shell >/dev/null 2>&1 \
+            || npx playwright install chromium >/dev/null 2>&1
+          cat > medir.js <<'JS'
+          const { chromium } = require('playwright');
+          const URL = process.env.URL, PILA = process.env.PILA;
+          (async () => {
+            const nav = await chromium.launch();
+            const pag = await nav.newPage();
+            const res = await pag.goto(URL, { waitUntil: 'load', timeout: 45000 });
+            if (!res || !res.ok()) { console.log('  FALLA: la pagina respondio ' + (res ? res.status() : 'nada')); process.exit(1); }
+            const m = await pag.evaluate(async (pila) => {
+              // Sin esto se mide antes de que las fuentes esten listas, y entonces
+              // todo sale igual: igual de mal, porque todo estaria en la del sistema.
+              await document.fonts.ready;
+              for (const f of ['40px Cifras', '40px Raleway']) {
+                try { await document.fonts.load(f, '0123456789'); } catch (e) {}
+              }
+              const l = document.createElement('canvas').getContext('2d');
+              const an = (fu, tx) => { l.font = fu; return Math.round(l.measureText(tx).width * 100) / 100; };
+              // Los diez digitos se miden en el DOM y no en el lienzo: el lienzo 2D
+              // no aplica font-variant-numeric, asi que ahi tnum saldria verde
+              // siempre y no probaria nada.
+              const c = document.createElement('div');
+              c.style.cssText = 'position:absolute;visibility:hidden;font:40px ' + pila +
+                                ';font-variant-numeric:tabular-nums;white-space:pre';
+              document.body.appendChild(c);
+              const tab = {};
+              for (const d of '0123456789') { c.textContent = d; tab[d] = Math.round(c.getBoundingClientRect().width * 100) / 100; }
+              c.remove();
+              return {
+                pila: an('40px ' + pila, '0123456789'),
+                fira: an('40px Cifras', '0123456789'),
+                rale: an('40px Raleway', '0123456789'),
+                sist: an('40px sans-serif', '0123456789'),
+                letras_pila: an('40px ' + pila, 'abcdefghij'),
+                letras_rale: an('40px Raleway', 'abcdefghij'),
+                tab: tab,
+                cargadas: [...document.fonts].map(f => f.family + ' ' + f.weight + ' ' + f.status)
+              };
+            }, PILA);
+            await nav.close();
+            const casi = (a, b) => Math.abs(a - b) < 0.5;
+            const dist = [...new Set(Object.values(m.tab))];
+            let fallas = 0;
+            const rev = (ok, txt) => { console.log('  ' + (ok ? 'ok   ' : 'FALLA ') + txt); if (!ok) fallas++; };
+            console.log('  pila: ' + PILA);
+            console.log('  ancho de "0123456789" a 40px:');
+            console.log('    pila completa=' + m.pila + '  solo Cifras=' + m.fira +
+                        '  solo Raleway=' + m.rale + '  sans-serif=' + m.sist);
+            rev(casi(m.pila, m.fira), 'los digitos de la pila miden lo mismo que Cifras sola -> caen en Fira Sans');
+            rev(!casi(m.fira, m.rale), 'Cifras y Raleway miden distinto -> la comparacion distingue de verdad');
+            rev(!casi(m.pila, m.rale), 'los digitos NO caen en Raleway');
+            rev(!casi(m.fira, m.sist), 'Cifras no es la del sistema disfrazada -> la .woff2 se aplico');
+            rev(casi(m.letras_pila, m.letras_rale), 'las letras siguen en Raleway -> el unicode-range no se paso de la raya');
+            rev(dist.length === 1, 'los diez digitos miden lo mismo con tabular-nums (' + dist.join(', ') + ') -> tnum activo');
+            if (fallas) {
+              console.log('  anchos por digito: ' + JSON.stringify(m.tab));
+              console.log('  familias cargadas: ' + m.cargadas.join(' | '));
+              process.exit(1);
+            }
+          })();
+          JS
+          node medir.js
+
+      # Aquí está el canal de vuelta. api.github.com sí lo alcanza el chat.
+      # jq arma el JSON: la salida trae comillas, saltos y acentos, y pegarla
+      # a mano en el cuerpo lo rompería.
+      - name: Dejar el resultado en el commit
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -u
+          [ -f /tmp/salida.txt ] || echo "No hubo salida que reportar." > /tmp/salida.txt
+          jq -Rs '{body: ("**Verificacion**\n\n```\n" + .[-60000:] + "\n```")}' \
+            /tmp/salida.txt > /tmp/comentario.json
+          # Si el token de Actions viene de solo lectura, esto responde 403 y
+          # el chat se queda sin números: se arregla una vez en
+          # Settings -> Actions -> General -> Workflow permissions -> Read and
+          # write. No se pide con un bloque permissions: dentro de este archivo,
+          # porque un workflow llamado no puede pedir mas de lo que trae el que
+          # lo llama y el run se cae antes de arrancar (pasó, runs 37 y 38).
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/commits/$SHA/comments" \
+            -d @/tmp/comentario.json -o /tmp/respuesta.json -w 'comentario: %{http_code}\n'
+          head -c 300 /tmp/respuesta.json || true
