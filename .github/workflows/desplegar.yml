@@ -114,6 +114,27 @@ jobs:
           npx wrangler d1 migrations apply suite101-master --remote
           npx wrangler d1 migrations apply suite101-master-staging --remote --env staging
 
+      # El secreto vive en GitHub; al Worker hay que ponerselo aparte. Sin esto,
+      # /auth/codigo contesta 503 correo_no_configurado aunque el secreto exista
+      # en el repositorio -- que fue exactamente lo que paso el 9-sep: se puso en
+      # GitHub, nadie lo movio a Cloudflare, y la pagina de importar no dejaba
+      # entrar. Va antes de publicar y en los dos entornos.
+      - name: Poner la llave de correo en el Worker
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          set -euo pipefail
+          # La guarda va aqui dentro y no en un `if:` del paso: ahi el contexto
+          # `env` se resuelve antes de que exista el `env:` de este mismo paso,
+          # asi que saldria vacio siempre y el paso no correria nunca.
+          if [ -z "${RESEND_API_KEY:-}" ]; then
+            echo "::warning::Sin RESEND_API_KEY. El Worker publica igual, pero /auth/codigo contestara 503 correo_no_configurado y nadie podra entrar."
+            exit 0
+          fi
+          printf '%s' "$RESEND_API_KEY" | npx wrangler secret put RESEND_API_KEY
+          printf '%s' "$RESEND_API_KEY" | npx wrangler secret put RESEND_API_KEY --env staging
+          echo "llave de correo puesta en produccion y en staging"
+
       - name: Publicar
         id: publicar
         run: |
