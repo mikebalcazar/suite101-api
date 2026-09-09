@@ -21,18 +21,21 @@ sin avisar.
 
 ## Estado
 
-**Vacío a propósito.** El diseño está cerrado; el código no está escrito.
-Corresponde a la **fase 1** del plan de migración.
+**Fase 1 escrita.** Worker con Hono, D1 «master», `OrgDB` con las 13 tablas,
+`auth101` (código por correo, PIN, Google), CRUD genérico con `permisos.ts`,
+`/etapa`, `/peek`, WebSocket, y `schema/tipos.ts` para que lo copien las apps.
 
-Lo que ya está listo para quien lo tome:
+Cómo se mide, y dónde queda la medición:
 
-- Los dos secretos de Cloudflare (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`)
-  ya están puestos en este repositorio. No hay que pedirle nada a Mike para
-  desplegar.
-- `OPERAR.md` — cómo trabaja un chat aquí. Se lee antes de tocar nada.
-- `.github/workflows/verificar.yml` — comprueba lo publicado desde el corredor
-  de GitHub, que sí alcanza internet, y deja lo que midió como comentario del
-  commit. El chat no alcanza `*.workers.dev` ni `api.cloudflare.com`.
+- `npx vitest run` — corre dentro de workerd, contra el Durable Object y el D1
+  de verdad. Es lo que corre en Actions antes de publicar.
+- `pruebas/humo.mjs` — corre en el corredor de GitHub contra lo ya publicado, y
+  deja lo que midió como comentario del commit. El chat no alcanza
+  `*.workers.dev`; ese comentario es su único canal de vuelta.
+- `verificar.yml` — el mismo de los otros seis repositorios.
+
+Lo que sigue: la fase 2 (importar desde Firestore). Lo que quedó sin verificar
+y lo que hay que saber antes de tomarla está en `claude/CONTINUAR.md`.
 
 ## El diseño
 

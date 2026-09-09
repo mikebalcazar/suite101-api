@@ -1,0 +1,111 @@
+/* Dueño por campo — §7 del documento de arquitectura.
+ *
+ * Una entidad, muchos lectores, UN escritor por campo. Gregorio existe una sola
+ * vez en `personal`: su `puesto` lo escribe roster101, sus `etapas_permitidas`
+ * las escribe quell101, y nadie más.
+ *
+ * Esto vive en código, no en reglas de base de datos, y la razón está medida:
+ * en conta-master las reglas de Firestore con acceso dinámico a mapas fallaban
+ * en silencio dentro de un try/catch y nadie lo veía. Aquí, si un permiso
+ * falla, grita: 403 con la lista de campos permitidos.
+ */
+
+import type { App, Tabla } from '../schema/tipos';
+
+type Campos = readonly string[] | '*';
+
+export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = {
+  items: {
+    cotizador101: ['nombre', 'descripcion', 'tipo', 'monto', 'moneda', 'estado', 'proyecto_id', 'cliente_id', 'negocio_id', 'origen'],
+    dash101: ['nombre', 'descripcion', 'tipo', 'monto', 'moneda', 'estado', 'proyecto_id', 'cliente_id', 'negocio_id', 'fecha_entrega'],
+    quell101: ['etapa', 'etapa_at', 'etapa_por', 'clave', 'asignados'], // etapa solo vía /etapa
+    roster101: ['asignados'],
+    nest101: ['refs'],
+  },
+  personal: {
+    roster101: ['nombre', 'nombre_norm', 'correo', 'puesto', 'activo', 'expediente_ref'],
+    quell101: ['etapas_permitidas', 've_dinero', 'estacion_default'],
+  },
+  clientes: {
+    cotizador101: ['nombre', 'nombre_norm', 'correo', 'telefono', 'negocio_id'],
+    dash101: ['nombre', 'nombre_norm', 'correo', 'telefono', 'rfc', 'notas', 'portal_activo', 'negocio_id'],
+  },
+  proyectos: {
+    dash101: ['nombre', 'descripcion', 'estado', 'fecha_inicio', 'fecha_fin_estimada', 'fecha_cierre', 'partidas', 'cliente_id', 'negocio_id'],
+    cotizador101: ['nombre', 'cliente_id', 'negocio_id'], // solo al crear desde /vender
+  },
+  movimientos: { dash101: '*' },
+  cuentas: { dash101: '*' },
+  negocios: { dash101: '*', suite101: '*' },
+  opex: { dash101: '*' },
+  cotizaciones: { cotizador101: '*' },
+  proveedores: { dash101: '*', cotizador101: ['nombre', 'nombre_norm', 'correo', 'telefono'] },
+  estaciones: { quell101: '*' },
+};
+
+/* Cachés: no los escribe NINGUNA app. Los recalcula la API después de cada
+ * mutación. Si una app manda uno, se rechaza aunque su lista lo trajera. */
+export const CACHES: Partial<Record<Tabla, readonly string[]>> = {
+  proyectos: ['precio_venta', 'cobrado', 'pagado_prov', 'avance'],
+  items: ['etapa', 'etapa_at', 'etapa_por'],
+};
+
+/* Campos que pone la API sola y que nadie manda de fuera. */
+export const DE_LA_API: readonly string[] = ['id', 'creado_at', 'actualizado_at', 'creado_por', 'creado_en_app'];
+
+/* `avances` es append-only: se escribe por /etapa, no por PATCH ni DELETE. */
+export const APPEND_ONLY: readonly Tabla[] = ['avances'];
+
+export type Veredicto =
+  | { ok: true }
+  | { ok: false; error: 'sin_permiso' | 'campo_no_permitido' | 'campo_solo_por_etapa'; detalle: Record<string, unknown> };
+
+export function camposDe(tabla: Tabla, app: App): Campos | undefined {
+  return ESCRITORES[tabla]?.[app];
+}
+
+/**
+ * ¿Puede esta app escribir estos campos en esta tabla?
+ *
+ * Se llama igual al crear que al modificar. Devuelve el veredicto completo —
+ * con la lista de lo que sí puede— para que el 403 sirva de algo al que lo lea.
+ */
+export function revisarEscritura(tabla: Tabla, app: App, campos: string[]): Veredicto {
+  const permitidos = camposDe(tabla, app);
+  if (!permitidos) {
+    return {
+      ok: false,
+      error: 'sin_permiso',
+      detalle: { tabla, app, apps_que_escriben: Object.keys(ESCRITORES[tabla] ?? {}) },
+    };
+  }
+
+  const caches = CACHES[tabla] ?? [];
+  const pisaCache = campos.filter((c) => caches.includes(c));
+
+  // `etapa` se mueve por POST /items/:id/etapa, que además deja el renglón en
+  // `avances`. Por PATCH se rechaza aunque quell101 la traiga en su lista: un
+  // caché que se escribe a mano deja de ser un caché.
+  if (pisaCache.length) {
+    return {
+      ok: false,
+      error: tabla === 'items' ? 'campo_solo_por_etapa' : 'campo_no_permitido',
+      detalle: {
+        tabla,
+        app,
+        campos: pisaCache,
+        motivo: tabla === 'items'
+          ? 'la etapa se mueve con POST /orgs/:o/items/:id/etapa'
+          : 'los recalcula la API despues de cada mutacion',
+      },
+    };
+  }
+
+  if (permitidos === '*') return { ok: true };
+
+  const fuera = campos.filter((c) => !permitidos.includes(c));
+  if (fuera.length) {
+    return { ok: false, error: 'campo_no_permitido', detalle: { tabla, app, campos: fuera, permitidos } };
+  }
+  return { ok: true };
+}
