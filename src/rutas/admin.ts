@@ -8,7 +8,7 @@
  */
 
 import { Hono } from 'hono';
-import { crearOrg, crearUsuario, esSuperadmin, miembro, miembrosDe, org, orgs, ponerMiembro, quitarMiembro } from '../maestro';
+import { borrarOrg, crearOrg, crearUsuario, esSuperadmin, miembro, miembrosDe, org, orgs, ponerMiembro, quitarMiembro } from '../maestro';
 import { normalizaCorreo } from '../lib';
 import { err, ok, type Ctx, type Vars } from '../http';
 import type { Env } from '../entorno';
@@ -52,6 +52,20 @@ rutas.post('/orgs', async (c) => {
   const version = await (c.env.ORG.get(c.env.ORG.idFromName(id)) as unknown as ApiOrgDB).version();
 
   return ok(c, { org: nueva, org_db_version: version }, 201);
+});
+
+/* Reiniciar una empresa: vacía su Durable Object y quita sus filas del D1.
+ * Existe para volver a sembrar la org `demo` de staging desde cero. En
+ * producción no existe: contesta 403 antes de mirar nada, para que `forespot`
+ * no se pueda tocar con esto ni por error. Los usuarios del D1 se quedan. */
+rutas.delete('/orgs/:o', async (c) => {
+  if (c.env.ENTORNO === 'produccion') return err(c, 'sin_permiso', 403, { motivo: 'en producción una empresa no se reinicia' });
+  if (!(await soySuper(c))) return err(c, 'sin_permiso', 403);
+  const id = c.req.param('o')!;
+  if (!(await org(c.env, id))) return err(c, 'org_desconocida', 404);
+  const version = await (c.env.ORG.get(c.env.ORG.idFromName(id)) as unknown as ApiOrgDB).vaciar();
+  await borrarOrg(c.env, id);
+  return ok(c, { reiniciada: id, org_db_version: version });
 });
 
 rutas.patch('/orgs/:o', async (c) => {

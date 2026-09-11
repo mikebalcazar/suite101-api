@@ -450,6 +450,97 @@ describe('6 · el cliente solo ve lo suyo, y ya sumado', () => {
     });
     expect(r.estado).toBe(400);
   });
+
+  it('se le quita el acceso: entra con su PIN pero la puerta de la org ya no abre; se le vuelve a dar y abre', async () => {
+    const l = await pedir(`/orgs/${ORG}/clientes`, { app: 'dash101' });
+    const cliente = l.data.filas[0];
+
+    const fuera = await pedir(`/orgs/${ORG}/clientes/${cliente.id}/acceso`, { app: 'dash101', method: 'DELETE' });
+    expect(fuera.estado).toBe(200);
+    expect(fuera.data.quitado).toBe(true);
+    const apagado = await pedir(`/orgs/${ORG}/clientes/${cliente.id}`, { app: 'dash101' });
+    expect(apagado.data.portal_activo).toBe(false);
+
+    const galletaMike = galleta;
+    galleta = '';
+    // El usuario y su PIN siguen: la sesión se abre. Lo que se cierra es la org.
+    const entrar = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: 'aurea@ejemplo.mx', pin: '481902' }) });
+    expect(entrar.estado).toBe(200);
+    const peek = await pedir(`/orgs/${ORG}/peek`, { app: 'peek101' });
+    expect(peek.estado).toBe(403);
+    galleta = galletaMike;
+
+    // Reactivar es el mismo POST, con el PIN que se quiera (aquí otro).
+    const otraVez = await pedir(`/orgs/${ORG}/clientes/${cliente.id}/acceso`, {
+      app: 'dash101', method: 'POST', body: JSON.stringify({ correo: 'aurea@ejemplo.mx', pin: '275913' }),
+    });
+    expect(otraVez.estado).toBe(201);
+    galleta = '';
+    await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: 'aurea@ejemplo.mx', pin: '275913' }) });
+    const deNuevo = await pedir(`/orgs/${ORG}/peek`, { app: 'peek101' });
+    expect(deNuevo.estado).toBe(200);
+    galleta = galletaMike;
+  });
+
+  it('un cliente solo puede quitarle el acceso un miembro, no el propio cliente', async () => {
+    const l = await pedir(`/orgs/${ORG}/clientes`, { app: 'dash101' });
+    const galletaMike = galleta;
+    galleta = '';
+    await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: 'aurea@ejemplo.mx', pin: '275913' }) });
+    const r = await pedir(`/orgs/${ORG}/clientes/${l.data.filas[0].id}/acceso`, { app: 'peek101', method: 'DELETE' });
+    expect(r.estado).toBe(403);
+    galleta = galletaMike;
+  });
+});
+
+describe('8 · borrar lo que tiene filas colgando es un 409, no un 500', () => {
+  it('un cliente con proyecto contesta en_uso; una fila suelta sí se va', async () => {
+    const l = await pedir(`/orgs/${ORG}/clientes`, { app: 'dash101' });
+    const conProyecto = l.data.filas.find((c: any) => c.correo === 'aurea@ejemplo.mx');
+    const r = await pedir(`/orgs/${ORG}/clientes/${conProyecto.id}`, { app: 'dash101', method: 'DELETE' });
+    expect(r.estado).toBe(409);
+    expect(r.error).toBe('en_uso');
+    expect(r.detalle.tabla).toBe('clientes');
+    // Sigue ahí, intacto.
+    const sigue = await pedir(`/orgs/${ORG}/clientes/${conProyecto.id}`, { app: 'dash101' });
+    expect(sigue.estado).toBe(200);
+
+    const n = await pedir(`/orgs/${ORG}/negocios`, { app: 'dash101' });
+    const suelto = await pedir(`/orgs/${ORG}/clientes`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Nadie Nunca', negocio_id: n.data.filas[0].id }) });
+    const fue = await pedir(`/orgs/${ORG}/clientes/${suelto.data.id}`, { app: 'dash101', method: 'DELETE' });
+    expect(fue.estado).toBe(200);
+    expect(fue.data.borrado).toBe(true);
+  });
+});
+
+describe('9 · reiniciar una empresa, que solo existe fuera de producción', () => {
+  it('DELETE /admin/orgs/:o vacía el Durable Object, quita la org del D1, y al recrearla nace limpia', async () => {
+    const alta = await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: 'efimera', nombre: 'Efímera' }) });
+    expect(alta.estado).toBe(201);
+    await pedir('/orgs/efimera/negocios', { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Taller que no dura' }) });
+    const antes = await pedir('/orgs/efimera/negocios', { app: 'dash101' });
+    expect(antes.data.total).toBe(1);
+
+    const r = await pedir('/admin/orgs/efimera', { method: 'DELETE' });
+    expect(r.estado).toBe(200);
+    expect(r.data.reiniciada).toBe('efimera');
+    expect(r.data.org_db_version).toBe(2);
+
+    const ya = await pedir('/orgs/efimera/negocios', { app: 'dash101' });
+    expect(ya.estado).toBe(404);
+    expect(ya.error).toBe('org_desconocida');
+
+    const otraVez = await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: 'efimera', nombre: 'Efímera' }) });
+    expect(otraVez.estado).toBe(201);
+    expect(otraVez.data.org_db_version).toBe(2);
+    const limpia = await pedir('/orgs/efimera/negocios', { app: 'dash101' });
+    expect(limpia.data.total).toBe(0);
+  });
+
+  it('una org que no existe contesta 404', async () => {
+    const r = await pedir('/admin/orgs/no-existe', { method: 'DELETE' });
+    expect(r.estado).toBe(404);
+  });
 });
 
 describe('7 · personal: ve su trabajo, no el dinero', () => {

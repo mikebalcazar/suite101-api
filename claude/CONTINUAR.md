@@ -201,7 +201,7 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   lo que se pidió.** El `Publicar API` del mismo commit estaba verde con 42/42.
 - Cada corrida del humo deja ahora **dos** orgs en staging, `humo-<run>` e
   `imp-<run>`, cada una con su Durable Object. Son pequeñas y staging es
-  desechable; si un día estorban, se borran de la tabla `orgs` del D1 de
-  staging.
+  desechable; si un día estorban, desde el contrato 0.3.1 se reinician con
+  `DELETE /admin/orgs/:o` (superadmin; en producción no existe, contesta 403).
 - El token de Actions de este repositorio sigue en `write`, comprobado hoy
   leyendo `/actions/permissions/workflow`, no supuesto.
