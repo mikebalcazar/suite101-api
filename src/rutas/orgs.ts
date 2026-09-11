@@ -23,7 +23,7 @@ import { APPS, LLAVE_APP, type App, type Tabla } from '../../schema/tipos';
 const rutas = new Hono<{ Bindings: Env; Variables: Vars }>();
 
 /** Tablas con dinero que el personal sin `ve_dinero` no abre. */
-const TABLAS_DINERO: Tabla[] = ['movimientos', 'cuentas', 'opex', 'cotizaciones'];
+const TABLAS_DINERO: Tabla[] = ['movimientos', 'cuentas', 'opex', 'cotizaciones', 'partidas'];
 
 const stub = (c: Ctx): ApiOrgDB => c.env.ORG.get(c.env.ORG.idFromName(c.get('org_id'))) as unknown as ApiOrgDB;
 
@@ -377,6 +377,11 @@ function puedeLeer(c: Ctx, tabla: string) {
   if (quien.clase === 'personal' && !quien.ve_dinero && (TABLAS_DINERO as string[]).includes(tabla)) {
     return err(c, 'sin_permiso', 403, { motivo: 'esta persona no ve dinero' });
   }
+  // Las partidas son costos: lo acordado con cada proveedor. Las ven owner,
+  // admin y socio; staff, personal y cliente no, ni por lista ni por id.
+  if (tabla === 'partidas' && !quien.ve_costos) {
+    return err(c, 'sin_permiso', 403, { motivo: 'las partidas son costos: solo owner, admin y socio' });
+  }
   return null;
 }
 
@@ -384,8 +389,8 @@ function puedeLeer(c: Ctx, tabla: string) {
 function podar(quien: Quien, tabla: Tabla, fila: Record<string, unknown>): Record<string, unknown> {
   const f = { ...fila };
   if (tabla === 'proyectos' && !quien.ve_costos) {
-    delete f.partidas;
     delete f.pagado_prov;
+    delete f.compromiso;
   }
   if (!quien.ve_dinero) {
     if (tabla === 'items') delete f.monto;

@@ -43,6 +43,8 @@ jobs:
       - run: npm ci
       - name: Revisar los tipos
         run: npx tsc --noEmit
+      - name: Medir la migración 0002 en un sqlite3 en memoria (OPERAR §7)
+        run: python3 pruebas/migracion-0002.py
       - name: Pruebas contra el Durable Object y el D1 de verdad
         run: npx vitest run --reporter=verbose
 

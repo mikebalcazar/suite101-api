@@ -31,9 +31,12 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
     dash101: ['nombre', 'nombre_norm', 'correo', 'telefono', 'rfc', 'notas', 'portal_activo', 'negocio_id'],
   },
   proyectos: {
-    dash101: ['nombre', 'descripcion', 'estado', 'fecha_inicio', 'fecha_fin_estimada', 'fecha_cierre', 'partidas', 'cliente_id', 'negocio_id'],
+    dash101: ['nombre', 'descripcion', 'estado', 'fecha_inicio', 'fecha_fin_estimada', 'fecha_cierre', 'cliente_id', 'negocio_id'],
     cotizador101: ['nombre', 'cliente_id', 'negocio_id'], // solo al crear desde /vender
   },
+  // Las partidas son de dash101 y de nadie más. `monto_pagado` y `estado` no
+  // están en su lista: son cachés (abajo).
+  partidas: { dash101: ['proyecto_id', 'item_id', 'proveedor_id', 'proveedor_nombre', 'concepto', 'monto_acordado'] },
   movimientos: { dash101: '*' },
   cuentas: { dash101: '*' },
   negocios: { dash101: '*', suite101: '*' },
@@ -46,7 +49,8 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
 /* Cachés: no los escribe NINGUNA app. Los recalcula la API después de cada
  * mutación. Si una app manda uno, se rechaza aunque su lista lo trajera. */
 export const CACHES: Partial<Record<Tabla, readonly string[]>> = {
-  proyectos: ['precio_venta', 'cobrado', 'pagado_prov', 'avance'],
+  proyectos: ['precio_venta', 'cobrado', 'pagado_prov', 'compromiso', 'avance'],
+  partidas: ['monto_pagado', 'estado'],
   items: ['etapa', 'etapa_at', 'etapa_por'],
 };
 

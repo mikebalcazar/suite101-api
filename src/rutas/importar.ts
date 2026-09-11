@@ -165,7 +165,7 @@ rutas.post('/importar', async (c) => {
   // contra la opinión de otra base, así que van en su propia lista y no
   // entran en el veredicto. Que cuadren o no se ve en otro lado: `cobrado`
   // sale de los mismos movimientos que ya se contaron arriba.
-  const CACHES_DINERO = ['proyectos.precio_venta', 'proyectos.cobrado', 'proyectos.pagado_prov'];
+  const CACHES_DINERO = ['proyectos.precio_venta', 'proyectos.cobrado', 'proyectos.pagado_prov', 'proyectos.compromiso', 'partidas.monto_pagado'];
 
   const llavesDinero = [...new Set([...Object.keys(cosecha.sumas), ...Object.keys(r.sumas)])]
     .filter((k) => (cosecha.sumas[k] ?? 0) !== 0 || (r.sumas[k] ?? 0) !== 0)
