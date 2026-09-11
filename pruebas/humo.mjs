@@ -110,7 +110,8 @@ async function recorrido() {
   // 2 · se crea una org y su DO nace solo
   const nueva = await pedir(STAGING, '/admin/orgs', { method: 'POST', body: { id: ORG, nombre: 'Humo' } });
   rev(nueva.estado === 201, `se crea la org ${ORG}`, `${nueva.ms} ms`);
-  rev(nueva.data?.org_db_version === 1, 'su Durable Object nació y se migró solo, sin redeploy', `version ${nueva.data?.org_db_version}`);
+  // Desde 0002 (partidas a tabla propia) el DO nace en la versión 2.
+  rev(nueva.data?.org_db_version === 2, 'su Durable Object nació y corrió las dos migraciones solo, sin redeploy', `version ${nueva.data?.org_db_version}`);
 
   const neg = await pedir(STAGING, `/orgs/${ORG}/negocios`, { app: 'dash101', method: 'POST', body: { nombre: 'Taller' } });
   const cli = await pedir(STAGING, `/orgs/${ORG}/clientes`, { app: 'dash101', method: 'POST', body: { nombre: 'Áurea Pérez', negocio_id: neg.data?.id } });
