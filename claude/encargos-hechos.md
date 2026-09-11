@@ -19,6 +19,9 @@ El camino es éste, y depende de Mike a propósito:
 
 Dejar el archivo en Drive **no basta**: si nadie avisa, ahí se queda.
 
+Qué tiene que traer un encargo para poder ejecutarse sin preguntar nada:
+`claude/formato-de-encargo.md`, aquí al lado.
+
 La huella es `sha256` del contenido del archivo de Drive. Si el chat que lo
 escribió lo corrige, la huella cambia y el encargo se vuelve a ejecutar, que
 es justo lo que se quiere. Por eso no se reusa un archivo de Drive para dos
