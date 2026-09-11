@@ -140,13 +140,34 @@ describe('lo que llega de Firestore', () => {
       proyectos: [{
         id: 'P1', nombre: 'Casa', cliente_id: 'C1', negocio_id: 'N1', estado: 'activo',
         precio_venta: 999, cobrado: 111, pagado: 22, disponible: 89, compromiso_total: 5,
-        margen_proyectado: 1, cliente_nombre: 'Áurea', productos: [], partidas: [],
+        margen_proyectado: 1, cliente_nombre: 'Áurea', productos: [{ id: 'x1', nombre: 'Mesa', monto: 999 }], partidas: [],
       }],
     });
     const p = cosecha.filas.proyectos![0];
     expect(p.precio_venta).toBeUndefined();
     expect(p.cobrado).toBeUndefined();
+    // con productos, el precio es caché y se ignora
     expect(cosecha.ignorados.proyectos).toContain('precio_venta');
+    expect(cosecha.filas.items).toHaveLength(1);
+  });
+
+  it('la regla del producto único: un proyecto con precio y sin productos produce un ítem con su nombre', () => {
+    const cosecha = cosechar({
+      proyectos: [
+        { id: 'P1', nombre: 'Casa', cliente_id: 'C1', negocio_id: 'N1', estado: 'activo', precio_venta: 175000.5, productos: [], creado_at: '2026-01-15T12:00:00Z' },
+        { id: 'P2', nombre: 'Sin precio', cliente_id: 'C1', negocio_id: 'N1', estado: 'planeando' },
+      ],
+    });
+    expect(cosecha.filas.items).toHaveLength(1);
+    const i = cosecha.filas.items![0];
+    expect(i).toMatchObject({ id: 'P1-i1', proyecto_id: 'P1', cliente_id: 'C1', nombre: 'Casa', monto: 17500050, estado: 'vendido', etapa: 0, tipo: 'otro' });
+    expect((i.origen as { regla: string }).regla).toBe('producto_unico');
+    // el precio SÍ se usó: no se reporta como ignorado
+    expect(cosecha.ignorados.proyectos ?? []).not.toContain('precio_venta');
+    // y la plata se cuenta en items.monto, que es contra lo que cuadra la API
+    expect(cosecha.sumas['items.monto']).toBe(17500050);
+    // sin precio ni productos, nada se inventa
+    expect(cosecha.filas.proyectos).toHaveLength(2);
   });
 });
 

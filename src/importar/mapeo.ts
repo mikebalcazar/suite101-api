@@ -193,6 +193,11 @@ class Cesta {
     for (const k of Object.keys(doc)) if (!usados.includes(k)) set.add(k);
   }
 
+  /** Un campo que `sobrantes` ya apuntó como ignorado pero que al final sí se usó. */
+  usado(coleccion: string, campo: string): void {
+    this.ignorados[coleccion]?.delete(campo);
+  }
+
   cierra(): Cosecha {
     const ignorados: Record<string, string[]> = {};
     for (const [k, v] of Object.entries(this.ignorados)) ignorados[k] = [...v].sort();
@@ -450,6 +455,29 @@ function mapear(docs: Record<string, Crudo[]>, hoy: string): Cosecha {
         creado_por: 'importacion',
       }, platita);
       // `pagado` del producto es caché: sale de los movimientos con item_id.
+    }
+
+    /* La regla del producto único (decisión de Mike, 11-sep): un proyecto con
+     * precio y SIN productos se guarda como un ítem vendido con el nombre del
+     * proyecto y ese monto. Sin ella el precio de venta quedaba en cero,
+     * porque es un caché que sale de los ítems y no había ninguno. Es la
+     * misma regla con la que dash101 captura contra la API. El id es
+     * determinista (`<proyecto>-i1`) para que reimportar actualice. */
+    const productos = Array.isArray(d.productos) ? d.productos : [];
+    if (productos.length === 0 && d.precio_venta !== undefined && d.precio_venta !== null && d.precio_venta !== '' && Number(d.precio_venta) !== 0) {
+      const iid = `${id(d)}-i1`;
+      const platita: Pendiente[] = [];
+      const monto = c.dinero(platita, 'proyectos', 'items', 'monto', iid, d.precio_venta);
+      if (monto !== null) {
+        c.pon('items', {
+          id: iid, negocio_id: texto(d.negocio_id) ?? '', proyecto_id: id(d), cliente_id: texto(d.cliente_id),
+          nombre: texto(d.nombre), descripcion: null, tipo: 'otro', monto, moneda: texto(d.moneda) ?? 'MXN',
+          estado: 'vendido', etapa: 0, fecha_entrega: aDia(d.fecha_fin_estimada),
+          origen: { app: 'conta-master', proyecto_id: id(d), regla: 'producto_unico' },
+          creado_at: aISO(d.creado_at) ?? hoy, creado_por: 'importacion',
+        }, platita);
+        c.usado('proyectos', 'precio_venta');
+      }
     }
   }
 
