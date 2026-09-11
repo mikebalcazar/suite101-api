@@ -1,7 +1,23 @@
 # Encargos ejecutados
 
-Lo lee la pasada programada de cada hora **antes** de correr nada: si el
-encargo ya está aquí con la misma huella, no se vuelve a ejecutar.
+Lo lee la sesión que ejecuta **antes** de correr nada: si el encargo ya está
+aquí con la misma huella, no se vuelve a ejecutar.
+
+## Cómo llega un encargo (decisión de Mike, 11-sep-2026)
+
+**No hay barrido automático.** Se probó una pasada programada de cada hora y se
+quitó el mismo día: las sesiones que dispara arrancan sin conector de Drive y
+sin repos, así que no podían ni leer los encargos.
+
+El camino es éste, y depende de Mike a propósito:
+
+1. El chat de proyecto escribe su encargo en Drive `suite101/<proyecto>/` y
+   **le avisa a Mike** que ya está.
+2. Mike se lo dice a la sesión de Claude Code: «lee el encargo nuevo».
+3. La sesión busca en Drive cuál es, lo contrasta con este registro y lo
+   ejecuta.
+
+Dejar el archivo en Drive **no basta**: si nadie avisa, ahí se queda.
 
 La huella es `sha256` del contenido del archivo de Drive. Si el chat que lo
 escribió lo corrige, la huella cambia y el encargo se vuelve a ejecutar, que
