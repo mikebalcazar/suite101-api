@@ -137,6 +137,26 @@ jobs:
           printf '%s' "$RESEND_API_KEY" | npx wrangler secret put RESEND_API_KEY --env staging
           echo "llave de correo puesta en produccion y en staging"
 
+      # Lo mismo para Google (login de miembros). Mike pone GOOGLE_CLIENT_ID y
+      # GOOGLE_CLIENT_SECRET como secretos del repositorio y este paso los
+      # lleva a los dos Workers. Sin ellos, /auth/google contesta 501 y se
+      # sigue entrando con correo, codigo y PIN: nada se rompe.
+      - name: Poner las credenciales de Google en el Worker
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GOOGLE_CLIENT_ID:-}" ] || [ -z "${GOOGLE_CLIENT_SECRET:-}" ]; then
+            echo "::warning::Sin GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET. Se entra con correo, codigo y PIN; /auth/google contesta 501."
+            exit 0
+          fi
+          for e in "" "--env staging"; do
+            printf '%s' "$GOOGLE_CLIENT_ID" | npx wrangler secret put GOOGLE_CLIENT_ID $e
+            printf '%s' "$GOOGLE_CLIENT_SECRET" | npx wrangler secret put GOOGLE_CLIENT_SECRET $e
+          done
+          echo "credenciales de Google puestas en produccion y en staging"
+
       - name: Publicar
         id: publicar
         run: |

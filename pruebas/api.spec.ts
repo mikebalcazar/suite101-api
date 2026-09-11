@@ -493,6 +493,53 @@ describe('6 · el cliente solo ve lo suyo, y ya sumado', () => {
   });
 });
 
+describe('3b · Google detrás de un proxy: el boleto de entrada', () => {
+  it('sin credenciales, /auth/google dice que no está configurado; con un volver_a ajeno, que no', async () => {
+    const sin = await pedir('/auth/google');
+    expect(sin.estado).toBe(501);
+    expect(sin.error).toBe('google_no_configurado');
+    const ajeno = await pedir('/auth/google?volver_a=' + encodeURIComponent('https://malo.ejemplo.mx/login'));
+    expect(ajeno.estado).toBe(403);
+    expect(ajeno.error).toBe('origen_no_permitido');
+  });
+
+  it('un boleto se canjea una sola vez por la cookie, y con ella /yo contesta', async () => {
+    const galletaMike = galleta;
+    // Un boleto como lo dejaría el callback de Google: la cookie de una sesión de Mike.
+    const yo = await pedir('/yo');
+    const id = 'boleto-de-prueba-' + Date.now();
+    await entorno.MASTER.prepare(`INSERT INTO tickets (id, galleta, expira_at) VALUES (?,?,?)`)
+      .bind(id, galletaMike.split('=')[1], new Date(Date.now() + 60_000).toISOString()).run();
+
+    galleta = '';
+    const canje = await pedir('/auth/canje', { method: 'POST', body: JSON.stringify({ entrada: id }) });
+    expect(canje.estado).toBe(200);
+    expect(galleta).toBe(galletaMike);
+    const otraVez = await pedir('/yo');
+    expect(otraVez.estado).toBe(200);
+    expect(otraVez.data.usuario.correo).toBe(yo.data.usuario.correo);
+
+    galleta = '';
+    const repetido = await pedir('/auth/canje', { method: 'POST', body: JSON.stringify({ entrada: id }) });
+    expect(repetido.estado).toBe(401);
+    expect(repetido.error).toBe('entrada_invalida');
+    galleta = galletaMike;
+  });
+
+  it('un boleto vencido no entra, y también se consume', async () => {
+    const galletaMike = galleta;
+    const id = 'boleto-viejo-' + Date.now();
+    await entorno.MASTER.prepare(`INSERT INTO tickets (id, galleta, expira_at) VALUES (?,?,?)`)
+      .bind(id, galletaMike.split('=')[1], new Date(Date.now() - 1000).toISOString()).run();
+    galleta = '';
+    const r = await pedir('/auth/canje', { method: 'POST', body: JSON.stringify({ entrada: id }) });
+    expect(r.estado).toBe(401);
+    const queda = await entorno.MASTER.prepare(`SELECT 1 AS x FROM tickets WHERE id = ?`).bind(id).first();
+    expect(queda).toBe(null);
+    galleta = galletaMike;
+  });
+});
+
 describe('8 · borrar lo que tiene filas colgando es un 409, no un 500', () => {
   it('un cliente con proyecto contesta en_uso; una fila suelta sí se va', async () => {
     const l = await pedir(`/orgs/${ORG}/clientes`, { app: 'dash101' });
