@@ -13,10 +13,11 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.3.0 (fase 2 de dash101 — `partidas` a tabla propia)
+ * Versión del contrato: 0.3.1 (fase 3 de dash101 — DELETE …/acceso, 409 en_uso,
+ * DELETE /admin/orgs/:o fuera de producción; nada de lo de 0.3.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.3.0';
+export const VERSION_CONTRATO = '0.3.1';
 
 /* ─────────────── envoltura de toda respuesta ─────────────── */
 

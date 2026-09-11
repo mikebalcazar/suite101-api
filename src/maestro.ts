@@ -156,6 +156,32 @@ export async function ponerAcceso(env: Env, a: { usuario_id: string; org_id: str
   ).bind(a.usuario_id, a.org_id, a.tipo, a.ref_id).run();
 }
 
+/** Apaga el acceso sin borrarlo: el usuario y su PIN se quedan, y volver a
+ *  `ponerAcceso` lo prende otra vez. La puerta de /orgs/:o/* filtra activo = 1. */
+export async function quitarAcceso(env: Env, usuario_id: string): Promise<void> {
+  await env.MASTER.prepare(`UPDATE accesos SET activo = 0 WHERE usuario_id = ?`).bind(usuario_id).run();
+}
+
+/** El usuario ligado a un cliente o persona de una org, si lo hay. */
+export async function accesoDe(env: Env, org_id: string, tipo: TipoAcceso, ref_id: string): Promise<Acceso | null> {
+  const f = await env.MASTER.prepare(`SELECT * FROM accesos WHERE org_id = ? AND tipo = ? AND ref_id = ?`)
+    .bind(org_id, tipo, ref_id)
+    .first<{ usuario_id: string; org_id: string; tipo: TipoAcceso; ref_id: string; activo: number }>();
+  return f ? { ...f, activo: !!f.activo } : null;
+}
+
+/** Quita del D1 todo lo de una org. Solo lo llama DELETE /admin/orgs/:o, que
+ *  fuera de producción existe y en producción contesta 403. Los usuarios se
+ *  quedan: pueden ser miembros de otra empresa. */
+export async function borrarOrg(env: Env, org_id: string): Promise<void> {
+  await env.MASTER.batch([
+    env.MASTER.prepare(`DELETE FROM accesos WHERE org_id = ?`).bind(org_id),
+    env.MASTER.prepare(`DELETE FROM miembros WHERE org_id = ?`).bind(org_id),
+    env.MASTER.prepare(`DELETE FROM invitaciones WHERE org_id = ?`).bind(org_id),
+    env.MASTER.prepare(`DELETE FROM orgs WHERE id = ?`).bind(org_id),
+  ]);
+}
+
 /* ─────────────── importación (fase 2) ───────────────
  * Un usuario que viene de Firebase Auth conserva su uid como `id`: es lo que
  * `clientes.usuario_id` ya apunta del otro lado, y cambiarlo rompería el

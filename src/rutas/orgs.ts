@@ -13,7 +13,7 @@ import { Hono } from 'hono';
 import { DEFS, columnasDinero, esTabla } from '../tablas';
 import type { ApiOrgDB } from '../org-db';
 import { revisarEscritura } from '../permisos';
-import { acceso, miembro, org, ponerAcceso, usuarioPorCorreo } from '../maestro';
+import { acceso, accesoDe, miembro, org, ponerAcceso, quitarAcceso, usuarioPorCorreo } from '../maestro';
 import { crearUsuario } from '../maestro';
 import { guardarPin, normalizaCorreo, pinAceptable, ulid } from '../lib';
 import { err, ok, type Ctx, type Quien, type Vars } from '../http';
@@ -217,6 +217,22 @@ for (const par of [
 
     return ok(c, { usuario_id: usuario.id, correo, tipo: par.tipo, ref_id: fila.id }, 201);
   });
+
+  /* Apagar el acceso. El usuario y su PIN se quedan en el D1: volver a hacer
+   * POST …/acceso lo prende con el PIN que traiga. Sin esto, «desactivar» en
+   * dash101 solo cambiaría una bandera y el cliente seguiría entrando. */
+  rutas.delete(`/:o/${par.tabla}/:id/acceso`, async (c) => {
+    const quien = c.get('quien');
+    if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403);
+    const fila = (await stub(c).obtener(par.tabla, c.req.param('id')!)) as Record<string, unknown> | null;
+    if (!fila) return err(c, 'no_encontrado', 404);
+
+    const a = await accesoDe(c.env, c.get('org_id'), par.tipo, String(fila.id));
+    if (a) await quitarAcceso(c.env, a.usuario_id);
+    if (par.tipo === 'cliente') await stub(c).actualizar('clientes', String(fila.id), { portal_activo: false });
+
+    return ok(c, { quitado: !!a, usuario_id: a?.usuario_id ?? null, ref_id: fila.id });
+  });
 }
 
 /* ─────────────── archivos (R2) ───────────────
@@ -361,7 +377,10 @@ rutas.delete('/:o/:tabla/:id', async (c) => {
   const veredicto = revisarEscritura(tabla, c.get('app'), []);
   if (!veredicto.ok) return err(c, veredicto.error, 403, veredicto.detalle);
 
+  // Las llaves foráneas del OrgDB se aplican: un proyecto con ítems o
+  // movimientos no se va. Eso es un 409 que la app puede explicar, no un 500.
   const fue = await stub(c).borrar(tabla, c.req.param('id')!);
+  if (fue === 'en_uso') return err(c, 'en_uso', 409, { tabla, motivo: 'otras filas apuntan a esta; primero se quitan o se cancelan ellas' });
   if (!fue) return err(c, 'no_encontrado', 404);
   return ok(c, { borrado: true });
 });

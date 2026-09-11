@@ -47,11 +47,14 @@ export interface Sujeto {
  * llamada a distancia. Si se agrega un metodo publico, se agrega aqui. */
 export interface ApiOrgDB {
   version(): Promise<number>;
+  /** Puerta de servicio: borra TODO y vuelve a migrar. Solo DELETE /admin/orgs/:o fuera de producción. */
+  vaciar(): Promise<number>;
   listar(tabla: Tabla, filtros?: Record<string, string>, sujeto?: Sujeto, limite?: number): Promise<{ total: number; filas: Fila[] }>;
   obtener(tabla: Tabla, id: string): Promise<Fila | null>;
   crear(tabla: Tabla, datos: Fila, contexto: { app: string; usuario_id: string }): Promise<Fila>;
   actualizar(tabla: Tabla, id: string, datos: Fila): Promise<Fila | null>;
-  borrar(tabla: Tabla, id: string): Promise<boolean>;
+  /** false si no existía; 'en_uso' si otras filas apuntan a esta (llave foránea). */
+  borrar(tabla: Tabla, id: string): Promise<boolean | 'en_uso'>;
   recalcularProyecto(proyecto_id: string): Promise<Fila | null>;
   moverEtapa(args: {
     item_id: string; etapa: number; nota?: string | null; foto?: string | null;
@@ -118,6 +121,15 @@ export class OrgDB extends DurableObject<Env> {
       this.sql.exec(MIGRACIONES[i]);
       this.sql.exec(`INSERT INTO _migraciones (version, aplicada_at) VALUES (?, ?)`, i + 1, new Date().toISOString());
     }
+  }
+
+  /** Borra todo lo que hay en el SQLite de esta empresa y lo deja como recién
+   *  nacido: tablas vacías y las migraciones aplicadas. Para resembrar la org
+   *  demo de staging; la ruta que lo llama no existe en producción. */
+  async vaciar(): Promise<number> {
+    await this.ctx.storage.deleteAll();
+    this.migrar();
+    return this.version();
   }
 
   version(): number {
@@ -239,10 +251,18 @@ export class OrgDB extends DurableObject<Env> {
     return this.obtener(tabla, id);
   }
 
-  borrar(tabla: Tabla, id: string): boolean {
+  borrar(tabla: Tabla, id: string): boolean | 'en_uso' {
     const antes = this.obtener(tabla, id);
     if (!antes) return false;
-    this.sql.exec(`DELETE FROM ${tabla} WHERE id = ?`, id);
+    // Las llaves foráneas se aplican. Se contesta con un valor y no con una
+    // excepción: cruzar el RPC con una excepción deja «uncaught» en el registro
+    // del Worker aunque el Worker la atrape.
+    try {
+      this.sql.exec(`DELETE FROM ${tabla} WHERE id = ?`, id);
+    } catch (e) {
+      if (/FOREIGN KEY/i.test((e as Error).message ?? '')) return 'en_uso';
+      throw e;
+    }
     if ((tabla === 'movimientos' || tabla === 'partidas') && antes.proyecto_id) this.recalcularProyecto(String(antes.proyecto_id));
     return true;
   }
