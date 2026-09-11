@@ -14,8 +14,9 @@
  *   1. El dinero de Firestore viene en PESOS con decimales. Aquí se vuelve
  *      centavos enteros con `aCentavosExacto`, y cada redondeo se apunta.
  *   2. Los cachés NO se importan (`precio_venta`, `cobrado`, `pagado`,
- *      `productos[].pagado`, `saldo_actual`). Los recalcula la API desde los
- *      movimientos. Importar un caché es importar una opinión.
+ *      `productos[].pagado`, `partidas[].monto_pagado`, `saldo_actual`). Los
+ *      recalcula la API desde los movimientos. Importar un caché es importar
+ *      una opinión.
  *   3. No se inventa historial. `avances` sale vacío: en Firestore nunca
  *      existió, y una fecha de etapa falsa es peor que ninguna (encargo §2).
  */
@@ -379,28 +380,31 @@ function mapear(docs: Record<string, Crudo[]>, hoy: string): Cosecha {
       continue;
     }
 
-    // Las partidas son JSON, pero traen dinero adentro y ese dinero también
-    // va en centavos. Es el único sitio donde hay que entrar a un JSON.
-    const plata: Pendiente[] = [];
-    const partidas: unknown[] = [];
-    for (const p of (Array.isArray(d.partidas) ? d.partidas : []) as Crudo[]) {
-      const acordado = c.dinero(plata, 'proyectos', 'proyectos', 'partidas.monto_acordado', id(d), p.monto_acordado);
-      const pagado = c.dinero(plata, 'proyectos', 'proyectos', 'partidas.monto_pagado', id(d), p.monto_pagado);
-      if (acordado === null || pagado === null) continue;
-      partidas.push({
-        proveedor_id: texto(p.proveedor_id), proveedor_nombre: texto(p.proveedor_nombre),
-        concepto: texto(p.concepto), monto_acordado: acordado, monto_pagado: pagado,
-        estado: texto(p.estado) ?? 'pendiente',
-      });
-    }
-
     c.pon('proyectos', {
       id: id(d), negocio_id: texto(d.negocio_id) ?? '', cliente_id: texto(d.cliente_id),
       nombre: texto(d.nombre), descripcion: texto(d.descripcion), estado,
       fecha_inicio: aDia(d.fecha_inicio), fecha_fin_estimada: aDia(d.fecha_fin_estimada),
-      fecha_cierre: aDia(d.fecha_cierre), partidas,
+      fecha_cierre: aDia(d.fecha_cierre),
       creado_at: aISO(d.creado_at) ?? hoy, actualizado_at: aISO(d.actualizado_at),
-    }, plata);
+    });
+
+    /* partidas[] → filas en `partidas`, colgadas del proyecto. El id se arma
+     * del proyecto y la posición (PRO1-p1), igual que lo hace la migración
+     * 0002: así reimportar actualiza en vez de duplicar. `monto_pagado` y
+     * `estado` no se copian: son cachés, salen de los egresos. */
+    (Array.isArray(d.partidas) ? d.partidas : []).forEach((cruda, i) => {
+      const p = cruda as Crudo;
+      const pid = `${id(d)}-p${i + 1}`;
+      const plata: Pendiente[] = [];
+      const acordado = c.dinero(plata, 'partidas', 'partidas', 'monto_acordado', pid, p.monto_acordado);
+      if (acordado === null) return;
+      c.pon('partidas', {
+        id: pid, proyecto_id: id(d), item_id: texto(p.item_id ?? p.producto_id),
+        proveedor_id: texto(p.proveedor_id), proveedor_nombre: texto(p.proveedor_nombre),
+        concepto: texto(p.concepto), monto_acordado: acordado,
+        creado_at: aISO(d.creado_at) ?? hoy,
+      }, plata);
+    });
     c.sobrantes('proyectos', d, [
       'id', 'negocio_id', 'cliente_id', 'nombre', 'descripcion', 'estado', 'fecha_inicio',
       'fecha_fin_estimada', 'fecha_cierre', 'partidas', 'productos', 'creado_at', 'actualizado_at',

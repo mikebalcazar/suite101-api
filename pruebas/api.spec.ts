@@ -95,11 +95,12 @@ describe('2 · se crea una org y su Durable Object nace solo', () => {
       body: JSON.stringify({ id: ORG, nombre: 'Empresa de pruebas' }),
     });
     expect(r.estado).toBe(201);
-    // La versión la contesta el propio DO: si vale 1, nació y se migró.
-    expect(r.data.org_db_version).toBe(1);
+    // La versión la contesta el propio DO: si vale 2, nació y corrió las dos
+    // migraciones (0001 y la de partidas).
+    expect(r.data.org_db_version).toBe(2);
   });
 
-  it('las trece tablas están dentro del DO', async () => {
+  it('las catorce tablas están dentro del DO', async () => {
     // El stub tipado obliga a TypeScript a recorrer la clase entera; aqui no
     // hace falta, solo se le pide el listado de tablas.
     const stub = entorno.ORG.get(entorno.ORG.idFromName(ORG)) as unknown as DurableObjectStub;
@@ -112,7 +113,7 @@ describe('2 · se crea una org y su Durable Object nace solo', () => {
     );
     expect(nombres).toEqual([
       'archivos', 'avances', 'clientes', 'cotizaciones', 'cuentas', 'estaciones',
-      'items', 'movimientos', 'negocios', 'opex', 'personal', 'proveedores', 'proyectos',
+      'items', 'movimientos', 'negocios', 'opex', 'partidas', 'personal', 'proveedores', 'proyectos',
     ]);
   });
 
@@ -257,6 +258,82 @@ describe('4 · el ítem, su etapa y el aviso por WebSocket', () => {
     expect(r.estado).toBe(400);
     expect(r.error).toBe('dinero_no_entero');
   });
+
+  /* ─────────────── las partidas: tabla propia, cachés de la API ───────────────
+   * Fase 2 de dash101. Cuelgan del proyecto; el ítem es opcional. Lo pagado a
+   * cada proveedor y el estado los calcula la API desde los egresos, y el
+   * compromiso del proyecto es la suma de lo acordado. */
+
+  it('dash101 crea una partida colgada del proyecto y el proyecto gana compromiso', async () => {
+    const prov = await pedir(`/orgs/${ORG}/proveedores`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Maderas del Sur' }) });
+    ids.proveedor = prov.data.id;
+    const r = await pedir(`/orgs/${ORG}/partidas`, {
+      app: 'dash101',
+      method: 'POST',
+      body: JSON.stringify({ proyecto_id: ids.proyecto, proveedor_id: ids.proveedor, proveedor_nombre: 'Maderas del Sur', concepto: 'Madera', monto_acordado: 2000000 }),
+    });
+    expect(r.estado).toBe(201);
+    expect(r.data.proyecto_id).toBe(ids.proyecto);
+    expect(r.data.item_id).toBe(null);
+    expect(r.data.monto_pagado).toBe(0);
+    expect(r.data.estado).toBe('pendiente');
+    ids.partida = r.data.id;
+
+    const p = await pedir(`/orgs/${ORG}/proyectos/${ids.proyecto}`, { app: 'dash101' });
+    expect(p.data.compromiso).toBe(2000000);
+    expect(p.data.partidas).toBeUndefined();
+  });
+
+  it('un egreso al proveedor mueve lo pagado de la partida y su estado', async () => {
+    const cu = await pedir(`/orgs/${ORG}/cuentas`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Caja', tipo: 'caja', negocio_id: ids.negocio, saldo_inicial: 0 }) });
+    const egreso = (monto: number) => pedir(`/orgs/${ORG}/movimientos`, {
+      app: 'dash101',
+      method: 'POST',
+      body: JSON.stringify({
+        negocio_id: ids.negocio, tipo: 'egreso', monto, fecha: '2026-09-10',
+        cuenta_id: cu.data.id, proyecto_id: ids.proyecto, contraparte_tipo: 'proveedor', contraparte_id: ids.proveedor,
+      }),
+    });
+    expect((await egreso(500000)).estado).toBe(201);
+    let par = await pedir(`/orgs/${ORG}/partidas/${ids.partida}`, { app: 'dash101' });
+    expect(par.data.monto_pagado).toBe(500000);
+    expect(par.data.estado).toBe('parcial');
+
+    expect((await egreso(1500000)).estado).toBe(201);
+    par = await pedir(`/orgs/${ORG}/partidas/${ids.partida}`, { app: 'dash101' });
+    expect(par.data.monto_pagado).toBe(2000000);
+    expect(par.data.estado).toBe('pagado');
+
+    const p = await pedir(`/orgs/${ORG}/proyectos/${ids.proyecto}`, { app: 'dash101' });
+    expect(p.data.pagado_prov).toBe(2000000);
+  });
+
+  it('los cachés de la partida no los escribe nadie, ni dash101', async () => {
+    const r = await pedir(`/orgs/${ORG}/partidas/${ids.partida}`, { app: 'dash101', method: 'PATCH', body: JSON.stringify({ monto_pagado: 1 }) });
+    expect(r.estado).toBe(403);
+    expect(r.error).toBe('campo_no_permitido');
+    expect(r.detalle.campos).toEqual(['monto_pagado']);
+  });
+
+  it('el proyecto ya no acepta partidas adentro: son otra tabla', async () => {
+    const r = await pedir(`/orgs/${ORG}/proyectos/${ids.proyecto}`, { app: 'dash101', method: 'PATCH', body: JSON.stringify({ partidas: [] }) });
+    expect(r.estado).toBe(403);
+    expect(r.error).toBe('campo_no_permitido');
+  });
+
+  it('solo dash101 escribe partidas', async () => {
+    const r = await pedir(`/orgs/${ORG}/partidas/${ids.partida}`, { app: 'quell101', method: 'PATCH', body: JSON.stringify({ concepto: 'otro' }) });
+    expect(r.estado).toBe(403);
+    expect(r.error).toBe('sin_permiso');
+    expect(r.detalle.apps_que_escriben).toEqual(['dash101']);
+  });
+
+  it('borrar la partida devuelve el compromiso a cero', async () => {
+    const r = await pedir(`/orgs/${ORG}/partidas/${ids.partida}`, { app: 'dash101', method: 'DELETE' });
+    expect(r.estado).toBe(200);
+    const p = await pedir(`/orgs/${ORG}/proyectos/${ids.proyecto}`, { app: 'dash101' });
+    expect(p.data.compromiso).toBe(0);
+  });
 });
 
 describe('5 · permisos.ts dice que NO', () => {
@@ -350,9 +427,15 @@ describe('6 · el cliente solo ve lo suyo, y ya sumado', () => {
     expect(peek.data.totales.saldo).toBe(peek.data.totales.vendido - peek.data.totales.cobrado);
 
     // El cliente no ve costos ni movimientos de egreso por ningún lado.
-    for (const p of peek.data.proyectos) expect(p.partidas).toBeUndefined();
+    for (const p of peek.data.proyectos) {
+      expect(p.partidas).toBeUndefined();
+      expect(p.compromiso).toBeUndefined();
+      expect(p.pagado_prov).toBeUndefined();
+    }
     const mov = await pedir(`/orgs/${ORG}/movimientos`, { app: 'peek101' });
     expect(mov.estado).toBe(403);
+    const par = await pedir(`/orgs/${ORG}/partidas`, { app: 'peek101' });
+    expect(par.estado).toBe(403);
 
     const pin = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: 'aurea@ejemplo.mx', pin: '111111' }) });
     expect(pin.estado).toBe(401);
@@ -396,6 +479,15 @@ describe('7 · personal: ve su trabajo, no el dinero', () => {
     expect(cuentas.estado).toBe(403);
     const lista = await pedir(`/orgs/${ORG}/items`, { app: 'quell101' });
     expect(lista.data.filas[0].monto).toBeUndefined();
+    // ni los costos: las partidas son de owner, admin y socio
+    const partidas = await pedir(`/orgs/${ORG}/partidas`, { app: 'quell101' });
+    expect(partidas.estado).toBe(403);
+    const proyectos = await pedir(`/orgs/${ORG}/proyectos`, { app: 'quell101' });
+    expect(proyectos.estado).toBe(200);
+    for (const p of proyectos.data.filas) {
+      expect(p.compromiso).toBeUndefined();
+      expect(p.pagado_prov).toBeUndefined();
+    }
 
     galleta = galletaMike;
   });

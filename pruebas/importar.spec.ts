@@ -279,6 +279,8 @@ describe('§6.1 y §6.2 · los conteos y el dinero cuadran', () => {
     expect(por.items).toMatchObject({ firestore: 2, en_orgdb: 2, cuadra: true });
     expect(por.movimientos).toMatchObject({ firestore: 3, en_orgdb: 3, cuadra: true });
     expect(por.opex).toMatchObject({ firestore: 1, en_orgdb: 1, cuadra: true });
+    // la partida del JSON del proyecto es un renglón de la tabla partidas
+    expect(por.partidas).toMatchObject({ firestore: 1, en_orgdb: 1, cuadra: true });
   });
 
   it('no se inventó historial: `avances` quedó vacío', async () => {
@@ -292,15 +294,19 @@ describe('§6.1 y §6.2 · los conteos y el dinero cuadran', () => {
     expect(por['movimientos.monto'].en_orgdb).toBe(ESPERADO.movimientos_monto);
     expect(por['cuentas.saldo_inicial'].en_orgdb).toBe(ESPERADO.cuentas_saldo);
     expect(por['opex.monto'].en_orgdb).toBe(ESPERADO.opex_monto);
-    // el dinero de dentro del JSON de partidas también se convirtió
-    expect(por['proyectos.partidas.monto_acordado'].en_orgdb).toBe(ESPERADO.partidas_acordado);
-    expect(por['proyectos.partidas.monto_pagado'].en_orgdb).toBe(ESPERADO.partidas_pagado);
+    // el dinero de las partidas también se convirtió; lo pagado y el
+    // compromiso no se importan, se recalculan, y por eso están aparte
+    expect(por['partidas.monto_acordado'].en_orgdb).toBe(ESPERADO.partidas_acordado);
+    expect(por['partidas.monto_pagado']).toBeUndefined();
     for (const d of r.data.cuadre.dinero) expect(d.cuadra).toBe(true);
+    const rec = Object.fromEntries(r.data.cuadre.recalculado.map((d: any) => [d.campo, d]));
+    expect(rec['partidas.monto_pagado'].en_orgdb).toBe(ESPERADO.partidas_pagado);
+    expect(rec['proyectos.compromiso'].en_orgdb).toBe(ESPERADO.partidas_acordado);
   });
 
   it('el único redondeo que hubo está declarado, no escondido', () => {
     expect(r.data.redondeos).toHaveLength(1);
-    expect(r.data.redondeos[0]).toMatchObject({ campo: 'partidas.monto_acordado', origen: '20000.005', centavos: 2000001 });
+    expect(r.data.redondeos[0]).toMatchObject({ coleccion: 'partidas', id: 'PRO1-p1', campo: 'monto_acordado', origen: '20000.005', centavos: 2000001 });
   });
 
   it('§6.3 · los ids son los mismos de los dos lados', async () => {
@@ -332,7 +338,21 @@ describe('§6.1 y §6.2 · los conteos y el dinero cuadran', () => {
     expect(p.data.precio_venta).toBe(ESPERADO.items_monto);
     expect(p.data.cobrado).toBe(6000000);
     expect(p.data.pagado_prov).toBe(100000);
+    expect(p.data.compromiso).toBe(ESPERADO.partidas_acordado);
     expect(p.data.avance).toBeCloseTo((0 + 4) / 2 / 7, 9);
+  });
+
+  it('la partida quedó como fila propia: cuelga del proyecto, sin ítem, y lo pagado lo calculó la API', async () => {
+    const par = await pedir(`/orgs/${ORG}/partidas/PRO1-p1`, { app: 'dash101' });
+    expect(par.estado).toBe(200);
+    expect(par.data).toMatchObject({ proyecto_id: 'PRO1', item_id: null, proveedor_id: 'PROV1', concepto: 'Madera', monto_acordado: ESPERADO.partidas_acordado });
+    // Firestore decía monto_pagado 1000 y estado parcial; aquí sale de MOV2,
+    // el egreso de 1000 a PROV1 dentro de PRO1. Coinciden porque conta-master
+    // también los calculaba así, no porque se hayan copiado.
+    expect(par.data.monto_pagado).toBe(ESPERADO.partidas_pagado);
+    expect(par.data.estado).toBe('parcial');
+    const lista = await pedir(`/orgs/${ORG}/partidas?proyecto_id=PRO1`, { app: 'dash101' });
+    expect(lista.data.total).toBe(1);
   });
 
   it('el nombre_norm lo pone la API, con acentos y todo', async () => {

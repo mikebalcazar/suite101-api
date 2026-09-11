@@ -22,7 +22,7 @@ sin avisar.
 
 ## Estado
 
-**Fase 1 escrita.** Worker con Hono, D1 «master», `OrgDB` con las 13 tablas,
+**Fase 1 escrita.** Worker con Hono, D1 «master», `OrgDB` con las 13 tablas (14 desde el 11-sep: `partidas` es tabla propia),
 `auth101` (código por correo, PIN, Google), CRUD genérico con `permisos.ts`,
 `/etapa`, `/peek`, WebSocket, y `schema/tipos.ts` para que lo copien las apps.
 

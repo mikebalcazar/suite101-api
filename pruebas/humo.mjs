@@ -270,7 +270,7 @@ async function importacion() {
 
   const plata = Object.fromEntries((uno.data?.cuadre?.dinero || []).map((d) => [d.campo, d]));
   rev(plata['items.monto']?.en_orgdb === ITEMS, 'el dinero de los ítems cuadra al centavo', `${plata['items.monto']?.en_orgdb} de ${ITEMS}`);
-  rev(plata['proyectos.partidas.monto_acordado']?.en_orgdb === 2000001, 'el medio centavo de 20000.005 subió, no se perdió', String(plata['proyectos.partidas.monto_acordado']?.en_orgdb));
+  rev(plata['partidas.monto_acordado']?.en_orgdb === 2000001, 'el medio centavo de 20000.005 subió, no se perdió', String(plata['partidas.monto_acordado']?.en_orgdb));
   rev((uno.data?.cuadre?.dinero || []).every((d) => d.cuadra), 'todas las sumas de dinero cuadran');
 
   // Los ids son los mismos, y el producto_id viejo apunta al ítem correcto.

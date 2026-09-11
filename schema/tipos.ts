@@ -13,10 +13,10 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.2.0 (fase 2 — importación)
+ * Versión del contrato: 0.3.0 (fase 2 de dash101 — `partidas` a tabla propia)
  */
 
-export const VERSION_CONTRATO = '0.2.0';
+export const VERSION_CONTRATO = '0.3.0';
 
 /* ─────────────── envoltura de toda respuesta ─────────────── */
 
@@ -193,15 +193,24 @@ export interface Cotizacion {
 
 export type EstadoProyecto = 'planeando' | 'activo' | 'pausado' | 'finiquito' | 'cerrado';
 
+/** Lo acordado con un proveedor dentro de un proyecto. Cuelga del proyecto;
+ *  el ítem es opcional (decisión de Mike, 11-sep). El cliente NUNCA la ve. */
 export interface Partida {
-  proveedor_id?: string;
-  proveedor_nombre?: string;
-  concepto?: string;
+  id: string;
+  proyecto_id: string;
+  item_id: string | null;
+  proveedor_id: string | null;
+  proveedor_nombre: string | null;
+  concepto: string | null;
   /** centavos */
-  monto_acordado?: number;
+  monto_acordado: number;
+  // cachés: los recalcula la API desde los egresos del proyecto con ese
+  // proveedor como contraparte. Ninguna app los escribe.
   /** centavos */
-  monto_pagado?: number;
-  estado?: 'pendiente' | 'parcial' | 'pagado';
+  monto_pagado: number;
+  estado: 'pendiente' | 'parcial' | 'pagado';
+  creado_at: string;
+  actualizado_at: string | null;
 }
 
 export interface Proyecto {
@@ -214,15 +223,15 @@ export interface Proyecto {
   fecha_inicio: string | null;
   fecha_fin_estimada: string | null;
   fecha_cierre: string | null;
-  /** El cliente NUNCA ve esto. */
-  partidas: Partida[];
   // cachés: los recalcula la API tras cada mutación. Ninguna app los escribe.
   /** centavos */
   precio_venta: number;
   /** centavos */
   cobrado: number;
-  /** centavos */
+  /** centavos. El cliente NUNCA lo ve. */
   pagado_prov: number;
+  /** centavos: Σ monto_acordado de sus partidas. El cliente NUNCA lo ve. */
+  compromiso: number;
   /** 0..1 */
   avance: number;
   creado_at: string;
@@ -346,6 +355,7 @@ export const TABLAS = [
   'cotizaciones',
   'proyectos',
   'items',
+  'partidas',
   'avances',
   'movimientos',
   'opex',
@@ -368,7 +378,7 @@ export interface Pool {
 export interface Peek {
   cliente: Pick<Cliente, 'id' | 'nombre' | 'correo'>;
   proyectos: Array<
-    Omit<Proyecto, 'partidas' | 'pagado_prov'> & {
+    Omit<Proyecto, 'pagado_prov' | 'compromiso'> & {
       items: Array<Pick<Item, 'id' | 'clave' | 'nombre' | 'monto' | 'moneda' | 'estado' | 'etapa' | 'etapa_at' | 'fecha_entrega'>>;
     }
   >;

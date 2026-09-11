@@ -14,6 +14,7 @@
 
 import { DurableObject } from 'cloudflare:workers';
 import inicial from '../migrations/org/0001_inicial.sql';
+import partidasATabla from '../migrations/org/0002_partidas.sql';
 import { DEFS, type Def, type Tipo } from './tablas';
 import { ahora, normalizar, ulid } from './lib';
 import { TABLAS, type Aviso, type Etapa, type Peek, type Pool, type Tabla } from '../schema/tipos';
@@ -22,7 +23,7 @@ import type { Env } from './entorno';
 /* Las migraciones del OrgDB, en orden. Para agregar una: se escribe el .sql,
  * se importa y se empuja aquí. El DO la aplica al despertar. Nunca se edita
  * una que ya salió: las bases que ya la corrieron no la volverían a correr. */
-const MIGRACIONES: string[] = [inicial];
+const MIGRACIONES: string[] = [inicial, partidasATabla];
 
 const PREFIJO_CLAVE: Record<string, string> = { mueble: 'M', servicio: 'S', visita: 'V', otro: 'O' };
 
@@ -136,7 +137,7 @@ export class OrgDB extends DurableObject<Env> {
       const t = cols[k] as Tipo | undefined;
       if (t === 'json') {
         try {
-          out[k] = JSON.parse(String(v ?? (k === 'partidas' || k === 'asignados' || k === 'etapas_permitidas' ? '[]' : '{}')));
+          out[k] = JSON.parse(String(v ?? (k === 'asignados' || k === 'etapas_permitidas' ? '[]' : '{}')));
         } catch {
           out[k] = null;
         }
@@ -242,7 +243,7 @@ export class OrgDB extends DurableObject<Env> {
     const antes = this.obtener(tabla, id);
     if (!antes) return false;
     this.sql.exec(`DELETE FROM ${tabla} WHERE id = ?`, id);
-    if (tabla === 'movimientos' && antes.proyecto_id) this.recalcularProyecto(String(antes.proyecto_id));
+    if ((tabla === 'movimientos' || tabla === 'partidas') && antes.proyecto_id) this.recalcularProyecto(String(antes.proyecto_id));
     return true;
   }
 
@@ -257,6 +258,10 @@ export class OrgDB extends DurableObject<Env> {
       const m = this.obtener('movimientos', id);
       if (m?.proyecto_id) this.recalcularProyecto(String(m.proyecto_id));
       this.avisar({ t: 'movimiento.nuevo', id, proyecto_id: (m?.proyecto_id as string) ?? null }, 'dinero');
+    }
+    if (tabla === 'partidas') {
+      const par = this.obtener('partidas', id);
+      if (par?.proyecto_id) this.recalcularProyecto(String(par.proyecto_id));
     }
   }
 
@@ -281,14 +286,36 @@ export class OrgDB extends DurableObject<Env> {
       .one() as { s: number }).s;
     const avance = venta.n ? venta.e / 7 : 0;
 
+    // Las partidas: lo pagado a cada proveedor sale de los egresos del
+    // proyecto que lo traen como contraparte —igual que lo hacía conta-master—
+    // y de ahí su estado. Son cachés de la partida: los escribe esto y nadie
+    // más. Y lo acordado con todos se suma en `compromiso`, el del proyecto.
+    for (const par of this.sql
+      .exec(`SELECT id, proveedor_id, monto_acordado FROM partidas WHERE proyecto_id = ?`, proyecto_id)
+      .toArray() as Fila[]) {
+      const pagadoProv = par.proveedor_id
+        ? (this.sql
+            .exec(`SELECT COALESCE(SUM(monto),0) AS s FROM movimientos
+                   WHERE proyecto_id = ? AND tipo = 'egreso' AND contraparte_tipo = 'proveedor' AND contraparte_id = ?`,
+                  proyecto_id, par.proveedor_id)
+            .one() as { s: number }).s
+        : 0;
+      const acordado = Number(par.monto_acordado || 0);
+      const estadoPar = pagadoProv >= acordado && acordado > 0 ? 'pagado' : pagadoProv > 0 ? 'parcial' : 'pendiente';
+      this.sql.exec(`UPDATE partidas SET monto_pagado = ?, estado = ? WHERE id = ?`, pagadoProv, estadoPar, par.id);
+    }
+    const compromiso = (this.sql
+      .exec(`SELECT COALESCE(SUM(monto_acordado),0) AS s FROM partidas WHERE proyecto_id = ?`, proyecto_id)
+      .one() as { s: number }).s;
+
     // Cuando TODOS los ítems vendidos llegan a la etapa 7, el proyecto queda en
     // finiquito. No se toca si ya está cerrado: eso lo decide la oficina.
     let estado = String(p.estado);
     if (venta.n > 0 && venta.cerrados === venta.n && estado !== 'cerrado') estado = 'finiquito';
 
     this.sql.exec(
-      `UPDATE proyectos SET precio_venta = ?, cobrado = ?, pagado_prov = ?, avance = ?, estado = ?, actualizado_at = ? WHERE id = ?`,
-      venta.s, cobrado, pagado, avance, estado, ahora(), proyecto_id,
+      `UPDATE proyectos SET precio_venta = ?, cobrado = ?, pagado_prov = ?, compromiso = ?, avance = ?, estado = ?, actualizado_at = ? WHERE id = ?`,
+      venta.s, cobrado, pagado, compromiso, avance, estado, ahora(), proyecto_id,
     );
     this.avisar({ t: 'proyecto.cache', id: proyecto_id, precio_venta: venta.s, cobrado, avance }, 'dinero');
     return this.obtener('proyectos', proyecto_id);
@@ -582,7 +609,8 @@ export class OrgDB extends DurableObject<Env> {
   }
 
   /** Toda la plata que hay en la base, en centavos, columna por columna. Es la
-   *  cifra que tiene que cuadrar contra Firestore. */
+   *  cifra que tiene que cuadrar contra Firestore. Desde 0002 las partidas son
+   *  una tabla como las demás y un SUM las alcanza: ya no hay JSON que abrir. */
   private sumarDinero(): Record<string, number> {
     const out: Record<string, number> = {};
     for (const tabla of TABLAS) {
@@ -593,19 +621,6 @@ export class OrgDB extends DurableObject<Env> {
           .one() as { s: number }).s;
       }
     }
-    // El dinero de las partidas vive dentro de un JSON y no lo alcanza un SUM.
-    let acordado = 0;
-    let pagado = 0;
-    for (const p of this.sql.exec(`SELECT partidas FROM proyectos`).toArray() as Fila[]) {
-      let lista: Array<Record<string, unknown>> = [];
-      try { lista = JSON.parse(String(p.partidas || '[]')); } catch { lista = []; }
-      for (const par of Array.isArray(lista) ? lista : []) {
-        acordado += Number(par.monto_acordado || 0);
-        pagado += Number(par.monto_pagado || 0);
-      }
-    }
-    out['proyectos.partidas.monto_acordado'] = acordado;
-    out['proyectos.partidas.monto_pagado'] = pagado;
     return out;
   }
 
@@ -628,25 +643,6 @@ export class OrgDB extends DurableObject<Env> {
             .one() as { s: number }).s;
         }
         out[`${tabla}.${col}`] = suma;
-      }
-      if (tabla === 'proyectos') {
-        let acordado = 0;
-        let pagado = 0;
-        for (let i = 0; i < ids.length; i += TANDA) {
-          const tanda = ids.slice(i, i + TANDA);
-          for (const p of this.sql
-            .exec(`SELECT partidas FROM proyectos WHERE id IN (${tanda.map(() => '?').join(',')})`, ...tanda)
-            .toArray() as Fila[]) {
-            let lista: Array<Record<string, unknown>> = [];
-            try { lista = JSON.parse(String(p.partidas || '[]')); } catch { lista = []; }
-            for (const par of Array.isArray(lista) ? lista : []) {
-              acordado += Number(par.monto_acordado || 0);
-              pagado += Number(par.monto_pagado || 0);
-            }
-          }
-        }
-        out['proyectos.partidas.monto_acordado'] = acordado;
-        out['proyectos.partidas.monto_pagado'] = pagado;
       }
     }
     return out;
@@ -684,7 +680,7 @@ export class OrgDB extends DurableObject<Env> {
   /* ─────────────── /peek — lo del cliente, ya sumado ───────────────
    * Los totales salen de la misma consulta que la lista, así el KPI y la tabla
    * no se pueden contradecir. Fue un defecto real del 7-sep.
-   * `partidas` y los egresos no salen de aquí: el cliente no ve costos. */
+   * Las partidas y los egresos no salen de aquí: el cliente no ve costos. */
 
   peek(cliente_id: string): Peek | null {
     const cliente = this.sql

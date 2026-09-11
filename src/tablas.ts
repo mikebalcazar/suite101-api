@@ -4,8 +4,8 @@
  * (se guarda como texto y se devuelve ya parseado) o si es booleana (0/1 en
  * SQLite, true/false hacia afuera).
  *
- * Esta tabla y `migrations/org/0001_inicial.sql` tienen que decir lo mismo.
- * La prueba `esquema.spec.ts` compara las dos y truena si se separan. */
+ * Esta tabla y `migrations/org/*.sql` (aplicadas en orden) tienen que decir lo
+ * mismo. La prueba `esquema.spec.ts` compara las dos y truena si se separan. */
 
 import type { Tabla } from '../schema/tipos';
 
@@ -84,8 +84,9 @@ export const DEFS: Record<Tabla, Def> = {
   proyectos: {
     cols: {
       ...IDENT, negocio_id: 'texto', cliente_id: 'texto', nombre: 'texto', descripcion: 'texto', estado: 'texto',
-      fecha_inicio: 'texto', fecha_fin_estimada: 'texto', fecha_cierre: 'texto', partidas: 'json',
-      precio_venta: 'dinero', cobrado: 'dinero', pagado_prov: 'dinero', avance: 'real', actualizado_at: 'texto',
+      fecha_inicio: 'texto', fecha_fin_estimada: 'texto', fecha_cierre: 'texto',
+      precio_venta: 'dinero', cobrado: 'dinero', pagado_prov: 'dinero', compromiso: 'dinero', avance: 'real',
+      actualizado_at: 'texto',
     },
     requeridos: ['negocio_id', 'cliente_id', 'nombre'],
     filtros: ['negocio_id', 'cliente_id', 'estado'],
@@ -103,6 +104,16 @@ export const DEFS: Record<Tabla, Def> = {
     filtros: ['negocio_id', 'proyecto_id', 'cliente_id', 'estado', 'etapa'],
     orden: 'creado_at',
     fecha: 'fecha_entrega',
+  },
+  partidas: {
+    cols: {
+      ...IDENT, proyecto_id: 'texto', item_id: 'texto', proveedor_id: 'texto', proveedor_nombre: 'texto',
+      concepto: 'texto', monto_acordado: 'dinero', monto_pagado: 'dinero', estado: 'texto', actualizado_at: 'texto',
+    },
+    requeridos: ['proyecto_id'],
+    filtros: ['proyecto_id', 'item_id', 'proveedor_id', 'estado'],
+    orden: 'creado_at',
+    fecha: 'creado_at',
   },
   avances: {
     cols: { id: 'texto', item_id: 'texto', etapa: 'entero', persona_id: 'texto', usuario_id: 'texto', nota: 'texto', foto: 'texto', ts: 'texto' },
