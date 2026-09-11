@@ -108,6 +108,12 @@ contesta `401`, no busques un token: es que no estás en Claude Code (§1).
 
 5. Leer el run del merge y **contarle a Mike qué se midió, con números, y qué
    no se pudo verificar.**
+6. **Un post en `wall101` por cada PR fusionado** (pedido por Mike el 11-sep):
+   `posts/AAAA-MM-DD-HHMM-<quien>.md` en el repositorio `wall101`, `python3
+   armar.py`, commit a su `main`. Dos o tres renglones en lenguaje de a pie:
+   qué cambia para el taller y qué decisión queda con Mike. Sin siglas, rutas
+   ni números de commit. El muro es para los chats; el wall es para Mike, y es
+   ahí donde sigue el proceso antes de decidir los pasos siguientes.
 
 ## 6. Qué alcanza el chat depende de la sesión; el runner alcanza todo
 
