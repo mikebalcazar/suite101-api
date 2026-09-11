@@ -11,7 +11,7 @@
 import { Hono } from 'hono';
 import {
   ahora, cookie, correoValido, enSegundos, guardarPin, igualSeguro, normalizaCorreo,
-  pinAceptable, pinCoincide, sha256, vencida,
+  pinAceptable, pinCoincide, sha256, ulid, vencida,
 } from '../lib';
 import {
   VIDA_ACCESO, VIDA_MIEMBRO, abrirSesion, acceso, cerrarSesion, crearUsuario, esSuperadmin,
@@ -158,7 +158,27 @@ rutas.post('/pin', async (c) => {
  * Solo para miembros. Si no están las dos variables, la ruta lo dice en vez de
  * fingir: en la fase 1 no había credenciales de Google que poner. */
 
+/* `volver_a` puede ser una ruta de aquí mismo ('/') o la URL absoluta de una
+ * app (https://conta-master.netlify.app/login). Si es absoluta, su origen
+ * tiene que estar en ORIGENES: es a donde se manda el boleto de entrada, y
+ * mandarlo a cualquier sitio sería regalar sesiones. */
+function volverAPermitido(c: Ctx, volver_a: string): boolean {
+  if (!volver_a.startsWith('http')) return true;
+  let origen: string;
+  try {
+    origen = new URL(volver_a).origin;
+  } catch {
+    return false;
+  }
+  const permitidos = String(c.env.ORIGENES || '').split(',').map((s) => s.trim()).filter(Boolean);
+  return permitidos.includes('*') || permitidos.includes(origen);
+}
+
+const VIDA_TICKET = 60; // segundos: lo que tarda un navegador en volver a la app
+
 rutas.get('/google', async (c) => {
+  const volver_a = c.req.query('volver_a') || '/';
+  if (!volverAPermitido(c, volver_a)) return err(c, 'origen_no_permitido', 403, { volver_a });
   if (!c.env.GOOGLE_CLIENT_ID || !c.env.GOOGLE_CLIENT_SECRET) return err(c, 'google_no_configurado', 501);
   const destino = new URL(c.req.url);
   const redirect = `${destino.origin}/auth/google/callback`;
@@ -167,7 +187,7 @@ rutas.get('/google', async (c) => {
   u.searchParams.set('redirect_uri', redirect);
   u.searchParams.set('response_type', 'code');
   u.searchParams.set('scope', 'openid email profile');
-  u.searchParams.set('state', c.req.query('volver_a') || '/');
+  u.searchParams.set('state', volver_a);
   return c.redirect(u.toString(), 302);
 });
 
@@ -201,8 +221,40 @@ rutas.get('/google/callback', async (c) => {
   await sembrarSuperadmin(c.env, usuario.id, correo);
 
   const s = await abrirSesion(c.env, usuario.id, appDe(c), VIDA_MIEMBRO);
+  const volver_a = c.req.query('state') || '/';
+
+  // A una app detrás de su proxy no le sirve la cookie puesta aquí: es de
+  // otro origen. Se le manda un boleto de un solo uso y ella lo canjea por
+  // /s101/auth/canje, con lo que la cookie queda en su propio origen.
+  if (volver_a.startsWith('http')) {
+    if (!volverAPermitido(c, volver_a)) return err(c, 'origen_no_permitido', 403, { volver_a });
+    const ticket = await emitirTicket(c.env, s.cookie);
+    const u = new URL(volver_a);
+    u.searchParams.set('entrada', ticket);
+    return c.redirect(u.toString(), 302);
+  }
+
   c.header('Set-Cookie', cookie(COOKIE, s.cookie, VIDA_MIEMBRO));
-  return c.redirect(c.req.query('state') || '/', 302);
+  return c.redirect(volver_a, 302);
+});
+
+async function emitirTicket(env: Env, galleta: string): Promise<string> {
+  const id = ulid() + '-' + [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  await env.MASTER.prepare(`INSERT INTO tickets (id, galleta, expira_at) VALUES (?,?,?)`).bind(id, galleta, enSegundos(VIDA_TICKET)).run();
+  return id;
+}
+
+/* ─────────────── canjear el boleto por la cookie ───────────────
+ * Un solo uso: se borra al leerlo, valga o no. */
+
+rutas.post('/canje', async (c) => {
+  const { entrada } = await c.req.json<{ entrada?: string }>().catch(() => ({ entrada: '' }));
+  const id = String(entrada || '');
+  if (!id) return err(c, 'datos_invalidos', 400, { falta: 'entrada' });
+  const t = await c.env.MASTER.prepare(`SELECT galleta, expira_at FROM tickets WHERE id = ?`).bind(id).first<{ galleta: string; expira_at: string }>();
+  if (t) await c.env.MASTER.prepare(`DELETE FROM tickets WHERE id = ?`).bind(id).run();
+  if (!t || vencida(t.expira_at)) return err(c, 'entrada_invalida', 401);
+  return ok(c, { entro: true }, 200, { 'Set-Cookie': cookie(COOKIE, t.galleta, VIDA_MIEMBRO) });
 });
 
 /* ─────────────── salir ─────────────── */
