@@ -438,6 +438,22 @@ describe('6 · el cliente solo ve lo suyo, y ya sumado', () => {
     const par = await pedir(`/orgs/${ORG}/partidas`, { app: 'peek101' });
     expect(par.estado).toBe(403);
 
+    // Y tampoco las tablas «inofensivas»: un cliente sólo abre /peek. Hasta el
+    // 12-sep items, proyectos, clientes y archivos se le dejaban listar, y
+    // archivos sin acotar. Se cierra todo, incluida la descarga por id, y se
+    // comprueba que /peek sigue abierto: cerrar de más también sería un error.
+    for (const tabla of ['items', 'proyectos', 'clientes', 'archivos', 'negocios']) {
+      const r = await pedir(`/orgs/${ORG}/${tabla}`, { app: 'peek101' });
+      expect(r.estado, `GET /${tabla} como cliente`).toBe(403);
+      expect(r.detalle?.motivo).toBe('un cliente solo abre /peek');
+    }
+    const porId = await pedir(`/orgs/${ORG}/clientes/${cliente.id}`, { app: 'peek101' });
+    expect(porId.estado, 'ni siquiera su propia ficha, suelta').toBe(403);
+    const bytes = await SELF.fetch(`https://api.local/orgs/${ORG}/archivos/01INVENTADO`, { headers: { Cookie: galleta, 'X-App': 'peek101' } });
+    expect(bytes.status, 'GET /archivos/:id como cliente').toBe(403);
+    const sigue = await pedir(`/orgs/${ORG}/peek`, { app: 'peek101' });
+    expect(sigue.estado).toBe(200);
+
     const pin = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: 'aurea@ejemplo.mx', pin: '111111' }) });
     expect(pin.estado).toBe(401);
 

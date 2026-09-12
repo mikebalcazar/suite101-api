@@ -262,6 +262,10 @@ rutas.post('/:o/archivos', async (c) => {
 });
 
 rutas.get('/:o/archivos/:id', async (c) => {
+  // Misma regla que puedeLeer(): un cliente sólo abre /peek. Esta ruta no
+  // pasa por ahí porque devuelve bytes, no JSON, y se le había escapado: un
+  // cliente con el id de cualquier archivo de la empresa se lo bajaba.
+  if (c.get('quien').clase === 'cliente') return err(c, 'sin_permiso', 403, { motivo: 'un cliente solo abre /peek' });
   const fila = (await stub(c).obtener('archivos', c.req.param('id')!)) as Record<string, unknown> | null;
   if (!fila) return err(c, 'no_encontrado', 404);
   const obj = await c.env.ARCHIVOS.get(String(fila.r2_key));
@@ -444,7 +448,13 @@ rutas.delete('/:o/:tabla/:id', async (c) => {
 function puedeLeer(c: Ctx, tabla: string) {
   if (!esTabla(tabla)) return err(c, 'tabla_desconocida', 404, { tabla, tablas: Object.keys(DEFS) });
   const quien = c.get('quien');
-  if (quien.clase === 'cliente' && !['items', 'proyectos', 'clientes', 'archivos'].includes(tabla)) {
+  // Un cliente sólo abre /peek. Hasta el 12-sep aquí había una lista blanca
+  // (items, proyectos, clientes, archivos) que la fase 1 dejó por si el
+  // portal las pedía sueltas; el portal pide /peek y nada más, y `archivos`
+  // ni siquiera se acotaba al cliente. Lo que un cliente puede ver ya viene
+  // sumado y filtrado en /peek: abrir tablas sueltas es dar más de lo que se
+  // enseña, y eso es lo que se cierra.
+  if (quien.clase === 'cliente') {
     return err(c, 'sin_permiso', 403, { motivo: 'un cliente solo abre /peek' });
   }
   if (quien.clase === 'personal' && !quien.ve_dinero && (TABLAS_DINERO as string[]).includes(tabla)) {
