@@ -1,17 +1,18 @@
 # Cómo opera un chat en este repositorio
 
-Este archivo va **igual en los siete repositorios** que lo llevan:
-`descargas`, `suite101-api`, `cotizador-t101`, `dash101`, `bitacora-obra`,
-`t101-portal-trabajadores` y `taller101`. Si lo cambias en uno, cópialo a los
-demás en el mismo trabajo: siete copias que se separan son peor que ninguna.
-El 11-sep se comprobaron las siete y estaban idénticas salvo el nombre del
-repositorio en las direcciones de `api.github.com`, que es la única diferencia
-que debe haber. Es el contrato: un chat nuevo lo lee y ya sabe trabajar sin
-preguntarle nada a Mike y sin que Mike prenda su computadora.
+Este archivo va **igual en los once repositorios**: `descargas`,
+`suite101-api`, `cotizador-t101`, `dash101`, `bitacora-obra`,
+`t101-portal-trabajadores`, `taller101`, `wall101`, `nest101`, `peek101` y
+`draw101`. Si lo cambias en uno, cópialo a los demás en el mismo trabajo: once
+copias que se separan son peor que ninguna. El 12-sep se comprobaron las once
+y estaban idénticas salvo el nombre del repositorio en las direcciones de
+`api.github.com`, que es la única diferencia que debe haber. Es el contrato:
+un chat nuevo lo lee y ya sabe trabajar sin preguntarle nada a Mike y sin que
+Mike prenda su computadora.
 
-`nest101`, `wall101`, `peek101` y `draw101` todavía no lo llevan: nacieron
-después. Cuando uno de ellos empiece a tener código, se le copia este mismo
-archivo y se agrega a la lista de arriba.
+`nest101`, `peek101` y `draw101` todavía no tienen código: el archivo llegó
+primero, para que el chat que los estrene no empiece inventando su manera de
+trabajar.
 
 La regla de fondo: **Mike decide, el chat ejecuta y mide.** Si un chat te está
 pidiendo que abras GitHub, que hagas merge o que le digas si el sitio quedó
