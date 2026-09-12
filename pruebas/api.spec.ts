@@ -97,7 +97,7 @@ describe('2 · se crea una org y su Durable Object nace solo', () => {
     expect(r.estado).toBe(201);
     // La versión la contesta el propio DO: si vale 2, nació y corrió las dos
     // migraciones (0001 y la de partidas).
-    expect(r.data.org_db_version).toBe(2);
+    expect(r.data.org_db_version).toBe(3);
   });
 
   it('las catorce tablas están dentro del DO', async () => {
@@ -112,8 +112,9 @@ describe('2 · se crea una org y su Durable Object nace solo', () => {
         .toArray().map((f: any) => f.name).sort(),
     );
     expect(nombres).toEqual([
-      'archivos', 'avances', 'clientes', 'cotizaciones', 'cuentas', 'estaciones',
-      'items', 'movimientos', 'negocios', 'opex', 'partidas', 'personal', 'proveedores', 'proyectos',
+      'archivos', 'avances', 'clientes', 'conciliacion_cuentas', 'conciliaciones', 'cotizaciones',
+      'cuentas', 'estaciones', 'items', 'movimientos', 'negocios', 'opex', 'partidas', 'personal',
+      'proveedores', 'proyectos',
     ]);
   });
 
@@ -571,7 +572,7 @@ describe('9 · reiniciar una empresa, que solo existe fuera de producción', () 
     const r = await pedir('/admin/orgs/efimera', { method: 'DELETE' });
     expect(r.estado).toBe(200);
     expect(r.data.reiniciada).toBe('efimera');
-    expect(r.data.org_db_version).toBe(2);
+    expect(r.data.org_db_version).toBe(3);
 
     const ya = await pedir('/orgs/efimera/negocios', { app: 'dash101' });
     expect(ya.estado).toBe(404);
@@ -579,7 +580,7 @@ describe('9 · reiniciar una empresa, que solo existe fuera de producción', () 
 
     const otraVez = await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: 'efimera', nombre: 'Efímera' }) });
     expect(otraVez.estado).toBe(201);
-    expect(otraVez.data.org_db_version).toBe(2);
+    expect(otraVez.data.org_db_version).toBe(3);
     const limpia = await pedir('/orgs/efimera/negocios', { app: 'dash101' });
     expect(limpia.data.total).toBe(0);
   });
@@ -628,5 +629,216 @@ describe('7 · personal: ve su trabajo, no el dinero', () => {
     }
 
     galleta = galletaMike;
+  });
+});
+
+describe('10 · la conciliación semanal: lo que se escapa del registro', () => {
+  const N: Record<string, string> = {};
+  let corte1 = '';
+
+  it('el negocio nace en lunes y con sus cuentas', async () => {
+    const n = await pedir(`/orgs/${ORG}/negocios`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Taller que concilia' }) });
+    expect(n.estado).toBe(201);
+    // Decisión 3 de Mike: el día se configura, y por omisión es el lunes.
+    expect(n.data.dia_conciliacion).toBe(1);
+    N.negocio = n.data.id;
+    await pedir(`/orgs/${ORG}/negocios/${N.negocio}`, { app: 'dash101', method: 'PATCH', body: JSON.stringify({ dia_conciliacion: 3 }) });
+    const puesto = await pedir(`/orgs/${ORG}/negocios/${N.negocio}`, { app: 'dash101' });
+    expect(puesto.data.dia_conciliacion).toBe(3);
+
+    for (const [clave, nombre, tipo, saldo] of [
+      ['banco', 'Banco', 'banco', 25000000],
+      ['caja', 'Caja', 'caja', 500000],
+      ['tarjeta', 'Tarjeta', 'credito', -3000000],
+      ['otra', 'Otra', 'otro', 100000],
+    ] as Array<[string, string, string, number]>) {
+      const r = await pedir(`/orgs/${ORG}/cuentas`, {
+        app: 'dash101', method: 'POST',
+        body: JSON.stringify({ negocio_id: N.negocio, nombre, tipo, saldo_inicial: saldo }),
+      });
+      expect(r.estado).toBe(201);
+      N[clave] = r.data.id;
+    }
+
+    // Banco: 25,000,000 + 12,000,000 − 2,500,000 = 34,500,000.
+    // Caja: 500,000 − 850,000 = −350,000.
+    for (const [tipo, monto, cuenta] of [
+      ['ingreso', 12000000, 'banco'],
+      ['egreso', 2500000, 'banco'],
+      ['egreso', 850000, 'caja'],
+    ] as Array<[string, number, string]>) {
+      const r = await pedir(`/orgs/${ORG}/movimientos`, {
+        app: 'dash101', method: 'POST',
+        body: JSON.stringify({ negocio_id: N.negocio, tipo, monto, fecha: '2026-09-02', cuenta_id: N[cuenta] }),
+      });
+      expect(r.estado).toBe(201);
+    }
+  });
+
+  it('el primer corte: la que cuadra no recibe ajuste, y las otras quedan iguales al real', async () => {
+    corte1 = '2026-09-07T18:00:00.000Z';
+    const r = await pedir(`/orgs/${ORG}/conciliaciones`, {
+      app: 'dash101', method: 'POST',
+      body: JSON.stringify({
+        negocio_id: N.negocio, corte_at: corte1,
+        saldos: [
+          { cuenta_id: N.banco, saldo_real: 34420000 },   // le faltan $800
+          { cuenta_id: N.caja, saldo_real: -350000 },     // cuadra
+          { cuenta_id: N.tarjeta, saldo_real: -3050000 }, // se debe $500 más
+          { cuenta_id: N.otra, saldo_real: 130000 },      // hay $300 de más
+        ],
+      }),
+    });
+    expect(r.estado).toBe(201);
+    const por = Object.fromEntries((r.data.cuentas as any[]).map((c) => [c.cuenta_id, c]));
+
+    expect(por[N.banco]).toMatchObject({ saldo_registrado: 34500000, saldo_real: 34420000, diferencia: 80000 });
+    expect(por[N.banco].movimiento_id).toBeTruthy();
+    // La que cuadra: diferencia 0 y SIN ajuste.
+    expect(por[N.caja]).toMatchObject({ saldo_registrado: -350000, saldo_real: -350000, diferencia: 0, movimiento_id: null });
+    expect(por[N.tarjeta]).toMatchObject({ saldo_registrado: -3000000, saldo_real: -3050000, diferencia: 50000 });
+    expect(por[N.otra]).toMatchObject({ saldo_registrado: 100000, saldo_real: 130000, diferencia: -30000 });
+    expect(r.data.diferencia_total).toBe(80000 + 0 + 50000 - 30000);
+
+    // Falta dinero → egreso; sobra → ingreso. Todos sin proyecto.
+    const movs = await pedir(`/orgs/${ORG}/movimientos?negocio_id=${N.negocio}`, { app: 'dash101' });
+    const ajustes = (movs.data.filas as any[]).filter((m) => m.categoria === 'ajuste_conciliacion');
+    expect(ajustes).toHaveLength(3);
+    const deBanco = ajustes.find((m) => m.cuenta_id === N.banco);
+    expect(deBanco).toMatchObject({ tipo: 'egreso', monto: 80000, proyecto_id: null, contraparte_nombre: 'Sin identificar' });
+    expect(ajustes.find((m) => m.cuenta_id === N.otra)).toMatchObject({ tipo: 'ingreso', monto: 30000 });
+    expect(ajustes.find((m) => m.cuenta_id === N.tarjeta)).toMatchObject({ tipo: 'egreso', monto: 50000 });
+
+    // Y con el ajuste, cada cuenta queda exactamente en el saldo real.
+    const saldo = (cuenta_id: string, inicial: number) =>
+      inicial + (movs.data.filas as any[])
+        .filter((m) => m.cuenta_id === cuenta_id)
+        .reduce((t, m) => t + (m.tipo === 'ingreso' ? m.monto : -m.monto), 0);
+    expect(saldo(N.banco, 25000000)).toBe(34420000);
+    expect(saldo(N.caja, 500000)).toBe(-350000);
+    expect(saldo(N.tarjeta, -3000000)).toBe(-3050000);
+    expect(saldo(N.otra, 100000)).toBe(130000);
+  });
+
+  it('la segunda semana sólo mide lo nuevo, y el acumulado es la suma', async () => {
+    // Nada cambió salvo que al banco se le fueron otros $200 sin registrar.
+    const r = await pedir(`/orgs/${ORG}/conciliaciones`, {
+      app: 'dash101', method: 'POST',
+      body: JSON.stringify({
+        negocio_id: N.negocio, corte_at: '2026-09-14T18:00:00.000Z',
+        saldos: [
+          { cuenta_id: N.banco, saldo_real: 34400000 },
+          { cuenta_id: N.caja, saldo_real: -350000 },
+          { cuenta_id: N.tarjeta, saldo_real: -3050000 },
+          { cuenta_id: N.otra, saldo_real: 130000 },
+        ],
+      }),
+    });
+    expect(r.estado).toBe(201);
+    expect(r.data.diferencia_total).toBe(20000);
+    const por = Object.fromEntries((r.data.cuentas as any[]).map((c) => [c.cuenta_id, c]));
+    expect(por[N.banco]).toMatchObject({ saldo_registrado: 34420000, diferencia: 20000 });
+    // Las tres que ya cuadraban no vuelven a recibir ajuste.
+    expect((r.data.cuentas as any[]).filter((c) => c.movimiento_id).length).toBe(1);
+
+    const e = await pedir(`/orgs/${ORG}/conciliaciones/estadistica?negocio_id=${N.negocio}`, { app: 'dash101' });
+    expect(e.estado).toBe(200);
+    expect(e.data.acumulado).toMatchObject({ cortes: 2, diferencia_total: 120000, faltante: 150000, sobrante: 30000 });
+    expect(e.data.cortes).toHaveLength(2);
+    expect(e.data.cortes[0].diferencia_total).toBe(20000); // el más reciente primero
+    const banco = (e.data.por_cuenta as any[]).find((c) => c.cuenta_id === N.banco);
+    expect(banco).toMatchObject({ nombre: 'Banco', cortes: 2, diferencia_total: 100000 });
+  });
+
+  it('un gasto capturado después con fecha vieja no cambia la conciliación pasada', async () => {
+    const antes = await pedir(`/orgs/${ORG}/conciliacion_cuentas?cuenta_id=${N.banco}`, { app: 'dash101' });
+    const viejo = (antes.data.filas as any[]).find((f) => f.saldo_registrado === 34500000);
+    expect(viejo).toBeTruthy();
+
+    await pedir(`/orgs/${ORG}/movimientos`, {
+      app: 'dash101', method: 'POST',
+      body: JSON.stringify({ negocio_id: N.negocio, tipo: 'egreso', monto: 111111, fecha: '2026-09-03', cuenta_id: N.banco, descripcion: 'se capturó tarde' }),
+    });
+
+    const despues = await pedir(`/orgs/${ORG}/conciliacion_cuentas?cuenta_id=${N.banco}`, { app: 'dash101' });
+    const mismo = (despues.data.filas as any[]).find((f) => f.id === viejo.id);
+    expect(mismo.saldo_registrado).toBe(34500000);
+    expect(mismo.diferencia).toBe(80000);
+  });
+
+  it('una conciliación no se edita ni se borra: es append-only', async () => {
+    const l = await pedir(`/orgs/${ORG}/conciliaciones?negocio_id=${N.negocio}`, { app: 'dash101' });
+    const id = l.data.filas[0].id;
+    const patch = await pedir(`/orgs/${ORG}/conciliaciones/${id}`, { app: 'dash101', method: 'PATCH', body: JSON.stringify({ corte_at: '2020-01-01T00:00:00Z' }) });
+    expect(patch.estado).toBe(403);
+    const del = await pedir(`/orgs/${ORG}/conciliaciones/${id}`, { app: 'dash101', method: 'DELETE' });
+    expect(del.estado).toBe(403);
+  });
+
+  it('sólo dash101 la escribe, y sólo owner o admin la corren', async () => {
+    const otraApp = await pedir(`/orgs/${ORG}/conciliaciones`, {
+      app: 'peek101', method: 'POST',
+      body: JSON.stringify({ negocio_id: N.negocio, saldos: [{ cuenta_id: N.caja, saldo_real: 0 }] }),
+    });
+    expect(otraApp.estado).toBe(403);
+
+    const alta = await pedir(`/admin/orgs/${ORG}/miembros`, { method: 'POST', body: JSON.stringify({ correo: 'socio-concilia@ejemplo.mx', rol: 'socio' }) });
+    expect(alta.estado).toBe(201);
+
+    const galletaMike = galleta;
+    galleta = '';
+    const cod = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo: 'socio-concilia@ejemplo.mx' }) });
+    await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: 'socio-concilia@ejemplo.mx', codigo: cod.data.codigo_prueba }) });
+    const comoSocio = await pedir(`/orgs/${ORG}/conciliaciones`, {
+      app: 'dash101', method: 'POST',
+      body: JSON.stringify({ negocio_id: N.negocio, saldos: [{ cuenta_id: N.caja, saldo_real: 0 }] }),
+    });
+    expect(comoSocio.estado).toBe(403);
+    expect(comoSocio.detalle.motivo).toMatch(/owner y admin/);
+    // Pero sí la puede LEER: es dinero de su empresa.
+    const lee = await pedir(`/orgs/${ORG}/conciliaciones?negocio_id=${N.negocio}`, { app: 'dash101' });
+    expect(lee.estado).toBe(200);
+    galleta = galletaMike;
+  });
+
+  it('se concilian todas las cuentas o ninguna, y el dinero va en centavos enteros', async () => {
+    const faltan = await pedir(`/orgs/${ORG}/conciliaciones`, {
+      app: 'dash101', method: 'POST',
+      body: JSON.stringify({ negocio_id: N.negocio, saldos: [{ cuenta_id: N.caja, saldo_real: -350000 }] }),
+    });
+    expect(faltan.estado).toBe(400);
+    expect(faltan.error).toBe('faltan_cuentas');
+    expect(faltan.detalle.faltan.length).toBe(3);
+
+    const flotante = await pedir(`/orgs/${ORG}/conciliaciones`, {
+      app: 'dash101', method: 'POST',
+      body: JSON.stringify({ negocio_id: N.negocio, saldos: [{ cuenta_id: N.caja, saldo_real: 1500.5 }] }),
+    });
+    expect(flotante.estado).toBe(400);
+    expect(flotante.error).toBe('dinero_no_entero');
+
+    // Y si algo truena, no queda media conciliación: siguen siendo dos.
+    const l = await pedir(`/orgs/${ORG}/conciliaciones?negocio_id=${N.negocio}`, { app: 'dash101' });
+    expect(l.data.total).toBe(2);
+  });
+
+  it('los proyectos no se mueven: el ajuste no cuelga de ninguno', async () => {
+    const p = await pedir(`/orgs/${ORG}/proyectos`, { app: 'dash101' });
+    const proyecto = p.data.filas[0];
+    const cobradoAntes = proyecto.cobrado;
+    const pagadoAntes = proyecto.pagado_prov;
+    await pedir(`/orgs/${ORG}/conciliaciones`, {
+      app: 'dash101', method: 'POST',
+      body: JSON.stringify({
+        negocio_id: N.negocio,
+        saldos: [
+          { cuenta_id: N.banco, saldo_real: 1 }, { cuenta_id: N.caja, saldo_real: 2 },
+          { cuenta_id: N.tarjeta, saldo_real: 3 }, { cuenta_id: N.otra, saldo_real: 4 },
+        ],
+      }),
+    });
+    const despues = await pedir(`/orgs/${ORG}/proyectos/${proyecto.id}`, { app: 'dash101' });
+    expect(despues.data.cobrado).toBe(cobradoAntes);
+    expect(despues.data.pagado_prov).toBe(pagadoAntes);
   });
 });

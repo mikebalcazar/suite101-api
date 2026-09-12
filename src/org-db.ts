@@ -15,6 +15,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import inicial from '../migrations/org/0001_inicial.sql';
 import partidasATabla from '../migrations/org/0002_partidas.sql';
+import conciliaciones from '../migrations/org/0003_conciliaciones.sql';
 import { DEFS, type Def, type Tipo } from './tablas';
 import { ahora, normalizar, ulid } from './lib';
 import { TABLAS, type Aviso, type Etapa, type Peek, type Pool, type Tabla } from '../schema/tipos';
@@ -23,7 +24,7 @@ import type { Env } from './entorno';
 /* Las migraciones del OrgDB, en orden. Para agregar una: se escribe el .sql,
  * se importa y se empuja aquí. El DO la aplica al despertar. Nunca se edita
  * una que ya salió: las bases que ya la corrieron no la volverían a correr. */
-const MIGRACIONES: string[] = [inicial, partidasATabla];
+const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones];
 
 const PREFIJO_CLAVE: Record<string, string> = { mueble: 'M', servicio: 'S', visita: 'V', otro: 'O' };
 
@@ -56,6 +57,16 @@ export interface ApiOrgDB {
   /** false si no existía; 'en_uso' si otras filas apuntan a esta (llave foránea). */
   borrar(tabla: Tabla, id: string): Promise<boolean | 'en_uso'>;
   recalcularProyecto(proyecto_id: string): Promise<Fila | null>;
+  /** La conciliación semanal, entera o nada (B1). Sólo la llama POST /conciliaciones. */
+  conciliar(args: {
+    negocio_id: string; corte_at: string; usuario_id: string;
+    saldos: Array<{ cuenta_id: string; saldo_real: number }>;
+  }): Promise<{ ok: true; conciliacion: Fila; cuentas: Fila[]; diferencia_total: number } | { ok: false; error: string; detalle?: Record<string, any> }>;
+  estadisticaConciliacion(negocio_id: string): Promise<{
+    cortes: Array<Record<string, any>>;
+    por_cuenta: Array<Record<string, any>>;
+    acumulado: { cortes: number; diferencia_total: number; faltante: number; sobrante: number };
+  }>;
   moverEtapa(args: {
     item_id: string; etapa: number; nota?: string | null; foto?: string | null;
     usuario_id: string; persona_id?: string | null; etapas_permitidas?: number[] | null;
@@ -288,6 +299,145 @@ export class OrgDB extends DurableObject<Env> {
   /* ─────────────── agregados del proyecto (§4) ───────────────
    * Los calcula la API, no las apps. Un caché que escribe cualquiera deja de
    * ser un caché: se contradice con la tabla y nadie sabe cuál manda. */
+
+  /* ─────────────── la conciliación semanal (B1) ───────────────
+   * Una sola operación: o queda la conciliación con sus renglones y sus
+   * ajustes, o no queda nada. `transactionSync` da esa garantía dentro del
+   * SQLite del Durable Object; el aviso por WebSocket se manda después, ya
+   * con todo escrito, porque un aviso no se puede deshacer.
+   *
+   * El saldo registrado se calcula aquí y se guarda como foto: es lo que
+   * dash101 creía tener al corte. Si mañana alguien captura un gasto con
+   * fecha vieja, esta conciliación no cambia; eso sale en la siguiente. */
+  conciliar(args: {
+    negocio_id: string; corte_at: string; usuario_id: string;
+    saldos: Array<{ cuenta_id: string; saldo_real: number }>;
+  }): { ok: true; conciliacion: Fila; cuentas: Fila[]; diferencia_total: number } | { ok: false; error: string; detalle?: Record<string, any> } {
+    const negocio = this.sql.exec(`SELECT id FROM negocios WHERE id = ?`, args.negocio_id).toArray()[0] as Fila | undefined;
+    if (!negocio) return { ok: false, error: 'no_encontrado', detalle: { negocio_id: args.negocio_id } };
+
+    const cuentas = this.sql
+      .exec(`SELECT id, nombre, saldo_inicial FROM cuentas WHERE negocio_id = ? ORDER BY nombre`, args.negocio_id)
+      .toArray() as Fila[];
+    if (!cuentas.length) return { ok: false, error: 'datos_invalidos', detalle: { motivo: 'el negocio no tiene cuentas' } };
+
+    // Mike decidió que se concilian TODAS las cuentas, iguales: bancos,
+    // efectivo y tarjetas. Que falte una es un error, no un silencio.
+    const dados = new Map(args.saldos.map((s) => [s.cuenta_id, s.saldo_real]));
+    const faltan = cuentas.filter((c) => !dados.has(String(c.id))).map((c) => ({ id: c.id, nombre: c.nombre }));
+    if (faltan.length) return { ok: false, error: 'faltan_cuentas', detalle: { faltan } };
+    const sobran = args.saldos.filter((s) => !cuentas.some((c) => String(c.id) === s.cuenta_id)).map((s) => s.cuenta_id);
+    if (sobran.length) return { ok: false, error: 'no_encontrado', detalle: { cuentas: sobran, motivo: 'no son de este negocio' } };
+
+    // Los movimientos llevan día, no hora: al corte entra todo lo registrado
+    // hasta ese día inclusive.
+    const dia = args.corte_at.slice(0, 10);
+    const id = ulid();
+    const at = ahora();
+    const renglones: Fila[] = [];
+    let diferencia_total = 0;
+
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(
+        `INSERT INTO conciliaciones (id, negocio_id, corte_at, hecha_por, creado_at) VALUES (?,?,?,?,?)`,
+        id, args.negocio_id, args.corte_at, args.usuario_id, at,
+      );
+
+      for (const c of cuentas) {
+        const cuenta_id = String(c.id);
+        const movidos = this.sql
+          .exec(
+            `SELECT COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN monto ELSE -monto END), 0) AS s
+             FROM movimientos WHERE cuenta_id = ? AND fecha <= ?`,
+            cuenta_id, dia,
+          )
+          .one() as { s: number };
+        const saldo_registrado = Number(c.saldo_inicial || 0) + Number(movidos.s || 0);
+        const saldo_real = Number(dados.get(cuenta_id) || 0);
+        const diferencia = saldo_registrado - saldo_real;
+        diferencia_total += diferencia;
+
+        // El ajuste deja la cuenta igual a la realidad (decisión 1 de Mike).
+        // Va SIN proyecto: por eso no mueve `cobrado` ni `pagado_prov`.
+        let movimiento_id: string | null = null;
+        if (diferencia !== 0) {
+          const mov = this.crear(
+            'movimientos',
+            {
+              negocio_id: args.negocio_id,
+              tipo: diferencia > 0 ? 'egreso' : 'ingreso',
+              monto: Math.abs(diferencia),
+              fecha: dia,
+              cuenta_id,
+              proyecto_id: null,
+              item_id: null,
+              contraparte_tipo: 'otro',
+              contraparte_nombre: 'Sin identificar',
+              categoria: 'ajuste_conciliacion',
+              descripcion: `Ajuste por conciliación del ${dia}`,
+            },
+            { app: 'dash101', usuario_id: args.usuario_id },
+          );
+          movimiento_id = String(mov.id);
+        }
+
+        const rid = ulid();
+        this.sql.exec(
+          `INSERT INTO conciliacion_cuentas
+             (id, conciliacion_id, cuenta_id, saldo_registrado, saldo_real, diferencia, movimiento_id, creado_at)
+           VALUES (?,?,?,?,?,?,?,?)`,
+          rid, id, cuenta_id, saldo_registrado, saldo_real, diferencia, movimiento_id, at,
+        );
+        renglones.push(this.obtener('conciliacion_cuentas', rid)!);
+      }
+    });
+
+    this.avisar({ t: 'conciliacion.nueva', id, negocio_id: args.negocio_id, diferencia_total }, 'dinero');
+    return { ok: true, conciliacion: this.obtener('conciliaciones', id)!, cuentas: renglones, diferencia_total };
+  }
+
+  /** Lo que se escapó: por corte, por cuenta y el acumulado. */
+  estadisticaConciliacion(negocio_id: string): {
+    cortes: Array<Record<string, unknown>>;
+    por_cuenta: Array<Record<string, unknown>>;
+    acumulado: { cortes: number; diferencia_total: number; faltante: number; sobrante: number };
+  } {
+    const cortes = this.sql
+      .exec(
+        `SELECT c.id, c.corte_at, c.hecha_por,
+                COUNT(cc.id) AS cuentas,
+                COALESCE(SUM(cc.diferencia), 0) AS diferencia_total,
+                COALESCE(SUM(CASE WHEN cc.diferencia > 0 THEN cc.diferencia ELSE 0 END), 0) AS faltante,
+                COALESCE(SUM(CASE WHEN cc.diferencia < 0 THEN -cc.diferencia ELSE 0 END), 0) AS sobrante
+         FROM conciliaciones c
+         LEFT JOIN conciliacion_cuentas cc ON cc.conciliacion_id = c.id
+         WHERE c.negocio_id = ?
+         GROUP BY c.id ORDER BY c.corte_at DESC`,
+        negocio_id,
+      )
+      .toArray() as Array<Record<string, unknown>>;
+
+    const por_cuenta = this.sql
+      .exec(
+        `SELECT cc.cuenta_id, cu.nombre, COUNT(*) AS cortes,
+                COALESCE(SUM(cc.diferencia), 0) AS diferencia_total
+         FROM conciliacion_cuentas cc
+         JOIN conciliaciones c ON c.id = cc.conciliacion_id
+         LEFT JOIN cuentas cu ON cu.id = cc.cuenta_id
+         WHERE c.negocio_id = ?
+         GROUP BY cc.cuenta_id ORDER BY diferencia_total DESC`,
+        negocio_id,
+      )
+      .toArray() as Array<Record<string, unknown>>;
+
+    const acumulado = {
+      cortes: cortes.length,
+      diferencia_total: cortes.reduce((t, c) => t + Number(c.diferencia_total || 0), 0),
+      faltante: cortes.reduce((t, c) => t + Number(c.faltante || 0), 0),
+      sobrante: cortes.reduce((t, c) => t + Number(c.sobrante || 0), 0),
+    };
+    return { cortes, por_cuenta, acumulado };
+  }
 
   recalcularProyecto(proyecto_id: string): Fila | null {
     const p = this.sql.exec(`SELECT id, estado FROM proyectos WHERE id = ?`, proyecto_id).toArray()[0] as Fila | undefined;

@@ -12,7 +12,7 @@
 import { Hono } from 'hono';
 import { DEFS, columnasDinero, esTabla } from '../tablas';
 import type { ApiOrgDB } from '../org-db';
-import { revisarEscritura } from '../permisos';
+import { APPEND_ONLY, POR_SU_RUTA, revisarEscritura } from '../permisos';
 import { acceso, accesoDe, miembro, org, ponerAcceso, quitarAcceso, usuarioPorCorreo } from '../maestro';
 import { crearUsuario } from '../maestro';
 import { guardarPin, normalizaCorreo, pinAceptable, ulid } from '../lib';
@@ -23,7 +23,7 @@ import { APPS, LLAVE_APP, type App, type Tabla } from '../../schema/tipos';
 const rutas = new Hono<{ Bindings: Env; Variables: Vars }>();
 
 /** Tablas con dinero que el personal sin `ve_dinero` no abre. */
-const TABLAS_DINERO: Tabla[] = ['movimientos', 'cuentas', 'opex', 'cotizaciones', 'partidas'];
+const TABLAS_DINERO: Tabla[] = ['movimientos', 'cuentas', 'opex', 'cotizaciones', 'partidas', 'conciliaciones', 'conciliacion_cuentas'];
 
 const stub = (c: Ctx): ApiOrgDB => c.env.ORG.get(c.env.ORG.idFromName(c.get('org_id'))) as unknown as ApiOrgDB;
 
@@ -288,6 +288,58 @@ rutas.get('/:o/ws', async (c) => {
   return stub(c).fetch(new Request(url.toString(), c.req.raw));
 });
 
+/* ─────────────── la conciliación semanal (B1) ───────────────
+ * Una vez por semana alguien captura el saldo real de cada cuenta. La API
+ * calcula el registrado, guarda la diferencia y crea los ajustes: todo en una
+ * transacción, para que no quede una conciliación sin sus ajustes ni al revés.
+ *
+ * Van antes del CRUD genérico a propósito: si no, `/conciliaciones/estadistica`
+ * caería en `/:o/:tabla/:id` con id = «estadistica». */
+
+rutas.post('/:o/conciliaciones', async (c) => {
+  const quien = c.get('quien');
+  // Decisión 4 de Mike: concilian el owner y el admin, nadie más. Y se
+  // comprueba aquí, en el servidor, no en la pantalla.
+  if (quien.clase !== 'miembro' || (quien.rol !== 'owner' && quien.rol !== 'admin')) {
+    return err(c, 'sin_permiso', 403, { motivo: 'sólo owner y admin concilian' });
+  }
+  const permiso = revisarEscritura('conciliaciones', c.get('app'), ['negocio_id', 'corte_at']);
+  if (!permiso.ok) return err(c, permiso.error, 403, permiso.detalle);
+
+  const cuerpo = await c.req
+    .json<{ negocio_id?: string; corte_at?: string; saldos?: Array<{ cuenta_id?: string; saldo_real?: unknown }> }>()
+    .catch(() => ({}) as never);
+  if (!cuerpo.negocio_id) return err(c, 'datos_invalidos', 400, { falta: 'negocio_id' });
+  if (!Array.isArray(cuerpo.saldos) || !cuerpo.saldos.length) return err(c, 'datos_invalidos', 400, { falta: 'saldos' });
+
+  const saldos: Array<{ cuenta_id: string; saldo_real: number }> = [];
+  for (const s of cuerpo.saldos) {
+    if (!s?.cuenta_id) return err(c, 'datos_invalidos', 400, { falta: 'cuenta_id en saldos' });
+    if (typeof s.saldo_real !== 'number' || !Number.isInteger(s.saldo_real)) {
+      return err(c, 'dinero_no_entero', 400, { campo: 'saldo_real', cuenta_id: s.cuenta_id, recibido: s.saldo_real, regla: 'centavos, INTEGER. $150,000.00 es 15000000' });
+    }
+    saldos.push({ cuenta_id: s.cuenta_id, saldo_real: s.saldo_real });
+  }
+
+  const r = await stub(c).conciliar({
+    negocio_id: cuerpo.negocio_id,
+    corte_at: cuerpo.corte_at || new Date().toISOString(),
+    usuario_id: quien.usuario_id,
+    saldos,
+  });
+  if (!r.ok) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 400, r.detalle);
+  return ok(c, { conciliacion: r.conciliacion, cuentas: r.cuentas, diferencia_total: r.diferencia_total }, 201);
+});
+
+rutas.get('/:o/conciliaciones/estadistica', async (c) => {
+  const permiso = puedeLeer(c, 'conciliaciones');
+  if (permiso) return permiso;
+  const quien = c.get('quien');
+  const negocio_id = c.req.query('negocio_id') || quien.negocios[0];
+  if (!negocio_id) return err(c, 'datos_invalidos', 400, { falta: 'negocio_id' });
+  return ok(c, await stub(c).estadisticaConciliacion(negocio_id));
+});
+
 /* ─────────────── CRUD genérico ─────────────── */
 
 rutas.get('/:o/:tabla', async (c) => {
@@ -327,7 +379,9 @@ rutas.post('/:o/:tabla', async (c) => {
   if (!esTabla(tabla)) return err(c, 'tabla_desconocida', 404, { tabla, tablas: Object.keys(DEFS) });
   const quien = c.get('quien');
   if (quien.clase === 'cliente') return err(c, 'sin_permiso', 403);
-  if (tabla === 'avances') return err(c, 'sin_permiso', 403, { motivo: 'avances se escribe con POST /items/:id/etapa' });
+  if ((APPEND_ONLY as string[]).includes(tabla)) {
+    return err(c, 'sin_permiso', 403, { motivo: `${tabla} se escribe con ${POR_SU_RUTA[tabla as Tabla]}` });
+  }
 
   const datos = await c.req.json<Record<string, unknown>>().catch(() => ({}) as never);
   const campos = Object.keys(datos);
@@ -350,7 +404,7 @@ rutas.patch('/:o/:tabla/:id', async (c) => {
   if (!esTabla(tabla)) return err(c, 'tabla_desconocida', 404, { tabla });
   const quien = c.get('quien');
   if (quien.clase === 'cliente') return err(c, 'sin_permiso', 403);
-  if (tabla === 'avances') return err(c, 'sin_permiso', 403, { motivo: 'avances es append-only' });
+  if ((APPEND_ONLY as string[]).includes(tabla)) return err(c, 'sin_permiso', 403, { motivo: `${tabla} es append-only` });
 
   const datos = await c.req.json<Record<string, unknown>>().catch(() => ({}) as never);
   const veredicto = revisarEscritura(tabla, c.get('app'), Object.keys(datos));
@@ -372,7 +426,7 @@ rutas.delete('/:o/:tabla/:id', async (c) => {
   // Un ítem no se borra: se cancela. Si se borrara, el historial y el saldo
   // dejarían de cuadrar y nadie sabría por qué.
   if (tabla === 'items') return err(c, 'items_nunca_se_borran', 403, { en_su_lugar: "PATCH {estado:'cancelado'}" });
-  if (tabla === 'avances') return err(c, 'sin_permiso', 403, { motivo: 'avances es append-only' });
+  if ((APPEND_ONLY as string[]).includes(tabla)) return err(c, 'sin_permiso', 403, { motivo: `${tabla} es append-only` });
 
   const veredicto = revisarEscritura(tabla, c.get('app'), []);
   if (!veredicto.ok) return err(c, veredicto.error, 403, veredicto.detalle);

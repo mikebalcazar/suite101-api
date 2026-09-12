@@ -8,10 +8,11 @@
 import { describe, expect, it } from 'vitest';
 import inicial from '../migrations/org/0001_inicial.sql';
 import partidasATabla from '../migrations/org/0002_partidas.sql';
+import conciliacionesSql from '../migrations/org/0003_conciliaciones.sql';
 import { DEFS } from '../src/tablas';
 import { TABLAS } from '../schema/tipos';
 
-const MIGRACIONES = [inicial, partidasATabla];
+const MIGRACIONES = [inicial, partidasATabla, conciliacionesSql];
 
 /** Saca {tabla: [columnas]} del SQL, sin motor: basta con leerlo. Entiende
  *  CREATE TABLE, ALTER TABLE … ADD COLUMN y ALTER TABLE … DROP COLUMN, que es
@@ -50,7 +51,7 @@ const sinNotas = MIGRACIONES.join('\n').replace(/--[^\n]*/g, '');
 describe('el esquema del OrgDB', () => {
   it('tiene las catorce tablas: las trece del documento y `partidas` (fase 2 de dash101)', () => {
     expect(Object.keys(delSql).sort()).toEqual([...TABLAS].sort());
-    expect(TABLAS.length).toBe(14);
+    expect(TABLAS.length).toBe(16);
   });
 
   it('0002 se lleva el JSON de partidas del proyecto y le deja el compromiso', () => {
