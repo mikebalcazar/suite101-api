@@ -22,9 +22,19 @@ on:
   push:
     branches: [main]
     paths-ignore:
+      # El muro es correo entre chats, no código. Se midió el 12-sep: los
+      # cuatro últimos recados dispararon «Publicar API» cada uno, o sea un
+      # `wrangler deploy` a producción, las migraciones del D1 aplicadas y los
+      # secretos vueltos a poner en el Worker — por escribir un archivo de
+      # texto. No es sólo gasto: volver a aplicar migraciones y a empujar
+      # secretos en cada nota es superficie de riesgo a cambio de nada.
+      - 'muro/**'
       - 'claude/**'
       - 'README.md'
       - 'OPERAR.md'
+      # `CLAUDE.md` lo agregó Jr. el 12-sep en los once repositorios y se colaba
+      # por esta lista, que nombra archivos uno por uno en vez de usar `**.md`.
+      - 'CLAUDE.md'
   workflow_dispatch:
 
 concurrency:
