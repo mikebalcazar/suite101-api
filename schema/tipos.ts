@@ -13,11 +13,12 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.3.1 (fase 3 de dash101 — DELETE …/acceso, 409 en_uso,
- * DELETE /admin/orgs/:o fuera de producción; nada de lo de 0.3.0 cambia)
+ * Versión del contrato: 0.4.0 (B1 de dash101 — la conciliación semanal:
+ * `conciliaciones`, `conciliacion_cuentas` y `negocios.dia_conciliacion`;
+ * nada de lo de 0.3.1 cambia)
  */
 
-export const VERSION_CONTRATO = '0.3.1';
+export const VERSION_CONTRATO = '0.4.0';
 
 /* ─────────────── envoltura de toda respuesta ─────────────── */
 
@@ -111,6 +112,8 @@ export interface Negocio {
   nombre: string;
   rfc: string | null;
   moneda: Moneda;
+  /** Día en que toca conciliar: 0 domingo … 6 sábado. Por omisión el lunes. */
+  dia_conciliacion: number;
   creado_at: string;
 }
 
@@ -334,6 +337,31 @@ export interface Opex {
   creado_at: string;
 }
 
+/** Una conciliación: la foto de un momento. Append-only, como `avances`. */
+export interface Conciliacion {
+  id: string;
+  negocio_id: string;
+  /** La hora exacta del corte; el saldo registrado se congela ahí. */
+  corte_at: string;
+  hecha_por: string;
+  creado_at: string;
+}
+
+export interface ConciliacionCuenta {
+  id: string;
+  conciliacion_id: string;
+  cuenta_id: string;
+  /** centavos */
+  saldo_registrado: number;
+  /** centavos */
+  saldo_real: number;
+  /** registrado − real, en centavos. Positiva: salidas que nadie registró. */
+  diferencia: number;
+  /** El ajuste que dejó la cuenta igual al real; null si cuadró. */
+  movimiento_id: string | null;
+  creado_at: string;
+}
+
 export interface Archivo {
   id: string;
   r2_key: string;
@@ -360,6 +388,8 @@ export const TABLAS = [
   'avances',
   'movimientos',
   'opex',
+  'conciliaciones',
+  'conciliacion_cuentas',
   'archivos',
 ] as const;
 export type Tabla = (typeof TABLAS)[number];
@@ -394,7 +424,8 @@ export type Aviso =
   | { t: 'item.etapa'; id: string; etapa: Etapa; clave: string | null; at: string }
   | { t: 'item.cambio'; id: string }
   | { t: 'movimiento.nuevo'; id: string; proyecto_id: string | null }
-  | { t: 'proyecto.cache'; id: string; precio_venta: number; cobrado: number; avance: number };
+  | { t: 'proyecto.cache'; id: string; precio_venta: number; cobrado: number; avance: number }
+  | { t: 'conciliacion.nueva'; id: string; negocio_id: string; diferencia_total: number };
 
 /* ─────────────── ayudas de formato (identidad Taller 101) ─────────────── */
 

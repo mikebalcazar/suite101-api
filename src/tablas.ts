@@ -26,7 +26,7 @@ const IDENT = { id: 'texto', creado_at: 'texto' } as const;
 
 export const DEFS: Record<Tabla, Def> = {
   negocios: {
-    cols: { ...IDENT, nombre: 'texto', rfc: 'texto', moneda: 'texto' },
+    cols: { ...IDENT, nombre: 'texto', rfc: 'texto', moneda: 'texto', dia_conciliacion: 'entero' },
     requeridos: ['nombre'],
     filtros: [],
     orden: 'nombre',
@@ -143,6 +143,27 @@ export const DEFS: Record<Tabla, Def> = {
     filtros: ['negocio_id', 'activo'],
     orden: 'nombre',
   },
+  /* La conciliación semanal: una foto por corte. Se escribe con
+   * POST /orgs/:o/conciliaciones, en una transacción; por el CRUD genérico
+   * sólo se lee (append-only, como `avances`). */
+  conciliaciones: {
+    cols: { ...IDENT, negocio_id: 'texto', corte_at: 'texto', hecha_por: 'texto' },
+    requeridos: ['negocio_id', 'corte_at'],
+    filtros: ['negocio_id'],
+    orden: 'corte_at',
+    fecha: 'corte_at',
+  },
+  conciliacion_cuentas: {
+    cols: {
+      ...IDENT, conciliacion_id: 'texto', cuenta_id: 'texto', saldo_registrado: 'dinero',
+      saldo_real: 'dinero', diferencia: 'dinero', movimiento_id: 'texto',
+    },
+    requeridos: ['conciliacion_id', 'cuenta_id'],
+    filtros: ['conciliacion_id', 'cuenta_id'],
+    orden: 'creado_at',
+    fecha: 'creado_at',
+  },
+
   archivos: {
     cols: { ...IDENT, r2_key: 'texto', nombre: 'texto', mime: 'texto', bytes: 'entero', de_tabla: 'texto', de_id: 'texto', subido_por: 'texto' },
     requeridos: ['r2_key', 'nombre', 'de_tabla', 'de_id'],

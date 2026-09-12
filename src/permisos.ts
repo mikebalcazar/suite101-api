@@ -44,6 +44,10 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
   cotizaciones: { cotizador101: '*' },
   proveedores: { dash101: '*', cotizador101: ['nombre', 'nombre_norm', 'correo', 'telefono'] },
   estaciones: { quell101: '*' },
+  // Las escribe la ruta POST /orgs/:o/conciliaciones, no el CRUD genérico:
+  // aquí está para que quede dicho de quién son, y para el 403 con la lista.
+  conciliaciones: { dash101: ['negocio_id', 'corte_at', 'hecha_por'] },
+  conciliacion_cuentas: { dash101: ['conciliacion_id', 'cuenta_id', 'saldo_registrado', 'saldo_real', 'diferencia', 'movimiento_id'] },
 };
 
 /* Cachés: no los escribe NINGUNA app. Los recalcula la API después de cada
@@ -57,8 +61,18 @@ export const CACHES: Partial<Record<Tabla, readonly string[]>> = {
 /* Campos que pone la API sola y que nadie manda de fuera. */
 export const DE_LA_API: readonly string[] = ['id', 'creado_at', 'actualizado_at', 'creado_por', 'creado_en_app'];
 
-/* `avances` es append-only: se escribe por /etapa, no por PATCH ni DELETE. */
-export const APPEND_ONLY: readonly Tabla[] = ['avances'];
+/* Append-only: se escriben por su propia ruta, no por PATCH ni DELETE.
+ * `avances` por /etapa; la conciliación por POST /conciliaciones. Una
+ * conciliación pasada nunca se edita: si se recalculara, la estadística de
+ * cuánto dinero se escapa mentiría. */
+export const APPEND_ONLY: readonly Tabla[] = ['avances', 'conciliaciones', 'conciliacion_cuentas'];
+
+/** Por qué ruta se escribe cada tabla append-only, para decirlo en el 403. */
+export const POR_SU_RUTA: Partial<Record<Tabla, string>> = {
+  avances: 'POST /items/:id/etapa',
+  conciliaciones: 'POST /conciliaciones',
+  conciliacion_cuentas: 'POST /conciliaciones',
+};
 
 export type Veredicto =
   | { ok: true }
