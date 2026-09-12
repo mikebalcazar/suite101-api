@@ -34,3 +34,9 @@ mitad, el encargo sigue pendiente y la siguiente lo retoma; el semáforo
 | fecha | encargo | id de Drive | sha256 | resultado |
 |---|---|---|---|---|
 | 2026-09-10 | `suite101/sitio/encargo-sitio-claude-code.md` | `1TnPhLNWOozrb9cWVFs7nJiolbNR3Limx` | `504458b771fde501` | verde · `cc1767c` en descargas, run 5 |
+| 2026-09-12 | `suite101/dash101/2026-09-11-tarea-t3-lo-ya-medido.md` | `1EwrQCiYzp4f3tZdoecxjWAbv_WIS4dWP` | `b1905941450ea63c` | verde · el recado del muro se subió como `2026-09-11-0330-dash101-portal-y-marca.md` y `claude/backlog.md` llegó al repo de dash101 (#18) |
+| 2026-09-12 | `suite101/dash101/2026-09-11-tarea-conciliacion-semanal.md` | `14cim2aIYBEIpTQ48d0ovGDrK5mLWpka4` | `6abd5024a07020a1` | verde · migración `0003`, contrato 0.4.0, API #38 y pantalla dash101 #18; 113 y 38 pruebas en verde |
+
+_Estos dos se ejecutaron el 11 y el 12-sep y se anotaron aquí con retraso, al
+revisar el CONTEXTO nuevo del coordinador. La huella es del contenido que
+devuelve Drive hoy._
