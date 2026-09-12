@@ -201,8 +201,9 @@ export class OrgDB extends DurableObject<Env> {
       if (filtros.desde) { donde.push(`${def.fecha} >= ?`); args.push(filtros.desde); }
       if (filtros.hasta) { donde.push(`${def.fecha} <= ?`); args.push(filtros.hasta); }
     }
-    // Un cliente jamás llega hasta aquí (solo tiene /peek). El personal sí, y
-    // se le acota a lo suyo: sus ítems y lo que cuelga de ellos.
+    // Un cliente jamás llega hasta aquí: desde el 12-sep la ruta le contesta
+    // 403 antes (puedeLeer). Esto se queda como segunda cerradura: si algún
+    // día una ruta nueva se olvida de preguntar, lo peor que ve es lo suyo.
     if (sujeto?.clase === 'cliente') {
       if (tabla === 'items' || tabla === 'proyectos') { donde.push(`cliente_id = ?`); args.push(sujeto.ref_id ?? '—'); }
       else if (tabla === 'clientes') { donde.push(`id = ?`); args.push(sujeto.ref_id ?? '—'); }
