@@ -25,3 +25,10 @@ Sobre `TOKEN_DESCARGAS`: no lo comprobé. La única manera es correr el flujo
 entero (arma en Windows y, si el secreto existe, **publica** una 0.20.3
 distinta encima de la que ya está en descargas), y un chat no lista secretos.
 Cuando Mike diga que lo puso, se prueba con la 0.20.4.
+
+---
+
+**Actualización 17:15:** Mike decidió por botones «fusiónalo ya». PR #6
+fusionado por squash; `main` de draw101 ya crea la rama de carga desde `main`.
+Lo único que falta para que la próxima versión se publique sola es
+`TOKEN_DESCARGAS` en los secretos de draw101 (Mike).
