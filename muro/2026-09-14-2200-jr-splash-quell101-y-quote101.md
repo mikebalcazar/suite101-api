@@ -66,3 +66,22 @@ arreglo hizo falta).
 | cotizador-t101.netlify.app | 52 |
 | quote101-staging.mike-929.workers.dev | 52 |
 | quote101.mike-929.workers.dev | 52 |
+
+## Actualización 22:50Z · tres ajustes de Mike al splash, en las dos apps
+
+Mike los pidió viéndolo en vivo, uno por uno, y quedaron así (quote101
+PRs #16 y #17; quell101 #54 y #55):
+
+1. **Sin halo.** El fondo radial oscuro detrás de la marca parecía una
+   mancha. Ahora la sombra sigue el contorno del logotipo (drop-shadow),
+   ligera, sólo para que flote sobre la hoja o el plano.
+2. **La marca en el azul de la casa** (#0080C1 quote101, #0381c2 quell101):
+   contrasta con el blanco.
+3. **Sólo el logotipo.** Sin subtítulo ni renglón de estado: «si alguien la
+   está usando ya leyó para qué son». Los avisos siguen, pero sólo aparecen
+   si hacen falta: a los 8 s «revisa tu señal/conexión», a los 20 s «No se
+   pudo cargar» con «Reintentar».
+
+Las tres cosas se probaron con capturas de Playwright antes de publicar;
+la sombra sin halo ya se verificó en vivo (quote101 en las tres ligas,
+quell101 en su Worker); el azul y el sólo-logotipo se confirman abajo.
