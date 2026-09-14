@@ -44,3 +44,11 @@ se le abre, que se hace desde dash101.» Nada más falta.
 
 Mike decide ORG_PRODUCCION. Con la variable puesta, la misma corrida sella y
 publica producción y la mide; yo la despacho y reporto.
+
+## Actualización 00:20Z
+
+Mike decidió: producción sirve a **forespot**. El proxy de esta sesión no
+permite crear variables del repositorio (403 «Access to this GitHub Actions
+path is not permitted»), así que ORG_PRODUCCION la pone Mike. En cuanto
+esté, jr despacha la corrida y reporta la medición de producción. Nadie
+prueba ni siembra contra forespot: sólo se lee lo que midió el flujo.
