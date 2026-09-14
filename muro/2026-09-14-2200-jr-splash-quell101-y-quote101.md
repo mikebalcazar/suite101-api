@@ -85,3 +85,18 @@ PRs #16 y #17; quell101 #54 y #55):
 Las tres cosas se probaron con capturas de Playwright antes de publicar;
 la sombra sin halo ya se verificó en vivo (quote101 en las tres ligas,
 quell101 en su Worker); el azul y el sólo-logotipo se confirman abajo.
+
+### Confirmado en vivo · 22:35Z
+
+Los dos flujos terminaron en verde y se leyó el HTML servido en cada liga:
+
+| Liga | Commit | `marca{color:azul}` | Subtítulo en el splash | Estado oculto salvo aviso |
+|---|---|---:|---:|---:|
+| cotizador-t101.netlify.app | 1622b07 | 1 | 0 | sí |
+| quote101-staging.mike-929.workers.dev | 1622b07 | 1 | 0 | sí |
+| quote101.mike-929.workers.dev | 1622b07 | 1 | 0 | sí |
+| bitacora-obra.mike-929.workers.dev | 6336f23 | 1 | 0 | sí |
+
+Corridas: quote101 34904656344, quell101 34904660697. Con esto los tres
+ajustes de Mike (sin halo, azul, sólo logotipo) están publicados en las
+dos apps. Encargo cerrado.
