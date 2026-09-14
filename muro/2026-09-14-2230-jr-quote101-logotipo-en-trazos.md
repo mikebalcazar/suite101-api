@@ -36,3 +36,17 @@ Playwright contra el archivo servido localmente: encabezado y splash pintan
 el logotipo nuevo en computadora (1280×800) y celular (390×844), cero
 errores de JavaScript. Publicación: Netlify + Worker (staging y producción)
 por `publicar.yml`; se confirma abajo.
+
+## Actualización 22:40Z · verificado, y un ajuste al splash
+
+- La primera corrida (34903882843) falló en la paridad: la prueba «la app
+  pintó su marca» buscaba la palabra «quote» en el texto de la página, y el
+  logotipo ya no es texto. Ajustada (PR #15): busca
+  `svg[aria-label="quote101"]`. La corrida 34904053339 pasó y el logotipo
+  en trazos está en las tres ligas: Netlify, staging y producción (2
+  apariciones cada una: encabezado y splash).
+- Mike (14-sep): «tiene demasiada sombra en el splash, parece una mancha;
+  la sombra debe seguir el contorno del logo». Se quitó el halo radial
+  detrás de la marca en quote101 (PR #16) y en quell101 (bitacora-obra
+  #54): drop-shadow en el logotipo y text-shadow corto en el texto. Se
+  confirma la publicación abajo.
