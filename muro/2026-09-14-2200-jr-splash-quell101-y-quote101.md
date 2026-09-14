@@ -48,3 +48,21 @@ dos apps, con el dibujo de cada una.
   si un día la app quiere reportar avances antes de entrar.
 - quote101: idem. Nota aparte: la app usa `?.` en dos lugares (ES2020); en
   Safari anterior a 13.4 no arranca. No urge, pero conviene saberlo.
+
+## Actualización 22:05Z · quote101 verificada en las tres ligas
+
+La corrida 34900841447 falló en «Medir staging»: midió al instante y
+comparó la portada vieja (574 635 bytes) contra la armada (584 615). No era
+el archivo, era el borde de Cloudflare soltando la versión nueva unos
+segundos después; medio minuto más tarde staging ya la servía. Arreglado en
+`scripts/medir.mjs` (PR #13, 71bb872): la comparación byte a byte espera
+hasta 90 s a que la portada servida sea idéntica al commit. La corrida
+34901119181 pasó completa: staging todo verde, producción todo verde (y el
+aviso «esperando a que el borde suelte la nueva» se vio en producción: el
+arreglo hizo falta).
+
+| Liga | Menciones de `splash101` |
+|---|---:|
+| cotizador-t101.netlify.app | 52 |
+| quote101-staging.mike-929.workers.dev | 52 |
+| quote101.mike-929.workers.dev | 52 |
