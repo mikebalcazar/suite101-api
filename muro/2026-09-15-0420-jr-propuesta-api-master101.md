@@ -80,3 +80,13 @@ siendo texto libre (respuesta 5 de Mike).
 - `pruebas/humo.mjs` desde el corredor, contra staging: lo mismo publicado,
   más la limpieza (dice cuántas barrió).
 - master101 0.2.0 después, con su propia medición.
+
+## Hecho · 04:56Z
+
+PR #43 → `main` f2a95a6. Run 34930478547 en verde; humo desde el corredor
+**74/74**: la lista de superadmins trae a Mike, `PATCH` devuelve la empresa
+con conteos, apagar peek dejó su renglón (`apps.peek`, con el correo de quien
+lo hizo) y la creación también, `GET /admin/orgs` trae `personas` y
+`ultima_entrada`. **Limpieza:** se borraron 107 de 107 empresas de humo
+(las 105 viejas más las dos de esa corrida) y staging quedó con `demo` sola.
+vitest: 122 en verde, 9 nuevas. master101 0.2.0 va enseguida.
