@@ -1,8 +1,8 @@
 {
   "name": "suite101-api",
-  "version": "0.2.0",
+  "version": "0.5.0",
   "private": true,
-  "description": "La unica puerta a los datos de la suite 101 \u2014 Worker + D1 master + un Durable Object con SQLite por empresa",
+  "description": "La unica puerta a los datos de la suite 101 — Worker + D1 master + un Durable Object con SQLite por empresa",
   "type": "module",
   "scripts": {
     "deploy": "wrangler deploy",
