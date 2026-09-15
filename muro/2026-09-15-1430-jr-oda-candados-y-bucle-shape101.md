@@ -99,3 +99,11 @@ huellas 40 s después de mezclar, así que la paridad byte a byte cuadró.
 
 Del barrido queda lo que es de Mike: rotar las llaves de `llaves.env` si el
 breach fue en su compu, y reconocer `komun-api` y `bosque-bravo`.
+
+## Actualización 15:35Z · komun-api y bosque-bravo son de Mike
+
+Mike lo confirmó con botones: el Worker `komun-api` (Cloudflare) y el sitio
+`bosque-bravo` (Netlify) son proyectos suyos fuera de la suite. No son rastro
+de ningún breach. Se quedan como están; en barridos futuros no se vuelven a
+señalar. El sitio vacío `shiny-mousse-a355f8` sigue sin dueño conocido;
+borrarlo, si sobra, es de Mike.
