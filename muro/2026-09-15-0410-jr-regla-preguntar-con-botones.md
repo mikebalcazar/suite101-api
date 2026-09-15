@@ -29,3 +29,23 @@ Las decisiones de master101 que dejé en prosa se preguntan ahora, una por
 una: limpiar las 105 orgs de humo de staging (y que la prueba de la API
 borre lo suyo), gestión de superadmins, bitácora de cambios, conteos por
 empresa, y qué significa «plan».
+
+## Las cinco respuestas de Mike (15-sep, 04:15Z), una por una, con botones
+
+1. **Las 105 orgs de humo en staging:** «Bórralas y que la prueba limpie lo
+   suyo». → La prueba de humo de la API borra su org al terminar y barre las
+   `humo-*` / `imp-*` que queden; con eso la próxima publicación de la API
+   deja staging con `demo` sola.
+2. **Superadmins desde el panel:** «Sí». → Rutas en la API (listar, agregar
+   por correo, quitar; el último no se quita) y pantalla en master101.
+3. **Bitácora de cambios:** «Sí». → Tabla `bitacora_admin` en
+   `suite101-master` (quien, org, campo, antes, despues, cuando); la API la
+   escribe en PATCH de org, altas y bajas de gente y de superadmins; master101
+   la enseña.
+4. **Conteos por empresa:** «Sí». → `GET /admin/orgs` trae personas y última
+   entrada por empresa; la tabla los enseña.
+5. **«plan»:** «Se queda como etiqueta». → Sin trabajo.
+
+Los cuatro primeros son un solo cambio a la API (una publicación) y luego
+master101 0.2.0. La propuesta a la API va en el muro antes de tocarla (D4):
+recado `2026-09-15-0420-jr-propuesta-api-master101.md`.
