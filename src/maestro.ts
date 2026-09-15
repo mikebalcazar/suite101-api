@@ -2,7 +2,7 @@
  * contra el directorio: si algo falta, se agrega aquí. */
 
 import { ahora, enSegundos, firmarId, normalizaCorreo, ulid } from './lib';
-import type { App, Org, Rol, TipoAcceso, Usuario } from '../schema/tipos';
+import type { App, Org, Rol, TipoAcceso, Usuario, OrgConConteos, Superadmin, RenglonBitacoraAdmin } from '../schema/tipos';
 import type { Env } from './entorno';
 
 export const VIDA_MIEMBRO = 30 * 24 * 3600; // 30 días
@@ -216,8 +216,71 @@ export async function importarUsuario(
   return { usuario_id: u.id, suerte: 'creado' };
 }
 
-export async function esSuperadmin(env: Env, usuario_id: string): Promise<boolean> {  const f = await env.MASTER.prepare(`SELECT 1 AS x FROM superadmins WHERE usuario_id = ?`).bind(usuario_id).first();
+export async function esSuperadmin(env: Env, usuario_id: string): Promise<boolean> {
+  const f = await env.MASTER.prepare(`SELECT 1 AS x FROM superadmins WHERE usuario_id = ?`).bind(usuario_id).first();
   return !!f;
+}
+
+/* ─────────────── superadmins por ruta (contrato 0.5.0) ─────────────── */
+
+export async function superadmins(env: Env): Promise<Superadmin[]> {
+  const r = await env.MASTER.prepare(
+    `SELECT s.usuario_id, u.correo, u.nombre FROM superadmins s JOIN usuarios u ON u.id = s.usuario_id ORDER BY u.correo`,
+  ).all<Superadmin>();
+  return r.results ?? [];
+}
+
+export async function ponerSuperadmin(env: Env, usuario_id: string): Promise<void> {
+  await env.MASTER.prepare(`INSERT OR IGNORE INTO superadmins (usuario_id) VALUES (?)`).bind(usuario_id).run();
+}
+
+export async function quitarSuperadmin(env: Env, usuario_id: string): Promise<void> {
+  await env.MASTER.prepare(`DELETE FROM superadmins WHERE usuario_id = ?`).bind(usuario_id).run();
+}
+
+/* ─────────────── la bitácora del panel (contrato 0.5.0) ───────────────
+ * Quién cambió qué en el directorio. La escribe la API sola; nadie desde
+ * fuera. Un renglón por campo que de verdad cambió. */
+
+export async function apuntaAdmin(
+  env: Env,
+  r: { quien: string; org_id: string | null; campo: string; antes?: unknown; despues?: unknown },
+): Promise<void> {
+  const txt = (v: unknown) => (v === undefined || v === null ? null : typeof v === 'string' ? v : JSON.stringify(v));
+  await env.MASTER.prepare(`INSERT INTO bitacora_admin (cuando, quien, org_id, campo, antes, despues) VALUES (?,?,?,?,?,?)`)
+    .bind(ahora(), r.quien, r.org_id, r.campo, txt(r.antes), txt(r.despues))
+    .run();
+}
+
+export async function bitacoraAdmin(env: Env, org_id: string | null, limite = 200): Promise<RenglonBitacoraAdmin[]> {
+  const r = org_id === null
+    ? await env.MASTER.prepare(`SELECT * FROM bitacora_admin ORDER BY id DESC LIMIT ?`).bind(limite).all<RenglonBitacoraAdmin>()
+    : await env.MASTER.prepare(`SELECT * FROM bitacora_admin WHERE org_id = ? ORDER BY id DESC LIMIT ?`).bind(org_id, limite).all<RenglonBitacoraAdmin>();
+  return r.results ?? [];
+}
+
+/* ─────────────── conteos por empresa (contrato 0.5.0) ───────────────
+ * Dos consultas agrupadas, no una por empresa: con cien empresas en staging
+ * eso serían doscientas idas al D1 por cada vez que se abre master101. */
+
+export async function conteosDeOrgs(env: Env): Promise<Map<string, { personas: number; ultima_entrada: string | null }>> {
+  const conteos = new Map<string, { personas: number; ultima_entrada: string | null }>();
+  const personas = await env.MASTER.prepare(`SELECT org_id, COUNT(*) AS n FROM miembros GROUP BY org_id`).all<{ org_id: string; n: number }>();
+  for (const f of personas.results ?? []) conteos.set(f.org_id, { personas: f.n, ultima_entrada: null });
+  const entradas = await env.MASTER.prepare(
+    `SELECT m.org_id, MAX(s.creado_at) AS ultima FROM sesiones s JOIN miembros m ON m.usuario_id = s.usuario_id GROUP BY m.org_id`,
+  ).all<{ org_id: string; ultima: string | null }>();
+  for (const f of entradas.results ?? []) {
+    const c = conteos.get(f.org_id) ?? { personas: 0, ultima_entrada: null };
+    c.ultima_entrada = f.ultima;
+    conteos.set(f.org_id, c);
+  }
+  return conteos;
+}
+
+export function conConteos(o: Org, conteos: Map<string, { personas: number; ultima_entrada: string | null }>): OrgConConteos {
+  const c = conteos.get(o.id);
+  return { ...o, personas: c?.personas ?? 0, ultima_entrada: c?.ultima_entrada ?? null };
 }
 
 /** Mike entra la primera vez sin que nadie lo dé de alta: si no hay ningún

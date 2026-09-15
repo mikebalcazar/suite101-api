@@ -13,12 +13,12 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.4.0 (B1 de dash101 — la conciliación semanal:
- * `conciliaciones`, `conciliacion_cuentas` y `negocios.dia_conciliacion`;
- * nada de lo de 0.3.1 cambia)
+ * Versión del contrato: 0.5.0 (master101 — superadmins por ruta, la bitácora
+ * del panel `bitacora_admin`, y conteos por empresa en GET /admin/orgs; nada
+ * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.4.0';
+export const VERSION_CONTRATO = '0.5.0';
 
 /* ─────────────── envoltura de toda respuesta ─────────────── */
 
@@ -46,7 +46,8 @@ export type ErrorApi =
   | 'codigo_invalido'
   | 'pin_invalido'
   | 'demasiados_intentos'
-  | 'items_nunca_se_borran';
+  | 'items_nunca_se_borran'
+  | 'ultimo_superadmin';
 
 /* ─────────────── apps ─────────────── */
 
@@ -101,6 +102,33 @@ export interface Yo {
   superadmin: boolean;
   orgs: Array<{ id: string; nombre: string; rol: Rol; apps: string[]; negocios: string[] }>;
   acceso: { org_id: string; tipo: TipoAcceso; ref_id: string } | null;
+}
+
+/* ─────────────── el panel de la suite (master101), contrato 0.5.0 ─────────────── */
+
+/** Lo que trae cada fila de GET /admin/orgs: la empresa y sus conteos. */
+export interface OrgConConteos extends Org {
+  /** cuántos miembros tiene (socios y oficina; no cuenta clientes ni personal) */
+  personas: number;
+  /** la sesión más reciente de cualquiera de sus miembros, ISO, o null si nadie ha entrado */
+  ultima_entrada: string | null;
+}
+
+export interface Superadmin {
+  usuario_id: string;
+  correo: string;
+  nombre: string | null;
+}
+
+/** Un renglón de `bitacora_admin`: quién cambió qué en el directorio. */
+export interface RenglonBitacoraAdmin {
+  id: number;
+  cuando: string;
+  quien: string; // correo del superadmin
+  org_id: string | null; // null cuando cambió la lista de superadmins
+  campo: string; // 'creada' | 'nombre' | 'plan' | 'moneda' | 'activa' | 'apps.dash' … | 'miembro' | 'superadmin'
+  antes: string | null;
+  despues: string | null;
 }
 
 /* ─────────────── OrgDB: el SQLite de cada empresa ─────────────── */

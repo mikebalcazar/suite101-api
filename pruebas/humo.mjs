@@ -113,6 +113,19 @@ async function recorrido() {
   // Desde 0002 (partidas a tabla propia) el DO nace en la versión 2.
   rev(nueva.data?.org_db_version === 3, 'su Durable Object nació y corrió las tres migraciones solo, sin redeploy', `version ${nueva.data?.org_db_version}`);
 
+  // Contrato 0.5.0: lo que master101 necesita.
+  const supers = await pedir(STAGING, '/admin/superadmins');
+  rev(supers.estado === 200 && (supers.data?.filas || []).some((x) => x.correo === CORREO), 'la lista de superadmins trae al que entró', `${supers.data?.total} superadmin(s)`);
+  const apagaPeek = await pedir(STAGING, `/admin/orgs/${ORG}`, { method: 'PATCH', body: { apps: { dash: true, quell: true, peek: false, cotizador: true, roster: true, nest: true } } });
+  rev(apagaPeek.estado === 200 && typeof apagaPeek.data?.personas === 'number', 'PATCH devuelve la empresa con sus conteos', `personas ${apagaPeek.data?.personas}`);
+  const bit = await pedir(STAGING, `/admin/orgs/${ORG}/bitacora`);
+  const renglones = bit.data?.filas || [];
+  rev(renglones.some((r) => r.campo === 'apps.peek' && r.antes === 'true' && r.despues === 'false' && r.quien === CORREO), 'apagar peek dejó su renglón en la bitácora, con el correo de quien lo hizo', renglones.map((r) => r.campo).join(', '));
+  rev(renglones.some((r) => r.campo === 'creada'), 'y la creación de la empresa también quedó apuntada');
+  const conConteos = await pedir(STAGING, '/admin/orgs');
+  const mia = (conConteos.data?.filas || []).find((o) => o.id === ORG);
+  rev(mia && mia.personas === 0 && mia.ultima_entrada === null, 'GET /admin/orgs trae personas y ultima_entrada por empresa', JSON.stringify({ personas: mia?.personas, ultima_entrada: mia?.ultima_entrada }));
+
   const neg = await pedir(STAGING, `/orgs/${ORG}/negocios`, { app: 'dash101', method: 'POST', body: { nombre: 'Taller' } });
   const cli = await pedir(STAGING, `/orgs/${ORG}/clientes`, { app: 'dash101', method: 'POST', body: { nombre: 'Áurea Pérez', negocio_id: neg.data?.id } });
   rev(cli.data?.nombre_norm === 'aurea perez', 'nombre_norm sale sin acentos', String(cli.data?.nombre_norm));
@@ -327,6 +340,33 @@ async function importacion() {
   rev(enProd.status === 401, 'en producción la puerta pide sesión', String(enProd.status));
 }
 
+/* ─────────────── limpieza: lo que esta prueba deja, lo borra ───────────────
+ * Hasta el 14-sep cada corrida dejaba su `humo-<run>` y su `imp-<run>` en
+ * staging: 105 empresas de mentiras que master101 encontró en su tabla el
+ * 15-sep (decisión de Mike: borrarlas y que la prueba limpie lo suyo). Se
+ * borra lo de esta corrida y se barre lo que quedó de las anteriores.
+ * DELETE /admin/orgs/:o sólo existe fuera de producción: aquí no hay riesgo. */
+
+async function limpieza() {
+  linea('');
+  linea('== Limpieza de staging ==');
+  galleta = '';
+  const cod = await pedir(STAGING, '/auth/codigo', { method: 'POST', body: { correo: CORREO } });
+  if (!cod.data?.codigo_prueba) { rev(false, 'entrar para limpiar', `${cod.estado} ${cod.error || ''}`); return; }
+  await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO, codigo: cod.data.codigo_prueba } });
+  const lista = await pedir(STAGING, '/admin/orgs');
+  const basura = (lista.data?.filas || []).map((o) => o.id).filter((id) => /^(humo|imp)-[0-9]+$/.test(id));
+  let borradas = 0;
+  for (const id of basura) {
+    const r = await pedir(STAGING, `/admin/orgs/${id}`, { method: 'DELETE' });
+    if (r.estado === 200) borradas++; else linea(`  (no se pudo borrar ${id}: ${r.estado} ${r.error || ''})`);
+  }
+  rev(borradas === basura.length, `se borraron las empresas de prueba (${borradas} de ${basura.length}, incluidas las de esta corrida)`);
+  const despues = await pedir(STAGING, '/admin/orgs');
+  const quedan = (despues.data?.filas || []).map((o) => o.id);
+  rev(!quedan.some((id) => /^(humo|imp)-[0-9]+$/.test(id)), 'staging queda sin empresas de humo', quedan.join(', '));
+}
+
 const t0 = Date.now();
 try {
   await produccion();
@@ -336,7 +376,12 @@ try {
   fallas++;
   linea(`  FALLA se rompió a medias: ${e?.message}`);
 }
+try {
+  await limpieza();
+} catch (e) {
+  fallas++;
+  linea(`  FALLA la limpieza se rompió: ${e?.message}`);
+}
 linea('');
 linea(`RESULTADO: ${revisadas - fallas}/${revisadas} comprobaciones en ${((Date.now() - t0) / 1000).toFixed(1)} s`);
-linea(`org de esta corrida: ${ORG} (queda en staging; staging es desechable)`);
 process.exit(fallas ? 1 : 0);

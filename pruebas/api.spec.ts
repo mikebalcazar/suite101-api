@@ -858,3 +858,129 @@ describe('10 · la conciliación semanal: lo que se escapa del registro', () => 
     expect(despues.data.pagado_prov).toBe(pagadoAntes);
   });
 });
+
+/* ─────────────── contrato 0.5.0: lo que master101 necesita ───────────────
+ * Decidido por Mike el 15-sep (muro 0410-jr y 0420-jr): superadmins por ruta,
+ * la bitácora del panel y conteos por empresa. */
+
+describe('0.5.0 · superadmins por ruta', () => {
+  it('la lista trae al que entró primero (sembrado por CORREO_SUPERADMIN)', async () => {
+    const r = await pedir('/admin/superadmins');
+    expect(r.estado).toBe(200);
+    expect(r.data.filas.map((x: any) => x.correo)).toContain(CORREO);
+  });
+
+  it('el último superadmin no se puede quitar, ni uno mismo', async () => {
+    const yo = await pedir('/yo');
+    const propio = await pedir(`/admin/superadmins/${yo.data.usuario.id}`, { method: 'DELETE' });
+    expect(propio.estado).toBe(409);
+    expect(propio.detalle.motivo).toBe('a_ti_mismo');
+  });
+
+  it('se agrega otro por correo, se apunta en la bitácora, y luego sí se puede quitar', async () => {
+    const alta = await pedir('/admin/superadmins', { method: 'POST', body: JSON.stringify({ correo: 'Socia@Ejemplo.MX', nombre: 'Socia' }) });
+    expect(alta.estado).toBe(201);
+    expect(alta.data.correo).toBe('socia@ejemplo.mx');
+    const otraVez = await pedir('/admin/superadmins', { method: 'POST', body: JSON.stringify({ correo: 'socia@ejemplo.mx' }) });
+    expect(otraVez.estado).toBe(200);
+    expect(otraVez.data.ya_lo_era).toBe(true);
+
+    const lista = await pedir('/admin/superadmins');
+    expect(lista.data.total).toBe(2);
+
+    const bit = await pedir('/admin/bitacora');
+    const renglon = bit.data.filas.find((f: any) => f.campo === 'superadmin' && f.despues === 'socia@ejemplo.mx');
+    expect(renglon).toBeTruthy();
+    expect(renglon.quien).toBe(CORREO);
+    expect(renglon.org_id).toBeNull();
+
+    const baja = await pedir(`/admin/superadmins/${alta.data.usuario_id}`, { method: 'DELETE' });
+    expect(baja.estado).toBe(200);
+    expect((await pedir('/admin/superadmins')).data.total).toBe(1);
+    const quitado = (await pedir('/admin/bitacora')).data.filas.find((f: any) => f.campo === 'superadmin' && f.antes === 'socia@ejemplo.mx');
+    expect(quitado.despues).toBeNull();
+  });
+
+  it('quitar a uno que no es superadmin contesta 404, y el último da ultimo_superadmin', async () => {
+    const nadie = await pedir('/admin/superadmins/no-existe', { method: 'DELETE' });
+    expect(nadie.estado).toBe(404);
+    // Con dos, quitar al otro deja uno; con uno, quitar a ese uno (desde otra
+    // sesión) daría ultimo_superadmin. Se comprueba el candado directo:
+    const alta = await pedir('/admin/superadmins', { method: 'POST', body: JSON.stringify({ correo: 'otro@ejemplo.mx' }) });
+    const guardada = galleta;
+    // Entra el otro y trata de quitar al primero: se puede (quedan dos → uno).
+    const cod = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo: 'otro@ejemplo.mx' }) });
+    galleta = '';
+    await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: 'otro@ejemplo.mx', codigo: cod.data.codigo_prueba }) });
+    const yo = await pedir('/yo');
+    expect(yo.data.superadmin).toBe(true);
+    // Ahora el otro intenta quitarse a sí mismo: a_ti_mismo, aunque haya dos.
+    const asiMismo = await pedir(`/admin/superadmins/${alta.data.usuario_id}`, { method: 'DELETE' });
+    expect(asiMismo.estado).toBe(409);
+    galleta = guardada;
+    // El primero quita al otro: quedan uno.
+    expect((await pedir(`/admin/superadmins/${alta.data.usuario_id}`, { method: 'DELETE' })).estado).toBe(200);
+    // Y desde una sesión de un tercero que ya no es superadmin, nada:
+    galleta = '';
+    const cod2 = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo: 'otro@ejemplo.mx' }) });
+    await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: 'otro@ejemplo.mx', codigo: cod2.data.codigo_prueba }) });
+    expect((await pedir('/admin/superadmins')).estado).toBe(403);
+    galleta = guardada;
+  });
+});
+
+describe('0.5.0 · la bitácora del panel y los conteos', () => {
+  it('GET /admin/orgs trae personas y ultima_entrada por empresa', async () => {
+    const r = await pedir('/admin/orgs');
+    expect(r.estado).toBe(200);
+    const mia = r.data.filas.find((o: any) => o.id === ORG);
+    expect(mia).toBeTruthy();
+    expect(typeof mia.personas).toBe('number');
+    expect(mia).toHaveProperty('ultima_entrada');
+  });
+
+  it('un PATCH deja un renglón por campo que cambió, con el correo de quien lo hizo', async () => {
+    const antes = (await pedir(`/admin/orgs/${ORG}/bitacora`)).data.total;
+    const r = await pedir(`/admin/orgs/${ORG}`, { method: 'PATCH', body: JSON.stringify({ nombre: 'Empresa renombrada', apps: { dash: true, quell: false, cotizador: true, peek: true, roster: true, nest: true } }) });
+    expect(r.estado).toBe(200);
+    expect(r.data.nombre).toBe('Empresa renombrada');
+    expect(typeof r.data.personas).toBe('number');
+    const bit = await pedir(`/admin/orgs/${ORG}/bitacora`);
+    const nuevos = bit.data.filas.slice(0, bit.data.total - antes);
+    const campos = nuevos.map((f: any) => f.campo).sort();
+    expect(campos).toEqual(['apps.quell', 'nombre']);
+    const quell = nuevos.find((f: any) => f.campo === 'apps.quell');
+    expect(quell.antes).toBe('true');
+    expect(quell.despues).toBe('false');
+    expect(quell.quien).toBe(CORREO);
+    expect(quell.org_id).toBe(ORG);
+  });
+
+  it('un PATCH que no cambia nada no deja renglón', async () => {
+    const antes = (await pedir(`/admin/orgs/${ORG}/bitacora`)).data.total;
+    await pedir(`/admin/orgs/${ORG}`, { method: 'PATCH', body: JSON.stringify({ nombre: 'Empresa renombrada' }) });
+    expect((await pedir(`/admin/orgs/${ORG}/bitacora`)).data.total).toBe(antes);
+  });
+
+  it('alta y baja de un miembro quedan apuntadas, y los conteos cambian', async () => {
+    const alta = await pedir(`/admin/orgs/${ORG}/miembros`, { method: 'POST', body: JSON.stringify({ correo: 'oficina@ejemplo.mx', rol: 'staff' }) });
+    expect(alta.estado).toBe(201);
+    const conUno = (await pedir(`/admin/orgs/${ORG}`)).data;
+    expect(conUno.personas).toBeGreaterThanOrEqual(1);
+    const baja = await pedir(`/admin/orgs/${ORG}/miembros/${alta.data.usuario_id}`, { method: 'DELETE' });
+    expect(baja.estado).toBe(200);
+    const bit = (await pedir(`/admin/orgs/${ORG}/bitacora`)).data.filas.filter((f: any) => f.campo === 'miembro');
+    expect(bit.some((f: any) => f.antes === null && f.despues === 'oficina@ejemplo.mx (staff)')).toBe(true);
+    expect(bit.some((f: any) => f.antes === 'oficina@ejemplo.mx (staff)' && f.despues === null)).toBe(true);
+  });
+
+  it('quien no es superadmin no lee la bitácora ni los superadmins', async () => {
+    const guardada = galleta;
+    galleta = '';
+    const cod = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo: 'otro@ejemplo.mx' }) });
+    await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: 'otro@ejemplo.mx', codigo: cod.data.codigo_prueba }) });
+    expect((await pedir('/admin/bitacora')).estado).toBe(403);
+    expect((await pedir(`/admin/orgs/${ORG}/bitacora`)).estado).toBe(403);
+    galleta = guardada;
+  });
+});
