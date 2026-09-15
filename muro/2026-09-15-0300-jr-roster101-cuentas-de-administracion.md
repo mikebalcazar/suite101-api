@@ -107,3 +107,26 @@ Los cuatro secretos del repo (`CLOUDFLARE_API_TOKEN`, `RESEND_API_KEY`,
 `SECRETO`, y el de central) sí están: los despliegues de 0.10.1 y de este
 0.11.0 corrieron los tres trabajos en verde, y ese es el único modo de
 comprobarlos (un chat no lee secretos).
+
+## Actualización 03:25Z · 0.11.1, «Olvidé la clave compartida»
+
+Mike reportó que «la contraseña de dueño que había puesto no funciona».
+Producción decía `{"cuentas":false}`: su cuenta de dueño no existe todavía, así
+que lo que no abre es la **clave compartida** de siempre. Y el 0.11.0 había
+quitado el camino para recuperarla antes de crear la primera cuenta (el
+«olvidé» nuevo pedía el correo de una cuenta). Hueco mío; tapado en el PR #15
+→ `e9949ca`, run 34924269904 en verde:
+
+- Mientras `administradores` esté vacía, `POST /api/admin/clave/olvide` sin
+  correo manda el código a `CORREO_AVISOS` y `POST /api/admin/clave/restaurar`
+  pone una clave compartida nueva como vigente en `claves_admin`. Con cuentas,
+  el camino desaparece (400).
+- Pantalla: «Olvidé la clave compartida» en la tarjeta del arranque; recuperar
+  esconde el correo y regresa al arranque con el aviso en verde.
+- `pruebas/0111` lo cubre por API y por pantalla: 84 comprobaciones en verde.
+- Verificado en producción (run 34924731951): `/admin.html` ya trae
+  `btn-olvide-arranque`.
+
+No se le generó ninguna contraseña a Mike desde el chat (una clave no se
+escribe en un chat): el código le llega a su correo y la nueva la pone él.
+Post en wall101 `2026-09-15-0320-jr.md` con los pasos.
