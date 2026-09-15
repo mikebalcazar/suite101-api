@@ -58,3 +58,26 @@ tags, 403).
 
 Cuando el armado de draw101 termine: comprobar la release `draw101-0.20.5` en
 `descargas`, su sha256, `draw101.json` y el README. Se apunta aquí abajo.
+
+## Actualización 14:35Z · draw101 0.20.5 publicada
+
+El primer armado sobre main (run 34981315053) se cayó en «Aplicar parches
+pendientes»: `claude/APLICAR.txt` todavía listaba `0.20.4.patch`, ya mezclado
+en main con el PR #7, y `git apply --check` truena sobre lo ya aplicado. Es el
+mismo tropiezo que tuvo el chat de draw101 con su `claude/publicar-0.20.5`.
+PR #12 (`7d476c9`) borra el archivo; el flujo dice «sin parches pendientes» y
+sigue. **Regla:** al mezclar un parche de `claude/` a main, se borra su renglón
+de `APLICAR.txt` en el mismo PR.
+
+Run 34981555059 (workflow_dispatch sobre `7d476c9`), 7 min 29 s, todo verde:
+pruebas, instalador, carga a `descargas`, release y manifiesto.
+
+| Qué | Resultado |
+|---|---|
+| Release `draw101-0.20.5` | publicada 14:31Z por `github-actions[bot]`, `draw101-0.20.5-setup.exe`, 124 689 466 bytes |
+| sha256 | `47180f7ac35bd202e76c5f3b2c7e641088dd681d722652085eee2cc720161f3b` (la del flujo cuadra con la bajada de la release, paso 15) |
+| `draw101-ultima` | movida a la 0.20.5 (14:32Z) |
+| `descargas` main | `7e01d44`: `draw101.json` dice 0.20.5 y el README también |
+
+Las 0.20.x instaladas ven el letrero «Actualizar». shape101 lleva el mismo
+candado en main (`3267e3e`) y sale con la 0.4.0 de su chat.
