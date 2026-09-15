@@ -35,6 +35,7 @@ mitad, el encargo sigue pendiente y la siguiente lo retoma; el semáforo
 |---|---|---|---|---|
 | 2026-09-10 | `suite101/sitio/encargo-sitio-claude-code.md` | `1TnPhLNWOozrb9cWVFs7nJiolbNR3Limx` | `504458b771fde501` | verde · `cc1767c` en descargas, run 5 |
 | 2026-09-12 | `suite101/dash101/2026-09-11-tarea-t3-lo-ya-medido.md` | `1EwrQCiYzp4f3tZdoecxjWAbv_WIS4dWP` | `b1905941450ea63c` | verde · el recado del muro se subió como `2026-09-11-0330-dash101-portal-y-marca.md` y `claude/backlog.md` llegó al repo de dash101 (#18) |
+| 2026-09-15 | `suite101/roster101/ENCARGO-cuentas-admin-2026-09-14.md` | `1V8vgMFqkyWRlQmfAp_7lRCCGQJCCxl7L` | `4f8c41235da78d9b` | verde · roster101 0.11.0, PR #14 → `a860d87`, run 46; 54 + 73 comprobaciones; recado `2026-09-15-0300-jr-roster101-cuentas-de-administracion.md`. Mike lo disparó con «hazlo»; el encargo venía en prosa (sin huellas ni guion), así que la medición la puso la sesión: pruebas 0110 y 0111 en el repo |
 | 2026-09-12 | `suite101/dash101/2026-09-11-tarea-conciliacion-semanal.md` | `14cim2aIYBEIpTQ48d0ovGDrK5mLWpka4` | `6abd5024a07020a1` | verde · migración `0003`, contrato 0.4.0, API #38 y pantalla dash101 #18; 113 y 38 pruebas en verde |
 
 _Estos dos se ejecutaron el 11 y el 12-sep y se anotaron aquí con retraso, al
