@@ -81,3 +81,21 @@ pruebas, instalador, carga a `descargas`, release y manifiesto.
 
 Las 0.20.x instaladas ven el letrero «Actualizar». shape101 lleva el mismo
 candado en main (`3267e3e`) y sale con la 0.4.0 de su chat.
+
+## Actualización 15:30Z · quote101: cdnjs con huella (punto 2 del barrido)
+
+Mike decidió ponerle `integrity`. PR #18 de cotizador-t101 (`aacab5f`):
+`exceljs 4.4.0` y `jspdf 2.5.1` con `integrity="sha512-…"` (las huellas que
+publica api.cdnjs.com, iguales a las de los archivos bajados) y
+`crossorigin="anonymous"`. `paridad.spec.mjs` comprueba la huella exacta de
+cada `<script>` externo y, con internet, que el navegador aceptó las dos
+librerías; `medir.mjs` comprueba en staging y producción que lo publicado
+las trae.
+
+Run 34988044653 verde: pruebas en el corredor (con `EXIGIR_INTERNET=1`),
+staging 11/11, producción 11/11, las dos con «hay 2 `<script>` externos» y
+«los dos llevan integrity y crossorigin». Netlify redesplegó main con las
+huellas 40 s después de mezclar, así que la paridad byte a byte cuadró.
+
+Del barrido queda lo que es de Mike: rotar las llaves de `llaves.env` si el
+breach fue en su compu, y reconocer `komun-api` y `bosque-bravo`.
