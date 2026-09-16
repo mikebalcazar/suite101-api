@@ -12,7 +12,7 @@
  */
 
 import { SELF } from 'cloudflare:test';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { aCentavosExacto, aCentavos } from '../schema/tipos';
 import { aplanar, aISO, cosechar } from '../src/importar/mapeo';
 
@@ -789,5 +789,187 @@ describe('la mudanza de quote101: el folio lo pone el OrgDB', () => {
     const total = r.data.cuadre.dinero.find((d: any) => d.campo === 'cotizaciones.total');
     expect(total.cuadra).toBe(true);
     expect(total.centavos).toBe(2500100 + 300000 + 4004);
+  });
+});
+
+/* ─────────────── las fotos salen de Firebase ───────────────
+ * Lo que la mudanza del documento no puede traer: las fotos de los muebles y
+ * el detalle de las versiones archivadas viven en Firebase Storage y sólo se
+ * referencian por URL. Se importan como URLs, y esas URLs mueren el día que
+ * Firebase se apague.
+ *
+ * El `fetch` a Storage se suplanta: aquí no se prueba que Firebase conteste
+ * —eso no depende de este código—, se prueba qué se guarda, qué se reescribe,
+ * qué pasa cuando algo falla, y que repetirlo no vuelva a bajar lo que ya
+ * está. Lo que NO se suplanta es R2 ni el registro en `archivos`: ésos son de
+ * verdad, dentro de workerd.
+ */
+
+describe('las fotos salen de Firebase Storage', () => {
+  const ORG_A = 'cotizador-archivos';
+  const FOTO = 'https://firebasestorage.googleapis.com/v0/b/x/o/muebles%2F17-ab.jpg?alt=media&token=t';
+  const HIST = 'https://firebasestorage.googleapis.com/v0/b/x/o/versiones%2F17-cd.json?alt=media&token=t';
+  const AJENA = 'https://cdn.ejemplo.mx/foto.jpg';
+
+  const original = globalThis.fetch;
+  let pedidas: string[] = [];
+  /** Contesta como Storage sólo a Storage; lo demás pasa de largo, o `SELF`
+   *  dejaría de funcionar. */
+  function suplantar(comoVa: 'bien' | 'mal' = 'bien') {
+    pedidas = [];
+    globalThis.fetch = (async (entrada: any, init?: any) => {
+      const u = String(entrada instanceof Request ? entrada.url : entrada);
+      if (u.includes('firebasestorage.googleapis.com')) {
+        pedidas.push(u);
+        if (comoVa === 'mal') return new Response('no', { status: 403 });
+        return new Response(new Uint8Array([1, 2, 3, 4, 5]), { headers: { 'Content-Type': 'image/jpeg' } });
+      }
+      return original(entrada, init);
+    }) as typeof fetch;
+  }
+  afterEach(() => { globalThis.fetch = original; });
+
+  const arbolConFotos = {
+    cotizador: [{
+      clientes: [{
+        id: 'af-cli', nombre: 'Casa Fotos',
+        proyectos: [{
+          id: 'af-pro', nombre: 'Cocina',
+          cotizaciones: [{
+            id: 'af-q1', nombre: 'Con fotos',
+            versiones: [
+              { fecha: '2026-03-04T10:00:00Z', muebles: [{ total: 1000, qty: 1, imagenes: [FOTO, AJENA] }] },
+              { fecha: '2026-02-01T10:00:00Z', archivada: true, historicoURL: HIST },
+            ],
+          }],
+        }],
+      }],
+    }],
+  };
+
+  let negocio = '';
+  const mudar = (modo: 'seco' | 'escribir', limite?: number) =>
+    pedir('/admin/mudar-archivos', { method: 'POST', body: JSON.stringify({ org: ORG_A, modo, limite }) });
+
+  beforeAll(async () => {
+    await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: ORG_A, nombre: 'Archivos' }) });
+    const n = await pedir(`/orgs/${ORG_A}/negocios`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Taller' }) });
+    negocio = n.data.id;
+    await pedir('/admin/importar', {
+      method: 'POST',
+      body: JSON.stringify({ org: ORG_A, modo: 'escribir', negocio, docs: arbolConFotos }),
+    });
+  });
+
+  it('el ensayo cuenta lo que falta y no baja nada', async () => {
+    suplantar();
+    const r = await mudar('seco');
+    expect(r.estado).toBe(200);
+    // Dos: la foto y el JSON de la versión archivada. La URL de otro dominio
+    // NO se cuenta.
+    expect(r.data.archivos_en_firebase).toBe(2);
+    expect(r.data.cotizaciones_con_archivos_en_firebase).toBe(1);
+    expect(r.data.movidos).toBe(0);
+    expect(r.data.firebase_se_puede_apagar).toBe(false);
+    expect(pedidas).toEqual([]);
+  });
+
+  it('sólo se baja de Firebase Storage, no de cualquier dirección que venga en los datos', async () => {
+    // Las URLs vienen de datos importados, o sea de fuera. Sin la lista blanca,
+    // quien lograra meter una URL en `datos` tendría al Worker pidiendo lo que
+    // él quiera desde dentro de la red de Cloudflare.
+    suplantar();
+    await mudar('escribir', 100);
+    expect(pedidas).toHaveLength(2);
+    expect(pedidas.every((u) => u.includes('firebasestorage.googleapis.com'))).toBe(true);
+    const cot = await pedir(`/orgs/${ORG_A}/cotizaciones/af-q1`, { app: 'cotizador101' });
+    // La ajena sigue ahí, intacta: no era de Firebase y no es de esta mudanza.
+    expect(JSON.stringify(cot.data.datos)).toContain(AJENA);
+  });
+
+  it('la URL de la foto queda apuntando a la suite, que sí pide sesión', async () => {
+    const cot = await pedir(`/orgs/${ORG_A}/cotizaciones/af-q1`, { app: 'cotizador101' });
+    const datos = cot.data.datos as any;
+    const nueva = datos.versiones[0].muebles[0].imagenes[0];
+    expect(nueva).toMatch(new RegExp(`^/s101/orgs/${ORG_A}/archivos/`));
+    expect(datos.versiones[1].historicoURL).toMatch(new RegExp(`^/s101/orgs/${ORG_A}/archivos/`));
+    expect(JSON.stringify(datos)).not.toContain('firebasestorage');
+  });
+
+  it('el archivo queda en R2 y se baja por la API, con su nombre y su tipo', async () => {
+    const cot = await pedir(`/orgs/${ORG_A}/cotizaciones/af-q1`, { app: 'cotizador101' });
+    const ruta = String((cot.data.datos as any).versiones[0].muebles[0].imagenes[0]).replace('/s101', '');
+    const r = await SELF.fetch(`https://api.local${ruta}`, { headers: { Cookie: galleta, 'X-App': 'cotizador101' } });
+    expect(r.status).toBe(200);
+    expect(r.headers.get('Content-Type')).toBe('image/jpeg');
+    expect(new Uint8Array(await r.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3, 4, 5]));
+    const lista = await pedir(`/orgs/${ORG_A}/archivos`, { app: 'cotizador101' });
+    expect(lista.data.filas.map((f: any) => f.nombre).sort()).toEqual(['17-ab.jpg', '17-cd.json']);
+    expect(lista.data.filas.every((f: any) => f.de_tabla === 'cotizaciones' && f.de_id === 'af-q1')).toBe(true);
+  });
+
+  it('ya no queda nada pendiente, y eso es lo que autoriza apagar Firebase', async () => {
+    suplantar();
+    const r = await mudar('seco');
+    expect(r.data.pendientes).toBe(0);
+    expect(r.data.firebase_se_puede_apagar).toBe(true);
+  });
+
+  it('repetirla no vuelve a bajar lo que ya está', async () => {
+    suplantar();
+    const r = await mudar('escribir', 100);
+    expect(r.data.movidos).toBe(0);
+    expect(pedidas).toEqual([]);
+    const lista = await pedir(`/orgs/${ORG_A}/archivos`, { app: 'cotizador101' });
+    expect(lista.data.total).toBe(2);
+  });
+
+  it('se muda por tandas: el límite manda y la respuesta dice cuántas faltan', async () => {
+    // Un Worker tiene techo de subpeticiones y de tiempo. Doscientas fotos en
+    // una llamada se caen a la mitad; por tandas, el que llama sabe cuándo
+    // parar sin llevar la cuenta.
+    const ORG_T = 'cotizador-tandas';
+    await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: ORG_T, nombre: 'Tandas' }) });
+    const n = await pedir(`/orgs/${ORG_T}/negocios`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'T' }) });
+    await pedir('/admin/importar', {
+      method: 'POST',
+      body: JSON.stringify({ org: ORG_T, modo: 'escribir', negocio: n.data.id, docs: arbolConFotos }),
+    });
+    suplantar();
+    const una = await pedir('/admin/mudar-archivos', { method: 'POST', body: JSON.stringify({ org: ORG_T, modo: 'escribir', limite: 1 }) });
+    expect(una.data.movidos).toBe(1);
+    expect(una.data.pendientes).toBe(1);
+    expect(una.data.firebase_se_puede_apagar).toBe(false);
+    const dos = await pedir('/admin/mudar-archivos', { method: 'POST', body: JSON.stringify({ org: ORG_T, modo: 'escribir', limite: 1 }) });
+    expect(dos.data.pendientes).toBe(0);
+    expect(dos.data.firebase_se_puede_apagar).toBe(true);
+  });
+
+  it('si Storage se niega, se dice y la URL se queda: no se pierde la referencia', async () => {
+    const ORG_F = 'cotizador-falla';
+    await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: ORG_F, nombre: 'Falla' }) });
+    const n = await pedir(`/orgs/${ORG_F}/negocios`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'F' }) });
+    await pedir('/admin/importar', {
+      method: 'POST',
+      body: JSON.stringify({ org: ORG_F, modo: 'escribir', negocio: n.data.id, docs: arbolConFotos }),
+    });
+    suplantar('mal');
+    const r = await pedir('/admin/mudar-archivos', { method: 'POST', body: JSON.stringify({ org: ORG_F, modo: 'escribir', limite: 100 }) });
+    expect(r.data.movidos).toBe(0);
+    expect(r.data.fallos).toHaveLength(2);
+    expect(r.data.fallos[0].motivo).toMatch(/403/);
+    expect(r.data.firebase_se_puede_apagar).toBe(false);
+    // La URL vieja sigue ahí: borrarla habría dejado la foto sin manera de
+    // volver a encontrarla.
+    const cot = await pedir(`/orgs/${ORG_F}/cotizaciones/af-q1`, { app: 'cotizador101' });
+    expect(JSON.stringify(cot.data.datos)).toContain('firebasestorage');
+  });
+
+  it('la puerta es sólo del superadmin', async () => {
+    const antes = galleta;
+    galleta = '';
+    const r = await pedir('/admin/mudar-archivos', { method: 'POST', body: JSON.stringify({ org: ORG_A }) });
+    expect(r.estado).toBeGreaterThanOrEqual(401);
+    galleta = antes;
   });
 });

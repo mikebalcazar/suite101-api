@@ -31,6 +31,7 @@ import pagina from '../importar/pagina.html';
 import { importarUsuario, org, ponerAcceso, ponerMiembro } from '../maestro';
 import { soySuper } from './admin';
 import { err, ok, type Ctx, type Vars } from '../http';
+import { ulid } from '../lib';
 import type { Env } from '../entorno';
 import type { ApiOrgDB } from '../org-db';
 import { VERSION_CONTRATO, TABLAS } from '../../schema/tipos';
@@ -249,6 +250,196 @@ rutas.post('/importar', async (c) => {
     // fuera, pero se dicen: perder un campo sin ruido es como perder plata.
     campos_ignorados: cosecha.ignorados,
     muestra_ids: r.muestra,
+  });
+});
+
+/* ═══════════════ POST /admin/mudar-archivos ═══════════════
+ *
+ * Lo que la mudanza del documento NO puede traer.
+ *
+ * Las cotizaciones de quote101 apuntan a archivos que viven en Firebase
+ * Storage y no viajan en el documento: las fotos de los muebles
+ * (`muebles[].imagenes[]`) y el detalle de las versiones archivadas
+ * (`historicoURL`, un JSON). Al importar la cotización, esas URLs entran tal
+ * cual en `cotizaciones.datos` — y siguen apuntando a Firebase. **Apagar
+ * Firebase las mata.** Mientras queden, no hay corte.
+ *
+ * Esto las baja y las guarda en R2, por el mismo camino que cualquier archivo
+ * de la suite (`archivos` + `ARCHIVOS.put`), y reescribe la URL dentro de
+ * `datos`.
+ *
+ * POR QUÉ LO HACE EL WORKER Y NO EL NAVEGADOR
+ * El documento lo lee el navegador porque la sesión de Firebase vive ahí. Para
+ * esto no hace falta ninguna sesión: esas URLs son públicas —que lo sean es
+ * justo el hueco que se está cerrando—. Hacerlo aquí lo vuelve reanudable: si
+ * se corta a la mitad, lo ya mudado se queda mudado y la siguiente corrida
+ * sigue donde iba. Con el navegador, cerrar la pestaña a media subida dejaría
+ * el trabajo tirado.
+ *
+ * DOS CANDADOS, Y NINGUNO ES DECORATIVO
+ *
+ *   1. Sólo se baja de `firebasestorage.googleapis.com`. Las URLs vienen de
+ *      datos importados, o sea de fuera: sin esta lista, alguien que lograra
+ *      meter una URL en `datos` tendría al Worker pidiendo lo que él quiera
+ *      desde dentro de la red de Cloudflare. Es una lista blanca de un solo
+ *      nombre y así se queda.
+ *   2. `limite` por corrida. Un Worker tiene un techo de subpeticiones y de
+ *      tiempo; doscientas fotos en una sola llamada se caen a la mitad. Se
+ *      mudan por tandas y la respuesta dice cuántas faltan: se vuelve a llamar
+ *      hasta que `pendientes` sea 0. Repetir no hace daño — una URL ya mudada
+ *      no vuelve a coincidir con el patrón.
+ *
+ * La URL nueva queda como `/s101/orgs/:o/archivos/:id`, que es la ruta por la
+ * que quote101 le habla a la suite desde su propio origen. Así un `<img src>`
+ * y el `fetch` del histórico siguen funcionando sin tocar la app. Vive dentro
+ * de `cotizaciones.datos`, que es el cajón de quote101; ninguna otra app lo
+ * lee. Y a diferencia de la de Firebase, esta dirección **pide sesión**.
+ */
+
+/** De dónde se acepta bajar. Un solo nombre, a propósito. */
+const STORAGE = 'firebasestorage.googleapis.com';
+
+const esDeStorage = (u: string): boolean => {
+  if (!u.startsWith('https://')) return false;
+  try {
+    return new URL(u).hostname === STORAGE;
+  } catch {
+    return false;
+  }
+};
+
+/** El nombre con el que se guarda. De la URL de Storage se saca el nombre del
+ *  objeto (`muebles/17..-ab12.jpg` → `17..-ab12.jpg`); si no se puede, uno
+ *  genérico. Sirve para reconocerlo en `archivos`, no para nada más. */
+function nombreDe(u: string): string {
+  try {
+    const ruta = decodeURIComponent(new URL(u).pathname.split('/o/')[1] ?? '');
+    const hoja = ruta.split('/').pop();
+    return hoja && hoja.length <= 120 ? hoja : 'archivo';
+  } catch {
+    return 'archivo';
+  }
+}
+
+/** Recorre `datos` de una cotización y junta las URLs de Storage que haya, con
+ *  el camino para volver a escribirlas. Se hace con un recorrido general y no
+ *  yendo campo por campo a propósito: si mañana la app guarda una imagen en
+ *  otro rincón del árbol, ésta la encuentra igual. Lo que decide qué se muda es
+ *  «ser una URL de Storage», no en qué llave está. */
+function urlsDeStorage(valor: unknown, camino: Array<string | number> = [], salida: Array<{ camino: Array<string | number>; url: string }> = []) {
+  if (typeof valor === 'string') {
+    if (esDeStorage(valor)) salida.push({ camino: [...camino], url: valor });
+    return salida;
+  }
+  if (Array.isArray(valor)) {
+    valor.forEach((v, i) => urlsDeStorage(v, [...camino, i], salida));
+    return salida;
+  }
+  if (valor && typeof valor === 'object') {
+    for (const [k, v] of Object.entries(valor as Record<string, unknown>)) urlsDeStorage(v, [...camino, k], salida);
+  }
+  return salida;
+}
+
+/** Escribe `nuevo` en el camino que `urlsDeStorage` apuntó. */
+function ponerEn(raiz: unknown, camino: Array<string | number>, nuevo: string): void {
+  let nodo: any = raiz;
+  for (const paso of camino.slice(0, -1)) nodo = nodo?.[paso];
+  const ultimo = camino[camino.length - 1];
+  if (nodo && ultimo !== undefined) nodo[ultimo] = nuevo;
+}
+
+interface CuerpoMudar {
+  org?: string;
+  modo?: 'seco' | 'escribir';
+  limite?: number;
+}
+
+rutas.post('/mudar-archivos', async (c) => {
+  if (!(await soySuper(c))) return err(c, 'sin_permiso', 403, { puerta: 'mudar-archivos es solo del superadmin' });
+
+  const cuerpo = await c.req.json<CuerpoMudar>().catch(() => ({}) as CuerpoMudar);
+  const org_id = String(cuerpo.org || '').trim();
+  if (!org_id) return err(c, 'datos_invalidos', 400, { falta: 'org' });
+  const empresa = await org(c.env, org_id);
+  if (!empresa) return err(c, 'org_desconocida', 404, { org: org_id });
+
+  const seco = cuerpo.modo !== 'escribir';
+  const limite = Math.min(Math.max(Number(cuerpo.limite) || 20, 1), 100);
+  const stub = c.env.ORG.get(c.env.ORG.idFromName(org_id)) as unknown as ApiOrgDB;
+
+  const { filas } = await stub.listar('cotizaciones', {}, undefined, 1000);
+
+  // Primero se cuenta TODO lo que falta, y después se muda una tanda. Así la
+  // respuesta puede decir cuántas quedan sin que el que llama lleve la cuenta.
+  const porCotizacion = filas.map((f) => ({
+    id: String(f.id),
+    datos: (f.datos ?? {}) as Record<string, unknown>,
+    urls: urlsDeStorage(f.datos),
+  })).filter((x) => x.urls.length > 0);
+
+  const total = porCotizacion.reduce((s, x) => s + x.urls.length, 0);
+
+  const movidos: Array<{ cotizacion: string; nombre: string; bytes: number }> = [];
+  const fallos: Array<{ cotizacion: string; url: string; motivo: string }> = [];
+  let bytes = 0;
+
+  if (!seco) {
+    let presupuesto = limite;
+    for (const cot of porCotizacion) {
+      if (presupuesto <= 0) break;
+      let cambio = false;
+      for (const { camino, url } of cot.urls) {
+        if (presupuesto <= 0) break;
+        presupuesto--;
+        try {
+          const r = await fetch(url);
+          if (!r.ok) throw new Error(`Storage contestó ${r.status}`);
+          const cuerpoArchivo = await r.arrayBuffer();
+          const nombre = nombreDe(url);
+          const id = ulid();
+          const r2_key = `orgs/${org_id}/cotizaciones/${cot.id}/${id}-${nombre}`;
+          const mime = r.headers.get('content-type') || 'application/octet-stream';
+          await c.env.ARCHIVOS.put(r2_key, cuerpoArchivo, { httpMetadata: { contentType: mime } });
+          await stub.registrarArchivo({
+            id, r2_key, nombre, mime, bytes: cuerpoArchivo.byteLength,
+            de_tabla: 'cotizaciones', de_id: cot.id, subido_por: 'mudanza',
+          });
+          ponerEn(cot.datos, camino, `/s101/orgs/${org_id}/archivos/${id}`);
+          movidos.push({ cotizacion: cot.id, nombre, bytes: cuerpoArchivo.byteLength });
+          bytes += cuerpoArchivo.byteLength;
+          cambio = true;
+        } catch (e) {
+          fallos.push({ cotizacion: cot.id, url, motivo: (e as Error).message });
+        }
+      }
+      // Se guarda por cotización y no al final: si la corrida se corta, lo ya
+      // bajado queda apuntado. Un archivo en R2 que nadie referencia es basura
+      // silenciosa, y peor: la siguiente corrida lo volvería a bajar.
+      if (cambio) await stub.actualizar('cotizaciones', cot.id, { datos: cot.datos });
+    }
+  }
+
+  // Se vuelve a contar leyendo de la base, no restando: lo que vale es lo que
+  // quedó escrito, no lo que esta corrida creyó hacer.
+  const despues = await stub.listar('cotizaciones', {}, undefined, 1000);
+  const pendientes = despues.filas.reduce((s, f) => s + urlsDeStorage(f.datos).length, 0);
+
+  return ok(c, {
+    org: org_id,
+    modo: seco ? 'seco (no se bajó ni se escribió nada)' : 'escribir',
+    contrato: VERSION_CONTRATO,
+    cotizaciones_con_archivos_en_firebase: porCotizacion.length,
+    archivos_en_firebase: total,
+    movidos: movidos.length,
+    bytes,
+    pendientes,
+    /* Lo único que de verdad hay que leer de esta respuesta. Mientras no sea
+     * `false`, apagar Firebase se lleva fotos y versiones viejas. */
+    firebase_se_puede_apagar: pendientes === 0 && fallos.length === 0,
+    limite,
+    fallos,
+    detalle: movidos,
   });
 });
 

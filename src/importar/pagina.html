@@ -178,6 +178,21 @@
   <div id="corriendo" class="estado"></div>
 </section>
 
+<section id="archivos" hidden>
+  <h2>3.5 · Las fotos y las versiones viejas</h2>
+  <p>Las cotizaciones apuntan a archivos que <b>no viajan en el documento</b>: las fotos de los
+  muebles y el detalle de las versiones archivadas viven en Firebase Storage y sólo se referencian
+  por dirección. La mudanza de arriba trae la cotización; esos archivos se quedan allá.
+  <b>Apagar Firebase los borraría.</b></p>
+  <p class="nota">Esto los baja y los guarda en la suite, y reescribe la dirección dentro de la
+  cotización. Va por tandas porque son muchos: el botón sigue llamando hasta que no quede ninguno,
+  y se puede interrumpir — lo ya mudado se queda mudado y al volver sigue donde iba.</p>
+  <button id="bArchSeco" class="gris">Contar cuántos faltan</button>
+  <button id="bArchMudar" class="rojo">Mudarlos a la suite</button>
+  <div id="archEstado" class="estado"></div>
+  <div id="archVeredicto"></div>
+</section>
+
 <section id="reporte" hidden>
   <h2>4 · El cuadre</h2>
   <div id="veredicto"></div>
@@ -333,6 +348,7 @@ async function mirarSesion() {
     $('quien').innerHTML = 'Sesión de <b>' + yo.data.usuario.correo + '</b> · superadmin.';
     $('login').hidden = true;
     $('orgs').hidden = false;
+    $('archivos').hidden = false;
     const lista = $('listaOrgs');
     lista.innerHTML = '';
     for (const o of (yo.data.orgs || [])) {
@@ -561,6 +577,61 @@ function pintar(r) {
   }
   $('extras').innerHTML = extra;
 }
+
+/* ─── 3.5 · las fotos y las versiones viejas ───
+ *
+ * Por tandas, hasta que no quede ninguna. El límite lo pone la ruta; aquí sólo
+ * se vuelve a llamar mientras `pendientes` baje. Se mira que BAJE y no sólo que
+ * sea mayor que cero: si una tanda no lograra mudar nada —Storage caído, por
+ * ejemplo— llamar otra vez daría lo mismo para siempre. */
+async function archivos(modo) {
+  $('bArchSeco').disabled = true; $('bArchMudar').disabled = true;
+  $('archVeredicto').innerHTML = '';
+  let vuelta = 0, movidos = 0, bytes = 0, previo = Infinity, ultima = null;
+  try {
+    for (;;) {
+      vuelta++;
+      $('archEstado').textContent = modo === 'seco'
+        ? 'Contando…'
+        : 'Mudando… vuelta ' + vuelta + ', ' + movidos + ' archivos hasta ahora';
+      const r = await api('/admin/mudar-archivos', {
+        method: 'POST',
+        body: JSON.stringify({ org: $('org').value.trim(), modo, limite: 20 }),
+      });
+      if (!r.ok) { $('archVeredicto').innerHTML = '<p class="aviso"><b class="no">No se pudo: ' + (r.error || r.estado) + '</b></p>'; break; }
+      ultima = r.data;
+      movidos += r.data.movidos;
+      bytes += r.data.bytes;
+      if (modo === 'seco') break;
+      if (r.data.pendientes === 0) break;
+      if (r.data.pendientes >= previo) break;  // no avanzó: no insistir
+      previo = r.data.pendientes;
+    }
+  } finally {
+    $('archEstado').textContent = '';
+    $('bArchSeco').disabled = false; $('bArchMudar').disabled = false;
+  }
+  if (!ultima) return;
+  const puede = ultima.firebase_se_puede_apagar;
+  let html = '<p class="aviso"><b class="' + (puede ? 'si' : 'no') + '">'
+    + (puede ? 'Ya no queda nada en Firebase Storage' : 'Todavía faltan ' + ultima.pendientes) + '</b></p>'
+    + '<p class="cifra">cotizaciones con archivos en Firebase: ' + ultima.cotizaciones_con_archivos_en_firebase
+    + ' · mudados en esta corrida: ' + movidos
+    + ' · ' + Math.round(bytes / 1024).toLocaleString('es-MX') + ' KB</p>';
+  if ((ultima.fallos || []).length) {
+    html += tabla([{ t: 'Cotización' }, { t: 'Motivo' }], ultima.fallos.map((f) => [f.cotizacion, f.motivo]))
+      + '<p class="nota">La dirección vieja se quedó donde estaba: borrarla dejaría la foto sin manera '
+      + 'de volver a encontrarse. Se puede volver a intentar.</p>';
+  }
+  html += '<p class="nota"><b>Mientras esto no diga que no queda nada, Firebase no se apaga.</b></p>';
+  $('archVeredicto').innerHTML = html;
+}
+
+$('bArchSeco').onclick = () => archivos('seco');
+$('bArchMudar').onclick = () => {
+  if (!confirm('Va a bajar las fotos y las versiones viejas de Firebase y guardarlas en la suite. ¿Seguimos?')) return;
+  archivos('escribir');
+};
 
 mirarSesion();
 </script>
