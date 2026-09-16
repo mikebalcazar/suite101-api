@@ -14,8 +14,36 @@ const OSCURO = '#122733';
 const TEXTO = "'Raleway',Helvetica,Arial,sans-serif";
 const CIFRAS = "'Fira Sans','Raleway',Helvetica,Arial,sans-serif";
 
+/** ¿Sale el correo de verdad?
+ *
+ *  Sólo en producción. Fuera de producción NO se llama a Resend, y la razón no
+ *  es el ahorro: es que ese correo no lo lee nadie. La prueba de humo entra con
+ *  el código que `/auth/codigo` le devuelve en la respuesta —eso es justo lo que
+ *  `ENTORNO !== 'produccion'` habilita—, así que el mensaje se enviaba para
+ *  morir en un buzón que nadie abre.
+ *
+ *  Lo caro no era el gasto. Las pruebas entran con direcciones inventadas
+ *  (`@ejemplo.mx`), que no existen: cada una era un **rebote** a nombre de
+ *  `envios.taller101.mx`, el mismo dominio con el que le llega el código de
+ *  acceso a la gente de verdad. Una tasa alta de rebotes es lo que hace que un
+ *  proveedor de correo empiece a mandar tus mensajes a la basura. El 16-sep se
+ *  agotaron los 100 envíos del día en unas veinte corridas de medición, y ahí
+ *  se vio: el gasto sólo fue el síntoma.
+ *
+ *  Ninguna prueba comprueba que el correo salga —todas leen el código de la
+ *  respuesta—, así que apagarlo aquí no deja nada sin cubrir. Lo que sí se
+ *  comprueba, y sigue igual, es que en producción el código NUNCA viaja en la
+ *  respuesta.
+ *
+ *  Para probar el camino del correo a propósito en staging, se pone la variable
+ *  `CORREO_DE_VERDAD = "1"` y se quita al terminar. No está puesta en ningún
+ *  lado, y es una variable —no un secreto—, así que se ve en `wrangler.toml`
+ *  quién la prendió. */
+const sale = (env: Env) => env.ENTORNO === 'produccion' || env.CORREO_DE_VERDAD === '1';
+
 export async function enviarCorreo(env: Env, msg: { para: string; asunto: string; html: string; texto: string }): Promise<{ enviado: boolean; motivo?: string }> {
   if (!env.RESEND_API_KEY) return { enviado: false, motivo: 'correo_no_configurado' };
+  if (!sale(env)) return { enviado: false, motivo: 'correo_apagado_fuera_de_produccion' };
   const r = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
