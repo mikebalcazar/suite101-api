@@ -1270,3 +1270,93 @@ describe('0.5.0 · la bitácora del panel y los conteos', () => {
     galleta = guardada;
   });
 });
+
+describe('13 · la puerta de las apps empacadas (contrato 0.8.0)', () => {
+  const CORREO_APP = 'del-apk@ejemplo.mx';
+  let galletaMike = '';
+  let token = '';
+
+  /** Como pide una app empacada: sin cookie, con el token a mano. */
+  async function conToken(ruta: string, t: string, opciones: RequestInit = {}) {
+    const guardada = galleta;
+    galleta = '';
+    const r = await pedir(ruta, { ...opciones, headers: { Authorization: `Bearer ${t}`, ...(opciones.headers as object) } });
+    galleta = guardada;
+    return r;
+  }
+
+  it('al navegador no se le da token; sólo a quien lo pide con aparato', async () => {
+    galletaMike = galleta;
+    const alta = await pedir(`/admin/orgs/${ORG}/miembros`, { method: 'POST', body: JSON.stringify({ correo: CORREO_APP, nombre: 'Del APK', rol: 'staff' }) });
+    expect(alta.estado).toBe(201);
+
+    galleta = '';
+    const cod = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo: CORREO_APP }) });
+    const web = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CORREO_APP, codigo: cod.data.codigo_prueba }) });
+    expect(web.estado).toBe(200);
+    expect(web.data.token).toBeUndefined();
+    // Pero la cookie sí quedó puesta.
+    expect(galleta).toMatch(/^s101=/);
+
+    // El freno de reenvío son 45 s; aquí se borra el renglón para pedir otro
+    // código de inmediato, que es lo único que estorba en la prueba.
+    await entorno.MASTER.prepare(`DELETE FROM codigos WHERE correo = ?`).bind(CORREO_APP).run();
+    galleta = '';
+    const cod2 = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo: CORREO_APP }) });
+    const app = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CORREO_APP, codigo: cod2.data.codigo_prueba, aparato: true }) });
+    expect(app.estado).toBe(200);
+    expect(typeof app.data.token).toBe('string');
+    expect(app.data.token.length).toBeGreaterThan(20);
+    token = app.data.token;
+    galleta = galletaMike;
+  });
+
+  it('con el token y sin cookie, /yo contesta y es la misma persona', async () => {
+    const r = await conToken('/yo', token);
+    expect(r.estado).toBe(200);
+    expect(r.data.usuario.correo).toBe(CORREO_APP);
+    expect(r.data.entro_con).toBe('codigo');
+  });
+
+  it('un token inventado o mal firmado no abre nada', async () => {
+    expect((await conToken('/yo', 'no-soy-un-token')).estado).toBe(401);
+    expect((await conToken('/yo', token.split('.')[0] + '.firmaInventada')).estado).toBe(401);
+    // Y el encabezado sin «Bearer» tampoco.
+    const guardada = galleta;
+    galleta = '';
+    const suelto = await pedir('/yo', { headers: { Authorization: token } });
+    expect(suelto.estado).toBe(401);
+    galleta = guardada;
+  });
+
+  it('si van cookie y token a la vez, manda la cookie', async () => {
+    // `galleta` es la de Mike; el token es de otra persona.
+    const r = await pedir('/yo', { headers: { Authorization: `Bearer ${token}` } });
+    expect(r.estado).toBe(200);
+    expect(r.data.usuario.correo).toBe(CORREO);
+  });
+
+  it('es la misma sesión: salir con el token la mata para siempre', async () => {
+    const salida = await conToken('/auth/salir', token, { method: 'POST' });
+    expect(salida.estado).toBe(200);
+    expect(salida.data.salio).toBe(true);
+    expect((await conToken('/yo', token)).estado).toBe(401);
+    galleta = galletaMike;
+  });
+
+  it('el boleto de Google también se canjea por token cuando lo pide una app', async () => {
+    galletaMike = galleta;
+    const id = 'boleto-de-aparato-' + Date.now();
+    await entorno.MASTER.prepare(`INSERT INTO tickets (id, galleta, expira_at) VALUES (?,?,?)`)
+      .bind(id, galletaMike.split('=')[1], new Date(Date.now() + 60_000).toISOString()).run();
+
+    galleta = '';
+    const canje = await pedir('/auth/canje', { method: 'POST', body: JSON.stringify({ entrada: id, aparato: true }) });
+    expect(canje.estado).toBe(200);
+    expect(canje.data.token).toBe(galletaMike.split('=')[1]);
+    const r = await conToken('/yo', canje.data.token);
+    expect(r.estado).toBe(200);
+    expect(r.data.usuario.correo).toBe(CORREO);
+    galleta = galletaMike;
+  });
+});

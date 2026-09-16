@@ -6,6 +6,14 @@
  *
  * La sesión es una cookie `s101` con `id.firmaHMAC`: el id no dice nada por sí
  * solo, la sesión de verdad vive en D1 y se puede matar de un DELETE.
+ *
+ * Una app empacada (el APK de Android de quell101, la de Windows) no comparte
+ * origen con el sitio, así que la cookie no le llega nunca. Para ella la misma
+ * galleta firmada se puede pedir a mano —`{ aparato: true }` al entrar— y viaja
+ * en `Authorization: Bearer`. Es la misma sesión: la misma firma, la misma fila
+ * en D1 y el mismo DELETE la mata. Sólo se entrega a quien la pide, para que el
+ * navegador se quede con la cookie HttpOnly y no con un token que su JavaScript
+ * pueda leer.
  */
 
 import { Hono } from 'hono';
@@ -86,7 +94,8 @@ rutas.post('/codigo', async (c) => {
 /* ─────────────── entrar: código o PIN ─────────────── */
 
 rutas.post('/entrar', async (c) => {
-  const cuerpo = await c.req.json<{ correo?: string; codigo?: string; pin?: string; clave?: string }>().catch(() => ({}) as never);
+  const cuerpo = await c.req.json<{ correo?: string; codigo?: string; pin?: string; clave?: string; aparato?: boolean }>().catch(() => ({}) as never);
+  const aparato = cuerpo.aparato === true;
   const correo = normalizaCorreo(cuerpo.correo);
   if (!correoValido(correo)) return err(c, 'datos_invalidos', 400, { correo: 'no parece un correo' });
 
@@ -108,7 +117,7 @@ rutas.post('/entrar', async (c) => {
     }
     await c.env.MASTER.prepare(`DELETE FROM codigos WHERE correo = ?`).bind(correo).run();
     await sembrarSuperadmin(c.env, usuario.id, correo);
-    return await entregarSesion(c, usuario.id, VIDA_MIEMBRO, 'codigo');
+    return await entregarSesion(c, usuario.id, VIDA_MIEMBRO, 'codigo', aparato);
   }
 
   if (cuerpo.pin) {
@@ -127,7 +136,7 @@ rutas.post('/entrar', async (c) => {
       return err(c, 'pin_invalido', 401);
     }
     await c.env.MASTER.prepare(`DELETE FROM intentos_pin WHERE correo = ?`).bind(correo).run();
-    return await entregarSesion(c, usuario.id, VIDA_ACCESO, 'pin');
+    return await entregarSesion(c, usuario.id, VIDA_ACCESO, 'pin', aparato);
   }
 
   // Contraseña (contrato 0.7.0). El mismo freno que el PIN, en su propia
@@ -149,18 +158,24 @@ rutas.post('/entrar', async (c) => {
       return err(c, 'clave_invalida', 401);
     }
     await c.env.MASTER.prepare(`DELETE FROM intentos_clave WHERE correo = ?`).bind(correo).run();
-    return await entregarSesion(c, usuario.id, VIDA_MIEMBRO, 'clave');
+    return await entregarSesion(c, usuario.id, VIDA_MIEMBRO, 'clave', aparato);
   }
 
   return err(c, 'datos_invalidos', 400, { falta: 'codigo, pin o clave' });
 });
 
-async function entregarSesion(c: Ctx, usuario_id: string, vida: number, como: Como = 'codigo') {
+async function entregarSesion(c: Ctx, usuario_id: string, vida: number, como: Como = 'codigo', aparato = false) {
   const s = await abrirSesion(c.env, usuario_id, appDe(c), vida, como);
   const usuario = await usuarioPorId(c.env, usuario_id);
   // La cookie viaja en la respuesta que se arma aqui: `ok()` construye una
   // Response propia, asi que lo que se ponga con c.header() se perderia.
-  return ok(c, { usuario, vive_segundos: vida }, 200, { 'Set-Cookie': cookie(COOKIE, s.cookie, vida) });
+  // La cookie va siempre; el token sólo si lo pidieron (contrato 0.8.0).
+  return ok(
+    c,
+    { usuario, vive_segundos: vida, ...(aparato ? { token: s.cookie } : {}) },
+    200,
+    { 'Set-Cookie': cookie(COOKIE, s.cookie, vida) },
+  );
 }
 
 /* ─────────────── PIN: fijarlo ─────────────── */
@@ -323,13 +338,18 @@ async function emitirTicket(env: Env, galleta: string): Promise<string> {
  * Un solo uso: se borra al leerlo, valga o no. */
 
 rutas.post('/canje', async (c) => {
-  const { entrada } = await c.req.json<{ entrada?: string }>().catch(() => ({ entrada: '' }));
+  const { entrada, aparato } = await c.req.json<{ entrada?: string; aparato?: boolean }>().catch(() => ({ entrada: '', aparato: false }));
   const id = String(entrada || '');
   if (!id) return err(c, 'datos_invalidos', 400, { falta: 'entrada' });
   const t = await c.env.MASTER.prepare(`SELECT galleta, expira_at FROM tickets WHERE id = ?`).bind(id).first<{ galleta: string; expira_at: string }>();
   if (t) await c.env.MASTER.prepare(`DELETE FROM tickets WHERE id = ?`).bind(id).run();
   if (!t || vencida(t.expira_at)) return err(c, 'entrada_invalida', 401);
-  return ok(c, { entro: true }, 200, { 'Set-Cookie': cookie(COOKIE, t.galleta, VIDA_MIEMBRO) });
+  return ok(
+    c,
+    { entro: true, ...(aparato === true ? { token: t.galleta } : {}) },
+    200,
+    { 'Set-Cookie': cookie(COOKIE, t.galleta, VIDA_MIEMBRO) },
+  );
 });
 
 /* ─────────────── salir ─────────────── */
@@ -370,10 +390,15 @@ export async function yo(c: Ctx) {
   return ok(c, { usuario, superadmin: soySuper, orgs: mias, acceso: acc, entro_con: s.como, ...secretos });
 }
 
-/** Middleware: lee la cookie y deja la sesión en el contexto. No exige nada:
- *  cada ruta decide si la necesita. */
+/** Middleware: lee la sesión y la deja en el contexto. No exige nada: cada
+ *  ruta decide si la necesita.
+ *
+ *  Primero la cookie, que es la puerta del navegador. Si no viene —una app
+ *  empacada nunca la manda— se acepta la misma galleta en `Authorization:
+ *  Bearer`. La cookie manda: si las dos vienen, gana la del navegador. */
 export async function conSesion(c: Ctx, next: () => Promise<void>) {
-  const crudo = leerCookieDe(c.req.raw.headers.get('Cookie'), COOKIE);
+  const crudo = leerCookieDe(c.req.raw.headers.get('Cookie'), COOKIE)
+    ?? leerBearerDe(c.req.raw.headers.get('Authorization'));
   if (crudo) {
     const { abrirCookie } = await import('../lib');
     const id = await abrirCookie(crudo, await secretoDe(c.env));
@@ -395,6 +420,14 @@ export async function conSesion(c: Ctx, next: () => Promise<void>) {
     }
   }
   await next();
+}
+
+/** `Authorization: Bearer <galleta>`. La galleta es la misma que iría en la
+ *  cookie; aquí sólo se despega del encabezado, la firma se revisa después. */
+function leerBearerDe(cabecera: string | null): string | null {
+  if (!cabecera) return null;
+  const m = /^Bearer\s+(.+)$/i.exec(cabecera.trim());
+  return m ? m[1].trim() : null;
 }
 
 function leerCookieDe(cabecera: string | null, nombre: string): string | null {

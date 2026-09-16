@@ -36,11 +36,13 @@ function rev(ok, texto, extra = '') {
   linea(`  ${ok ? 'ok   ' : 'FALLA'} ${texto}${extra ? '  →  ' + extra : ''}`);
 }
 
-async function pedir(base, ruta, { app, method = 'GET', body } = {}) {
+async function pedir(base, ruta, { app, method = 'GET', body, token } = {}) {
   const t0 = Date.now();
   const cabeceras = { 'Content-Type': 'application/json' };
   if (app) cabeceras['X-App'] = app;
-  if (galleta) cabeceras.Cookie = galleta;
+  // Con token se pide como una app empacada: sin cookie, con el token a mano.
+  if (token) cabeceras.Authorization = `Bearer ${token}`;
+  else if (galleta) cabeceras.Cookie = galleta;
   const r = await fetch(`${base}${ruta}`, { method, headers: cabeceras, body: body ? JSON.stringify(body) : undefined, redirect: 'manual' });
   const puesta = r.headers.get('set-cookie');
   if (puesta) galleta = puesta.split(';')[0];
@@ -70,6 +72,9 @@ async function produccion() {
   rev(c.data?.codigo_prueba === undefined, 'producción NUNCA devuelve el código en la respuesta');
   const sin = await pedir(PROD, `/orgs/${ORG}`, { app: 'dash101' });
   rev(sin.estado === 401 && sin.error === 'sin_sesion', 'sin cookie no se pasa de la puerta', `${sin.estado} ${sin.error}`);
+  // Contrato 0.8.0: la puerta del token existe, pero no regala nada.
+  const conBasura = await pedir(PROD, '/yo', { token: 'no-soy-un-token.niFirma' });
+  rev(conBasura.estado === 401 && conBasura.error === 'sin_sesion', 'un token inventado tampoco pasa de la puerta', `${conBasura.estado} ${conBasura.error}`);
 
   // Google en producción: sólo se mira. Un volver_a ajeno es 403; el de una
   // app de la suite pasa la puerta del origen (501 mientras Mike no ponga las
@@ -102,6 +107,7 @@ async function produccion() {
   rev(pre.headers.get('access-control-allow-origin') === ORIGEN, 'devuelve el origen exacto, no un comodin', String(pre.headers.get('access-control-allow-origin')));
   rev(pre.headers.get('access-control-allow-credentials') === 'true', 'permite credenciales (la cookie de sesion)');
   rev(String(pre.headers.get('access-control-allow-headers')).includes('X-App'), 'deja pasar la cabecera X-App');
+  rev(String(pre.headers.get('access-control-allow-headers')).includes('Authorization'), 'y la cabecera Authorization, que es como entra una app empacada');
   const ajeno = await fetch(`${PROD}/salud`, { headers: { Origin: 'https://sitio-de-nadie.example' } });
   rev(ajeno.headers.get('access-control-allow-origin') === null, 'un origen que no esta en la lista NO recibe permiso');
 }
@@ -197,6 +203,27 @@ async function recorrido() {
   rev(!JSON.stringify(yoClave).includes('clave_hash') && !JSON.stringify(yoClave).includes(CLAVE), 'la API nunca devuelve la contraseña ni su huella');
   const sinActual = await pedir(STAGING, '/auth/clave', { method: 'POST', body: { clave: `${CLAVE}-otra` } });
   rev(sinActual.estado === 400 && sinActual.detalle?.motivo === 'ya_tienes_clave', 'cambiarla desde una sesión de contraseña pide la actual', `${sinActual.estado} ${sinActual.detalle?.motivo ?? sinActual.error}`);
+  // Contrato 0.8.0: la puerta de las apps empacadas. El APK de Android de
+  // quell101 y la de Windows no comparten origen con el sitio, así que la
+  // cookie no les llega nunca y llevan el token a mano.
+  galleta = '';
+  const web = await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO_CLAVE, clave: CLAVE } });
+  rev(web.estado === 200 && web.data?.token === undefined, 'al navegador no se le da token, sólo la cookie', String(web.data?.token));
+  galleta = '';
+  const conApp = await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO_CLAVE, clave: CLAVE, aparato: true } });
+  const token = conApp.data?.token;
+  rev(conApp.estado === 200 && typeof token === 'string' && token.length > 20, 'quien pide con aparato sí recibe token', `${conApp.ms} ms`);
+  galleta = '';
+  const yoApp = await pedir(STAGING, '/yo', { token });
+  rev(yoApp.estado === 200 && yoApp.data?.usuario?.correo === CORREO_CLAVE, 'con el token y sin cookie, /yo contesta y es la misma persona', `${yoApp.estado} ${yoApp.data?.usuario?.correo ?? yoApp.error}`);
+  rev(yoApp.data?.entro_con === 'clave', 'y dice con qué se entró', String(yoApp.data?.entro_con));
+  const inventado = await pedir(STAGING, '/yo', { token: `${String(token).split('.')[0]}.firmaInventada` });
+  rev(inventado.estado === 401, 'un token mal firmado no abre nada', String(inventado.estado));
+  const salida = await pedir(STAGING, '/auth/salir', { token, method: 'POST' });
+  rev(salida.estado === 200, 'la app cierra su sesión con el token');
+  const muerto = await pedir(STAGING, '/yo', { token });
+  rev(muerto.estado === 401, 'y el token ya no vale: es la misma sesión de D1', String(muerto.estado));
+
   galleta = galletaSuper2;
 
   const neg = await pedir(STAGING, `/orgs/${ORG}/negocios`, { app: 'dash101', method: 'POST', body: { nombre: 'Taller' } });
