@@ -13,7 +13,14 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.8.0 (la puerta de las apps empacadas: quien entra
+ * Versión del contrato: 0.9.0 (el folio de la cotización lo asigna la suite:
+ * `POST /orgs/:o/cotizaciones` devuelve `folio` con formato `COT-` y seis
+ * dígitos, asignado dentro del OrgDB —atómico, porque es un Durable Object de
+ * un solo hilo— y ya no calculado en el navegador. Una app no puede imponer su
+ * folio: si lo manda, se le ignora; sólo `suite101` puede, y es para que la
+ * mudanza traiga los viejos congelados. Un índice único en la base impide dos
+ * folios iguales). Antes:
+ * 0.8.0 (la puerta de las apps empacadas: quien entra
  * con `{ aparato: true }` recibe además `token`, la misma galleta firmada, y
  * puede volver con `Authorization: Bearer`. Es la misma sesión de D1 y el
  * mismo DELETE la mata; al navegador se le sigue dando sólo la cookie).
@@ -30,7 +37,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.8.0';
+export const VERSION_CONTRATO = '0.9.0';
 
 /* ─────────────── envoltura de toda respuesta ─────────────── */
 
