@@ -517,6 +517,33 @@ async function importacion() {
   const q2b = await pedir(STAGING, `/orgs/${ORGI}/cotizaciones/COT-Q2`, { app: 'cotizador101' });
   rev(cotDos.data?.avisos?.folios_asignados === 0 && q2b.data?.folio === q2.data?.folio, 'repetir la mudanza NO le cambia el folio a ninguna', `asignados ${cotDos.data?.avisos?.folios_asignados}, ${q2.data?.folio} → ${q2b.data?.folio}`);
 
+  /* Las fotos y las versiones viejas, contra el Worker de verdad.
+   *
+   * Aquí NO se suplanta el `fetch`: se usa una dirección de Storage que no
+   * existe, a propósito. Lo que se mide es lo que sólo se puede medir desde
+   * afuera: que el candado de la lista blanca viaja publicado, que una
+   * dirección de otro dominio no la toca, y que cuando la bajada falla la
+   * dirección vieja NO se borra —borrarla dejaría la foto sin manera de volver
+   * a encontrarse—. Que Firebase conteste no depende de este código. */
+  const FOTO = 'https://firebasestorage.googleapis.com/v0/b/no-existe-humo/o/muebles%2Fx.jpg?alt=media&token=t';
+  const AJENA = 'https://cdn.ejemplo.mx/foto.jpg';
+  await pedir(STAGING, `/orgs/${ORGI}/cotizaciones`, {
+    app: 'cotizador101', method: 'POST',
+    body: {
+      id: 'COT-FOTOS', negocio_id: 'NEG1', total: 1000,
+      datos: { versiones: [{ muebles: [{ imagenes: [FOTO, AJENA] }] }] },
+    },
+  });
+  const arSeco = await pedir(STAGING, '/admin/mudar-archivos', { method: 'POST', body: { org: ORGI, modo: 'seco' } });
+  rev(arSeco.data?.archivos_en_firebase === 1, 'cuenta sólo lo que está en Firebase Storage, no cualquier dirección', `${arSeco.data?.archivos_en_firebase} de 2 direcciones`);
+  rev(arSeco.data?.firebase_se_puede_apagar === false, 'y con algo pendiente dice que Firebase NO se puede apagar');
+
+  const arMal = await pedir(STAGING, '/admin/mudar-archivos', { method: 'POST', body: { org: ORGI, modo: 'escribir', limite: 5 } });
+  rev((arMal.data?.fallos || []).length === 1, 'una bajada que falla se reporta, no se traga', `${(arMal.data?.fallos || []).length} fallos`);
+  const conFotos = await pedir(STAGING, `/orgs/${ORGI}/cotizaciones/COT-FOTOS`, { app: 'cotizador101' });
+  rev(JSON.stringify(conFotos.data?.datos || {}).includes('firebasestorage'), 'y la dirección vieja se queda: no se pierde la referencia');
+  await pedir(STAGING, `/orgs/${ORGI}/cotizaciones/COT-FOTOS`, { app: 'cotizador101', method: 'DELETE' });
+
   // El usuario importado existe y puede fijar su PIN por correo.
   const guardada = galleta;
   galleta = '';
