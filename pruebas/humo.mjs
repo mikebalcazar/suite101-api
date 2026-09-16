@@ -131,6 +131,15 @@ async function recorrido() {
   // 3 · entra con código por correo y la sesión sobrevive
   const cod = await pedir(STAGING, '/auth/codigo', { method: 'POST', body: { correo: CORREO } });
   rev(/^\d{6}$/.test(String(cod.data?.codigo_prueba)), 'llega un código de 6 dígitos');
+  // Y NO se manda correo de verdad. Esta misma línea, corrida unas veinte
+  // veces el 16-sep entre todos los repositorios, agotó los 100 envíos del día
+  // de Resend: cada medición mandaba un correo que nadie iba a leer, y la
+  // mitad rebotaba contra el dominio con el que le llega el código a la gente.
+  // Fuera de producción el correo no sale (`src/auth/correo.ts`), y esto lo
+  // comprueba desde afuera: el código viene en la respuesta, el envío dice que
+  // no. Que en producción el código NUNCA venga en la respuesta se comprueba
+  // más arriba, contra producción.
+  rev(cod.data?.enviado === false, 'y NO se manda correo de verdad en staging', `enviado=${cod.data?.enviado}`);
   const ent = await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO, codigo: cod.data?.codigo_prueba } });
   rev(ent.estado === 200, 'entra con el código', `${ent.ms} ms`);
   const yo = await pedir(STAGING, '/yo');

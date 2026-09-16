@@ -15,6 +15,11 @@ export interface Env {
    *  nadie tenga que ponerle un secreto a mano. */
   SECRETO?: string;
   RESEND_API_KEY?: string;
+  /** Deja salir el correo de verdad fuera de producción. Sin ella, `enviarCorreo`
+   *  no llama a Resend más que en producción: el correo de una prueba no lo lee
+   *  nadie y rebota contra el dominio que manda los códigos reales. Se prende a
+   *  mano y por un rato, sólo para probar el camino del correo. */
+  CORREO_DE_VERDAD?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   /** El origen público de ESTA API (https://suite101-api.mike-929.workers.dev).
