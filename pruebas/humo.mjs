@@ -70,6 +70,19 @@ async function produccion() {
   rev(c.data?.codigo_prueba === undefined, 'producción NUNCA devuelve el código en la respuesta');
   const sin = await pedir(PROD, `/orgs/${ORG}`, { app: 'dash101' });
   rev(sin.estado === 401 && sin.error === 'sin_sesion', 'sin cookie no se pasa de la puerta', `${sin.estado} ${sin.error}`);
+
+  // Google en producción: sólo se mira. Un volver_a ajeno es 403; el de una
+  // app de la suite pasa la puerta del origen (501 mientras Mike no ponga las
+  // llaves, 302 a accounts.google.com cuando las ponga; ambos valen aquí).
+  const volverAjeno = await pedir(PROD, '/auth/google?volver_a=' + encodeURIComponent('https://malo.ejemplo.mx/'));
+  rev(volverAjeno.estado === 403 && volverAjeno.error === 'origen_no_permitido', 'un volver_a ajeno a la suite se rechaza', `${volverAjeno.estado} ${volverAjeno.error}`);
+  const propio = await fetch(`${PROD}/auth/google?volver_a=${encodeURIComponent('https://master101.mike-929.workers.dev/')}`, { redirect: 'manual' });
+  const aGoogle = propio.status === 302 && String(propio.headers.get('location')).startsWith('https://accounts.google.com/');
+  rev(propio.status === 501 || aGoogle, 'master101 está en ORIGENES: /auth/google no lo rechaza', aGoogle ? 'Google prendido: 302 a accounts.google.com' : `${propio.status} (sin llaves de Google todavía)`);
+  if (aGoogle) {
+    const destino = new URL(propio.headers.get('location')).searchParams.get('redirect_uri');
+    rev(destino === `${PROD}/auth/google/callback`, 'y Google devuelve a la API, no a la app', String(destino));
+  }
   galleta = guardada;
 
   // CORS en el borde de verdad. Hasta ahora solo se habia probado con curl y

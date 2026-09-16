@@ -176,26 +176,42 @@ function volverAPermitido(c: Ctx, volver_a: string): boolean {
 
 const VIDA_TICKET = 60; // segundos: lo que tarda un navegador en volver a la app
 
+/** A dónde tiene que devolver Google: SIEMPRE a esta API, por su origen
+ *  público. Las apps llegan aquí por su proxy `/s101/*` con un *service
+ *  binding*, y la petición conserva el dominio de la app; armar la dirección
+ *  de regreso con `c.req.url` mandaba a Google a
+ *  `https://dash101…/auth/google/callback`, una puerta que la app no sirve
+ *  (encontrado el 16-sep-2026 al prender Google en todas las apps). Con
+ *  `URL_PUBLICA` en wrangler.toml se arma siempre igual, venga de donde venga
+ *  la petición; sin ella queda el origen de la petición, que sólo es correcto
+ *  cuando el navegador le habla a la API directo. */
+export function redirectUriGoogle(env: Pick<Env, 'URL_PUBLICA'>, urlPeticion: string): string {
+  const origen = (env.URL_PUBLICA || new URL(urlPeticion).origin).replace(/\/+$/, '');
+  return `${origen}/auth/google/callback`;
+}
+
+/** La dirección de Google a la que se manda al navegador. */
+export function urlAutorizacionGoogle(env: Pick<Env, 'URL_PUBLICA' | 'GOOGLE_CLIENT_ID'>, urlPeticion: string, volver_a: string): URL {
+  const u = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  u.searchParams.set('client_id', env.GOOGLE_CLIENT_ID || '');
+  u.searchParams.set('redirect_uri', redirectUriGoogle(env, urlPeticion));
+  u.searchParams.set('response_type', 'code');
+  u.searchParams.set('scope', 'openid email profile');
+  u.searchParams.set('state', volver_a);
+  return u;
+}
+
 rutas.get('/google', async (c) => {
   const volver_a = c.req.query('volver_a') || '/';
   if (!volverAPermitido(c, volver_a)) return err(c, 'origen_no_permitido', 403, { volver_a });
   if (!c.env.GOOGLE_CLIENT_ID || !c.env.GOOGLE_CLIENT_SECRET) return err(c, 'google_no_configurado', 501);
-  const destino = new URL(c.req.url);
-  const redirect = `${destino.origin}/auth/google/callback`;
-  const u = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-  u.searchParams.set('client_id', c.env.GOOGLE_CLIENT_ID);
-  u.searchParams.set('redirect_uri', redirect);
-  u.searchParams.set('response_type', 'code');
-  u.searchParams.set('scope', 'openid email profile');
-  u.searchParams.set('state', volver_a);
-  return c.redirect(u.toString(), 302);
+  return c.redirect(urlAutorizacionGoogle(c.env, c.req.url, volver_a).toString(), 302);
 });
 
 rutas.get('/google/callback', async (c) => {
   if (!c.env.GOOGLE_CLIENT_ID || !c.env.GOOGLE_CLIENT_SECRET) return err(c, 'google_no_configurado', 501);
   const code = c.req.query('code');
   if (!code) return err(c, 'datos_invalidos', 400);
-  const origin = new URL(c.req.url).origin;
   const r = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -203,7 +219,7 @@ rutas.get('/google/callback', async (c) => {
       code,
       client_id: c.env.GOOGLE_CLIENT_ID,
       client_secret: c.env.GOOGLE_CLIENT_SECRET,
-      redirect_uri: `${origin}/auth/google/callback`,
+      redirect_uri: redirectUriGoogle(c.env, c.req.url),
       grant_type: 'authorization_code',
     }),
   });
