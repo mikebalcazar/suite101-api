@@ -32,10 +32,12 @@ export async function secretoDe(env: Env): Promise<string> {
 
 /* ─────────────── usuarios ─────────────── */
 
-export async function usuarioPorCorreo(env: Env, correo: string): Promise<Usuario & { pin_hash: string | null } | null> {
+export type UsuarioConSecretos = Usuario & { pin_hash: string | null; clave_hash: string | null };
+
+export async function usuarioPorCorreo(env: Env, correo: string): Promise<UsuarioConSecretos | null> {
   return env.MASTER.prepare(`SELECT * FROM usuarios WHERE correo = ?`)
     .bind(normalizaCorreo(correo))
-    .first<Usuario & { pin_hash: string | null }>();
+    .first<UsuarioConSecretos>();
 }
 
 export async function usuarioPorId(env: Env, id: string): Promise<Usuario | null> {
@@ -54,20 +56,34 @@ export async function crearUsuario(env: Env, correo: string, nombre?: string | n
 
 /* ─────────────── sesiones ─────────────── */
 
-export async function abrirSesion(env: Env, usuario_id: string, app: App, vida: number): Promise<{ cookie: string; id: string }> {
+/** Con qué se abrió una sesión. `codigo` y `google` prueban que la persona
+ *  controla ese buzón; `pin` y `clave` sólo prueban que sabe un secreto. La
+ *  diferencia decide si cambiar la contraseña pide la actual (contrato 0.7.0). */
+export type Como = 'codigo' | 'pin' | 'clave' | 'google';
+
+export async function abrirSesion(env: Env, usuario_id: string, app: App, vida: number, como: Como = 'codigo'): Promise<{ cookie: string; id: string }> {
   const id = ulid() + '-' + [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
-  await env.MASTER.prepare(`INSERT INTO sesiones (id, usuario_id, app, expira_at, creado_at) VALUES (?,?,?,?,?)`)
-    .bind(id, usuario_id, app, enSegundos(vida), ahora())
+  await env.MASTER.prepare(`INSERT INTO sesiones (id, usuario_id, app, expira_at, creado_at, como) VALUES (?,?,?,?,?,?)`)
+    .bind(id, usuario_id, app, enSegundos(vida), ahora(), como)
     .run();
   return { cookie: await firmarId(id, await secretoDe(env)), id };
 }
 
-export async function leerSesion(env: Env, id: string): Promise<{ usuario_id: string; app: string } | null> {
-  const s = await env.MASTER.prepare(`SELECT usuario_id, app, expira_at FROM sesiones WHERE id = ?`)
+export async function leerSesion(env: Env, id: string): Promise<{ usuario_id: string; app: string; como: Como } | null> {
+  const s = await env.MASTER.prepare(`SELECT usuario_id, app, expira_at, como FROM sesiones WHERE id = ?`)
     .bind(id)
-    .first<{ usuario_id: string; app: string; expira_at: string }>();
+    .first<{ usuario_id: string; app: string; expira_at: string; como: string | null }>();
   if (!s || s.expira_at < ahora()) return null;
-  return { usuario_id: s.usuario_id, app: s.app };
+  return { usuario_id: s.usuario_id, app: s.app, como: (s.como as Como) || 'codigo' };
+}
+
+/** Qué secretos tiene puestos un usuario. La API NUNCA devuelve los hashes:
+ *  sólo si existen, para que la pantalla sepa qué ofrecer. */
+export async function secretosDe(env: Env, usuario_id: string): Promise<{ tiene_pin: boolean; tiene_clave: boolean }> {
+  const f = await env.MASTER.prepare(`SELECT pin_hash, clave_hash FROM usuarios WHERE id = ?`)
+    .bind(usuario_id)
+    .first<{ pin_hash: string | null; clave_hash: string | null }>();
+  return { tiene_pin: !!f?.pin_hash, tiene_clave: !!f?.clave_hash };
 }
 
 export async function cerrarSesion(env: Env, id: string): Promise<void> {

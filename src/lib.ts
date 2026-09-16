@@ -133,6 +133,66 @@ export async function pinCoincide(pin: string, guardado: string | null): Promise
   return igualSeguro(await derivar(pin, sal, Number(vueltas) || VUELTAS), hash);
 }
 
+/* ─────────────── la contraseña (contrato 0.7.0) ───────────────
+ * Se guarda igual que el PIN —PBKDF2 con su sal, en una sola columna— porque
+ * es el mismo problema. Lo que cambia son las reglas de qué se acepta, y esas
+ * vienen de roster101 0.11.0, donde ya estaban escritas y probadas: si el
+ * panel de expedientes se muda a la suite, no puede bajar de nivel.
+ */
+
+export const CLAVE_MINIMO = 10;
+
+/** Las que cualquiera prueba primero. Sin acentos: se comparan normalizadas. */
+const OBVIAS = [
+  'password', 'contrasena', 'taller101', 'suite101', 'qwerty', 'admin', 'iloveyou',
+  'bienvenido', 'mexico', 'forespot', 'letmein', 'welcome', 'abc123', 'master',
+];
+
+const sinAcentos = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+/** ¿Son dígitos en escalera, hacia arriba o hacia abajo?
+ *
+ *  La resta va en círculo (módulo 10) a propósito: con una resta normal,
+ *  `1234567890` NO salía escalera, porque del 9 al 0 la diferencia es -9. Es
+ *  justo la contraseña que más se teclea de corrido, y pasaba. Medido el
+ *  16-sep con la prueba de la contraseña; el mismo hueco está en la versión
+ *  que roster101 0.11.0 usa hoy para su panel. */
+function esSecuencia(digitos: string): boolean {
+  if (digitos.length < 2) return false;
+  let sube = true, baja = true;
+  for (let i = 1; i < digitos.length; i++) {
+    const d = (Number(digitos[i]) - Number(digitos[i - 1]) + 10) % 10;
+    if (d !== 1) sube = false;
+    if (d !== 9) baja = false;
+  }
+  return sube || baja;
+}
+
+/** `null` si la contraseña sirve; si no, la frase que se le enseña a la
+ *  persona. Se le pasa el correo porque la trampa más común es usar el
+ *  usuario del propio correo. */
+export function revisaClave(clave: string, correo = ''): string | null {
+  const c = String(clave || '');
+  if (c.length < CLAVE_MINIMO) return `La contraseña necesita al menos ${CLAVE_MINIMO} caracteres.`;
+  if (c.trim() !== c) return 'La contraseña no puede empezar ni terminar con espacio: se pierde al copiarla.';
+  if (new Set(c).size < 4) return 'Esa contraseña es demasiado sencilla: usa al menos cuatro caracteres distintos.';
+
+  const plana = sinAcentos(c);
+  const usuario = sinAcentos(String(correo || '').split('@')[0]);
+  if (usuario.length >= 3 && plana.includes(usuario)) {
+    return 'La contraseña no puede llevar el usuario de tu correo: es lo primero que cualquiera probaría.';
+  }
+  for (const obvia of OBVIAS) {
+    if (plana.includes(obvia)) return 'Esa contraseña es de las que cualquiera prueba primero. Escoge otra.';
+  }
+  if (/^\d+$/.test(plana) && esSecuencia(plana)) return 'Esa contraseña es una secuencia de números. Escoge otra.';
+  return null;
+}
+
+/** Igual que `guardarPin`: mismo PBKDF2, otra columna. */
+export const guardarClave = guardarPin;
+export const claveCoincide = pinCoincide;
+
 /** 111111 y 123456 no son PIN. Tampoco 000000 ni las escaleras. */
 export function pinAceptable(pin: string): boolean {
   if (!/^\d{6}$/.test(pin)) return false;

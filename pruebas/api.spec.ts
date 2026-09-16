@@ -704,6 +704,145 @@ describe('11 · workshop101: el administrador de la empresa (contrato 0.6.0)', (
   });
 });
 
+describe('12 · la contraseña, junto al código, el PIN y Google (contrato 0.7.0)', () => {
+  const CORREO = 'con-clave@ejemplo.mx';
+  const BUENA = 'muelle-tordo-49';
+  const OTRA = 'cantera-vidrio-77';
+  let galletaMike = '';
+
+  /** Entra con código y deja la cookie puesta. Devuelve el usuario_id. */
+  async function entrarConCodigo(correo: string): Promise<string> {
+    galleta = '';
+    const cod = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo }) });
+    const ent = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo, codigo: cod.data.codigo_prueba }) });
+    expect(ent.estado, `entrar con código como ${correo}`).toBe(200);
+    return ent.data.usuario.id;
+  }
+
+  it('el superadmin da de alta a alguien; esa persona entra con código y pone su contraseña', async () => {
+    galletaMike = galleta;
+    const alta = await pedir(`/admin/orgs/${ORG}/miembros`, { method: 'POST', body: JSON.stringify({ correo: CORREO, nombre: 'Con Clave', rol: 'admin' }) });
+    expect(alta.estado).toBe(201);
+
+    await entrarConCodigo(CORREO);
+    // Antes de ponerla, /yo lo dice.
+    const antes = await pedir('/yo');
+    expect(antes.data.tiene_clave).toBe(false);
+    expect(antes.data.tiene_pin).toBe(false);
+    expect(antes.data.entro_con).toBe('codigo');
+
+    // Las débiles no pasan, y la API dice por qué con palabras.
+    const corta = await pedir('/auth/clave', { method: 'POST', body: JSON.stringify({ clave: 'corta1' }) });
+    expect(corta.estado).toBe(400);
+    expect(corta.error).toBe('clave_debil');
+    expect(corta.detalle.porque).toMatch(/al menos 10 caracteres/);
+
+    const conUsuario = await pedir('/auth/clave', { method: 'POST', body: JSON.stringify({ clave: 'con-clave-2026' }) });
+    expect(conUsuario.error).toBe('clave_debil');
+    expect(conUsuario.detalle.porque).toMatch(/usuario de tu correo/);
+
+    const obvia = await pedir('/auth/clave', { method: 'POST', body: JSON.stringify({ clave: 'Password2026!' }) });
+    expect(obvia.error).toBe('clave_debil');
+
+    const escalera = await pedir('/auth/clave', { method: 'POST', body: JSON.stringify({ clave: '1234567890' }) });
+    expect(escalera.error).toBe('clave_debil');
+
+    const puesta = await pedir('/auth/clave', { method: 'POST', body: JSON.stringify({ clave: BUENA }) });
+    expect(puesta.estado).toBe(200);
+    expect(puesta.data).toEqual({ puesta: true, cambiada: false });
+
+    const despues = await pedir('/yo');
+    expect(despues.data.tiene_clave).toBe(true);
+  });
+
+  it('se entra con la contraseña, y la equivocada no dice de más', async () => {
+    galleta = '';
+    const mala = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CORREO, clave: 'la-que-no-es-99' }) });
+    expect(mala.estado).toBe(401);
+    expect(mala.error).toBe('clave_invalida');
+    expect(JSON.stringify(mala)).not.toContain(BUENA);
+
+    const buena = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CORREO, clave: BUENA }) });
+    expect(buena.estado).toBe(200);
+    expect(buena.data.usuario.correo).toBe(CORREO);
+    const yo = await pedir('/yo');
+    expect(yo.data.entro_con).toBe('clave');
+    // La API nunca devuelve los hashes.
+    expect(JSON.stringify(yo)).not.toContain('clave_hash');
+    expect(JSON.stringify(yo)).not.toContain('pin_hash');
+  });
+
+  it('cambiarla desde una sesión de contraseña pide la actual; desde una de código, no', async () => {
+    // Sigue puesta la sesión abierta con la contraseña.
+    const sinActual = await pedir('/auth/clave', { method: 'POST', body: JSON.stringify({ clave: OTRA }) });
+    expect(sinActual.estado).toBe(400);
+    expect(sinActual.detalle.motivo).toBe('ya_tienes_clave');
+
+    const actualMala = await pedir('/auth/clave', { method: 'POST', body: JSON.stringify({ clave: OTRA, actual: 'no-era-esta-1' }) });
+    expect(actualMala.estado).toBe(401);
+    expect(actualMala.detalle.cual).toBe('actual');
+
+    const bien = await pedir('/auth/clave', { method: 'POST', body: JSON.stringify({ clave: OTRA, actual: BUENA }) });
+    expect(bien.estado).toBe(200);
+    expect(bien.data.cambiada).toBe(true);
+
+    // La vieja ya no entra; la nueva sí.
+    galleta = '';
+    expect((await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CORREO, clave: BUENA }) })).estado).toBe(401);
+    galleta = '';
+    expect((await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CORREO, clave: OTRA }) })).estado).toBe(200);
+
+    // «Olvidé mi contraseña» es entrar con código y poner otra, sin la actual.
+    await entrarConCodigo(CORREO);
+    const olvide = await pedir('/auth/clave', { method: 'POST', body: JSON.stringify({ clave: BUENA }) });
+    expect(olvide.estado).toBe(200);
+    galleta = '';
+    expect((await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CORREO, clave: BUENA }) })).estado).toBe(200);
+  });
+
+  it('el PIN y la contraseña conviven, y cada uno lleva su propia cuenta de intentos', async () => {
+    await entrarConCodigo(CORREO);
+    expect((await pedir('/auth/pin', { method: 'POST', body: JSON.stringify({ pin: '481903' }) })).estado).toBe(200);
+    const yo = await pedir('/yo');
+    expect([yo.data.tiene_pin, yo.data.tiene_clave]).toEqual([true, true]);
+
+    // Se gastan los cinco intentos de la contraseña…
+    for (let i = 0; i < 5; i++) {
+      galleta = '';
+      await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CORREO, clave: 'equivocada-000' }) });
+    }
+    galleta = '';
+    const frenada = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CORREO, clave: BUENA }) });
+    expect(frenada.estado).toBe(429);
+    expect(frenada.error).toBe('demasiados_intentos');
+
+    // …y el PIN sigue abriendo: son dos frenos distintos.
+    galleta = '';
+    const conPin = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CORREO, pin: '481903' }) });
+    expect(conPin.estado).toBe(200);
+    expect((await pedir('/yo')).data.entro_con).toBe('pin');
+
+    // Desde una sesión de PIN tampoco se cambia la contraseña sin la actual:
+    // un PIN robado no se lleva la cuenta.
+    const intento = await pedir('/auth/clave', { method: 'POST', body: JSON.stringify({ clave: OTRA }) });
+    expect(intento.estado).toBe(400);
+    expect(intento.detalle.motivo).toBe('ya_tienes_clave');
+
+    galleta = galletaMike;
+  });
+
+  it('sin correo conocido, entrar con contraseña no revela nada; y sin nada que mandar es 400', async () => {
+    galleta = '';
+    const nadie = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: 'no-existe@ejemplo.mx', clave: BUENA }) });
+    expect(nadie.estado).toBe(403);
+    expect(nadie.error).toBe('sin_permiso');
+    const vacio = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CORREO }) });
+    expect(vacio.estado).toBe(400);
+    expect(vacio.detalle.falta).toBe('codigo, pin o clave');
+    galleta = galletaMike;
+  });
+});
+
 describe('8 · borrar lo que tiene filas colgando es un 409, no un 500', () => {
   it('un cliente con proyecto contesta en_uso; una fila suelta sí se va', async () => {
     const l = await pedir(`/orgs/${ORG}/clientes`, { app: 'dash101' });

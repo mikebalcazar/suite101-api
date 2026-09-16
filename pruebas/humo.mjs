@@ -174,6 +174,31 @@ async function recorrido() {
   const fuera = await pedir(STAGING, `/admin/orgs/${ORG}/miembros/${socia.data?.usuario_id}`, { method: 'DELETE' });
   rev(fuera.estado === 200, 'el superadmin da de baja a la socia');
 
+  // Contrato 0.7.0: la contraseña de verdad, junto al código, el PIN y Google.
+  const CORREO_CLAVE = `clave-${ORG}@ejemplo.mx`;
+  const CLAVE = `muelle-tordo-${Math.random().toString(36).slice(2, 8)}`;
+  await pedir(STAGING, `/admin/orgs/${ORG}/miembros`, { method: 'POST', body: { correo: CORREO_CLAVE, nombre: 'Con clave', rol: 'admin' } });
+  const galletaSuper2 = galleta;
+  const codC = await pedir(STAGING, '/auth/codigo', { method: 'POST', body: { correo: CORREO_CLAVE } });
+  await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO_CLAVE, codigo: codC.data?.codigo_prueba } });
+  const yoAntes = await pedir(STAGING, '/yo');
+  rev(yoAntes.data?.entro_con === 'codigo' && yoAntes.data?.tiene_clave === false, '/yo dice con qué se entró y que todavía no hay contraseña', `${yoAntes.data?.entro_con} · tiene_clave ${yoAntes.data?.tiene_clave}`);
+  const debil = await pedir(STAGING, '/auth/clave', { method: 'POST', body: { clave: '1234567890' } });
+  rev(debil.estado === 400 && debil.error === 'clave_debil', 'una contraseña de escalera se rechaza y se dice por qué', String(debil.detalle?.porque ?? debil.error));
+  const puesta = await pedir(STAGING, '/auth/clave', { method: 'POST', body: { clave: CLAVE } });
+  rev(puesta.estado === 200 && puesta.data?.puesta === true, 'se pone la contraseña', `${puesta.ms} ms`);
+  galleta = '';
+  const mala = await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO_CLAVE, clave: `${CLAVE}-no` } });
+  rev(mala.estado === 401 && mala.error === 'clave_invalida', 'la contraseña equivocada no entra', `${mala.estado} ${mala.error}`);
+  const conClave = await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO_CLAVE, clave: CLAVE } });
+  rev(conClave.estado === 200, 'y con la buena se entra', `${conClave.ms} ms`);
+  const yoClave = await pedir(STAGING, '/yo');
+  rev(yoClave.data?.entro_con === 'clave' && yoClave.data?.tiene_clave === true, '/yo dice que entró con la contraseña', String(yoClave.data?.entro_con));
+  rev(!JSON.stringify(yoClave).includes('clave_hash') && !JSON.stringify(yoClave).includes(CLAVE), 'la API nunca devuelve la contraseña ni su huella');
+  const sinActual = await pedir(STAGING, '/auth/clave', { method: 'POST', body: { clave: `${CLAVE}-otra` } });
+  rev(sinActual.estado === 400 && sinActual.detalle?.motivo === 'ya_tienes_clave', 'cambiarla desde una sesión de contraseña pide la actual', `${sinActual.estado} ${sinActual.detalle?.motivo ?? sinActual.error}`);
+  galleta = galletaSuper2;
+
   const neg = await pedir(STAGING, `/orgs/${ORG}/negocios`, { app: 'dash101', method: 'POST', body: { nombre: 'Taller' } });
   const cli = await pedir(STAGING, `/orgs/${ORG}/clientes`, { app: 'dash101', method: 'POST', body: { nombre: 'Áurea Pérez', negocio_id: neg.data?.id } });
   rev(cli.data?.nombre_norm === 'aurea perez', 'nombre_norm sale sin acentos', String(cli.data?.nombre_norm));
