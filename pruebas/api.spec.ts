@@ -587,6 +587,123 @@ describe('3b · Google detrás de un proxy: el boleto de entrada', () => {
   });
 });
 
+describe('11 · workshop101: el administrador de la empresa (contrato 0.6.0)', () => {
+  /** Entra con código por correo (fuera de producción la API lo devuelve) y
+   *  deja la cookie en `galleta`. Devuelve el usuario_id. */
+  async function entrarComo(correo: string): Promise<string> {
+    galleta = '';
+    const cod = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo }) });
+    const ent = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo, codigo: cod.data.codigo_prueba }) });
+    expect(ent.estado, `entrar como ${correo}`).toBe(200);
+    return ent.data.usuario.id;
+  }
+
+  let galletaMike = '';
+  let duena = '';
+  let admi = '';
+  let socia = '';
+
+  it('el superadmin nombra a la dueña; la dueña da de alta administración y una socia con apps acotadas', async () => {
+    galletaMike = galleta;
+    const alta = await pedir(`/admin/orgs/${ORG}/miembros`, { method: 'POST', body: JSON.stringify({ correo: 'duena@ejemplo.mx', nombre: 'Dueña', rol: 'owner' }) });
+    expect(alta.estado).toBe(201);
+    duena = alta.data.usuario_id;
+
+    await entrarComo('duena@ejemplo.mx');
+    const a = await pedir(`/admin/orgs/${ORG}/miembros`, { method: 'POST', body: JSON.stringify({ correo: 'admi@ejemplo.mx', nombre: 'Admi', rol: 'admin' }) });
+    expect(a.estado).toBe(201);
+    admi = a.data.usuario_id;
+    const s = await pedir(`/admin/orgs/${ORG}/miembros`, { method: 'POST', body: JSON.stringify({ correo: 'socia@ejemplo.mx', rol: 'socio', apps: ['dash', 'dash'] }) });
+    expect(s.estado).toBe(201);
+    expect(s.data.apps).toEqual(['dash']);
+    socia = s.data.usuario_id;
+
+    // Una app que la empresa no tiene no se puede repartir.
+    const rara = await pedir(`/admin/orgs/${ORG}/miembros`, { method: 'POST', body: JSON.stringify({ correo: 'x@ejemplo.mx', rol: 'staff', apps: ['bitcoin'] }) });
+    expect(rara.estado).toBe(400);
+    expect(rara.detalle.apps_desconocidas).toEqual(['bitcoin']);
+
+    // La lista trae a todos con su última entrada: la dueña acaba de entrar, la socia nunca.
+    const lista = await pedir(`/admin/orgs/${ORG}/miembros`);
+    expect(lista.estado).toBe(200);
+    const porCorreo = Object.fromEntries(lista.data.filas.map((f: any) => [f.correo, f]));
+    expect(porCorreo['duena@ejemplo.mx'].ultima_entrada).toBeTruthy();
+    expect(porCorreo['socia@ejemplo.mx'].ultima_entrada).toBe(null);
+    expect(porCorreo['socia@ejemplo.mx'].apps).toEqual(['dash']);
+
+    // Y la bitácora de su empresa la lee la dueña, con sus altas.
+    const bit = await pedir(`/admin/orgs/${ORG}/bitacora`);
+    expect(bit.estado).toBe(200);
+    expect(bit.data.filas.some((r: any) => r.campo === 'miembro' && r.despues === 'socia@ejemplo.mx (socio)' && r.quien === 'duena@ejemplo.mx')).toBe(true);
+  });
+
+  it('la lista de apps por persona se aplica en la puerta: la socia entra a dash101 y no a quell101; workshop101 es de quien administra', async () => {
+    await entrarComo('socia@ejemplo.mx');
+    const dash = await pedir(`/orgs/${ORG}`, { app: 'dash101' });
+    expect(dash.estado).toBe(200);
+    const quell = await pedir(`/orgs/${ORG}`, { app: 'quell101' });
+    expect(quell.estado).toBe(403);
+    expect(quell.error).toBe('app_no_permitida');
+    expect(quell.detalle.permitidas).toEqual(['dash']);
+    const panel = await pedir(`/orgs/${ORG}`, { app: 'workshop101' });
+    expect(panel.estado).toBe(403);
+    expect(panel.detalle.motivo).toBe('solo_administra');
+    // Y la socia tampoco administra gente.
+    const gente = await pedir(`/admin/orgs/${ORG}/miembros`);
+    expect(gente.estado).toBe(403);
+
+    await entrarComo('admi@ejemplo.mx');
+    const panelAdmi = await pedir(`/orgs/${ORG}`, { app: 'workshop101' });
+    expect(panelAdmi.estado).toBe(200);
+    // Sin lista, todas las apps de la empresa.
+    expect((await pedir(`/orgs/${ORG}`, { app: 'quell101' })).estado).toBe(200);
+  });
+
+  it('la administración no nombra ni toca dueños, y nadie se toca a sí mismo', async () => {
+    await entrarComo('admi@ejemplo.mx');
+    const nombra = await pedir(`/admin/orgs/${ORG}/miembros`, { method: 'POST', body: JSON.stringify({ correo: 'otro-dueno@ejemplo.mx', rol: 'owner' }) });
+    expect(nombra.estado).toBe(403);
+    expect(nombra.detalle.motivo).toBe('solo_un_dueno_nombra_duenos');
+    const degrada = await pedir(`/admin/orgs/${ORG}/miembros/${duena}`, { method: 'PATCH', body: JSON.stringify({ rol: 'socio' }) });
+    expect(degrada.estado).toBe(403);
+    expect(degrada.detalle.motivo).toBe('solo_un_dueno_toca_duenos');
+    const baja = await pedir(`/admin/orgs/${ORG}/miembros/${duena}`, { method: 'DELETE' });
+    expect(baja.estado).toBe(403);
+    const asiMismo = await pedir(`/admin/orgs/${ORG}/miembros/${admi}`, { method: 'PATCH', body: JSON.stringify({ rol: 'owner' }) });
+    expect(asiMismo.estado).toBe(403);
+    expect(asiMismo.detalle.motivo).toBe('a_ti_mismo');
+    const meVoy = await pedir(`/admin/orgs/${ORG}/miembros/${admi}`, { method: 'DELETE' });
+    expect(meVoy.detalle.motivo).toBe('a_ti_mismo');
+    // Pero sí puede cambiarle las apps a la socia, y queda en la bitácora.
+    const apps = await pedir(`/admin/orgs/${ORG}/miembros/${socia}`, { method: 'PATCH', body: JSON.stringify({ apps: ['dash', 'quell'] }) });
+    expect(apps.estado).toBe(200);
+    expect(apps.data.apps).toEqual(['dash', 'quell']);
+    const bit = await pedir(`/admin/orgs/${ORG}/bitacora`);
+    expect(bit.data.filas.some((r: any) => r.campo === 'miembro.apps' && r.antes === 'socia@ejemplo.mx: dash' && r.despues === 'socia@ejemplo.mx: dash, quell')).toBe(true);
+  });
+
+  it('el último dueño no se degrada ni se baja, ni siquiera por el superadmin', async () => {
+    galleta = galletaMike;
+    const degrada = await pedir(`/admin/orgs/${ORG}/miembros/${duena}`, { method: 'PATCH', body: JSON.stringify({ rol: 'admin' }) });
+    expect(degrada.estado).toBe(409);
+    expect(degrada.error).toBe('ultimo_owner');
+    const baja = await pedir(`/admin/orgs/${ORG}/miembros/${duena}`, { method: 'DELETE' });
+    expect(baja.estado).toBe(409);
+    expect(baja.error).toBe('ultimo_owner');
+    // Con un segundo dueño, sí; y el segundo puede bajar al primero.
+    const segundo = await pedir(`/admin/orgs/${ORG}/miembros/${admi}`, { method: 'PATCH', body: JSON.stringify({ rol: 'owner' }) });
+    expect(segundo.estado).toBe(200);
+    await entrarComo('admi@ejemplo.mx');
+    const ahora = await pedir(`/admin/orgs/${ORG}/miembros/${duena}`, { method: 'PATCH', body: JSON.stringify({ rol: 'admin' }) });
+    expect(ahora.estado).toBe(200);
+    expect(ahora.data.rol).toBe('admin');
+    const fuera = await pedir(`/admin/orgs/${ORG}/miembros/${socia}`, { method: 'DELETE' });
+    expect(fuera.estado).toBe(200);
+    expect((await pedir(`/admin/orgs/${ORG}/miembros/${socia}`, { method: 'DELETE' })).estado).toBe(404);
+    galleta = galletaMike;
+  });
+});
+
 describe('8 · borrar lo que tiene filas colgando es un 409, no un 500', () => {
   it('un cliente con proyecto contesta en_uso; una fila suelta sí se va', async () => {
     const l = await pedir(`/orgs/${ORG}/clientes`, { app: 'dash101' });

@@ -27,6 +27,9 @@ const TABLAS_DINERO: Tabla[] = ['movimientos', 'cuentas', 'opex', 'cotizaciones'
 
 const stub = (c: Ctx): ApiOrgDB => c.env.ORG.get(c.env.ORG.idFromName(c.get('org_id'))) as unknown as ApiOrgDB;
 
+/** Los paneles de control: no aparecen en `orgs.apps` ni en `miembros.apps`. */
+const PANELES: ReadonlySet<App> = new Set<App>(['master101', 'workshop101', 'suite101']);
+
 /* ─────────────── las cuatro puertas ─────────────── */
 
 rutas.use('/:o/*', async (c, next) => {
@@ -34,7 +37,7 @@ rutas.use('/:o/*', async (c, next) => {
   if (!s) return err(c, 'sin_sesion', 401);
 
   const nombreApp = c.req.header('X-App');
-  if (!nombreApp) return err(c, 'sin_app', 400, { manda: 'X-App: dash101|quell101|peek101|cotizador101|roster101|nest101|master101|suite101' });
+  if (!nombreApp) return err(c, 'sin_app', 400, { manda: 'X-App: dash101|quell101|peek101|cotizador101|roster101|nest101|master101|workshop101|suite101' });
   if (!(APPS as readonly string[]).includes(nombreApp)) return err(c, 'app_desconocida', 400, { recibido: nombreApp, apps: APPS });
   const app = nombreApp as App;
 
@@ -43,8 +46,10 @@ rutas.use('/:o/*', async (c, next) => {
   if (!empresa) return err(c, 'org_desconocida', 404, { org: org_id });
   if (!empresa.activa) return err(c, 'org_inactiva', 403);
 
-  // master101 y suite101 son el panel de control: no se apagan desde `apps`.
-  if (app !== 'master101' && app !== 'suite101' && empresa.apps[LLAVE_APP[app]] !== true) {
+  // master101, workshop101 y suite101 son paneles de control: no se apagan
+  // desde `apps` ni se reparten por persona.
+  const esPanel = PANELES.has(app);
+  if (!esPanel && empresa.apps[LLAVE_APP[app]] !== true) {
     return err(c, 'app_inactiva', 403, { app, activas: Object.entries(empresa.apps).filter(([, v]) => v).map(([k]) => k) });
   }
 
@@ -80,6 +85,17 @@ rutas.use('/:o/*', async (c, next) => {
     }
   }
   if (!quien) return err(c, 'sin_permiso', 403, { org: org_id });
+
+  // Contrato 0.6.0: la lista de apps por persona (`miembros.apps`, vacía =
+  // todas las de la empresa) se aplica aquí. Antes se guardaba y no se leía.
+  if (m && !esPanel && m.apps.length > 0 && !m.apps.includes(LLAVE_APP[app])) {
+    return err(c, 'app_no_permitida', 403, { app, permitidas: m.apps });
+  }
+  // workshop101 es el panel del administrador de la empresa: entra el dueño,
+  // la administración y el superadmin; un socio o alguien de oficina, no.
+  if (app === 'workshop101' && !(quien.clase === 'miembro' && (quien.rol === 'owner' || quien.rol === 'admin'))) {
+    return err(c, 'sin_permiso', 403, { motivo: 'solo_administra', org: org_id });
+  }
 
   c.set('app', app);
   c.set('org_id', org_id);

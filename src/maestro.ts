@@ -140,6 +140,21 @@ export async function quitarMiembro(env: Env, org_id: string, usuario_id: string
   await env.MASTER.prepare(`DELETE FROM miembros WHERE org_id = ? AND usuario_id = ?`).bind(org_id, usuario_id).run();
 }
 
+/** Cuántos dueños tiene la empresa. El último no se baja ni se degrada. */
+export async function cuentaOwners(env: Env, org_id: string): Promise<number> {
+  const f = await env.MASTER.prepare(`SELECT COUNT(*) AS n FROM miembros WHERE org_id = ? AND rol = 'owner'`).bind(org_id).first<{ n: number }>();
+  return f?.n ?? 0;
+}
+
+/** Última sesión abierta por cada miembro de la empresa (contrato 0.6.0):
+ *  una consulta agrupada, no una por persona. */
+export async function ultimasEntradasDe(env: Env, org_id: string): Promise<Map<string, string>> {
+  const r = await env.MASTER.prepare(
+    `SELECT s.usuario_id, MAX(s.creado_at) AS ultima FROM sesiones s JOIN miembros m ON m.usuario_id = s.usuario_id AND m.org_id = ? GROUP BY s.usuario_id`,
+  ).bind(org_id).all<{ usuario_id: string; ultima: string }>();
+  return new Map((r.results ?? []).map((f) => [f.usuario_id, f.ultima]));
+}
+
 export interface Acceso { usuario_id: string; org_id: string; tipo: TipoAcceso; ref_id: string; activo: boolean }
 
 export async function acceso(env: Env, usuario_id: string): Promise<Acceso | null> {
