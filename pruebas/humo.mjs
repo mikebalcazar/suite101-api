@@ -76,6 +76,10 @@ async function produccion() {
   // llaves, 302 a accounts.google.com cuando las ponga; ambos valen aquí).
   const volverAjeno = await pedir(PROD, '/auth/google?volver_a=' + encodeURIComponent('https://malo.ejemplo.mx/'));
   rev(volverAjeno.estado === 403 && volverAjeno.error === 'origen_no_permitido', 'un volver_a ajeno a la suite se rechaza', `${volverAjeno.estado} ${volverAjeno.error}`);
+  for (const app of ['master101', 'workshop101']) {
+    const paso = await fetch(`${PROD}/auth/google?volver_a=${encodeURIComponent(`https://${app}.mike-929.workers.dev/`)}`, { redirect: 'manual' });
+    rev(paso.status !== 403, `${app} está en ORIGENES: /auth/google no lo rechaza como ajeno`, `${paso.status}`);
+  }
   const propio = await fetch(`${PROD}/auth/google?volver_a=${encodeURIComponent('https://master101.mike-929.workers.dev/')}`, { redirect: 'manual' });
   const aGoogle = propio.status === 302 && String(propio.headers.get('location')).startsWith('https://accounts.google.com/');
   rev(propio.status === 501 || aGoogle, 'master101 está en ORIGENES: /auth/google no lo rechaza', aGoogle ? 'Google prendido: 302 a accounts.google.com' : `${propio.status} (sin llaves de Google todavía)`);
