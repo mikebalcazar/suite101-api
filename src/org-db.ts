@@ -70,6 +70,10 @@ export interface ApiOrgDB {
   /** Deja el contador de folios en un número. La usa la mudanza de la fase 4
    *  para dejarlo justo después de lo que acabó de importar. */
   fijarFolio(siguiente: number, serie?: string): Promise<number>;
+  /** Aparta el siguiente número de una serie (lo consume). */
+  apartarNumero(serie: string): Promise<number>;
+  /** Mira el siguiente número sin apartarlo. */
+  verNumero(serie: string): Promise<number>;
   actualizar(tabla: Tabla, id: string, datos: Fila): Promise<Fila | null>;
   /** false si no existía; 'en_uso' si otras filas apuntan a esta (llave foránea). */
   borrar(tabla: Tabla, id: string): Promise<boolean | 'en_uso'>;
@@ -260,21 +264,44 @@ export class OrgDB extends DurableObject<Env> {
    * cliente. Hoy no se dispara nunca.
    */
   private siguienteFolio(serie = 'COT'): string {
+    for (;;) {
+      const folio = `${serie}-${String(this.apartarNumero(serie)).padStart(6, '0')}`;
+      const ocupado = this.sql.exec(`SELECT 1 AS x FROM cotizaciones WHERE folio = ? LIMIT 1`, folio).toArray()[0];
+      if (!ocupado) return folio;
+    }
+  }
+
+  /** Aparta el siguiente número de una serie y lo devuelve. El contador queda
+   *  ya avanzado: quien lo pidió se lo llevó, aunque después no lo use.
+   *
+   *  Es el mismo mecanismo del folio, y es lo que hace falta para CUALQUIER
+   *  consecutivo: el de los recibos de quote101 vivía en Firestore con la
+   *  cuenta hecha en el navegador —leer, sumar uno, guardar— y ahí dos
+   *  personas guardando a la vez se llevan el mismo número. Aquí no puede
+   *  pasar: un solo hilo por empresa.
+   *
+   *  Un número apartado NO se devuelve si el recibo no se acaba imprimiendo.
+   *  Eso deja huecos en la numeración, y es lo correcto: un consecutivo que
+   *  reusa números es un consecutivo que puede repetir. Un hueco se explica;
+   *  dos recibos con el mismo número, no. */
+  apartarNumero(serie: string): number {
     const fila = this.sql.exec(`SELECT siguiente FROM folios WHERE serie = ?`, serie).toArray()[0] as
       { siguiente: number } | undefined;
-    let n = fila?.siguiente ?? 1;
-    let folio = '';
-    for (;;) {
-      folio = `${serie}-${String(n).padStart(6, '0')}`;
-      const ocupado = this.sql.exec(`SELECT 1 AS x FROM cotizaciones WHERE folio = ? LIMIT 1`, folio).toArray()[0];
-      n += 1;
-      if (!ocupado) break;
-    }
+    const n = fila?.siguiente ?? 1;
     this.sql.exec(
       `INSERT INTO folios (serie, siguiente) VALUES (?,?) ON CONFLICT(serie) DO UPDATE SET siguiente = excluded.siguiente`,
-      serie, n,
+      serie, n + 1,
     );
-    return folio;
+    return n;
+  }
+
+  /** Mira el siguiente número sin apartarlo. Para enseñarlo en una pantalla
+   *  antes de que el usuario confirme: si se apartara al abrir la pantalla,
+   *  cada vez que alguien se asomara y cerrara se iría un número. */
+  verNumero(serie: string): number {
+    const fila = this.sql.exec(`SELECT siguiente FROM folios WHERE serie = ?`, serie).toArray()[0] as
+      { siguiente: number } | undefined;
+    return fila?.siguiente ?? 1;
   }
 
   /** Deja el contador en un número dado. La usa la mudanza de la fase 4 para

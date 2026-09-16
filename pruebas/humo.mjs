@@ -285,6 +285,18 @@ async function recorrido() {
   });
   rev(firmar.estado === 403, 'y no puede firmar un ajuste con el nombre de otra app', `${firmar.estado} ${firmar.error}`);
 
+  // Contrato 0.11.0: consecutivos por serie. El de los recibos se calculaba en
+  // el navegador; lo que se mide aquí es lo que sólo se ve con el Worker de
+  // verdad: diez de golpe por el camino real, proxy incluido.
+  const ver1 = await pedir(STAGING, `/orgs/${ORG}/folios/REC`, { app: 'cotizador101' });
+  rev(ver1.data?.siguiente === 1, 'mirar el siguiente recibo no lo consume', `siguiente ${ver1.data?.siguiente}`);
+  const diezRec = await Promise.all(Array.from({ length: 10 }, () =>
+    pedir(STAGING, `/orgs/${ORG}/folios/REC`, { app: 'cotizador101', method: 'POST' })));
+  const nums = diezRec.map((r) => r.data?.numero);
+  rev(new Set(nums).size === 10, 'diez recibos de golpe se llevan diez números distintos', `${new Set(nums).size} distintos de 10`);
+  const cotSerie = await pedir(STAGING, `/orgs/${ORG}/folios/COT`, { app: 'cotizador101', method: 'POST' });
+  rev(cotSerie.estado === 403, 'la serie del folio de cotización no se aparta por ahí', `${cotSerie.estado} ${cotSerie.error}`);
+
   const neg = await pedir(STAGING, `/orgs/${ORG}/negocios`, { app: 'dash101', method: 'POST', body: { nombre: 'Taller' } });
   const cli = await pedir(STAGING, `/orgs/${ORG}/clientes`, { app: 'dash101', method: 'POST', body: { nombre: 'Áurea Pérez', negocio_id: neg.data?.id } });
   rev(cli.data?.nombre_norm === 'aurea perez', 'nombre_norm sale sin acentos', String(cli.data?.nombre_norm));
