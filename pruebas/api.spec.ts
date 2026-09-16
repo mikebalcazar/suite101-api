@@ -10,6 +10,9 @@
 
 import { SELF, env, runInDurableObject } from 'cloudflare:test';
 import { redirectUriGoogle, urlAutorizacionGoogle } from '../src/rutas/auth';
+// El número de migraciones del OrgDB se lee del código, no se escribe a mano:
+// olvidarlo al subir la 0004 dejó el humo en rojo el 16-sep.
+import { VERSION_ORG_DB } from '../src/org-db';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Env } from '../src/entorno';
 
@@ -98,7 +101,7 @@ describe('2 · se crea una org y su Durable Object nace solo', () => {
     expect(r.estado).toBe(201);
     // La versión la contesta el propio DO: si vale 2, nació y corrió las dos
     // migraciones (0001 y la de partidas).
-    expect(r.data.org_db_version).toBe(4);
+    expect(r.data.org_db_version).toBe(VERSION_ORG_DB);
   });
 
   it('las tablas que hay dentro del DO son exactamente éstas', async () => {
@@ -879,7 +882,7 @@ describe('9 · reiniciar una empresa, que solo existe fuera de producción', () 
     const r = await pedir('/admin/orgs/efimera', { method: 'DELETE' });
     expect(r.estado).toBe(200);
     expect(r.data.reiniciada).toBe('efimera');
-    expect(r.data.org_db_version).toBe(4);
+    expect(r.data.org_db_version).toBe(VERSION_ORG_DB);
 
     const ya = await pedir('/orgs/efimera/negocios', { app: 'dash101' });
     expect(ya.estado).toBe(404);
@@ -887,7 +890,7 @@ describe('9 · reiniciar una empresa, que solo existe fuera de producción', () 
 
     const otraVez = await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: 'efimera', nombre: 'Efímera' }) });
     expect(otraVez.estado).toBe(201);
-    expect(otraVez.data.org_db_version).toBe(4);
+    expect(otraVez.data.org_db_version).toBe(VERSION_ORG_DB);
     const limpia = await pedir('/orgs/efimera/negocios', { app: 'dash101' });
     expect(limpia.data.total).toBe(0);
   });
