@@ -67,3 +67,28 @@ quell101 (bitacora-obra), roster101 (t101-portal) y quote101 tienen login
 propio (sus propios códigos, sus propias cookies). Google llega ahí el día
 que entren por la suite, que es lo que pide la capa de administrador de
 empresa que Mike planteó hoy (recado aparte).
+
+## Actualización 04:20Z · Google PRENDIDO y medido en las cinco apps
+
+Mike hizo los seis pasos en la consola de Google (guiado uno por uno, con
+botones) y puso `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` como secretos de
+`suite101-api`. Jr. disparó `desplegar.yml` (run 35054572984): el flujo subió
+las dos llaves a los dos Workers de la API y midió.
+
+| Dónde | Antes | Ahora |
+|---|---|---|
+| API producción, humo | 501 google_no_configurado | **302 a accounts.google.com**, `redirect_uri` = `https://suite101-api.mike-929.workers.dev/auth/google/callback`; 91/91 |
+| workshop101 (run 35054818394) | — | staging y producción: 302 a Google, y devuelve a la API; 24/24, 47/47, 16/16 |
+| peek101 (run 35054820112) | 501 | staging y producción: 302 a Google, y devuelve a la API; 26/26, 56/56, 16/16 |
+| master101 (run 35054949224) | 501 | staging y producción: 302 a Google, y devuelve a la API; 25/25, 72/72, 16/16 |
+| SUPERVISOR taller101 (run 35054951060) | 501 | `GET /s101/auth/google` → 302, Google prendido; todo verde |
+
+dash101 ya tenía el botón y usa la misma ruta de la API; su medición no la
+comprueba (no se le agregó el renglón). Nada más que hacer de nuestro lado.
+
+**Lo que hay que saber del comportamiento:** Google no da de alta a nadie.
+Quien entra con Google tiene que existir ya como miembro de una empresa (o
+ser el superadmin); un correo desconocido recibe 403. El consentimiento de
+Google quedó como app **externa**; mientras esté en modo «Prueba» sólo entran
+los correos anotados como usuarios de prueba (hasta 100). Publicarla es de
+Mike, desde la misma pantalla de consentimiento.
