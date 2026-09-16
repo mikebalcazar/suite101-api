@@ -9,6 +9,7 @@
  */
 
 import { SELF, env, runInDurableObject } from 'cloudflare:test';
+import { redirectUriGoogle, urlAutorizacionGoogle } from '../src/rutas/auth';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Env } from '../src/entorno';
 
@@ -518,6 +519,35 @@ describe('3b · Google detrás de un proxy: el boleto de entrada', () => {
     const ajeno = await pedir('/auth/google?volver_a=' + encodeURIComponent('https://malo.ejemplo.mx/login'));
     expect(ajeno.estado).toBe(403);
     expect(ajeno.error).toBe('origen_no_permitido');
+  });
+
+  it('Google devuelve a la API por su origen público, aunque la petición llegue por el proxy de una app', () => {
+    // Detrás de /s101/* la petición conserva el dominio de la app. Antes del
+    // 16-sep la dirección de regreso se armaba con él y Google acababa en
+    // https://dash101…/auth/google/callback, que la app no sirve.
+    const env = { URL_PUBLICA: 'https://api.ejemplo.mx', GOOGLE_CLIENT_ID: 'cliente-de-prueba' };
+    expect(redirectUriGoogle(env, 'https://dash101.ejemplo.mx/auth/google?volver_a=x')).toBe('https://api.ejemplo.mx/auth/google/callback');
+    expect(redirectUriGoogle({ URL_PUBLICA: 'https://api.ejemplo.mx/' }, 'https://peek101.ejemplo.mx/auth/google')).toBe('https://api.ejemplo.mx/auth/google/callback');
+    // Sin URL_PUBLICA queda el origen de la petición: sólo vale cuando el navegador le habla directo a la API.
+    expect(redirectUriGoogle({}, 'https://api.ejemplo.mx/auth/google')).toBe('https://api.ejemplo.mx/auth/google/callback');
+
+    const u = urlAutorizacionGoogle(env, 'https://master101.ejemplo.mx/auth/google', 'https://master101.ejemplo.mx/');
+    expect(u.origin + u.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth');
+    expect(u.searchParams.get('redirect_uri')).toBe('https://api.ejemplo.mx/auth/google/callback');
+    expect(u.searchParams.get('client_id')).toBe('cliente-de-prueba');
+    expect(u.searchParams.get('state')).toBe('https://master101.ejemplo.mx/');
+    expect(u.searchParams.get('scope')).toBe('openid email profile');
+    expect(u.searchParams.get('response_type')).toBe('code');
+  });
+
+  it('los Workers de la suite están en ORIGENES: /auth/google no los rechaza como ajenos', async () => {
+    // wrangler.toml de producción es el que leen las pruebas (ver vitest.config).
+    for (const app of ['dash101', 'peek101', 'master101', 'quote101', 'supervisor-t101']) {
+      const r = await pedir('/auth/google?volver_a=' + encodeURIComponent(`https://${app}.mike-929.workers.dev/`));
+      // Sin credenciales de Google contesta 501; lo que importa aquí es que NO sea 403 origen_no_permitido.
+      expect(r.estado, app).toBe(501);
+      expect(r.error, app).toBe('google_no_configurado');
+    }
   });
 
   it('un boleto se canjea una sola vez por la cookie, y con ella /yo contesta', async () => {

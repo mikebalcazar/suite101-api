@@ -17,6 +17,11 @@ export interface Env {
   RESEND_API_KEY?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  /** El origen público de ESTA API (https://suite101-api.mike-929.workers.dev).
+   *  Google devuelve ahí. Detrás del proxy de una app la petición trae el
+   *  dominio de la app, y armar la dirección de regreso con él mandaría a
+   *  Google a una puerta que no existe (las apps sólo sirven /s101/*). */
+  URL_PUBLICA?: string;
 
   ENTORNO: string; // 'produccion' | 'staging' | 'prueba'
   ORIGENES: string; // CSV de orígenes con permiso de CORS
