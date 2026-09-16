@@ -13,7 +13,14 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.9.0 (el folio de la cotización lo asigna la suite:
+ * Versión del contrato: 0.10.0 (los ajustes de cada app: la tabla `ajustes`
+ * guarda la configuración de una app dentro de una empresa —lo que no describe
+ * al negocio sino a cómo esa app trabaja—. El `id` lo arma la API con `X-App`
+ * (`app:clave`), así que una app no lee ni pisa los de otra, no puede haber dos
+ * con la misma clave, y el POST hace upsert: guardar es una sola llamada. Hacía
+ * falta para que quote101 pudiera dejar Firebase: sus clientes y cotizaciones
+ * ya tenían tabla, su configuración y su lista de precios no). Antes:
+ * 0.9.0 (el folio de la cotización lo asigna la suite:
  * `POST /orgs/:o/cotizaciones` devuelve `folio` con formato `COT-` y seis
  * dígitos, asignado dentro del OrgDB —atómico, porque es un Durable Object de
  * un solo hilo— y ya no calculado en el navegador. Una app no puede imponer su
@@ -37,7 +44,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.9.0';
+export const VERSION_CONTRATO = '0.10.0';
 
 /* ─────────────── envoltura de toda respuesta ─────────────── */
 
@@ -427,6 +434,23 @@ export interface Archivo {
   creado_at: string;
 }
 
+/** Configuración de UNA app dentro de una empresa: lo que no describe al
+ *  negocio —eso es `Negocio`— sino a cómo esa app trabaja. `valor` se lee
+ *  entero; nadie lo consulta por dentro.
+ *
+ *  El `id` es `app:clave` y lo arma la API con la cabecera `X-App`: ninguna app
+ *  manda el suyo, ninguna app abre el de otra, y guardar es un solo POST
+ *  porque ese id hace upsert. */
+export interface Ajuste {
+  /** `app:clave`, p. ej. `cotizador101:precios`. Lo arma la API. */
+  id: string;
+  app: App;
+  clave: string;
+  valor: Record<string, unknown>;
+  creado_at: string;
+  actualizado_at: string | null;
+}
+
 export const TABLAS = [
   'negocios',
   'cuentas',
@@ -444,8 +468,20 @@ export const TABLAS = [
   'conciliaciones',
   'conciliacion_cuentas',
   'archivos',
+  'ajustes',
 ] as const;
 export type Tabla = (typeof TABLAS)[number];
+
+/** Tablas que viven dentro del OrgDB pero NO son del contrato: no se exponen
+ *  por el CRUD genérico y ninguna app las conoce. `folios` es el contador del
+ *  folio de la cotización, y vive ahí adentro justo para ser atómico.
+ *
+ *  Está aquí, y no escrita a mano en cada prueba, porque dos pruebas comparan
+ *  la lista de tablas de la base con igualdad —para que una tabla NUEVA que
+ *  nadie esperaba también truene—, y esa lista tiene que salir de un solo
+ *  lugar. El 16-sep un conteo de migraciones escrito a mano en una prueba dejó
+ *  un despliegue en rojo; es la misma clase de cosa. */
+export const TABLAS_INTERNAS = ['folios'] as const;
 
 /* ─────────────── lo que devuelven las rutas con nombre ─────────────── */
 

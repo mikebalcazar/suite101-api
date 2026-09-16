@@ -10,7 +10,7 @@
  * falla, grita: 403 con la lista de campos permitidos.
  */
 
-import type { App, Tabla } from '../schema/tipos';
+import { APPS, type App, type Tabla } from '../schema/tipos';
 
 type Campos = readonly string[] | '*';
 
@@ -42,6 +42,13 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
   negocios: { dash101: '*', suite101: '*' },
   opex: { dash101: '*' },
   cotizaciones: { cotizador101: '*' },
+  /* Los ajustes los escribe cualquier app, pero SÓLO los suyos, y eso no lo
+   * cuida esta lista: lo cuida el `id`, que la API arma con `X-App`
+   * (migrations/org/0005_ajustes.sql). Aquí lo que se acota es qué campos
+   * viajan: `clave` y `valor`, nada más. `app` no está, aunque sea una columna
+   * de la tabla: si una app pudiera mandarlo, podría firmar un ajuste con el
+   * nombre de otra. */
+  ajustes: Object.fromEntries(APPS.map((a) => [a, ['clave', 'valor'] as const])),
   proveedores: { dash101: '*', cotizador101: ['nombre', 'nombre_norm', 'correo', 'telefono'] },
   estaciones: { quell101: '*' },
   // Las escribe la ruta POST /orgs/:o/conciliaciones, no el CRUD genérico:

@@ -6,13 +6,16 @@
  * Durable Object al despertar. */
 
 import { describe, expect, it } from 'vitest';
-import inicial from '../migrations/org/0001_inicial.sql';
-import partidasATabla from '../migrations/org/0002_partidas.sql';
-import conciliacionesSql from '../migrations/org/0003_conciliaciones.sql';
 import { DEFS } from '../src/tablas';
-import { TABLAS } from '../schema/tipos';
+import { MIGRACIONES } from '../src/org-db';
+import { TABLAS, TABLAS_INTERNAS } from '../schema/tipos';
 
-const MIGRACIONES = [inicial, partidasATabla, conciliacionesSql];
+/* La lista de migraciones se IMPORTA de `src/org-db.ts`, que es quien las
+ * aplica. Hasta el 16-sep esta prueba se armaba la suya —tres imports a
+ * mano— y se había quedado en la 0003: la 0004 llevaba un día publicada y
+ * aquí no existía. No tronó porque lo único que agregaba era `folios`, que el
+ * contrato no expone; o sea, se salvó de casualidad. Comparar contra una lista
+ * propia es comparar contra una base que no es la que corre. */
 
 /** Saca {tabla: [columnas]} del SQL, sin motor: basta con leerlo. Entiende
  *  CREATE TABLE, ALTER TABLE … ADD COLUMN y ALTER TABLE … DROP COLUMN, que es
@@ -21,7 +24,12 @@ function columnasDelSql(migraciones: string[]): Record<string, string[]> {
   const salida: Record<string, string[]> = {};
   for (const sql of migraciones) {
     const limpio = sql.replace(/--[^\n]*/g, '');
-    for (const m of limpio.matchAll(/CREATE TABLE (\w+)\s*\(([\s\S]*?)\)\s*;/g)) {
+    // `IF NOT EXISTS` es parte del patrón a propósito: las migraciones lo usan
+    // para poder volver a correr sin tronar. Sin él aquí, el lector se comía la
+    // tabla entera en silencio —le pasó a `folios` (0004) y a `ajustes`
+    // (0005)—, y una tabla que el lector no ve es una tabla que esta prueba no
+    // compara. El conteo de abajo es el que impide que vuelva a pasar.
+    for (const m of limpio.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?(\w+)\s*\(([\s\S]*?)\)\s*;/g)) {
       const [, tabla, cuerpo] = m;
       const cols: string[] = [];
       let nivel = 0;
@@ -41,6 +49,19 @@ function columnasDelSql(migraciones: string[]): Record<string, string[]> {
       salida[m[1]] = salida[m[1]].filter((c) => c !== m[2]);
     }
   }
+  /* Y que no se haya quedado ninguna fuera. Este conteo es el que convierte un
+   * hueco del lector en una falla: sin él, una forma de CREATE TABLE que el
+   * patrón no entienda deja la tabla sin comparar y todo sale verde. */
+  const declaradas = migraciones
+    .map((sql) => sql.replace(/--[^\n]*/g, ''))
+    .join('\n')
+    .match(/CREATE TABLE\b/g)?.length ?? 0;
+  if (declaradas !== Object.keys(salida).length) {
+    throw new Error(
+      `el lector de SQL entendió ${Object.keys(salida).length} de ${declaradas} CREATE TABLE. ` +
+        'Hay una forma de CREATE TABLE que no reconoce, y esa tabla se estaría quedando sin comparar.',
+    );
+  }
   return salida;
 }
 
@@ -49,9 +70,12 @@ const delSql = columnasDelSql(MIGRACIONES);
 const sinNotas = MIGRACIONES.join('\n').replace(/--[^\n]*/g, '');
 
 describe('el esquema del OrgDB', () => {
-  it('tiene las catorce tablas: las trece del documento y `partidas` (fase 2 de dash101)', () => {
-    expect(Object.keys(delSql).sort()).toEqual([...TABLAS].sort());
-    expect(TABLAS.length).toBe(16);
+  it('las tablas del SQL son las del contrato, más las internas, y ninguna otra', () => {
+    // Igualdad y no «contiene», en los dos sentidos: una tabla del contrato que
+    // el SQL no cree, y una tabla del SQL que el contrato no declare, las dos
+    // truenan. Sin número escrito a mano: el número no dice nada que la
+    // comparación no diga ya, y hay que acordarse de subirlo.
+    expect(Object.keys(delSql).sort()).toEqual([...TABLAS, ...TABLAS_INTERNAS].sort());
   });
 
   it('0002 se lleva el JSON de partidas del proyecto y le deja el compromiso', () => {

@@ -17,6 +17,7 @@ import inicial from '../migrations/org/0001_inicial.sql';
 import partidasATabla from '../migrations/org/0002_partidas.sql';
 import conciliaciones from '../migrations/org/0003_conciliaciones.sql';
 import folios from '../migrations/org/0004_folios.sql';
+import ajustes from '../migrations/org/0005_ajustes.sql';
 import { DEFS, type Def, type Tipo } from './tablas';
 import { ahora, normalizar, ulid } from './lib';
 import { TABLAS, type Aviso, type Etapa, type Peek, type Pool, type Tabla } from '../schema/tipos';
@@ -25,7 +26,13 @@ import type { Env } from './entorno';
 /* Las migraciones del OrgDB, en orden. Para agregar una: se escribe el .sql,
  * se importa y se empuja aquí. El DO la aplica al despertar. Nunca se edita
  * una que ya salió: las bases que ya la corrieron no la volverían a correr. */
-const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios];
+/** Las migraciones del OrgDB, en orden. Se exporta porque es el ÚNICO dueño de
+ *  esta lista: el DO las aplica de aquí, `VERSION_ORG_DB` se cuenta de aquí y
+ *  `esquema.spec.ts` compara contra esto mismo. Una prueba que se armara su
+ *  propia lista compararía contra una base que no existe — y eso pasó: la
+ *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
+ *  agregaba una tabla que el contrato no expone. */
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes];
 
 /** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
  *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
@@ -296,6 +303,18 @@ export class OrgDB extends DurableObject<Env> {
       const traido = String(datos.folio ?? '').trim();
       fila.folio = contexto.app === 'suite101' && traido ? traido : this.siguienteFolio();
     }
+    /* El ajuste es de la app que lo escribe, y su `id` se calcula: `app:clave`.
+     *
+     * Ni el `id` ni el `app` vienen de fuera, aunque los manden: si una app
+     * pudiera elegir su id, podría escribir `cotizador101:precios` desde otra
+     * app y pisarle la lista de precios. Con el id armado aquí, el candado no
+     * depende de que ninguna ruta se acuerde de revisar. */
+    if (tabla === 'ajustes') {
+      fila.app = contexto.app;
+      fila.clave = String(datos.clave ?? '').trim();
+      fila.id = `${contexto.app}:${fila.clave}`;
+      fila.actualizado_at = ahora();
+    }
     if (def.cols.creado_at) fila.creado_at = ahora();
     if (def.cols.ts && !fila.ts) fila.ts = ahora();
     if (def.cols.creado_por) fila.creado_por = contexto.usuario_id;
@@ -304,8 +323,15 @@ export class OrgDB extends DurableObject<Env> {
 
     const cols = Object.keys(fila).filter((c) => c in def.cols);
     const valores = cols.map((c) => this.adentro(def.cols[c], fila[c]));
+    /* Guardar un ajuste es un solo POST: su id se calcula, así que el segundo
+     * POST con la misma clave no es un choque, es la misma gaveta otra vez. Sin
+     * esto la app tendría que preguntar antes si existía, y dos pestañas
+     * guardando a la vez se llevarían un 409 por turnarse mal. */
+    const choque = tabla === 'ajustes'
+      ? ' ON CONFLICT(id) DO UPDATE SET valor = excluded.valor, actualizado_at = excluded.actualizado_at'
+      : '';
     this.sql.exec(
-      `INSERT INTO ${tabla} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`,
+      `INSERT INTO ${tabla} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})${choque}`,
       ...valores,
     );
 
