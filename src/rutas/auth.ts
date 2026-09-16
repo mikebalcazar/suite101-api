@@ -10,12 +10,13 @@
 
 import { Hono } from 'hono';
 import {
-  ahora, cookie, correoValido, enSegundos, guardarPin, igualSeguro, normalizaCorreo,
-  pinAceptable, pinCoincide, sha256, ulid, vencida,
+  ahora, claveCoincide, cookie, correoValido, enSegundos, guardarClave, guardarPin, igualSeguro,
+  normalizaCorreo, pinAceptable, pinCoincide, revisaClave, sha256, ulid, vencida,
 } from '../lib';
 import {
   VIDA_ACCESO, VIDA_MIEMBRO, abrirSesion, acceso, cerrarSesion, crearUsuario, esSuperadmin,
   miembro, org, orgs, secretoDe, sembrarSuperadmin, usuarioPorCorreo, usuarioPorId,
+  secretosDe, type Como,
 } from '../maestro';
 import { correoCodigo, enviarCorreo } from '../auth/correo';
 import { err, ok, type Ctx, type Vars } from '../http';
@@ -56,7 +57,7 @@ rutas.post('/codigo', async (c) => {
   // a crear la primera empresa.
   let usuario = await usuarioPorCorreo(c.env, correo);
   const esPrimero = !usuario && normalizaCorreo(c.env.CORREO_SUPERADMIN || '') === correo;
-  if (esPrimero) usuario = { ...(await crearUsuario(c.env, correo)), pin_hash: null };
+  if (esPrimero) usuario = { ...(await crearUsuario(c.env, correo)), pin_hash: null, clave_hash: null };
   if (!usuario) {
     // No se dice si existe o no: eso convertiría esta ruta en un directorio.
     return ok(c, { enviado: false, mensaje: 'Si ese correo tiene acceso, le llega un código.' });
@@ -85,7 +86,7 @@ rutas.post('/codigo', async (c) => {
 /* ─────────────── entrar: código o PIN ─────────────── */
 
 rutas.post('/entrar', async (c) => {
-  const cuerpo = await c.req.json<{ correo?: string; codigo?: string; pin?: string }>().catch(() => ({}) as never);
+  const cuerpo = await c.req.json<{ correo?: string; codigo?: string; pin?: string; clave?: string }>().catch(() => ({}) as never);
   const correo = normalizaCorreo(cuerpo.correo);
   if (!correoValido(correo)) return err(c, 'datos_invalidos', 400, { correo: 'no parece un correo' });
 
@@ -107,7 +108,7 @@ rutas.post('/entrar', async (c) => {
     }
     await c.env.MASTER.prepare(`DELETE FROM codigos WHERE correo = ?`).bind(correo).run();
     await sembrarSuperadmin(c.env, usuario.id, correo);
-    return await entregarSesion(c, usuario.id, VIDA_MIEMBRO);
+    return await entregarSesion(c, usuario.id, VIDA_MIEMBRO, 'codigo');
   }
 
   if (cuerpo.pin) {
@@ -126,14 +127,36 @@ rutas.post('/entrar', async (c) => {
       return err(c, 'pin_invalido', 401);
     }
     await c.env.MASTER.prepare(`DELETE FROM intentos_pin WHERE correo = ?`).bind(correo).run();
-    return await entregarSesion(c, usuario.id, VIDA_ACCESO);
+    return await entregarSesion(c, usuario.id, VIDA_ACCESO, 'pin');
   }
 
-  return err(c, 'datos_invalidos', 400, { falta: 'codigo o pin' });
+  // Contraseña (contrato 0.7.0). El mismo freno que el PIN, en su propia
+  // cuenta: gastar los cinco intentos de la contraseña no debe cerrarle a
+  // nadie la puerta del PIN, ni al revés.
+  if (cuerpo.clave) {
+    const clave = String(cuerpo.clave);
+    const gasto = await c.env.MASTER.prepare(`SELECT * FROM intentos_clave WHERE correo = ?`)
+      .bind(correo).first<{ intentos: number; desde_at: string }>();
+    const enLaHora = gasto && Date.now() - Date.parse(gasto.desde_at) < 3600_000;
+    if (enLaHora && gasto!.intentos >= MAX_INTENTOS) return err(c, 'demasiados_intentos', 429, { ventana: '1 hora' });
+
+    if (!(await claveCoincide(clave, usuario.clave_hash))) {
+      await c.env.MASTER.prepare(
+        `INSERT INTO intentos_clave (correo, intentos, desde_at) VALUES (?,1,?)
+         ON CONFLICT(correo) DO UPDATE SET intentos = CASE WHEN ? THEN intentos_clave.intentos + 1 ELSE 1 END,
+                                           desde_at = CASE WHEN ? THEN intentos_clave.desde_at ELSE ? END`,
+      ).bind(correo, ahora(), enLaHora ? 1 : 0, enLaHora ? 1 : 0, ahora()).run();
+      return err(c, 'clave_invalida', 401);
+    }
+    await c.env.MASTER.prepare(`DELETE FROM intentos_clave WHERE correo = ?`).bind(correo).run();
+    return await entregarSesion(c, usuario.id, VIDA_MIEMBRO, 'clave');
+  }
+
+  return err(c, 'datos_invalidos', 400, { falta: 'codigo, pin o clave' });
 });
 
-async function entregarSesion(c: Ctx, usuario_id: string, vida: number) {
-  const s = await abrirSesion(c.env, usuario_id, appDe(c), vida);
+async function entregarSesion(c: Ctx, usuario_id: string, vida: number, como: Como = 'codigo') {
+  const s = await abrirSesion(c.env, usuario_id, appDe(c), vida, como);
   const usuario = await usuarioPorId(c.env, usuario_id);
   // La cookie viaja en la respuesta que se arma aqui: `ok()` construye una
   // Response propia, asi que lo que se ponga con c.header() se perderia.
@@ -152,6 +175,42 @@ rutas.post('/pin', async (c) => {
   }
   await c.env.MASTER.prepare(`UPDATE usuarios SET pin_hash = ? WHERE id = ?`).bind(await guardarPin(limpio), s.usuario_id).run();
   return ok(c, { puesto: true });
+});
+
+/* ─────────────── la contraseña: fijarla y cambiarla (contrato 0.7.0) ───────────────
+ * Una sola ruta para las dos cosas, y una regla que las separa: si ya hay una
+ * contraseña puesta, hay que mandar la actual… salvo que la sesión se haya
+ * abierto con código al correo o con Google. Eso es lo que hace que «olvidé mi
+ * contraseña» no necesite ruta aparte: se entra con un código y se pone otra.
+ *
+ * Con una sesión abierta con PIN o con la propia contraseña NO alcanza: quien
+ * se robara un PIN de seis dígitos podría cambiar la contraseña de diez y
+ * quedarse con la cuenta. */
+
+rutas.post('/clave', async (c) => {
+  const s = c.get('sesion');
+  if (!s) return err(c, 'sin_sesion', 401);
+  const cuerpo = await c.req.json<{ clave?: string; actual?: string }>().catch(() => ({}) as never);
+  const clave = String(cuerpo.clave || '');
+
+  const usuario = await usuarioPorCorreo(c.env, s.correo);
+  if (!usuario) return err(c, 'sin_permiso', 403);
+
+  const yaTenia = !!usuario.clave_hash;
+  const buzonProbado = s.como === 'codigo' || s.como === 'google';
+  if (yaTenia && !buzonProbado) {
+    if (!cuerpo.actual) return err(c, 'datos_invalidos', 400, { falta: 'actual', motivo: 'ya_tienes_clave' });
+    if (!(await claveCoincide(String(cuerpo.actual), usuario.clave_hash))) return err(c, 'clave_invalida', 401, { cual: 'actual' });
+  }
+
+  const queja = revisaClave(clave, s.correo);
+  if (queja) return err(c, 'clave_debil', 400, { porque: queja });
+
+  await c.env.MASTER.prepare(`UPDATE usuarios SET clave_hash = ? WHERE id = ?`).bind(await guardarClave(clave), s.usuario_id).run();
+  // Una contraseña nueva limpia el freno: quien acaba de probar quién es no
+  // tiene por qué cargar con los intentos fallidos de antes.
+  await c.env.MASTER.prepare(`DELETE FROM intentos_clave WHERE correo = ?`).bind(s.correo).run();
+  return ok(c, { puesta: true, cambiada: yaTenia });
 });
 
 /* ─────────────── Google ───────────────
@@ -230,13 +289,13 @@ rutas.get('/google/callback', async (c) => {
 
   let usuario = await usuarioPorCorreo(c.env, correo);
   if (!usuario && normalizaCorreo(c.env.CORREO_SUPERADMIN || '') === correo) {
-    usuario = { ...(await crearUsuario(c.env, correo, carga.name)), pin_hash: null };
+    usuario = { ...(await crearUsuario(c.env, correo, carga.name)), pin_hash: null, clave_hash: null };
   }
   if (!usuario) return err(c, 'sin_permiso', 403);
   await c.env.MASTER.prepare(`UPDATE usuarios SET google_sub = ? WHERE id = ?`).bind(carga.sub, usuario.id).run();
   await sembrarSuperadmin(c.env, usuario.id, correo);
 
-  const s = await abrirSesion(c.env, usuario.id, appDe(c), VIDA_MIEMBRO);
+  const s = await abrirSesion(c.env, usuario.id, appDe(c), VIDA_MIEMBRO, 'google');
   const volver_a = c.req.query('state') || '/';
 
   // A una app detrás de su proxy no le sirve la cookie puesta aquí: es de
@@ -305,7 +364,10 @@ export async function yo(c: Ctx) {
     }
   }
 
-  return ok(c, { usuario, superadmin: soySuper, orgs: mias, acceso: acc });
+  // Qué puede ofrecer la pantalla la próxima vez (contrato 0.7.0). Nunca los
+  // hashes: sólo si existen.
+  const secretos = await secretosDe(c.env, s.usuario_id);
+  return ok(c, { usuario, superadmin: soySuper, orgs: mias, acceso: acc, entro_con: s.como, ...secretos });
 }
 
 /** Middleware: lee la cookie y deja la sesión en el contexto. No exige nada:
@@ -326,6 +388,7 @@ export async function conSesion(c: Ctx, next: () => Promise<void>) {
             usuario_id: s.usuario_id,
             correo: u.correo,
             superadmin: await esSuperadmin(c.env, s.usuario_id),
+            como: s.como,
           });
         }
       }

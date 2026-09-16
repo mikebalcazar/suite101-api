@@ -13,7 +13,10 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.6.0 (workshop101 — el administrador de la empresa:
+ * Versión del contrato: 0.7.0 (contraseña de verdad junto al código, el PIN y
+ * Google: POST /auth/clave la fija, /auth/entrar la acepta, y cambiarla pide
+ * la actual salvo que la sesión venga de código o de Google). Antes:
+ * 0.6.0 (workshop101 — el administrador de la empresa:
  * PATCH de rol y apps por miembro, candados de último dueño y de uno mismo,
  * la lista de apps por persona se aplica en la puerta, última entrada por
  * miembro, y la bitácora de la empresa la lee su dueño). Antes:
@@ -22,7 +25,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.6.0';
+export const VERSION_CONTRATO = '0.7.0';
 
 /* ─────────────── envoltura de toda respuesta ─────────────── */
 
@@ -53,6 +56,8 @@ export type ErrorApi =
   | 'items_nunca_se_borran'
   | 'ultimo_superadmin'
   | 'ultimo_owner'
+  | 'clave_invalida'
+  | 'clave_debil'
   | 'app_no_permitida';
 
 /* ─────────────── apps ─────────────── */

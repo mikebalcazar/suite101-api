@@ -12,6 +12,8 @@ export interface Sesion {
   usuario_id: string;
   correo: string;
   superadmin: boolean;
+  /** Con qué se abrió: 'codigo' | 'pin' | 'clave' | 'google' (contrato 0.7.0). */
+  como: string;
 }
 
 export interface Quien {
