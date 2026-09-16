@@ -13,7 +13,16 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.10.0 (los ajustes de cada app: la tabla `ajustes`
+ * Versión del contrato: 0.11.0 (consecutivos por serie: `POST
+ * /orgs/:o/folios/:serie` aparta el siguiente número de una serie y `GET` lo
+ * mira sin consumirlo, con el mismo contador atómico del OrgDB que ya pone el
+ * folio de la cotización. Es para los consecutivos que todavía se calculaban
+ * en el navegador —el de los recibos de quote101—, donde dos personas
+ * guardando a la vez se llevaban el mismo número. La serie `COT` no se aparta
+ * por ahí: ésa la pone la creación de la cotización. Y `cotizador101` puede
+ * crear el negocio de su empresa si no hay ninguno, porque
+ * `cotizaciones.negocio_id` es obligatorio y si no quedaría trabado). Antes:
+ * 0.10.0 (los ajustes de cada app: la tabla `ajustes`
  * guarda la configuración de una app dentro de una empresa —lo que no describe
  * al negocio sino a cómo esa app trabaja—. El `id` lo arma la API con `X-App`
  * (`app:clave`), así que una app no lee ni pisa los de otra, no puede haber dos
@@ -44,7 +53,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.10.0';
+export const VERSION_CONTRATO = '0.11.0';
 
 /* ─────────────── envoltura de toda respuesta ─────────────── */
 

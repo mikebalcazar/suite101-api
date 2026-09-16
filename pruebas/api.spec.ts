@@ -1573,3 +1573,104 @@ describe('15 · los ajustes de cada app (contrato 0.10.0)', () => {
     expect(r.detalle.falta).toContain('clave');
   });
 });
+
+describe('16 · consecutivos por serie (contrato 0.11.0)', () => {
+  /* El folio de la cotización ya lo ponía la suite. Esto es lo mismo para
+   * cualquier otro consecutivo, y existe por el de los recibos de quote101:
+   * se calculaba en el navegador —leer el contador, sumar uno, guardar— y ahí
+   * dos personas guardando a la vez se llevan el mismo número. */
+
+  it('mirar el siguiente NO lo consume', async () => {
+    // Si se apartara al abrir la pantalla, cada vez que alguien se asomara y
+    // cerrara se iría un número.
+    const a = await pedir(`/orgs/${ORG}/folios/REC`, { app: 'cotizador101' });
+    expect(a.estado).toBe(200);
+    expect(a.data.siguiente).toBe(1);
+    const b = await pedir(`/orgs/${ORG}/folios/REC`, { app: 'cotizador101' });
+    expect(b.data.siguiente).toBe(1);
+  });
+
+  it('apartar sí lo consume, y el siguiente ya es otro', async () => {
+    const uno = await pedir(`/orgs/${ORG}/folios/REC`, { app: 'cotizador101', method: 'POST' });
+    expect(uno.estado).toBe(201);
+    expect(uno.data.numero).toBe(1);
+    const dos = await pedir(`/orgs/${ORG}/folios/REC`, { app: 'cotizador101', method: 'POST' });
+    expect(dos.data.numero).toBe(2);
+    const mira = await pedir(`/orgs/${ORG}/folios/REC`, { app: 'cotizador101' });
+    expect(mira.data.siguiente).toBe(3);
+  });
+
+  it('diez de golpe se llevan diez números distintos', async () => {
+    // La prueba que justifica que esto viva en el Durable Object y no en el
+    // navegador: un solo hilo por empresa, así que no hay manera de entrelazar
+    // «leer, sumar uno, guardar».
+    const diez = await Promise.all(Array.from({ length: 10 }, () =>
+      pedir(`/orgs/${ORG}/folios/REC`, { app: 'cotizador101', method: 'POST' })));
+    const numeros = diez.map((r) => r.data.numero);
+    expect(new Set(numeros).size).toBe(10);
+  });
+
+  it('cada serie lleva su propia cuenta', async () => {
+    const otra = await pedir(`/orgs/${ORG}/folios/NOTA`, { app: 'cotizador101', method: 'POST' });
+    expect(otra.data.numero).toBe(1);
+  });
+
+  it('la serie se normaliza a mayúsculas: `rec` y `REC` son la misma', async () => {
+    const antes = await pedir(`/orgs/${ORG}/folios/REC`, { app: 'cotizador101' });
+    const r = await pedir(`/orgs/${ORG}/folios/rec`, { app: 'cotizador101' });
+    expect(r.data.serie).toBe('REC');
+    expect(r.data.siguiente).toBe(antes.data.siguiente);
+  });
+
+  it('una serie con cualquier cosa adentro se rechaza', async () => {
+    // Es la llave primaria de una tabla. Una serie libre dejaría que cada app
+    // se inventara contadores sin que nadie los vea.
+    for (const mala of ['con espacio', 'demasiado-larga-para-una-serie', 'ñ', '']) {
+      const r = await pedir(`/orgs/${ORG}/folios/${encodeURIComponent(mala)}`, { app: 'cotizador101', method: 'POST' });
+      expect(r.estado, `serie ${JSON.stringify(mala)}`).not.toBe(201);
+    }
+  });
+
+  it('la serie COT no se aparta por aquí', async () => {
+    // Ésa la pone la creación de la cotización. Dejar que una app se lleve
+    // números de esa serie abriría huecos en la numeración sin motivo.
+    const r = await pedir(`/orgs/${ORG}/folios/COT`, { app: 'cotizador101', method: 'POST' });
+    expect(r.estado).toBe(403);
+    expect(r.detalle.motivo).toMatch(/POST \/orgs\/:o\/cotizaciones/);
+    // Mirarla sí se puede: no consume nada.
+    const ver = await pedir(`/orgs/${ORG}/folios/COT`, { app: 'cotizador101' });
+    expect(ver.estado).toBe(200);
+  });
+});
+
+describe('0.11.0 · quote101 puede crear su negocio, y nada más', () => {
+  const ORG_N = 'cotizador-negocio';
+
+  beforeAll(async () => {
+    await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: ORG_N, nombre: 'Sin negocio' }) });
+  });
+
+  it('crea el negocio si la empresa no tiene ninguno', async () => {
+    // `cotizaciones.negocio_id` es obligatorio: una empresa sin negocio no
+    // puede cotizar, y si el cotizador es la primera app que alguien usa
+    // quedaría trabado esperando a otra app.
+    const vacia = await pedir(`/orgs/${ORG_N}/negocios`, { app: 'cotizador101' });
+    expect(vacia.data.total).toBe(0);
+    const r = await pedir(`/orgs/${ORG_N}/negocios`, {
+      app: 'cotizador101', method: 'POST', body: JSON.stringify({ nombre: 'Taller 101', moneda: 'MXN' }),
+    });
+    expect(r.estado).toBe(201);
+    expect(r.data.nombre).toBe('Taller 101');
+  });
+
+  it('pero no le toca lo demás: eso sigue siendo de dash101', async () => {
+    const lista = await pedir(`/orgs/${ORG_N}/negocios`, { app: 'cotizador101' });
+    const id = lista.data.filas[0].id;
+    const r = await pedir(`/orgs/${ORG_N}/negocios/${id}`, {
+      app: 'cotizador101', method: 'PATCH', body: JSON.stringify({ rfc: 'XAXX010101000' }),
+    });
+    expect(r.estado).toBe(403);
+    expect(r.error).toBe('campo_no_permitido');
+    expect(r.detalle.permitidos).toEqual(['nombre', 'moneda']);
+  });
+});

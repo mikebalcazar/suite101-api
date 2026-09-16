@@ -39,7 +39,13 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
   partidas: { dash101: ['proyecto_id', 'item_id', 'proveedor_id', 'proveedor_nombre', 'concepto', 'monto_acordado'] },
   movimientos: { dash101: '*' },
   cuentas: { dash101: '*' },
-  negocios: { dash101: '*', suite101: '*' },
+  /* El negocio lo maneja dash101. `cotizador101` sólo puede CREARLO —nombre y
+   * moneda, nada más— y es por una razón concreta: `cotizaciones.negocio_id`
+   * es obligatorio, así que una empresa sin negocio no puede cotizar. Si la
+   * primera app que alguien usa es el cotizador, quedaría trabado esperando a
+   * que otra app le cree algo que él no puede ver ni pedir. Con esto se crea
+   * solo; lo demás del negocio sigue siendo de dash101. */
+  negocios: { dash101: '*', suite101: '*', cotizador101: ['nombre', 'moneda'] },
   opex: { dash101: '*' },
   cotizaciones: { cotizador101: '*' },
   /* Los ajustes los escribe cualquier app, pero SÓLO los suyos, y eso no lo

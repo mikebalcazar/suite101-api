@@ -251,6 +251,56 @@ for (const par of [
   });
 }
 
+/* ─────────────── consecutivos por serie ───────────────
+ *
+ * El folio de la cotización lo pone la suite desde el contrato 0.9.0. Esto es
+ * lo mismo para cualquier otro consecutivo: los recibos de quote101, que hasta
+ * hoy se numeraban en el navegador —leer el contador de Firestore, sumarle uno
+ * y guardarlo—. Ahí, dos personas guardando a la vez se llevan el mismo
+ * número, y en un recibo eso no es un detalle.
+ *
+ * `POST` aparta el siguiente y lo consume. `GET` lo mira sin consumirlo, que
+ * es lo que necesita una pantalla para enseñar el número antes de que alguien
+ * confirme: si se apartara al abrir, cada vez que alguien se asomara y cerrara
+ * se iría un número.
+ *
+ * Un número apartado no se devuelve si el recibo no se acaba imprimiendo. Eso
+ * deja huecos, y es lo correcto: un consecutivo que reusa números es uno que
+ * puede repetir. Un hueco se explica; dos recibos con el mismo número, no.
+ *
+ * La serie se acota a propósito: letras, números y guiones, hasta 16. Es la
+ * llave primaria de una tabla, y una serie libre dejaría que cualquier app se
+ * inventara contadores sin que nadie los vea.
+ */
+
+const SERIE_OK = /^[A-Z0-9-]{1,16}$/;
+
+const serieDe = (c: Ctx) => {
+  const s = String(c.req.param('serie') ?? '').trim().toUpperCase();
+  return SERIE_OK.test(s) ? s : null;
+};
+
+rutas.get('/:o/folios/:serie', async (c) => {
+  if (c.get('quien').clase === 'cliente') return err(c, 'sin_permiso', 403, { motivo: 'un cliente solo abre /peek' });
+  const serie = serieDe(c);
+  if (!serie) return err(c, 'datos_invalidos', 400, { serie: 'letras, números y guiones, hasta 16' });
+  return ok(c, { serie, siguiente: await stub(c).verNumero(serie) });
+});
+
+rutas.post('/:o/folios/:serie', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase === 'cliente') return err(c, 'sin_permiso', 403, { motivo: 'un cliente solo abre /peek' });
+  const serie = serieDe(c);
+  if (!serie) return err(c, 'datos_invalidos', 400, { serie: 'letras, números y guiones, hasta 16' });
+  // `COT` no se aparta por aquí: ése lo pone la propia creación de la
+  // cotización, y dejar que una app se lleve números de esa serie por su
+  // cuenta abriría huecos en la numeración de las cotizaciones sin motivo.
+  if (serie === 'COT') {
+    return err(c, 'sin_permiso', 403, { motivo: 'el folio de la cotización lo pone POST /orgs/:o/cotizaciones' });
+  }
+  return ok(c, { serie, numero: await stub(c).apartarNumero(serie) }, 201);
+});
+
 /* ─────────────── archivos (R2) ───────────────
  * El documento decía «redirige a URL firmada de R2». Con el binding de R2 no
  * hay manera de firmar una URL —eso pide credenciales de S3, que el Worker no
