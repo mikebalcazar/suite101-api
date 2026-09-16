@@ -40,7 +40,7 @@ app.use('*', async (c, next) => {
             'Access-Control-Allow-Origin': origen!,
             'Access-Control-Allow-Credentials': 'true',
             'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type,X-App',
+            'Access-Control-Allow-Headers': 'Content-Type,X-App,Authorization',
             'Access-Control-Max-Age': '86400',
             Vary: 'Origin',
           }
@@ -90,7 +90,7 @@ app.get('/', (c) =>
     que_es: 'La unica puerta a los datos de la suite 101. Ninguna app toca una base directo.',
     contrato: VERSION_CONTRATO,
     empieza_en: ['/salud', '/auth/codigo', '/yo', '/orgs/:org'],
-    manda: 'la cookie de sesion y la cabecera X-App',
+    manda: 'la cookie de sesion (o Authorization: Bearer, para una app empacada) y la cabecera X-App',
   }),
 );
 

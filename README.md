@@ -51,7 +51,8 @@ no tiene, **primero se propone en el documento y luego se escribe el código.**
 
 ```
 src/index.ts            rutas (Hono, como roster101)
-src/auth/               código por correo, PIN, Google, sesión en cookie HMAC
+src/auth/               código por correo, PIN, contraseña, Google, sesión en cookie HMAC
+                        (y la misma galleta como token para las apps empacadas)
 src/org-db.ts           class OrgDB extends DurableObject — SQL + WebSocket
 src/permisos.ts         quién escribe qué campo, por app
 migrations/d1/*.sql     wrangler d1 migrations

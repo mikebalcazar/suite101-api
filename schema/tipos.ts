@@ -13,7 +13,12 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.7.0 (contraseña de verdad junto al código, el PIN y
+ * Versión del contrato: 0.8.0 (la puerta de las apps empacadas: quien entra
+ * con `{ aparato: true }` recibe además `token`, la misma galleta firmada, y
+ * puede volver con `Authorization: Bearer`. Es la misma sesión de D1 y el
+ * mismo DELETE la mata; al navegador se le sigue dando sólo la cookie).
+ * Antes:
+ * 0.7.0 (contraseña de verdad junto al código, el PIN y
  * Google: POST /auth/clave la fija, /auth/entrar la acepta, y cambiarla pide
  * la actual salvo que la sesión venga de código o de Google). Antes:
  * 0.6.0 (workshop101 — el administrador de la empresa:
@@ -25,7 +30,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.7.0';
+export const VERSION_CONTRATO = '0.8.0';
 
 /* ─────────────── envoltura de toda respuesta ─────────────── */
 
