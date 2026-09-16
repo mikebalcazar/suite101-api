@@ -60,3 +60,26 @@ Invitaciones por correo (la tabla existe, nadie la usa), permisos finos
 dentro de cada app (hoy el rol es por empresa), y que cada app pinte sólo lo
 suyo leyendo `/yo` (la puerta ya lo aplica). Y quell101, roster101 y quote101
 siguen con login propio: entran a esta capa el día que entren por la suite.
+
+## Actualización 03:45Z · workshop101 0.1.0 publicado y medido
+
+Mike creó el repositorio `mikebalcazar/workshop101` y puso los dos secretos
+(guiado paso a paso, con botones). Jr. subió el código (`5168927`) y disparó
+el flujo.
+
+- Primera corrida (35052306084): staging 23/23, navegador contra staging
+  47/47 (empresa `prueba-0335-merb` creada, manejada y borrada), producción
+  publicada pero **1 falla**: `/s101/auth/google → 403 origen_no_permitido`.
+  El dominio de workshop101 no estaba en `ORIGENES` de la API (la lista era
+  de antes de que existiera). PR #46 de suite101-api (`7813c51`), humo 90/90.
+- Segunda corrida (35052631738): staging 23/23, navegador 47/47
+  (`prueba-0340-y3dr`), **producción 15/15**.
+
+| | |
+|---|---|
+| Producción | https://workshop101.mike-929.workers.dev |
+| Staging | https://workshop101-staging.mike-929.workers.dev |
+
+Entra quien sea dueño o administración de una empresa (o el superadmin).
+Hoy en `forespot` eso es quien tenga rol `owner`/`admin` en `miembros`; Mike
+entra como superadmin y ve `forespot` como su dueño.
