@@ -37,7 +37,15 @@ export interface Redondeo {
   coleccion: string;
   id: string;
   campo: string;
+  /** El valor crudo que se redondeó, tal como venía: por PIEZA cuando el
+   *  renglón trae cantidad. Multiplicarlo aquí haría que la nota mintiera —
+   *  «40.02 pesos se volvieron 4004 centavos» parece un error de dos centavos,
+   *  cuando lo que pasó es que cada una de las cuatro piezas se redondeó de
+   *  10.005 a 1001—. */
   origen: string;
+  /** Por cuántas piezas se multiplicó. 1 cuando el renglón no tiene cantidad. */
+  veces: number;
+  /** El total del renglón ya en centavos: `redondeo(origen) × veces`. */
   centavos: number;
 }
 
@@ -68,6 +76,32 @@ export interface Cosecha {
   /** La misma suma en los pesos crudos de Firestore, con flotantes. Es contra
    *  esto que se mira si la conversión perdió o ganó centavos. */
   sumas_origen: Record<string, number>;
+  /** Lo que hay que saber ANTES de apagar Firebase. Ver `cotizador` abajo. */
+  avisos: Avisos;
+}
+
+/** Cuentas de la mudanza de quote101 que no son filas ni dinero, y que deciden
+ *  si se puede apagar Firebase o no. Se cuentan aquí porque el ensayo tiene que
+ *  poder decirlas sin escribir nada. */
+export interface Avisos {
+  /** Cotizaciones que traían folio de antes. Se conserva tal cual: puede andar
+   *  impreso en el PDF que el cliente ya tiene. */
+  folios_traidos: number;
+  /** Cotizaciones sin folio. A ésas se les pone uno al importar, en orden de
+   *  fecha, y el contador queda después del último. */
+  sin_folio: number;
+  /** Versiones históricas cuyo detalle NO viaja en el documento: vive en un
+   *  archivo de Firebase Storage (`historicoURL`). La cotización se importa,
+   *  pero ese detalle se queda allá. **Apagar Firebase lo mata.** */
+  versiones_en_storage: number;
+  /** Imágenes de muebles que son una URL de Firebase Storage. Igual: apagar
+   *  Firebase las mata. Se mudan a R2 en su propio paso. */
+  imagenes_en_storage: number;
+  /** Imágenes que todavía son base64 dentro del documento. Ésas sí viajan. */
+  imagenes_en_el_documento: number;
+  /** Versiones por cotización, para ver de un golpe si alguna trae historia
+   *  larga: [cotizaciones con 1 versión, con 2, con 3 o más]. */
+  versiones_por_cotizacion: Record<string, number>;
 }
 
 /* ─────────────── fechas ───────────────
@@ -133,7 +167,10 @@ interface Pendiente {
   llave: string;
   id: string;
   campo: string;
+  /** Crudo POR PIEZA, sin multiplicar. */
   crudo: unknown;
+  veces: number;
+  /** Ya multiplicado por `veces`. */
   centavos: number;
   redondeo: boolean;
 }
@@ -150,6 +187,10 @@ class Cesta {
    *  flotantes: es contra esto que se compara para ver si la conversión perdió
    *  o ganó centavos. */
   sumasOrigen: Record<string, number> = {};
+  avisos: Avisos = {
+    folios_traidos: 0, sin_folio: 0, versiones_en_storage: 0,
+    imagenes_en_storage: 0, imagenes_en_el_documento: 0, versiones_por_cotizacion: {},
+  };
 
   pon(tabla: Tabla, fila: Fila, plata: Pendiente[] = []): void {
     (this.filas[tabla] ??= []).push(fila);
@@ -160,9 +201,15 @@ class Cesta {
   cobra(plata: Pendiente[]): void {
     for (const p of plata) {
       this.sumas[p.llave] = (this.sumas[p.llave] ?? 0) + p.centavos;
-      this.sumasOrigen[p.llave] = (this.sumasOrigen[p.llave] ?? 0) + Number(p.crudo || 0);
+      // La suma en pesos se multiplica igual que la de centavos: es contra
+      // ella que se compara lo escrito, y comparar un precio por pieza contra
+      // un total de renglón daría «no cuadra» sin que nada estuviera mal.
+      this.sumasOrigen[p.llave] = (this.sumasOrigen[p.llave] ?? 0) + Number(p.crudo || 0) * p.veces;
       if (p.redondeo) {
-        this.redondeos.push({ coleccion: p.coleccion, id: p.id, campo: p.campo, origen: String(p.crudo), centavos: p.centavos });
+        this.redondeos.push({
+          coleccion: p.coleccion, id: p.id, campo: p.campo,
+          origen: String(p.crudo), veces: p.veces, centavos: p.centavos,
+        });
       }
     }
   }
@@ -172,19 +219,30 @@ class Cesta {
   }
 
   /** Pesos del crudo → centavos. Queda pendiente de contar hasta que la fila
-   *  se guarde con `pon`. */
-  dinero(plata: Pendiente[], coleccion: string, tabla: Tabla | null, campo: string, id: string, valor: unknown): number | null {
+   *  se guarde con `pon`.
+   *
+   *  `veces` es para los renglones con cantidad: un mueble trae precio por
+   *  pieza y `qty`. Se convierte a centavos y se multiplica DESPUÉS, en
+   *  enteros, nunca `precio * qty` en flotantes —`1.005 * 3` da
+   *  3.0149999999999997 y ahí se va un centavo—. Y lo que se apunta en las
+   *  sumas es ya el multiplicado: si se apuntara el precio por pieza, el
+   *  cuadre compararía una cifra contra otra que nunca se escribió. */
+  dinero(
+    plata: Pendiente[], coleccion: string, tabla: Tabla | null, campo: string,
+    id: string, valor: unknown, veces = 1,
+  ): number | null {
     const r = aCentavosExacto(valor);
     if (!r.ok) {
       this.rechaza(coleccion, id, r.motivo ?? 'dinero ilegible', campo);
       return null;
     }
+    const crudo = typeof valor === 'string' ? Number(valor.replace(/[\s\u00a0$,]/g, '')) || 0 : Number(valor ?? 0);
     plata.push({
       coleccion, llave: `${tabla ?? coleccion}.${campo}`, id, campo,
-      crudo: typeof valor === 'string' ? Number(valor.replace(/[\s\u00a0$,]/g, '')) || 0 : (valor ?? 0),
-      centavos: r.centavos, redondeo: r.redondeo,
+      crudo, veces,
+      centavos: r.centavos * veces, redondeo: r.redondeo,
     });
-    return r.centavos;
+    return r.centavos * veces;
   }
 
   /** Los campos del documento que ninguna columna recogió. */
@@ -210,6 +268,7 @@ class Cesta {
       ignorados,
       sumas: this.sumas,
       sumas_origen: this.sumasOrigen,
+      avisos: this.avisos,
     };
   }
 }
@@ -292,13 +351,24 @@ export function aplanar(lista: unknown): Crudo[] {
 
 /* ─────────────── el mapeo, colección por colección ─────────────── */
 
-export function cosechar(entrada: Record<string, unknown>, hoy = new Date().toISOString()): Cosecha {
-  const docs: Record<string, Crudo[]> = {};
-  for (const [k, v] of Object.entries(entrada)) docs[k] = aplanar(v);
-  return mapear(docs, hoy);
+/** Lo que el mapeo no puede saber leyendo el documento. Hoy sólo el negocio:
+ *  la suite guarda clientes y cotizaciones por negocio, y quote101 no sabe que
+ *  los negocios existen. Se pide en la petición en vez de adivinarlo. */
+export interface Opciones {
+  negocio_id?: string;
 }
 
-function mapear(docs: Record<string, Crudo[]>, hoy: string): Cosecha {
+export function cosechar(
+  entrada: Record<string, unknown>,
+  hoy = new Date().toISOString(),
+  opciones: Opciones = {},
+): Cosecha {
+  const docs: Record<string, Crudo[]> = {};
+  for (const [k, v] of Object.entries(entrada)) docs[k] = aplanar(v);
+  return mapear(docs, hoy, opciones);
+}
+
+function mapear(docs: Record<string, Crudo[]>, hoy: string, opciones: Opciones): Cosecha {
   const c = new Cesta();
   const lista = (nombre: string): Crudo[] => {
     const l = Array.isArray(docs[nombre]) ? docs[nombre] : [];
@@ -567,6 +637,152 @@ function mapear(docs: Record<string, Crudo[]>, hoy: string): Cosecha {
       ...(rol ? { miembro: { rol, negocios } } : {}),
     });
     c.sobrantes('usuarios', d, ['id', 'email', 'correo', 'nombre', 'memberships', 'negocios_acceso', 'creado_at']);
+  }
+
+  /* ─────────────── cotizador — el árbol de quote101 ───────────────
+   *
+   * quote101 no tiene colecciones: tiene UN documento (`app/datos`) con un
+   * árbol adentro —`clientes → proyectos → cotizaciones → versiones →
+   * muebles`— más `config`, `prices` y `reciboCounter`. Por eso esta colección
+   * trae un solo documento y no una lista de muchos.
+   *
+   * A dónde va cada cosa:
+   *   cliente     → `clientes`
+   *   proyecto    → `proyectos` (estado `planeando`: la app no guarda estado y
+   *                 aquí no se inventa uno; que un proyecto esté activo lo dice
+   *                 dash101, no una suposición del importador)
+   *   cotización  → `cotizaciones`, con las versiones enteras en `datos`
+   *   config      → `ajustes` clave `config`
+   *   prices      → `ajustes` clave `precios`
+   *
+   * Los ids del árbol se CONSERVAN. Son los que la app ya trae en memoria, y
+   * conservarlos es lo que hace que la mudanza se pueda repetir sin duplicar:
+   * la segunda corrida actualiza las mismas filas en vez de crear otras.
+   *
+   * EL DINERO. Un mueble trae `total` (por pieza, en pesos con decimales) y
+   * `qty`. El total de la cotización se arma convirtiendo PRIMERO a centavos y
+   * multiplicando DESPUÉS por la cantidad, no al revés: `1.005 * 3` en
+   * flotantes da 3.0149999999999997, y redondear eso pierde un centavo que
+   * nadie vuelve a encontrar. Convertir primero deja la multiplicación en
+   * enteros, donde no hay nada que perder.
+   *
+   * EL FOLIO. Si la versión traía uno, se conserva tal cual —puede andar
+   * impreso en el PDF que el cliente ya tiene—. Si no traía, NO se inventa
+   * aquí: se deja vacío y el OrgDB le pone el siguiente al importar, con el
+   * mismo contador atómico del contrato 0.9.0. Así el contador queda solo
+   * después del último y no hay que acomodarlo a mano.
+   */
+  for (const d of lista('cotizador')) {
+    const negocio_id = texto(opciones.negocio_id);
+    if (!negocio_id) {
+      c.rechaza('cotizador', '(documento)', 'falta `negocio` en la petición: la suite guarda clientes y cotizaciones por negocio, y quote101 no sabe de negocios');
+      continue;
+    }
+
+    const clientes = Array.isArray(d.clientes) ? (d.clientes as Crudo[]) : [];
+    for (const cl of clientes) {
+      const cid = id(cl);
+      if (!cid) { c.rechaza('cotizador', '(cliente sin id)', 'el cliente no trae id'); continue; }
+      if (!texto(cl.nombre)) { c.rechaza('cotizador', cid, 'cliente sin nombre', 'nombre'); continue; }
+
+      c.pon('clientes', {
+        id: cid, negocio_id, nombre: texto(cl.nombre),
+        creado_en_app: 'cotizador101', creado_at: aISO(cl.creado_at) ?? hoy,
+      });
+
+      const proyectos = Array.isArray(cl.proyectos) ? (cl.proyectos as Crudo[]) : [];
+      for (const pr of proyectos) {
+        const pid = id(pr);
+        if (!pid) { c.rechaza('cotizador', `${cid}/(proyecto sin id)`, 'el proyecto no trae id'); continue; }
+        if (!texto(pr.nombre)) { c.rechaza('cotizador', pid, 'proyecto sin nombre', 'nombre'); continue; }
+
+        c.pon('proyectos', {
+          id: pid, negocio_id, cliente_id: cid, nombre: texto(pr.nombre),
+          estado: 'planeando', creado_at: aISO(pr.creado_at) ?? hoy,
+        });
+
+        const cotizaciones = Array.isArray(pr.cotizaciones) ? (pr.cotizaciones as Crudo[]) : [];
+        for (const cot of cotizaciones) {
+          const qid = id(cot);
+          if (!qid) { c.rechaza('cotizador', `${pid}/(cotización sin id)`, 'la cotización no trae id'); continue; }
+
+          const versiones = Array.isArray(cot.versiones) ? (cot.versiones as Crudo[]) : [];
+          const cuantas = versiones.length >= 3 ? '3 o más' : String(versiones.length);
+          c.avisos.versiones_por_cotizacion[cuantas] = (c.avisos.versiones_por_cotizacion[cuantas] ?? 0) + 1;
+
+          // La versión 0 es la vigente. Es la única cuyo total se guarda en la
+          // columna: las anteriores quedan en `datos`, como historia.
+          const vigente = (versiones[0] ?? {}) as Crudo;
+          const plata: Pendiente[] = [];
+          let total = 0;
+          let malo = false;
+          const muebles = Array.isArray(vigente.muebles) ? (vigente.muebles as Crudo[]) : [];
+          for (const [i, m] of muebles.entries()) {
+            // La cantidad se revisa ANTES de convertir: el renglón entero se
+            // cuenta multiplicado, así que un `qty` ilegible haría que la suma
+            // del cuadre no se pareciera a lo escrito.
+            const qty = Number((m as Crudo).qty ?? 1);
+            if (!Number.isInteger(qty) || qty < 0) {
+              c.rechaza('cotizador', `${qid}#${i}`, `cantidad que no es un entero positivo: ${String((m as Crudo).qty)}`, 'qty');
+              malo = true;
+              break;
+            }
+            const renglon = c.dinero(plata, 'cotizador', 'cotizaciones', 'total', `${qid}#${i}`, (m as Crudo).total, qty);
+            if (renglon === null) { malo = true; break; }
+            total += renglon;
+            for (const img of (Array.isArray((m as Crudo).imagenes) ? ((m as Crudo).imagenes as unknown[]) : [])) {
+              const t = String(img ?? '');
+              if (t.startsWith('https://')) c.avisos.imagenes_en_storage++;
+              else if (t.startsWith('data:image')) c.avisos.imagenes_en_el_documento++;
+            }
+          }
+          if (malo) continue;
+
+          // Las versiones históricas cuyo detalle se fue a Storage: se cuentan,
+          // porque apagar Firebase se las lleva y eso hay que decirlo ANTES.
+          for (const v of versiones) {
+            if (texto((v as Crudo).historicoURL)) c.avisos.versiones_en_storage++;
+          }
+
+          const folio = texto(vigente.folio ?? cot.folio);
+          if (folio) c.avisos.folios_traidos++; else c.avisos.sin_folio++;
+
+          c.pon('cotizaciones', {
+            id: qid, negocio_id, cliente_id: cid,
+            // Si no traía folio, la columna NI SE MENCIONA. No es lo mismo
+            // que mandarla vacía: el importador actualiza las filas que ya
+            // están, y una columna vacía le borraría a la cotización el folio
+            // que la corrida anterior ya le había puesto —y la siguiente le
+            // daría otro, gastando números y cambiándole el folio a una
+            // cotización que ya salió impresa—. Lo que no se manda, no se
+            // toca.
+            ...(folio ? { folio } : {}),
+            estado: 'borrador', total, moneda: texto(vigente.moneda) ?? 'MXN',
+            datos: { nombre: texto(cot.nombre), proyecto_id: pid, versiones },
+            creado_at: aISO(vigente.fecha ?? cot.creado_at) ?? hoy,
+          }, plata);
+        }
+      }
+    }
+
+    /* config y prices → ajustes. `app` se escribe aquí porque el importador es
+     * la única puerta que puede: entra por debajo de `permisos.ts`. Las claves
+     * son las que la app va a pedir cuando deje Firebase. */
+    for (const [campo, clave] of [['config', 'config'], ['prices', 'precios']] as const) {
+      const valor = d[campo];
+      if (valor === null || valor === undefined) continue;
+      c.pon('ajustes', {
+        id: `cotizador101:${clave}`, app: 'cotizador101', clave,
+        valor, creado_at: hoy, actualizado_at: hoy,
+      });
+    }
+
+    /* `reciboCounter` NO se importa. Es el consecutivo de los recibos, y tiene
+     * el mismo problema de concurrencia que tenía el folio: dos personas
+     * guardando a la vez se llevan el mismo número. Traerlo a `ajustes` sería
+     * mudar el defecto de casa. Le toca su propia vuelta, con el contador del
+     * OrgDB, que ya existe y es atómico. */
+    c.sobrantes('cotizador', d, ['clientes', 'config', 'prices']);
   }
 
   return c.cierra();

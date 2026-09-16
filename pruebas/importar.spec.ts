@@ -500,3 +500,294 @@ describe('lo que no se puede importar se rechaza y se cuenta', () => {
     expect(r.data.colecciones_desconocidas).toEqual(['inventada']);
   });
 });
+
+/* ─────────────── la mudanza de quote101 ───────────────
+ * quote101 no tiene colecciones: tiene UN documento con un árbol adentro.
+ * Estas pruebas son de dos clases y las dos hacen falta. Las primeras miran el
+ * mapeo solo, sin base: es donde se decide qué es dinero y cuántos centavos
+ * son. Las últimas van por la ruta y por el OrgDB, que es donde se pone el
+ * folio y donde se ve si correrlo dos veces hace daño.
+ */
+
+/** El árbol, con la forma que de verdad tiene el documento de quote101. */
+const ARBOL = {
+  clientes: [
+    {
+      id: 'cli-1', nombre: 'Casa Aurea',
+      proyectos: [
+        {
+          id: 'pro-1', nombre: 'Cocina',
+          cotizaciones: [
+            {
+              id: 'cot-1', nombre: 'Cocina integral',
+              versiones: [
+                {
+                  fecha: '2026-03-04T10:00:00.000Z', folio: 'COT-000007',
+                  muebles: [
+                    { id: 'm1', nombre: 'Alacena', total: 12500.5, qty: 2, imagenes: ['https://firebasestorage.googleapis.com/x.jpg'] },
+                    { id: 'm2', nombre: 'Barra', total: 3000, qty: 1, imagenes: ['data:image/jpeg;base64,AAA'] },
+                  ],
+                },
+                { fecha: '2026-02-01T10:00:00.000Z', archivada: true, historicoURL: 'https://firebasestorage.googleapis.com/v1.json', resumen: { muebles: 1, total: 9000 } },
+              ],
+            },
+            {
+              // Sin folio: la app nunca le puso número.
+              id: 'cot-2', nombre: 'Cocina chica',
+              versiones: [{ fecha: '2026-01-09T10:00:00.000Z', muebles: [{ id: 'm3', nombre: 'Mueble', total: 10.005, qty: 4, imagenes: [] }] }],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+  config: { empresa: 'Taller 101', iva: 16 },
+  prices: { mano_obra: 350.5 },
+  reciboCounter: 7,
+};
+
+describe('la mudanza de quote101: del árbol a las filas', () => {
+  const cosecha = cosechar({ cotizador: [ARBOL] }, '2026-09-16T00:00:00.000Z', { negocio_id: 'neg-1' });
+
+  it('el árbol se reparte en clientes, proyectos y cotizaciones', () => {
+    expect(cosecha.filas.clientes?.map((f) => f.id)).toEqual(['cli-1']);
+    expect(cosecha.filas.proyectos?.map((f) => f.id)).toEqual(['pro-1']);
+    expect(cosecha.filas.cotizaciones?.map((f) => f.id)).toEqual(['cot-1', 'cot-2']);
+    expect(cosecha.rechazos).toEqual([]);
+  });
+
+  it('los ids del árbol se conservan: es lo que hace que repetirla no duplique', () => {
+    expect(cosecha.filas.proyectos?.[0].cliente_id).toBe('cli-1');
+    expect(cosecha.filas.cotizaciones?.[0].cliente_id).toBe('cli-1');
+    expect((cosecha.filas.cotizaciones?.[0].datos as any).proyecto_id).toBe('pro-1');
+  });
+
+  it('el proyecto entra como «planeando»: la app no guarda estado y no se inventa', () => {
+    expect(cosecha.filas.proyectos?.[0].estado).toBe('planeando');
+  });
+
+  it('el total se convierte a centavos ANTES de multiplicar por la cantidad', () => {
+    // 12500.50 × 2 = 2500100, y 3000 × 1 = 300000.
+    expect(cosecha.filas.cotizaciones?.[0].total).toBe(2500100 + 300000);
+    // El caso que justifica el orden: 10.005 por pieza son 1001 centavos
+    // (redondeo declarado), y cuatro piezas son 4004. Multiplicando primero en
+    // flotantes, 10.005 × 4 = 40.02 → 4002: dos centavos que no están en
+    // ningún renglón y que nadie volvería a encontrar.
+    expect(cosecha.filas.cotizaciones?.[1].total).toBe(4004);
+    expect(Math.round(10.005 * 4 * 100)).toBe(4002);
+  });
+
+  it('cada redondeo al centavo queda apuntado, con el valor de origen', () => {
+    const r = cosecha.redondeos.find((x) => x.id === 'cot-2#0');
+    // El origen es el precio POR PIEZA, que es lo que de verdad se redondeó.
+    // Si aquí dijera 40.02 la nota parecería un error de dos centavos, cuando
+    // lo que pasó fue que cada una de las cuatro piezas subió medio centavo.
+    expect(r?.origen).toBe('10.005');
+    expect(r?.veces).toBe(4);
+    expect(r?.centavos).toBe(4004);
+  });
+
+  it('la suma del cuadre es la que se escribió, no el precio por pieza', () => {
+    // Si se apuntara el precio por pieza, el cuadre compararía una cifra
+    // contra otra que nunca se guardó, y saldría «no cuadra» sin que nada
+    // estuviera mal.
+    const escrito = (cosecha.filas.cotizaciones ?? []).reduce((s, f) => s + Number(f.total), 0);
+    expect(cosecha.sumas['cotizaciones.total']).toBe(escrito);
+  });
+
+  it('las versiones viajan enteras en `datos`, con su historia', () => {
+    const datos = cosecha.filas.cotizaciones?.[0].datos as any;
+    expect(datos.nombre).toBe('Cocina integral');
+    expect(datos.versiones).toHaveLength(2);
+    expect(datos.versiones[1].archivada).toBe(true);
+  });
+
+  it('el folio que traía se conserva; el que no traía NI SE MENCIONA', () => {
+    expect(cosecha.filas.cotizaciones?.[0].folio).toBe('COT-000007');
+    // No es `''`: mandarlo vacío le borraría el folio a una fila ya importada.
+    expect('folio' in (cosecha.filas.cotizaciones?.[1] ?? {})).toBe(false);
+    expect(cosecha.avisos.folios_traidos).toBe(1);
+    expect(cosecha.avisos.sin_folio).toBe(1);
+  });
+
+  it('config y prices se van a `ajustes`, con el id que les toca', () => {
+    expect(cosecha.filas.ajustes?.map((f) => f.id)).toEqual(['cotizador101:config', 'cotizador101:precios']);
+    expect(cosecha.filas.ajustes?.[1].valor).toEqual({ mano_obra: 350.5 });
+    expect(cosecha.filas.ajustes?.[0].app).toBe('cotizador101');
+  });
+
+  it('`reciboCounter` NO se importa, y se dice que se quedó fuera', () => {
+    // Traerlo sería mudar de casa el mismo problema de concurrencia que el
+    // folio ya dejó atrás. Le toca su propia vuelta.
+    expect(cosecha.filas.ajustes?.some((f) => String(f.clave).includes('recibo'))).toBe(false);
+    expect(cosecha.ignorados.cotizador).toContain('reciboCounter');
+  });
+
+  it('cuenta lo que se queda en Firebase Storage, que es lo que decide si se puede apagar', () => {
+    expect(cosecha.avisos.versiones_en_storage).toBe(1);
+    expect(cosecha.avisos.imagenes_en_storage).toBe(1);
+    expect(cosecha.avisos.imagenes_en_el_documento).toBe(1);
+  });
+
+  it('sin negocio no se importa nada, y se dice por qué', () => {
+    const sin = cosechar({ cotizador: [ARBOL] }, '2026-09-16T00:00:00.000Z', {});
+    expect(sin.filas.clientes).toBeUndefined();
+    expect(sin.rechazos[0].motivo).toMatch(/falta `negocio`/);
+  });
+
+  it('una cantidad que no es entero se rechaza: no se redondea a escondidas', () => {
+    const raro = { ...ARBOL, clientes: [{ id: 'c', nombre: 'X', proyectos: [{ id: 'p', nombre: 'Y', cotizaciones: [{ id: 'q', versiones: [{ muebles: [{ total: 10, qty: 1.5 }] }] }] }] }] };
+    const r = cosechar({ cotizador: [raro] }, undefined, { negocio_id: 'neg-1' });
+    expect(r.filas.cotizaciones).toBeUndefined();
+    expect(r.rechazos.some((x) => x.campo === 'qty')).toBe(true);
+  });
+
+  it('el árbol también se entiende en el formato crudo de la API REST', () => {
+    // Es como llega de verdad: cada valor envuelto en su tipo, y los mapas y
+    // las listas anidados. Si esto no se desenvolviera bien, el navegador
+    // tendría que interpretar el documento antes de mandarlo — y entonces el
+    // código que decide qué es dinero viviría fuera de estas pruebas.
+    const rest = {
+      name: 'projects/x/databases/(default)/documents/app/datos',
+      fields: {
+        clientes: {
+          arrayValue: {
+            values: [{
+              mapValue: {
+                fields: {
+                  id: { stringValue: 'cli-9' }, nombre: { stringValue: 'Rita' },
+                  proyectos: {
+                    arrayValue: {
+                      values: [{
+                        mapValue: {
+                          fields: {
+                            id: { stringValue: 'pro-9' }, nombre: { stringValue: 'Closet' },
+                            cotizaciones: {
+                              arrayValue: {
+                                values: [{
+                                  mapValue: {
+                                    fields: {
+                                      id: { stringValue: 'cot-9' },
+                                      versiones: {
+                                        arrayValue: {
+                                          values: [{
+                                            mapValue: {
+                                              fields: {
+                                                muebles: {
+                                                  arrayValue: {
+                                                    values: [{ mapValue: { fields: { total: { doubleValue: 99.99 }, qty: { integerValue: '2' } } } }],
+                                                  },
+                                                },
+                                              },
+                                            },
+                                          }],
+                                        },
+                                      },
+                                    },
+                                  },
+                                }],
+                              },
+                            },
+                          },
+                        },
+                      }],
+                    },
+                  },
+                },
+              },
+            }],
+          },
+        },
+      },
+    };
+    const r = cosechar({ cotizador: [rest] }, undefined, { negocio_id: 'neg-1' });
+    expect(r.rechazos).toEqual([]);
+    expect(r.filas.clientes?.[0].nombre).toBe('Rita');
+    expect(r.filas.cotizaciones?.[0].total).toBe(9999 * 2);
+  });
+});
+
+describe('la mudanza de quote101: el folio lo pone el OrgDB', () => {
+  const ORG_C = 'cotizador-mudanza';
+  let negocio = '';
+
+  beforeAll(async () => {
+    await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: ORG_C, nombre: 'Mudanza' }) });
+    const n = await pedir(`/orgs/${ORG_C}/negocios`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Taller' }) });
+    negocio = n.data.id;
+  });
+
+  const mudar = (modo: 'seco' | 'escribir') =>
+    pedir('/admin/importar', {
+      method: 'POST',
+      body: JSON.stringify({ org: ORG_C, modo, negocio, docs: { cotizador: [ARBOL] } }),
+    });
+
+  it('el ensayo cuenta los avisos sin escribir nada', async () => {
+    const r = await mudar('seco');
+    expect(r.estado).toBe(200);
+    expect(r.data.avisos.versiones_en_storage).toBe(1);
+    expect(r.data.avisos.sin_folio).toBe(1);
+    const lista = await pedir(`/orgs/${ORG_C}/cotizaciones`, { app: 'cotizador101' });
+    expect(lista.data.total).toBe(0);
+  });
+
+  it('un negocio que no existe se rechaza antes de tocar nada', async () => {
+    const r = await pedir('/admin/importar', {
+      method: 'POST',
+      body: JSON.stringify({ org: ORG_C, modo: 'seco', negocio: 'no-existe', docs: { cotizador: [ARBOL] } }),
+    });
+    expect(r.estado).toBe(404);
+    expect(r.error).toBe('negocio_desconocido');
+  });
+
+  it('al escribir, la que traía folio lo conserva y la que no se lleva el siguiente', async () => {
+    const r = await mudar('escribir');
+    expect(r.estado).toBe(200);
+    expect(r.data.avisos.folios_asignados).toBe(1);
+    const lista = await pedir(`/orgs/${ORG_C}/cotizaciones`, { app: 'cotizador101' });
+    const porId = Object.fromEntries(lista.data.filas.map((f: any) => [f.id, f.folio]));
+    expect(porId['cot-1']).toBe('COT-000007');
+    // El contador se salta los folios ocupados, así que el nuevo no choca con
+    // el que la mudanza trajo congelado.
+    expect(porId['cot-2']).toMatch(/^COT-\d{6}$/);
+    expect(porId['cot-2']).not.toBe('COT-000007');
+  });
+
+  it('y la cotización nueva que se haga después sigue la cuenta, sin chocar', async () => {
+    const nueva = await pedir(`/orgs/${ORG_C}/cotizaciones`, {
+      app: 'cotizador101', method: 'POST', body: JSON.stringify({ negocio_id: negocio, total: 100 }),
+    });
+    expect(nueva.estado).toBe(201);
+    expect(nueva.data.folio).toMatch(/^COT-\d{6}$/);
+    const lista = await pedir(`/orgs/${ORG_C}/cotizaciones`, { app: 'cotizador101' });
+    const folios = lista.data.filas.map((f: any) => f.folio);
+    expect(new Set(folios).size).toBe(folios.length);
+  });
+
+  it('correrla dos veces NO le cambia el folio a ninguna', async () => {
+    // Es la prueba que más importa de esta parte: un folio que cambia en la
+    // segunda corrida es un folio distinto del que el cliente ya tiene impreso.
+    const antes = await pedir(`/orgs/${ORG_C}/cotizaciones`, { app: 'cotizador101' });
+    const mapa = Object.fromEntries(antes.data.filas.map((f: any) => [f.id, f.folio]));
+    const r = await mudar('escribir');
+    expect(r.data.avisos.folios_asignados).toBe(0);
+    const despues = await pedir(`/orgs/${ORG_C}/cotizaciones`, { app: 'cotizador101' });
+    expect(Object.fromEntries(despues.data.filas.map((f: any) => [f.id, f.folio]))).toEqual(mapa);
+    expect(despues.data.total).toBe(antes.data.total);
+  });
+
+  it('los ajustes quedan donde la app los va a buscar', async () => {
+    const r = await pedir(`/orgs/${ORG_C}/ajustes`, { app: 'cotizador101' });
+    const porClave = Object.fromEntries(r.data.filas.map((f: any) => [f.clave, f.valor]));
+    expect(porClave.config).toEqual({ empresa: 'Taller 101', iva: 16 });
+    expect(porClave.precios).toEqual({ mano_obra: 350.5 });
+  });
+
+  it('y el dinero cuadra al centavo contra lo que se convirtió', async () => {
+    const r = await mudar('seco');
+    const total = r.data.cuadre.dinero.find((d: any) => d.campo === 'cotizaciones.total');
+    expect(total.cuadra).toBe(true);
+    expect(total.centavos).toBe(2500100 + 300000 + 4004);
+  });
+});
