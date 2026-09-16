@@ -64,8 +64,14 @@ leer.
   ya estaban, con todas las apps.
 * Rearmar el APK y las apps de Windows para que entren por la suite.
 * roster101: 9 trabajadores (correo + código) y 2 cuentas de administración
-  (contraseña). Con la mudanza se va de paso el hoyo de `esSecuencia` que hoy
-  sigue vivo en su verificador de contraseñas: «1234567890» le pasa.
+  (contraseña).
+
+**Corrección.** En una nota anterior quedó escrito que el hoyo de `esSecuencia`
+—medir las escaleras de dígitos en línea recta en vez de en círculo, con lo que
+«1234567890» pasaba— seguía vivo en roster101. No es cierto: roster101 nació con
+la versión buena (`(d[i] - d[i-1] + 10) % 10`, `src/cuentas.js`). El hoyo fue mío
+al portar esas reglas a la API, y la prueba nueva lo cachó ahí mismo. Nada que
+arreglar en roster101 por ese lado.
 
 ## Medido
 
