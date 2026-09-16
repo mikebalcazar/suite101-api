@@ -27,6 +27,12 @@ import type { Env } from './entorno';
  * una que ya salió: las bases que ya la corrieron no la volverían a correr. */
 const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios];
 
+/** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
+ *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
+ *  número dejó el humo en rojo con la migración ya publicada y funcionando.
+ *  El repositorio define qué es «al día»; nadie más. */
+export const VERSION_ORG_DB = MIGRACIONES.length;
+
 const PREFIJO_CLAVE: Record<string, string> = { mueble: 'M', servicio: 'S', visita: 'V', otro: 'O' };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

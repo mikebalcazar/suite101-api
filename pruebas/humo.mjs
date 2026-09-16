@@ -19,6 +19,12 @@
  */
 
 import WebSocket from 'ws';
+import { readdirSync } from 'node:fs';
+
+/** Cuántas migraciones tiene hoy el OrgDB, contadas del repositorio. Así el
+ *  humo no se queda atrás cada vez que se agrega una. */
+const MIGRACIONES_ORG = readdirSync(new URL('../migrations/org/', import.meta.url).pathname)
+  .filter((f) => f.endsWith('.sql')).length;
 
 const STAGING = process.env.STAGING;
 const PROD = process.env.PROD;
@@ -134,7 +140,13 @@ async function recorrido() {
   const nueva = await pedir(STAGING, '/admin/orgs', { method: 'POST', body: { id: ORG, nombre: 'Humo' } });
   rev(nueva.estado === 201, `se crea la org ${ORG}`, `${nueva.ms} ms`);
   // Desde 0002 (partidas a tabla propia) el DO nace en la versión 2.
-  rev(nueva.data?.org_db_version === 3, 'su Durable Object nació y corrió las tres migraciones solo, sin redeploy', `version ${nueva.data?.org_db_version}`);
+  // El número se lee de las migraciones del repo, no se escribe a mano: subir
+  // una migración y olvidar este número dejó el humo en rojo el 16-sep, con la
+  // 0004 (folios) ya publicada y funcionando. Lo que importa es que el DO
+  // nazca al día, y «al día» lo define el repositorio.
+  rev(nueva.data?.org_db_version === MIGRACIONES_ORG,
+    `su Durable Object nació y corrió las ${MIGRACIONES_ORG} migraciones solo, sin redeploy`,
+    `version ${nueva.data?.org_db_version}`);
 
   // Contrato 0.5.0: lo que master101 necesita.
   const supers = await pedir(STAGING, '/admin/superadmins');
