@@ -226,6 +226,22 @@ async function recorrido() {
 
   galleta = galletaSuper2;
 
+  // Contrato 0.9.0: el folio de la cotización lo asigna la suite.
+  const negF = await pedir(STAGING, `/orgs/${ORG}/negocios`, { app: 'dash101', method: 'POST', body: { nombre: 'Folios' } });
+  const cotizar = (extra = {}) => pedir(STAGING, `/orgs/${ORG}/cotizaciones`, {
+    app: 'cotizador101', method: 'POST', body: { negocio_id: negF.data?.id, total: 15000000, moneda: 'MXN', ...extra },
+  });
+  const f1 = await cotizar();
+  rev(f1.estado === 201 && f1.data?.folio === 'COT-000001', 'la primera cotización se lleva el folio COT-000001', `${f1.estado} ${f1.data?.folio ?? f1.error}`);
+  const f2 = await cotizar();
+  rev(f2.data?.folio === 'COT-000002', 'y la segunda el COT-000002: la cuenta la lleva la suite', String(f2.data?.folio));
+  const impuesto = await cotizar({ folio: 'COT-999999' });
+  rev(impuesto.data?.folio === 'COT-000003', 'una app NO puede imponer su folio: se le ignora', String(impuesto.data?.folio));
+  const diez = await Promise.all(Array.from({ length: 10 }, () => cotizar()));
+  const folios = diez.map((r) => r.data?.folio);
+  rev(new Set(folios).size === 10, 'diez cotizaciones de golpe se llevan diez folios distintos', `${new Set(folios).size} distintos de 10`);
+  rev(folios.every((f) => /^COT-\d{6}$/.test(String(f))), 'y todos con el formato COT- y seis dígitos');
+
   const neg = await pedir(STAGING, `/orgs/${ORG}/negocios`, { app: 'dash101', method: 'POST', body: { nombre: 'Taller' } });
   const cli = await pedir(STAGING, `/orgs/${ORG}/clientes`, { app: 'dash101', method: 'POST', body: { nombre: 'Áurea Pérez', negocio_id: neg.data?.id } });
   rev(cli.data?.nombre_norm === 'aurea perez', 'nombre_norm sale sin acentos', String(cli.data?.nombre_norm));

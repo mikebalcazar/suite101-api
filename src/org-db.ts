@@ -16,6 +16,7 @@ import { DurableObject } from 'cloudflare:workers';
 import inicial from '../migrations/org/0001_inicial.sql';
 import partidasATabla from '../migrations/org/0002_partidas.sql';
 import conciliaciones from '../migrations/org/0003_conciliaciones.sql';
+import folios from '../migrations/org/0004_folios.sql';
 import { DEFS, type Def, type Tipo } from './tablas';
 import { ahora, normalizar, ulid } from './lib';
 import { TABLAS, type Aviso, type Etapa, type Peek, type Pool, type Tabla } from '../schema/tipos';
@@ -24,7 +25,7 @@ import type { Env } from './entorno';
 /* Las migraciones del OrgDB, en orden. Para agregar una: se escribe el .sql,
  * se importa y se empuja aquí. El DO la aplica al despertar. Nunca se edita
  * una que ya salió: las bases que ya la corrieron no la volverían a correr. */
-const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones];
+const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios];
 
 const PREFIJO_CLAVE: Record<string, string> = { mueble: 'M', servicio: 'S', visita: 'V', otro: 'O' };
 
@@ -53,6 +54,9 @@ export interface ApiOrgDB {
   listar(tabla: Tabla, filtros?: Record<string, string>, sujeto?: Sujeto, limite?: number): Promise<{ total: number; filas: Fila[] }>;
   obtener(tabla: Tabla, id: string): Promise<Fila | null>;
   crear(tabla: Tabla, datos: Fila, contexto: { app: string; usuario_id: string }): Promise<Fila>;
+  /** Deja el contador de folios en un número. La usa la mudanza de la fase 4
+   *  para dejarlo justo después de lo que acabó de importar. */
+  fijarFolio(siguiente: number, serie?: string): Promise<number>;
   actualizar(tabla: Tabla, id: string, datos: Fila): Promise<Fila | null>;
   /** false si no existía; 'en_uso' si otras filas apuntan a esta (llave foránea). */
   borrar(tabla: Tabla, id: string): Promise<boolean | 'en_uso'>;
@@ -222,11 +226,70 @@ export class OrgDB extends DurableObject<Env> {
     return this.afuera(tabla, f ?? null);
   }
 
+  /* ─────────────── el folio de la cotización ───────────────
+   * Se asigna AQUÍ, dentro del Durable Object, y por eso es atómico sin
+   * transacciones: un solo hilo por empresa, así que «leer, sumar uno,
+   * guardar» no se puede entrelazar con otra ejecución. Es la respuesta de
+   * verdad a «dos personas cotizando a la vez», y es más fuerte que una
+   * transacción, porque no depende de que esté bien escrita.
+   *
+   * Formato: `COT-` y seis dígitos. Lo decidió Mike el 16-sep —consecutivo
+   * corrido, sin año— porque quiere que el número diga cuántas cotizaciones
+   * llevan en total.
+   *
+   * El candado del `while`: los 39 folios que traerá la mudanza son números
+   * derivados de 008406 a 874280, y ninguno baja de 1000, así que la cuenta
+   * nueva tiene 8,366 de margen. Aun así se comprueba, porque cuesta una
+   * consulta con índice y cubre el día que se importe el histórico de otro
+   * cliente. Hoy no se dispara nunca.
+   */
+  private siguienteFolio(serie = 'COT'): string {
+    const fila = this.sql.exec(`SELECT siguiente FROM folios WHERE serie = ?`, serie).toArray()[0] as
+      { siguiente: number } | undefined;
+    let n = fila?.siguiente ?? 1;
+    let folio = '';
+    for (;;) {
+      folio = `${serie}-${String(n).padStart(6, '0')}`;
+      const ocupado = this.sql.exec(`SELECT 1 AS x FROM cotizaciones WHERE folio = ? LIMIT 1`, folio).toArray()[0];
+      n += 1;
+      if (!ocupado) break;
+    }
+    this.sql.exec(
+      `INSERT INTO folios (serie, siguiente) VALUES (?,?) ON CONFLICT(serie) DO UPDATE SET siguiente = excluded.siguiente`,
+      serie, n,
+    );
+    return folio;
+  }
+
+  /** Deja el contador en un número dado. La usa la mudanza de la fase 4 para
+   *  dejarlo justo después de lo que acabó de importar. */
+  fijarFolio(siguiente: number, serie = 'COT'): number {
+    const n = Math.max(1, Math.floor(siguiente));
+    this.sql.exec(
+      `INSERT INTO folios (serie, siguiente) VALUES (?,?) ON CONFLICT(serie) DO UPDATE SET siguiente = excluded.siguiente`,
+      serie, n,
+    );
+    return n;
+  }
+
   crear(tabla: Tabla, datos: Fila, contexto: { app: string; usuario_id: string }): Fila {
     const def = DEFS[tabla];
     const fila: Fila = { ...datos };
 
     fila.id = (datos.id as string) || ulid();
+
+    /* El folio no lo pone la app. Lo pone la suite, y una sola vez.
+     *
+     * La única excepción es `suite101`, que es con la que entra la mudanza de
+     * la fase 4: ésa trae los folios viejos ya congelados y hay que
+     * respetarlos, porque son los que andan impresos en los PDFs de los
+     * clientes. Cualquier otra app que mande un folio se lo ignora: si se
+     * dejara pasar, el navegador volvería a decidir el folio y estaríamos en
+     * el problema del que venimos. */
+    if (tabla === 'cotizaciones') {
+      const traido = String(datos.folio ?? '').trim();
+      fila.folio = contexto.app === 'suite101' && traido ? traido : this.siguienteFolio();
+    }
     if (def.cols.creado_at) fila.creado_at = ahora();
     if (def.cols.ts && !fila.ts) fila.ts = ahora();
     if (def.cols.creado_por) fila.creado_por = contexto.usuario_id;

@@ -98,10 +98,15 @@ describe('2 · se crea una org y su Durable Object nace solo', () => {
     expect(r.estado).toBe(201);
     // La versión la contesta el propio DO: si vale 2, nació y corrió las dos
     // migraciones (0001 y la de partidas).
-    expect(r.data.org_db_version).toBe(3);
+    expect(r.data.org_db_version).toBe(4);
   });
 
-  it('las catorce tablas están dentro del DO', async () => {
+  it('las tablas que hay dentro del DO son exactamente éstas', async () => {
+    // Se listan una por una y se comparan con igualdad, no con «contiene»:
+    // así una tabla NUEVA que nadie esperaba también rompe la prueba, no sólo
+    // una que falte. `folios` no es una tabla del contrato —no está en TABLAS
+    // ni se expone por el CRUD—: es el contador del folio de la cotización,
+    // que vive aquí adentro para ser atómico.
     // El stub tipado obliga a TypeScript a recorrer la clase entera; aqui no
     // hace falta, solo se le pide el listado de tablas.
     const stub = entorno.ORG.get(entorno.ORG.idFromName(ORG)) as unknown as DurableObjectStub;
@@ -114,8 +119,8 @@ describe('2 · se crea una org y su Durable Object nace solo', () => {
     );
     expect(nombres).toEqual([
       'archivos', 'avances', 'clientes', 'conciliacion_cuentas', 'conciliaciones', 'cotizaciones',
-      'cuentas', 'estaciones', 'items', 'movimientos', 'negocios', 'opex', 'partidas', 'personal',
-      'proveedores', 'proyectos',
+      'cuentas', 'estaciones', 'folios', 'items', 'movimientos', 'negocios', 'opex', 'partidas',
+      'personal', 'proveedores', 'proyectos',
     ]);
   });
 
@@ -874,7 +879,7 @@ describe('9 · reiniciar una empresa, que solo existe fuera de producción', () 
     const r = await pedir('/admin/orgs/efimera', { method: 'DELETE' });
     expect(r.estado).toBe(200);
     expect(r.data.reiniciada).toBe('efimera');
-    expect(r.data.org_db_version).toBe(3);
+    expect(r.data.org_db_version).toBe(4);
 
     const ya = await pedir('/orgs/efimera/negocios', { app: 'dash101' });
     expect(ya.estado).toBe(404);
@@ -882,7 +887,7 @@ describe('9 · reiniciar una empresa, que solo existe fuera de producción', () 
 
     const otraVez = await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: 'efimera', nombre: 'Efímera' }) });
     expect(otraVez.estado).toBe(201);
-    expect(otraVez.data.org_db_version).toBe(3);
+    expect(otraVez.data.org_db_version).toBe(4);
     const limpia = await pedir('/orgs/efimera/negocios', { app: 'dash101' });
     expect(limpia.data.total).toBe(0);
   });
@@ -1358,5 +1363,101 @@ describe('13 · la puerta de las apps empacadas (contrato 0.8.0)', () => {
     expect(r.estado).toBe(200);
     expect(r.data.usuario.correo).toBe(CORREO);
     galleta = galletaMike;
+  });
+});
+
+describe('14 · el folio de la cotización lo asigna la suite (contrato 0.9.0)', () => {
+  let negocio = '';
+
+  /* `runInDurableObject` viene con genéricos que arrastran toda la clase del
+   * OrgDB y TypeScript se rinde con TS2589 («type instantiation is excessively
+   * deep»). Se llama por un alias plano, igual que en la prueba 2. */
+  const dentro = runInDurableObject as unknown as <T>(s: unknown, f: (o: any) => T | Promise<T>) => Promise<T>;
+  const elDO = () => entorno.ORG.get(entorno.ORG.idFromName(ORG)) as unknown as DurableObjectStub;
+
+  /** Crea una cotización por la ruta de siempre, como quote101. */
+  const cotizar = (extra: Record<string, unknown> = {}) =>
+    pedir(`/orgs/${ORG}/cotizaciones`, {
+      method: 'POST', app: 'cotizador101',
+      body: JSON.stringify({ negocio_id: negocio, total: 15000000, moneda: 'MXN', ...extra }),
+    });
+
+  it('el contador arranca en 1 y va corrido', async () => {
+    const neg = await pedir(`/orgs/${ORG}/negocios`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Folios' }) });
+    negocio = neg.data.id;
+
+    const uno = await cotizar();
+    expect(uno.estado).toBe(201);
+    expect(uno.data.folio).toBe('COT-000001');
+
+    const dos = await cotizar();
+    expect(dos.data.folio).toBe('COT-000002');
+
+    const tres = await cotizar();
+    expect(tres.data.folio).toBe('COT-000003');
+  });
+
+  it('el folio NO lo pone la app: si lo manda, se le ignora', async () => {
+    // Es el punto de todo esto. Si se dejara pasar, el navegador volvería a
+    // decidir el folio y estaríamos en el problema del que venimos: un folio
+    // calculado del monto, que cambia si cambia el monto.
+    const r = await cotizar({ folio: 'COT-999999' });
+    expect(r.estado).toBe(201);
+    expect(r.data.folio).toBe('COT-000004');
+    expect(r.data.folio).not.toBe('COT-999999');
+  });
+
+  it('no hay dos cotizaciones con el mismo folio, ni a la carrera', async () => {
+    // Diez de golpe, sin esperar una a otra. El Durable Object es de un solo
+    // hilo: se encolan y cada una se lleva su número. Esto es lo que antes
+    // fallaba, cuando el folio lo calculaba el navegador del monto y la fecha
+    // y dos del mismo día con el mismo total daban el mismo folio.
+    const diez = await Promise.all(Array.from({ length: 10 }, () => cotizar()));
+    const folios = diez.map((r) => r.data.folio);
+    expect(new Set(folios).size).toBe(10);
+    expect(diez.every((r) => r.estado === 201)).toBe(true);
+
+    const todas = await pedir(`/orgs/${ORG}/cotizaciones`, { app: 'cotizador101' });
+    const todos = (todas.data.filas as Array<{ folio: string }>).map((f) => f.folio);
+    expect(new Set(todos).size).toBe(todos.length);
+    expect(todos.every((f) => /^COT-\d{6}$/.test(f))).toBe(true);
+  });
+
+  it('la mudanza sí puede traer un folio viejo congelado, y el contador lo respeta', async () => {
+    // Los 39 folios de producción son números derivados, de 008406 a 874280.
+    // Andan impresos en los PDFs de los clientes, así que la mudanza los trae
+    // tal cual. Sólo `suite101` puede hacerlo; para eso llama al DO directo.
+    const vieja = await dentro<{ folio: string }>(elDO(), (obj: any) =>
+      obj.crear('cotizaciones', { negocio_id: negocio, total: 5757170, folio: 'COT-008406' }, { app: 'suite101', usuario_id: 'u' }));
+    expect(vieja.folio).toBe('COT-008406');
+
+    // Y el contador queda donde se le diga, que es lo que hará la fase 4 al
+    // terminar de importar.
+    const puesto = await dentro<number>(elDO(), (obj: any) => obj.fijarFolio(40));
+    expect(puesto).toBe(40);
+    const siguiente = await cotizar();
+    expect(siguiente.data.folio).toBe('COT-000040');
+  });
+
+  it('si el folio que toca ya existe, se salta al siguiente', async () => {
+    // Se ocupa el 000041 a mano y se pone el contador ahí: el asignador tiene
+    // que darse cuenta y pasar al 000042. Hoy esto no se dispara nunca —los
+    // folios viejos no bajan de 008406— pero cubre el día que se importe el
+    // histórico de otro cliente.
+    await dentro<unknown>(elDO(), (obj: any) =>
+      obj.crear('cotizaciones', { negocio_id: negocio, total: 100, folio: 'COT-000041' }, { app: 'suite101', usuario_id: 'u' }));
+    await dentro<number>(elDO(), (obj: any) => obj.fijarFolio(41));
+
+    const r = await cotizar();
+    expect(r.data.folio).toBe('COT-000042');
+  });
+
+  it('la base misma impide dos folios iguales', async () => {
+    // La cerradura está en el índice único, no en una revisión del servidor:
+    // una ruta nueva que se olvide de preguntar vuelve a abrir la puerta, el
+    // índice no. Es la misma lección del código de ítem en quell101.
+    await expect(dentro<unknown>(elDO(), (obj: any) =>
+      obj.crear('cotizaciones', { negocio_id: negocio, total: 200, folio: 'COT-000041' }, { app: 'suite101', usuario_id: 'u' })),
+    ).rejects.toThrow(/UNIQUE|constraint/i);
   });
 });
