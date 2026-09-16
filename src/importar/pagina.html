@@ -119,6 +119,24 @@
 
 <section>
   <h2>2 · Sacar los datos de Firestore</h2>
+
+  <label for="fuente">De qué app se están mudando los datos</label>
+  <select id="fuente">
+    <option value="contamaster">CONTA MASTER — negocios, cuentas, clientes, proyectos, movimientos</option>
+    <option value="cotizador">El cotizador (quote101) — clientes, proyectos y cotizaciones</option>
+  </select>
+
+  <div id="ayudaCotizador" hidden>
+    <p>El cotizador no guarda colecciones: guarda <b>un solo documento</b> con todo el árbol adentro
+    —clientes, sus proyectos, sus cotizaciones y las versiones de cada una—, más la configuración de
+    la empresa y la lista de precios. Así que aquí no hay que pedir nada colección por colección: se
+    baja ese documento y ya.</p>
+    <p>Abre <a href="https://quote101.mike-929.workers.dev" target="_blank" rel="noopener">el
+    cotizador</a>, entra, abre la consola del navegador (F12 → Console) y pega esto. La receta saca la
+    configuración de Firestore <b>de la propia página</b>, así que aquí no hay ninguna llave escrita.</p>
+  </div>
+
+  <div id="ayudaContamaster">
   <p class="nota"><b>Se pide colección por colección, con los mismos filtros que usa CONTA MASTER.</b>
   Sus reglas no dejan leer una colección entera —la de <code>negocios</code> exige que tu uid esté en
   <code>miembros_uids</code>, y Firestore no puede demostrarlo sin filtro—, así que una lectura sin
@@ -129,14 +147,25 @@
   desde ahí, donde tu sesión ya está viva. Abre
   <a href="https://conta-master.netlify.app" target="_blank" rel="noopener">conta-master.netlify.app</a>,
   entra si hace falta, abre la consola del navegador (F12 → Console) y pega esto:</p>
+  </div>
+
   <pre id="receta"></pre>
   <button id="bCopiar" class="gris">Copiar la receta</button>
-  <p class="nota">Descarga un archivo <code>contamaster-export.json</code>. Nada sale de tu
-  navegador hacia ningún lado: el archivo se queda en tu computadora y de ahí lo subes aquí.</p>
+  <p class="nota">Descarga un archivo JSON. Nada sale de tu navegador hacia ningún lado: el archivo
+  se queda en tu computadora y de ahí lo subes aquí.</p>
 
   <label for="archivo">El archivo que descargaste</label>
   <input id="archivo" type="file" accept="application/json,.json">
   <div id="leido" class="estado"></div>
+
+  <div id="pideNegocio" hidden>
+    <label for="negocio">A qué negocio se cuelgan los clientes y las cotizaciones</label>
+    <input id="negocio" list="listaNegocios" placeholder="el negocio de la empresa">
+    <datalist id="listaNegocios"></datalist>
+    <p class="nota">El cotizador no sabe que los negocios existen: la suite guarda clientes y
+    cotizaciones por negocio, así que hay que decir a cuál. Se pregunta en vez de adivinarlo:
+    adivinar mal deja los clientes colgando del negocio equivocado.</p>
+  </div>
 </section>
 
 <section>
@@ -238,14 +267,53 @@ const RECETA = [
   "})()"
 ].join("\n");
 
-document.getElementById('receta').textContent = RECETA;
-document.getElementById('bCopiar').onclick = async () => {
-  try { await navigator.clipboard.writeText(RECETA); document.getElementById('bCopiar').textContent = 'Copiada'; }
-  catch { document.getElementById('bCopiar').textContent = 'Selecciónala a mano'; }
-};
+/* La receta del cotizador.
+ *
+ * Es mucho más corta porque quote101 guarda UN documento y su base está
+ * abierta: no hace falta token ni filtros. Eso último no es una comodidad, es
+ * el hueco que esta mudanza existe para cerrar.
+ *
+ * La configuración de Firestore se saca de la propia página en vez de venir
+ * escrita aquí. No por elegancia: una llave copiada en dos lugares es una
+ * llave que algún día se queda vieja en uno de los dos, y además este
+ * repositorio no tiene por qué llevar la de nadie. */
+const RECETA_COT = [
+  "(async () => {",
+  "  const src = document.documentElement.innerHTML;",
+  "  const proj = (src.match(/FS_PROJECT\s*=\s*\"([^\"]+)\"/) || [])[1];",
+  "  const key  = (src.match(/FS_KEY\s*=\s*\"([^\"]+)\"/) || [])[1];",
+  "  if (!proj || !key) throw new Error('esta pagina no es el cotizador: no encontre su configuracion de Firestore');",
+  "  const u = 'https://firestore.googleapis.com/v1/projects/' + proj + '/databases/(default)/documents/app/datos?key=' + key;",
+  "  const r = await fetch(u);",
+  "  if (!r.ok) throw new Error('Firestore contesto ' + r.status);",
+  "  const doc = await r.json();",
+  "  const cuantos = ((doc.fields && doc.fields.clientes && doc.fields.clientes.arrayValue.values) || []).length;",
+  "  const salida = { origen: 'cotizador', leido_at: new Date().toISOString(), docs: { cotizador: [doc] } };",
+  "  const blob = new Blob([JSON.stringify(salida)], { type: 'application/json' });",
+  "  const a = document.createElement('a');",
+  "  a.href = URL.createObjectURL(blob); a.download = 'cotizador-export.json'; a.click();",
+  "  console.log('listo: ' + cuantos + ' clientes');",
+  "})()"
+].join("\n");
 
 const $ = (id) => document.getElementById(id);
 let DOCS = null;
+
+const RECETAS = { contamaster: RECETA, cotizador: RECETA_COT };
+function ponerFuente() {
+  const f = $('fuente').value;
+  $('receta').textContent = RECETAS[f];
+  $('ayudaContamaster').hidden = f !== 'contamaster';
+  $('ayudaCotizador').hidden = f !== 'cotizador';
+  $('bCopiar').textContent = 'Copiar la receta';
+}
+$('fuente').onchange = ponerFuente;
+ponerFuente();
+
+$('bCopiar').onclick = async () => {
+  try { await navigator.clipboard.writeText($('receta').textContent); $('bCopiar').textContent = 'Copiada'; }
+  catch { $('bCopiar').textContent = 'Selecciónala a mano'; }
+};
 
 async function api(ruta, opciones = {}) {
   const r = await fetch(ruta, {
@@ -324,18 +392,39 @@ $('archivo').onchange = async (e) => {
             + '. Eso llega vacío y el cuadre lo va a decir.';
     }
     $('leido').innerHTML = '<span class="cifra">' + cuenta + '</span>' + aviso;
+    $('pideNegocio').hidden = !(DOCS.cotizador && DOCS.cotizador.length);
+    if (!$('pideNegocio').hidden) await cargarNegocios();
     revisarListos();
   } catch (err) {
     $('leido').textContent = 'No pude leer el archivo: ' + err.message;
   }
 };
 
+/** Los negocios que ya tiene la empresa. Se leen de la base, no se teclean:
+ *  un negocio inventado deja los clientes colgando de nada, y eso la ruta lo
+ *  rechaza — mejor ofrecer los que hay. */
+async function cargarNegocios() {
+  const org = $('org').value.trim();
+  if (!org) return;
+  const r = await api('/orgs/' + encodeURIComponent(org) + '/negocios');
+  const lista = $('listaNegocios');
+  lista.innerHTML = '';
+  const filas = (r.data && r.data.filas) || [];
+  for (const n of filas) {
+    const op = document.createElement('option');
+    op.value = n.id; op.label = n.nombre; lista.appendChild(op);
+  }
+  if (filas.length === 1 && !$('negocio').value) $('negocio').value = filas[0].id;
+}
+
 function revisarListos() {
-  const listo = !!DOCS && !!$('org').value.trim();
+  const pideNeg = !$('pideNegocio').hidden;
+  const listo = !!DOCS && !!$('org').value.trim() && (!pideNeg || !!$('negocio').value.trim());
   $('bSeco').disabled = !listo;
   $('bEscribir').disabled = !listo;
 }
-$('org').addEventListener('input', revisarListos);
+$('org').addEventListener('input', () => { revisarListos(); if (!$('pideNegocio').hidden) cargarNegocios(); });
+$('negocio').addEventListener('input', revisarListos);
 
 /* ─── 3 · correr ─── */
 
@@ -344,7 +433,10 @@ async function correr(modo) {
   $('bSeco').disabled = true; $('bEscribir').disabled = true;
   const r = await api('/admin/importar', {
     method: 'POST',
-    body: JSON.stringify({ org: $('org').value.trim(), modo, docs: DOCS }),
+    body: JSON.stringify({
+      org: $('org').value.trim(), modo, docs: DOCS,
+      negocio: $('negocio').value.trim() || undefined,
+    }),
   });
   $('corriendo').textContent = '';
   revisarListos();
@@ -433,8 +525,32 @@ function pintar(r) {
   }
   if (d.redondeos.length) {
     extra += '<h2>Redondeos al centavo</h2>' + tabla(
-      [{ t: 'Colección' }, { t: 'Id' }, { t: 'Campo' }, { t: 'Venía' }, { t: 'Quedó', n: 1 }],
-      d.redondeos.map((x) => [x.coleccion, x.id, x.campo, x.origen, pesos(x.centavos)]));
+      [{ t: 'Colección' }, { t: 'Id' }, { t: 'Campo' }, { t: 'Venía (por pieza)' }, { t: 'Piezas', n: 1 }, { t: 'Quedó', n: 1 }],
+      d.redondeos.map((x) => [x.coleccion, x.id, x.campo, x.origen, x.veces, pesos(x.centavos)]));
+    extra += '<p class="nota">«Venía» es el precio por pieza, que es lo que de verdad se redondeó. '
+          + 'El total del renglón se arma multiplicando ya en centavos: convertir primero y multiplicar '
+          + 'después deja la cuenta en enteros, donde no hay centavos que perder.</p>';
+  }
+  const av = d.avisos;
+  if (av) {
+    const enStorage = av.versiones_en_storage + av.imagenes_en_storage;
+    extra += '<h2>La mudanza del cotizador</h2>'
+      + '<p class="cifra">cotizaciones con folio de antes: ' + av.folios_traidos
+      + ' · sin folio, se les puso uno: ' + av.folios_asignados + '</p>'
+      + '<p class="nota">El folio que ya traían se conserva tal cual: puede andar impreso en el PDF '
+      + 'que el cliente ya tiene. A las que nunca tuvieron número se les pone el siguiente, en orden '
+      + 'de fecha, con el mismo contador de la suite — así no hay dos iguales y el contador queda '
+      + 'después del último.</p>'
+      + '<p class="aviso"><b class="' + (enStorage ? 'no' : 'si') + '">'
+      + (enStorage ? 'Todavía queda detalle en Firebase Storage: ' + enStorage + ' cosas' : 'Nada quedó en Firebase Storage')
+      + '</b></p>'
+      + '<p class="cifra">versiones históricas que viven en Storage: ' + av.versiones_en_storage
+      + ' · imágenes que son una URL de Storage: ' + av.imagenes_en_storage
+      + ' · imágenes que sí viajan en el documento: ' + av.imagenes_en_el_documento + '</p>'
+      + '<p class="nota"><b>Esto decide si se puede apagar Firebase.</b> Lo que vive en Storage no '
+      + 'viaja en este documento: la cotización se importa y ese detalle se queda allá. Apagar '
+      + 'Firebase se lo lleva. Se muda en su propio paso, y hasta que estos números sean cero, '
+      + 'Firebase no se apaga.</p>';
   }
   const ign = Object.keys(d.campos_ignorados || {});
   if (ign.length) {

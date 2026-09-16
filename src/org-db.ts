@@ -126,6 +126,9 @@ export interface Importacion {
   muestra: Array<{ tabla: string; id: string }>;
   enlaces: { movimientos_con_item: number; item_que_no_existe: string[] };
   proyectos_recalculados: number;
+  /** Cotizaciones que llegaron sin folio y se fueron con uno. La mudanza de
+   *  quote101 trae muchas así: la app nunca les puso número. */
+  folios_asignados: number;
 }
 
 export class OrgDB extends DurableObject<Env> {
@@ -765,6 +768,7 @@ export class OrgDB extends DurableObject<Env> {
       muestra: [],
       enlaces: { movimientos_con_item: 0, item_que_no_existe: [] },
       proyectos_recalculados: 0,
+      folios_asignados: 0,
     };
 
     const trabajo = (): void => {
@@ -786,6 +790,30 @@ export class OrgDB extends DurableObject<Env> {
         }
         salida.nuevas[tabla] = nuevas;
         salida.actualizadas[tabla] = actualizadas;
+      }
+
+      /* El folio de las cotizaciones que llegaron sin uno.
+       *
+       * Se pone AQUÍ y no en el mapeo por dos razones. Una: el contador vive
+       * en esta base, y una cuenta paralela en el importador se desalinearía
+       * con la del contrato 0.9.0 en cuanto alguien cotizara. Dos:
+       * `siguienteFolio` se salta los folios ya ocupados, así que los que la
+       * mudanza trae congelados no chocan con los que se asignan, y al final
+       * el contador queda solo después del último — sin acomodarlo a mano.
+       *
+       * En orden de `creado_at` para que los números salgan en el orden en que
+       * las cotizaciones se hicieron, no en el que el árbol venía armado.
+       *
+       * Las que ya tenían folio no entran: si entraran, una segunda corrida le
+       * cambiaría el folio a una cotización que ya salió impresa. */
+      if (args.filas.cotizaciones?.length) {
+        const sinFolio = this.sql
+          .exec(`SELECT id FROM cotizaciones WHERE folio IS NULL OR folio = '' ORDER BY creado_at, id`)
+          .toArray() as Fila[];
+        for (const f of sinFolio) {
+          this.sql.exec(`UPDATE cotizaciones SET folio = ? WHERE id = ?`, this.siguienteFolio(), f.id);
+        }
+        salida.folios_asignados = sinFolio.length;
       }
 
       // Los cachés del proyecto NO se importan: se recalculan aquí, una vez

@@ -470,6 +470,53 @@ async function importacion() {
   const otra = await pedir(STAGING, `/orgs/${ORGI}/items`, { app: 'dash101' });
   rev(otra.data?.total === 2, 'siguen siendo 2 ítems, no 4', `${otra.data?.total}`);
 
+  /* La mudanza del cotizador, por el camino de verdad.
+   *
+   * quote101 no tiene colecciones: trae UN documento con el árbol adentro. Lo
+   * que se mide aquí y no en las pruebas de dentro es que el folio lo pone el
+   * OrgDB publicado —con su contador, el del contrato 0.9.0— y que repetir la
+   * mudanza no le cambia el folio a ninguna cotización. Un folio que cambia en
+   * la segunda corrida es un folio distinto del que el cliente ya tiene
+   * impreso. */
+  const arbol = {
+    cotizador: [{
+      clientes: [{
+        id: 'COT-CLI', nombre: 'Casa Humo',
+        proyectos: [{
+          id: 'COT-PRO', nombre: 'Cocina',
+          cotizaciones: [
+            { id: 'COT-Q1', nombre: 'Con folio', versiones: [{ fecha: '2026-03-04T10:00:00Z', folio: 'COT-000099', muebles: [{ total: 12500.5, qty: 2 }] }] },
+            { id: 'COT-Q2', nombre: 'Sin folio', versiones: [{ fecha: '2026-01-09T10:00:00Z', muebles: [{ total: 10.005, qty: 4 }] }] },
+          ],
+        }],
+      }],
+      config: { empresa: 'Taller 101' },
+      prices: { mano_obra: 350.5 },
+      reciboCounter: 7,
+    }],
+  };
+  const sinNeg = await pedir(STAGING, '/admin/importar', { method: 'POST', body: { org: ORGI, modo: 'seco', negocio: 'no-existe', docs: arbol } });
+  rev(sinNeg.estado === 404 && sinNeg.error === 'negocio_desconocido', 'un negocio inventado se rechaza antes de tocar nada', `${sinNeg.estado} ${sinNeg.error}`);
+
+  const cotSeco = await pedir(STAGING, '/admin/importar', { method: 'POST', body: { org: ORGI, modo: 'seco', negocio: 'NEG1', docs: arbol } });
+  rev(cotSeco.data?.avisos?.sin_folio === 1 && cotSeco.data?.avisos?.folios_traidos === 1, 'el ensayo cuenta 1 cotización con folio y 1 sin', `traídos ${cotSeco.data?.avisos?.folios_traidos}, sin ${cotSeco.data?.avisos?.sin_folio}`);
+
+  const cotUno = await pedir(STAGING, '/admin/importar', { method: 'POST', body: { org: ORGI, modo: 'escribir', negocio: 'NEG1', docs: arbol } });
+  rev(cotUno.data?.avisos?.folios_asignados === 1, 'a la que no traía folio se le puso uno', String(cotUno.data?.avisos?.folios_asignados));
+  const q1 = await pedir(STAGING, `/orgs/${ORGI}/cotizaciones/COT-Q1`, { app: 'cotizador101' });
+  rev(q1.data?.folio === 'COT-000099' && q1.data?.total === 2500100, 'conserva su folio viejo y su total al centavo', `${q1.data?.folio} · ${q1.data?.total}`);
+  const q2 = await pedir(STAGING, `/orgs/${ORGI}/cotizaciones/COT-Q2`, { app: 'cotizador101' });
+  // 10.005 por pieza son 1001 centavos y cuatro piezas 4004. Multiplicando
+  // primero en flotantes darían 4002: dos centavos que no están en ningún
+  // renglón.
+  rev(q2.data?.total === 4004, 'el total se convierte a centavos ANTES de multiplicar por la cantidad', `${q2.data?.total} (multiplicando primero serían 4002)`);
+  const ajCot = await pedir(STAGING, `/orgs/${ORGI}/ajustes`, { app: 'cotizador101' });
+  rev((ajCot.data?.filas || []).map((f) => f.clave).sort().join(',') === 'config,precios', 'la configuración y los precios quedaron en ajustes', (ajCot.data?.filas || []).map((f) => f.clave).join(','));
+
+  const cotDos = await pedir(STAGING, '/admin/importar', { method: 'POST', body: { org: ORGI, modo: 'escribir', negocio: 'NEG1', docs: arbol } });
+  const q2b = await pedir(STAGING, `/orgs/${ORGI}/cotizaciones/COT-Q2`, { app: 'cotizador101' });
+  rev(cotDos.data?.avisos?.folios_asignados === 0 && q2b.data?.folio === q2.data?.folio, 'repetir la mudanza NO le cambia el folio a ninguna', `asignados ${cotDos.data?.avisos?.folios_asignados}, ${q2.data?.folio} → ${q2b.data?.folio}`);
+
   // El usuario importado existe y puede fijar su PIN por correo.
   const guardada = galleta;
   galleta = '';

@@ -39,11 +39,20 @@ const rutas = new Hono<{ Bindings: Env; Variables: Vars }>();
 
 /** Las colecciones que este importador sabe leer. Cualquier otra llave del
  *  JSON se dice en la respuesta en vez de ignorarse en silencio. */
-const COLECCIONES = ['negocios', 'cuentas', 'clientes', 'proveedores', 'proyectos', 'movimientos', 'opex', 'usuarios'];
+const COLECCIONES = [
+  'negocios', 'cuentas', 'clientes', 'proveedores', 'proyectos', 'movimientos', 'opex', 'usuarios',
+  // quote101 no tiene colecciones: tiene UN documento (`app/datos`) con el
+  // árbol adentro. Va como una lista de un solo elemento. Ver `mapeo.ts`.
+  'cotizador',
+];
 
 interface Cuerpo {
   org?: string;
   modo?: 'seco' | 'escribir';
+  /** El negocio al que se cuelgan los clientes y las cotizaciones de
+   *  `cotizador`. quote101 no sabe que los negocios existen, así que se pide
+   *  aquí en vez de adivinarlo. */
+  negocio?: string;
   docs?: Record<string, Crudo[]>;
 }
 
@@ -64,7 +73,15 @@ rutas.post('/importar', async (c) => {
   }
   const desconocidas = Object.keys(docs).filter((k) => !COLECCIONES.includes(k));
 
-  const cosecha = cosechar(docs);
+  const negocio_id = String(cuerpo.negocio || '').trim();
+  // Que el negocio exista se revisa aquí y no en el mapeo: el mapeo no toca la
+  // base a propósito. Un negocio inventado dejaría clientes colgando de nada.
+  if (docs.cotizador?.length && negocio_id) {
+    const suyo = await (c.env.ORG.get(c.env.ORG.idFromName(org_id)) as unknown as ApiOrgDB).obtener('negocios', negocio_id);
+    if (!suyo) return err(c, 'negocio_desconocido', 404, { negocio: negocio_id, en: org_id });
+  }
+
+  const cosecha = cosechar(docs, undefined, { negocio_id });
   const stub = c.env.ORG.get(c.env.ORG.idFromName(org_id)) as unknown as ApiOrgDB;
 
   const antes = await stub.conteos();
@@ -214,6 +231,14 @@ rutas.post('/importar', async (c) => {
     colecciones_desconocidas: desconocidas,
     cuadre: { tablas, dinero, recalculado },
     enlaces: r.enlaces,
+    /* Lo que hay que mirar ANTES de apagar Firebase, y que no es una fila ni
+     * un peso: cuántas cotizaciones traían folio y cuántas se llevaron uno
+     * nuevo, y —sobre todo— cuánto detalle sigue viviendo en Firebase Storage.
+     * Las versiones históricas y las imágenes que son una URL de Storage NO
+     * viajan en este documento: la cotización se importa y ese detalle se queda
+     * allá. Apagar Firebase se lo lleva. Eso se muda en su propio paso, y hasta
+     * que este número sea cero, Firebase no se apaga. */
+    avisos: { ...cosecha.avisos, folios_asignados: r.folios_asignados },
     usuarios,
     proyectos_recalculados: r.proyectos_recalculados,
     rechazos: cosecha.rechazos,
