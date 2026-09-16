@@ -25,6 +25,15 @@ export interface Def {
 const IDENT = { id: 'texto', creado_at: 'texto' } as const;
 
 export const DEFS: Record<Tabla, Def> = {
+  // Configuración de una app dentro de una empresa. `id` y `app` NO están en
+  // la lista de campos que una app puede mandar (src/permisos.ts): los pone la
+  // API con la cabecera X-App. Ver migrations/org/0005_ajustes.sql.
+  ajustes: {
+    cols: { ...IDENT, app: 'texto', clave: 'texto', valor: 'json', actualizado_at: 'texto' },
+    requeridos: ['clave'],
+    filtros: ['app', 'clave'],
+    orden: 'clave',
+  },
   negocios: {
     cols: { ...IDENT, nombre: 'texto', rfc: 'texto', moneda: 'texto', dia_conciliacion: 'entero' },
     requeridos: ['nombre'],

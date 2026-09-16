@@ -263,6 +263,28 @@ async function recorrido() {
   rev(new Set(folios).size === 10, 'diez cotizaciones de golpe se llevan diez folios distintos', `${new Set(folios).size} distintos de 10`);
   rev(folios.every((f) => /^COT-\d{6}$/.test(String(f))), 'y todos con el formato COT- y seis dígitos');
 
+  // Contrato 0.10.0: los ajustes de cada app. Lo que importa medir contra el
+  // Worker de verdad no es guardar y leer —eso lo cubren las pruebas de
+  // dentro—, es que el candado del `id` viaje con la cabecera X-App en el
+  // camino real, proxy incluido: aquí la lista de precios de quote101 son
+  // costos, y el día que Firebase se apague va a vivir en esta tabla.
+  const aj = await pedir(STAGING, `/orgs/${ORG}/ajustes`, {
+    app: 'cotizador101', method: 'POST', body: { clave: 'precios', valor: { mano_obra: 35000 } },
+  });
+  rev(aj.estado === 201 && aj.data?.id === 'cotizador101:precios', 'el ajuste se guarda con el id que arma la API', `${aj.estado} ${aj.data?.id ?? aj.error}`);
+  const aj2 = await pedir(STAGING, `/orgs/${ORG}/ajustes`, {
+    app: 'cotizador101', method: 'POST', body: { clave: 'precios', valor: { mano_obra: 40000 } },
+  });
+  rev(aj2.estado === 201 && aj2.data?.valor?.mano_obra === 40000, 'guardarlo otra vez lo pisa, no choca', `${aj2.estado} ${aj2.data?.valor?.mano_obra}`);
+  const ajenoLista = await pedir(STAGING, `/orgs/${ORG}/ajustes?app=cotizador101`, { app: 'dash101' });
+  rev((ajenoLista.data?.filas || []).length === 0, 'otra app NO ve los ajustes de quote101, ni pidiéndolos por nombre', `${(ajenoLista.data?.filas || []).length} filas`);
+  const ajenoId = await pedir(STAGING, `/orgs/${ORG}/ajustes/cotizador101:precios`, { app: 'dash101' });
+  rev(ajenoId.estado === 404, 'ni por id: 404, que es lo mismo que contesta para una fila que no existe', `${ajenoId.estado} ${ajenoId.error}`);
+  const firmar = await pedir(STAGING, `/orgs/${ORG}/ajustes`, {
+    app: 'dash101', method: 'POST', body: { clave: 'precios', valor: {}, app: 'cotizador101' },
+  });
+  rev(firmar.estado === 403, 'y no puede firmar un ajuste con el nombre de otra app', `${firmar.estado} ${firmar.error}`);
+
   const neg = await pedir(STAGING, `/orgs/${ORG}/negocios`, { app: 'dash101', method: 'POST', body: { nombre: 'Taller' } });
   const cli = await pedir(STAGING, `/orgs/${ORG}/clientes`, { app: 'dash101', method: 'POST', body: { nombre: 'Áurea Pérez', negocio_id: neg.data?.id } });
   rev(cli.data?.nombre_norm === 'aurea perez', 'nombre_norm sale sin acentos', String(cli.data?.nombre_norm));

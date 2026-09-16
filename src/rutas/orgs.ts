@@ -369,6 +369,10 @@ rutas.get('/:o/:tabla', async (c) => {
 
   const filtros: Record<string, string> = {};
   for (const [k, v] of new URL(c.req.url).searchParams) filtros[k] = v;
+  // Los ajustes de una app no los lista otra. El filtro se SOBRESCRIBE con la
+  // cabecera X-App: aceptarlo del que pregunta sería ofrecer `?app=cotizador101`
+  // como manera de abrir la lista de precios desde cualquier otra app.
+  if (tabla === 'ajustes') filtros.app = c.get('app');
   const quien = c.get('quien');
   if (quien.negocios.length && !filtros.negocio_id && DEFS[tabla as Tabla].filtros.includes('negocio_id')) {
     filtros.negocio_id = quien.negocios[0];
@@ -387,6 +391,8 @@ rutas.get('/:o/:tabla/:id', async (c) => {
   const tabla = c.req.param('tabla')!;
   const permiso = puedeLeer(c, tabla);
   if (permiso) return permiso;
+  const ajeno = ajusteAjeno(c, tabla, c.req.param('id')!);
+  if (ajeno) return ajeno;
   const fila = await stub(c).obtener(tabla as Tabla, c.req.param('id')!);
   if (!fila) return err(c, 'no_encontrado', 404);
   const quien = c.get('quien');
@@ -401,6 +407,11 @@ rutas.post('/:o/:tabla', async (c) => {
   if (quien.clase === 'cliente') return err(c, 'sin_permiso', 403);
   if ((APPEND_ONLY as string[]).includes(tabla)) {
     return err(c, 'sin_permiso', 403, { motivo: `${tabla} se escribe con ${POR_SU_RUTA[tabla as Tabla]}` });
+  }
+  // Los ajustes son configuración de la app: los toca quien es de la empresa,
+  // no el personal de piso ni un cliente. La lectura lo pide igual (puedeLeer).
+  if (tabla === 'ajustes' && quien.clase !== 'miembro') {
+    return err(c, 'sin_permiso', 403, { motivo: 'los ajustes son configuracion de la app: solo miembros de la empresa' });
   }
 
   const datos = await c.req.json<Record<string, unknown>>().catch(() => ({}) as never);
@@ -425,6 +436,13 @@ rutas.patch('/:o/:tabla/:id', async (c) => {
   const quien = c.get('quien');
   if (quien.clase === 'cliente') return err(c, 'sin_permiso', 403);
   if ((APPEND_ONLY as string[]).includes(tabla)) return err(c, 'sin_permiso', 403, { motivo: `${tabla} es append-only` });
+  // Los ajustes son configuración de la app: los toca quien es de la empresa,
+  // no el personal de piso ni un cliente. La lectura lo pide igual (puedeLeer).
+  if (tabla === 'ajustes' && quien.clase !== 'miembro') {
+    return err(c, 'sin_permiso', 403, { motivo: 'los ajustes son configuracion de la app: solo miembros de la empresa' });
+  }
+  const ajeno = ajusteAjeno(c, tabla, c.req.param('id')!);
+  if (ajeno) return ajeno;
 
   const datos = await c.req.json<Record<string, unknown>>().catch(() => ({}) as never);
   const veredicto = revisarEscritura(tabla, c.get('app'), Object.keys(datos));
@@ -447,6 +465,8 @@ rutas.delete('/:o/:tabla/:id', async (c) => {
   // dejarían de cuadrar y nadie sabría por qué.
   if (tabla === 'items') return err(c, 'items_nunca_se_borran', 403, { en_su_lugar: "PATCH {estado:'cancelado'}" });
   if ((APPEND_ONLY as string[]).includes(tabla)) return err(c, 'sin_permiso', 403, { motivo: `${tabla} es append-only` });
+  const ajeno = ajusteAjeno(c, tabla, c.req.param('id')!);
+  if (ajeno) return ajeno;
 
   const veredicto = revisarEscritura(tabla, c.get('app'), []);
   if (!veredicto.ok) return err(c, veredicto.error, 403, veredicto.detalle);
@@ -481,7 +501,22 @@ function puedeLeer(c: Ctx, tabla: string) {
   if (tabla === 'partidas' && !quien.ve_costos) {
     return err(c, 'sin_permiso', 403, { motivo: 'las partidas son costos: solo owner, admin y socio' });
   }
+  // Los ajustes son configuración de la app, y ahí vive la lista de precios de
+  // quote101, que son costos. No es dato de piso: ni personal ni clientes.
+  if (tabla === 'ajustes' && quien.clase !== 'miembro') {
+    return err(c, 'sin_permiso', 403, { motivo: 'los ajustes son configuracion de la app: solo miembros de la empresa' });
+  }
   return null;
+}
+
+/** Un ajuste sólo lo abre su propia app. El `id` es `app:clave` y lo armó la
+ *  API al crearlo, así que el prefijo es prueba de quién es: no hay que
+ *  consultar la fila para saberlo, y una fila que no existe no se distingue de
+ *  una ajena —404 en los dos casos, que es lo que hay que contestar—. */
+function ajusteAjeno(c: Ctx, tabla: string, id: string) {
+  if (tabla !== 'ajustes') return null;
+  if (id.startsWith(c.get('app') + ':')) return null;
+  return err(c, 'no_encontrado', 404);
 }
 
 /** Quita de la fila lo que quien pregunta no tiene por qué ver. */

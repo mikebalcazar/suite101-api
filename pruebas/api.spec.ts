@@ -13,6 +13,7 @@ import { redirectUriGoogle, urlAutorizacionGoogle } from '../src/rutas/auth';
 // El número de migraciones del OrgDB se lee del código, no se escribe a mano:
 // olvidarlo al subir la 0004 dejó el humo en rojo el 16-sep.
 import { VERSION_ORG_DB } from '../src/org-db';
+import { TABLAS, TABLAS_INTERNAS } from '../schema/tipos';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Env } from '../src/entorno';
 
@@ -120,11 +121,7 @@ describe('2 · se crea una org y su Durable Object nace solo', () => {
       obj.sql.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '\\_%' ESCAPE '\\' AND name NOT LIKE 'sqlite_%'`)
         .toArray().map((f: any) => f.name).sort(),
     );
-    expect(nombres).toEqual([
-      'archivos', 'avances', 'clientes', 'conciliacion_cuentas', 'conciliaciones', 'cotizaciones',
-      'cuentas', 'estaciones', 'folios', 'items', 'movimientos', 'negocios', 'opex', 'partidas',
-      'personal', 'proveedores', 'proyectos',
-    ]);
+    expect(nombres).toEqual([...TABLAS, ...TABLAS_INTERNAS].sort());
   });
 
   it('sin X-App no se entra', async () => {
@@ -1462,5 +1459,117 @@ describe('14 · el folio de la cotización lo asigna la suite (contrato 0.9.0)',
     await expect(dentro<unknown>(elDO(), (obj: any) =>
       obj.crear('cotizaciones', { negocio_id: negocio, total: 200, folio: 'COT-000041' }, { app: 'suite101', usuario_id: 'u' })),
     ).rejects.toThrow(/UNIQUE|constraint/i);
+  });
+});
+
+describe('15 · los ajustes de cada app (contrato 0.10.0)', () => {
+  /* Lo que se prueba aquí no es guardar y leer: es que una app NO pueda tocar
+   * los ajustes de otra. La lista de precios de quote101 son costos, y el día
+   * que Firebase se apague va a vivir en esta tabla. */
+
+  it('se guarda un ajuste y el id lo arma la API con X-App', async () => {
+    const r = await pedir(`/orgs/${ORG}/ajustes`, {
+      method: 'POST', app: 'cotizador101',
+      body: JSON.stringify({ clave: 'precios', valor: { mano_obra: 35000, herrajes: 12000 } }),
+    });
+    expect(r.estado).toBe(201);
+    expect(r.data.id).toBe('cotizador101:precios');
+    expect(r.data.app).toBe('cotizador101');
+    expect(r.data.valor).toEqual({ mano_obra: 35000, herrajes: 12000 });
+  });
+
+  it('guardar otra vez la misma clave no choca: la pisa', async () => {
+    // Sin esto la app tendría que preguntar antes si existía, y dos pestañas
+    // guardando a la vez se llevarían un 409 por turnarse mal.
+    const r = await pedir(`/orgs/${ORG}/ajustes`, {
+      method: 'POST', app: 'cotizador101',
+      body: JSON.stringify({ clave: 'precios', valor: { mano_obra: 40000 } }),
+    });
+    expect(r.estado).toBe(201);
+    expect(r.data.id).toBe('cotizador101:precios');
+    expect(r.data.valor).toEqual({ mano_obra: 40000 });
+    const lista = await pedir(`/orgs/${ORG}/ajustes`, { app: 'cotizador101' });
+    expect(lista.data.filas.filter((f: any) => f.clave === 'precios')).toHaveLength(1);
+  });
+
+  it('una app NO puede firmar un ajuste con el nombre de otra', async () => {
+    const r = await pedir(`/orgs/${ORG}/ajustes`, {
+      method: 'POST', app: 'dash101',
+      body: JSON.stringify({ clave: 'precios', valor: {}, app: 'cotizador101' }),
+    });
+    expect(r.estado).toBe(403);
+    expect(r.error).toBe('campo_no_permitido');
+    expect(r.detalle.campos).toContain('app');
+  });
+
+  it('ni elegir su id, que es lo mismo por otro lado', async () => {
+    const r = await pedir(`/orgs/${ORG}/ajustes`, {
+      method: 'POST', app: 'dash101',
+      body: JSON.stringify({ clave: 'x', valor: {}, id: 'cotizador101:precios' }),
+    });
+    expect(r.estado).toBe(403);
+    expect(r.error).toBe('campo_no_permitido');
+  });
+
+  it('cada app lista los suyos y nada más', async () => {
+    await pedir(`/orgs/${ORG}/ajustes`, {
+      method: 'POST', app: 'dash101', body: JSON.stringify({ clave: 'columnas', valor: { orden: 'fecha' } }),
+    });
+    const mio = await pedir(`/orgs/${ORG}/ajustes`, { app: 'dash101' });
+    expect(mio.data.filas.map((f: any) => f.id)).toEqual(['dash101:columnas']);
+    const suyo = await pedir(`/orgs/${ORG}/ajustes`, { app: 'cotizador101' });
+    expect(suyo.data.filas.map((f: any) => f.id)).toEqual(['cotizador101:precios']);
+  });
+
+  it('y el filtro ?app= no sirve para asomarse: se sobrescribe', async () => {
+    const r = await pedir(`/orgs/${ORG}/ajustes?app=cotizador101`, { app: 'dash101' });
+    expect(r.estado).toBe(200);
+    expect(r.data.filas.map((f: any) => f.id)).toEqual(['dash101:columnas']);
+  });
+
+  it('pedir por id el ajuste de otra app contesta 404, no 403', async () => {
+    // 404 y no 403 a propósito: un 403 confirmaría que existe. Una fila ajena y
+    // una fila que no hay se contestan igual.
+    const r = await pedir(`/orgs/${ORG}/ajustes/cotizador101:precios`, { app: 'dash101' });
+    expect(r.estado).toBe(404);
+    expect(r.error).toBe('no_encontrado');
+  });
+
+  it('el propio sí se abre por id', async () => {
+    const r = await pedir(`/orgs/${ORG}/ajustes/cotizador101:precios`, { app: 'cotizador101' });
+    expect(r.estado).toBe(200);
+    expect(r.data.valor).toEqual({ mano_obra: 40000 });
+  });
+
+  it('modificar el ajuste de otra app: 404', async () => {
+    const r = await pedir(`/orgs/${ORG}/ajustes/cotizador101:precios`, {
+      method: 'PATCH', app: 'dash101', body: JSON.stringify({ valor: { mano_obra: 1 } }),
+    });
+    expect(r.estado).toBe(404);
+    const sigue = await pedir(`/orgs/${ORG}/ajustes/cotizador101:precios`, { app: 'cotizador101' });
+    expect(sigue.data.valor).toEqual({ mano_obra: 40000 });
+  });
+
+  it('borrar el ajuste de otra app: 404', async () => {
+    const r = await pedir(`/orgs/${ORG}/ajustes/cotizador101:precios`, { method: 'DELETE', app: 'dash101' });
+    expect(r.estado).toBe(404);
+    const sigue = await pedir(`/orgs/${ORG}/ajustes/cotizador101:precios`, { app: 'cotizador101' });
+    expect(sigue.estado).toBe(200);
+  });
+
+  it('el propio se borra', async () => {
+    const r = await pedir(`/orgs/${ORG}/ajustes/dash101:columnas`, { method: 'DELETE', app: 'dash101' });
+    expect(r.estado).toBe(200);
+    const ya = await pedir(`/orgs/${ORG}/ajustes/dash101:columnas`, { app: 'dash101' });
+    expect(ya.estado).toBe(404);
+  });
+
+  it('sin clave no se guarda', async () => {
+    const r = await pedir(`/orgs/${ORG}/ajustes`, {
+      method: 'POST', app: 'cotizador101', body: JSON.stringify({ valor: { a: 1 } }),
+    });
+    expect(r.estado).toBe(400);
+    expect(r.error).toBe('datos_invalidos');
+    expect(r.detalle.falta).toContain('clave');
   });
 });
