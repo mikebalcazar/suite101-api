@@ -13,12 +13,16 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.5.0 (master101 — superadmins por ruta, la bitácora
+ * Versión del contrato: 0.6.0 (workshop101 — el administrador de la empresa:
+ * PATCH de rol y apps por miembro, candados de último dueño y de uno mismo,
+ * la lista de apps por persona se aplica en la puerta, última entrada por
+ * miembro, y la bitácora de la empresa la lee su dueño). Antes:
+ * 0.5.0 (master101 — superadmins por ruta, la bitácora
  * del panel `bitacora_admin`, y conteos por empresa en GET /admin/orgs; nada
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.5.0';
+export const VERSION_CONTRATO = '0.6.0';
 
 /* ─────────────── envoltura de toda respuesta ─────────────── */
 
@@ -47,7 +51,9 @@ export type ErrorApi =
   | 'pin_invalido'
   | 'demasiados_intentos'
   | 'items_nunca_se_borran'
-  | 'ultimo_superadmin';
+  | 'ultimo_superadmin'
+  | 'ultimo_owner'
+  | 'app_no_permitida';
 
 /* ─────────────── apps ─────────────── */
 
@@ -59,6 +65,7 @@ export const APPS = [
   'roster101',
   'nest101',
   'master101',
+  'workshop101',
   'suite101',
 ] as const;
 export type App = (typeof APPS)[number];
@@ -72,6 +79,7 @@ export const LLAVE_APP: Record<App, string> = {
   roster101: 'roster',
   nest101: 'nest',
   master101: 'master',
+  workshop101: 'workshop',
   suite101: 'suite',
 };
 

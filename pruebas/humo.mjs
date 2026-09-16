@@ -139,6 +139,37 @@ async function recorrido() {
   const mia = (conConteos.data?.filas || []).find((o) => o.id === ORG);
   rev(mia && mia.personas === 0 && mia.ultima_entrada === null, 'GET /admin/orgs trae personas y ultima_entrada por empresa', JSON.stringify({ personas: mia?.personas, ultima_entrada: mia?.ultima_entrada }));
 
+  // Contrato 0.6.0: lo que workshop101 necesita (el administrador de la empresa).
+  const duena = await pedir(STAGING, `/admin/orgs/${ORG}/miembros`, { method: 'POST', body: { correo: `duena-${ORG}@ejemplo.mx`, nombre: 'Dueña', rol: 'owner' } });
+  rev(duena.estado === 201, 'se nombra a la dueña de la empresa', `${duena.ms} ms`);
+  const socia = await pedir(STAGING, `/admin/orgs/${ORG}/miembros`, { method: 'POST', body: { correo: `socia-${ORG}@ejemplo.mx`, rol: 'socio', apps: ['dash'] } });
+  rev(socia.estado === 201 && JSON.stringify(socia.data?.apps) === '["dash"]', 'y a una socia con sólo dash101', JSON.stringify(socia.data?.apps));
+  const gente = await pedir(STAGING, `/admin/orgs/${ORG}/miembros`);
+  const fSocia = (gente.data?.filas || []).find((f) => f.usuario_id === socia.data?.usuario_id);
+  rev(gente.estado === 200 && fSocia && fSocia.ultima_entrada === null, 'la lista trae ultima_entrada por persona (la socia: nunca)', JSON.stringify(fSocia?.ultima_entrada));
+  const masApps = await pedir(STAGING, `/admin/orgs/${ORG}/miembros/${socia.data?.usuario_id}`, { method: 'PATCH', body: { apps: ['dash', 'quell'] } });
+  rev(masApps.estado === 200 && JSON.stringify(masApps.data?.apps) === '["dash","quell"]', 'PATCH cambia las apps de la socia', JSON.stringify(masApps.data?.apps));
+  const ultimo = await pedir(STAGING, `/admin/orgs/${ORG}/miembros/${duena.data?.usuario_id}`, { method: 'DELETE' });
+  rev(ultimo.estado === 409 && ultimo.error === 'ultimo_owner', 'a la última dueña no se le da de baja', `${ultimo.estado} ${ultimo.error}`);
+  const bit2 = await pedir(STAGING, `/admin/orgs/${ORG}/bitacora`);
+  rev((bit2.data?.filas || []).some((r) => r.campo === 'miembro.apps' && r.quien === CORREO), 'el cambio de apps quedó en la bitácora de la empresa');
+
+  // La puerta aplica la lista: la socia entra a dash101 y a quell101, no a peek101 (que además está apagada) ni a workshop101.
+  const galletaSuper = galleta;
+  const codS = await pedir(STAGING, '/auth/codigo', { method: 'POST', body: { correo: `socia-${ORG}@ejemplo.mx` } });
+  const entS = await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: `socia-${ORG}@ejemplo.mx`, codigo: codS.data?.codigo_prueba } });
+  rev(entS.estado === 200, 'la socia entra con su código', `${entS.ms} ms`);
+  const sDash = await pedir(STAGING, `/orgs/${ORG}`, { app: 'dash101' });
+  const sRoster = await pedir(STAGING, `/orgs/${ORG}`, { app: 'roster101' });
+  const sPanel = await pedir(STAGING, `/orgs/${ORG}`, { app: 'workshop101' });
+  rev(sDash.estado === 200, 'la socia entra a dash101 (está en su lista)', `${sDash.estado}`);
+  rev(sRoster.estado === 403 && sRoster.error === 'app_no_permitida', 'y roster101 le contesta app_no_permitida', `${sRoster.estado} ${sRoster.error}`);
+  rev(sPanel.estado === 403 && sPanel.detalle?.motivo === 'solo_administra', 'workshop101 no la deja entrar: no administra', `${sPanel.estado} ${sPanel.detalle?.motivo ?? sPanel.error}`);
+  rev((await pedir(STAGING, `/admin/orgs/${ORG}/miembros`)).estado === 403, 'ni puede ver la gente de la empresa');
+  galleta = galletaSuper;
+  const fuera = await pedir(STAGING, `/admin/orgs/${ORG}/miembros/${socia.data?.usuario_id}`, { method: 'DELETE' });
+  rev(fuera.estado === 200, 'el superadmin da de baja a la socia');
+
   const neg = await pedir(STAGING, `/orgs/${ORG}/negocios`, { app: 'dash101', method: 'POST', body: { nombre: 'Taller' } });
   const cli = await pedir(STAGING, `/orgs/${ORG}/clientes`, { app: 'dash101', method: 'POST', body: { nombre: 'Áurea Pérez', negocio_id: neg.data?.id } });
   rev(cli.data?.nombre_norm === 'aurea perez', 'nombre_norm sale sin acentos', String(cli.data?.nombre_norm));

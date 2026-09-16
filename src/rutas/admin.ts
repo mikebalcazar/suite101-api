@@ -13,9 +13,9 @@
 
 import { Hono } from 'hono';
 import {
-  apuntaAdmin, bitacoraAdmin, borrarOrg, conConteos, conteosDeOrgs, crearOrg, crearUsuario, esSuperadmin,
+  apuntaAdmin, bitacoraAdmin, borrarOrg, conConteos, conteosDeOrgs, crearOrg, crearUsuario, cuentaOwners, esSuperadmin,
   miembro, miembrosDe, org, orgs, ponerMiembro, ponerSuperadmin, quitarMiembro, quitarSuperadmin,
-  superadmins, usuarioPorId,
+  superadmins, ultimasEntradasDe, usuarioPorId,
 } from '../maestro';
 import { normalizaCorreo } from '../lib';
 import { err, ok, type Ctx, type Vars } from '../http';
@@ -127,55 +127,130 @@ rutas.get('/bitacora', async (c) => {
 });
 
 rutas.get('/orgs/:o/bitacora', async (c) => {
-  if (!(await soySuper(c))) return err(c, 'sin_permiso', 403);
   const id = c.req.param('o')!;
+  // Contrato 0.6.0: la bitácora de SU empresa también la lee quien la administra.
+  if (!(await mandaEnLaOrg(c, id))) return err(c, 'sin_permiso', 403);
   if (!(await org(c.env, id))) return err(c, 'org_desconocida', 404);
   const filas = await bitacoraAdmin(c.env, id);
   return ok(c, { total: filas.length, filas });
 });
 
-/* ─────────────── miembros ─────────────── */
+/* ─────────────── miembros ───────────────
+ * Quién puede tocar la gente de una empresa: el superadmin (master101) y, desde
+ * el contrato 0.6.0 con candados, el dueño y la administración de esa empresa
+ * (workshop101). Los candados, en una lista, porque son lo que hay que probar:
+ *
+ *   · nadie se toca a sí mismo (ni rol, ni apps, ni baja): `a_ti_mismo`;
+ *   · sólo un dueño (o el superadmin) nombra, cambia o baja a un dueño;
+ *   · el último dueño no se baja ni se degrada: `ultimo_owner`;
+ *   · `apps` sólo trae llaves que la empresa tenga (dash, quell, peek…);
+ *     la lista vacía sigue queriendo decir «todas las de la empresa».
+ */
+
+type Mando = 'super' | Rol | null;
+
+async function mandoEnLaOrg(c: Ctx, org_id: string): Promise<Mando> {
+  if (await soySuper(c)) return 'super';
+  const m = await miembro(c.env, org_id, c.get('sesion').usuario_id);
+  return m ? m.rol : null;
+}
+
+const administra = (m: Mando) => m === 'super' || m === 'owner' || m === 'admin';
+const nombraDuenos = (m: Mando) => m === 'super' || m === 'owner';
 
 async function mandaEnLaOrg(c: Ctx, org_id: string): Promise<boolean> {
-  if (await soySuper(c)) return true;
-  const m = await miembro(c.env, org_id, c.get('sesion').usuario_id);
-  return !!m && (m.rol === 'owner' || m.rol === 'admin');
+  return administra(await mandoEnLaOrg(c, org_id));
+}
+
+/** `apps` de un miembro: llaves de `orgs.apps`, sin repetir. Devuelve la lista
+ *  limpia o el detalle del error. */
+function appsLimpias(apps: unknown, empresa: { apps: Record<string, boolean> }): { ok: true; apps: string[] } | { ok: false; detalle: Record<string, unknown> } {
+  if (apps === undefined) return { ok: true, apps: [] };
+  if (!Array.isArray(apps) || apps.some((a) => typeof a !== 'string')) return { ok: false, detalle: { apps: 'lista de llaves de app' } };
+  const validas = Object.keys(empresa.apps);
+  const raras = apps.filter((a) => !validas.includes(a));
+  if (raras.length) return { ok: false, detalle: { apps_desconocidas: raras, validas } };
+  return { ok: true, apps: [...new Set(apps as string[])] };
 }
 
 rutas.get('/orgs/:o/miembros', async (c) => {
   const org_id = c.req.param('o')!;
   if (!(await mandaEnLaOrg(c, org_id))) return err(c, 'sin_permiso', 403);
-  const filas = await miembrosDe(c.env, org_id);
-  return ok(c, { total: filas.length, filas });
+  const [filas, entradas] = await Promise.all([miembrosDe(c.env, org_id), ultimasEntradasDe(c.env, org_id)]);
+  return ok(c, { total: filas.length, filas: filas.map((f) => ({ ...f, ultima_entrada: entradas.get(f.usuario_id) ?? null })) });
 });
 
 rutas.post('/orgs/:o/miembros', async (c) => {
   const org_id = c.req.param('o')!;
-  if (!(await mandaEnLaOrg(c, org_id))) return err(c, 'sin_permiso', 403);
-  if (!(await org(c.env, org_id))) return err(c, 'org_desconocida', 404);
+  const mando = await mandoEnLaOrg(c, org_id);
+  if (!administra(mando)) return err(c, 'sin_permiso', 403);
+  const empresa = await org(c.env, org_id);
+  if (!empresa) return err(c, 'org_desconocida', 404);
 
   const cuerpo = await c.req.json<{ correo?: string; rol?: Rol; apps?: string[]; negocios?: string[]; nombre?: string }>().catch(() => ({}) as never);
   const correo = normalizaCorreo(cuerpo.correo);
   if (!correo) return err(c, 'datos_invalidos', 400, { falta: 'correo' });
   if (!cuerpo.rol || !ROLES.includes(cuerpo.rol)) return err(c, 'datos_invalidos', 400, { rol: ROLES });
+  if (correo === normalizaCorreo(quien(c))) return err(c, 'sin_permiso', 403, { motivo: 'a_ti_mismo' });
+  if (cuerpo.rol === 'owner' && !nombraDuenos(mando)) return err(c, 'sin_permiso', 403, { motivo: 'solo_un_dueno_nombra_duenos' });
+  const apps = appsLimpias(cuerpo.apps, empresa);
+  if (!apps.ok) return err(c, 'datos_invalidos', 400, apps.detalle);
 
   const usuario = await crearUsuario(c.env, correo, cuerpo.nombre ?? null);
   const previo = await miembro(c.env, org_id, usuario.id);
-  await ponerMiembro(c.env, org_id, usuario.id, cuerpo.rol, cuerpo.apps ?? [], cuerpo.negocios ?? []);
+  if (previo?.rol === 'owner' && !nombraDuenos(mando)) return err(c, 'sin_permiso', 403, { motivo: 'solo_un_dueno_toca_duenos' });
+  if (previo?.rol === 'owner' && cuerpo.rol !== 'owner' && (await cuentaOwners(c.env, org_id)) <= 1) return err(c, 'ultimo_owner', 409);
+
+  await ponerMiembro(c.env, org_id, usuario.id, cuerpo.rol, apps.apps, cuerpo.negocios ?? previo?.negocios ?? []);
   await apuntaAdmin(c.env, { quien: quien(c), org_id, campo: 'miembro', antes: previo ? `${correo} (${previo.rol})` : null, despues: `${correo} (${cuerpo.rol})` });
-  return ok(c, { usuario_id: usuario.id, correo, rol: cuerpo.rol }, 201);
+  return ok(c, { usuario_id: usuario.id, correo, rol: cuerpo.rol, apps: apps.apps }, previo ? 200 : 201);
+});
+
+rutas.patch('/orgs/:o/miembros/:uid', async (c) => {
+  const org_id = c.req.param('o')!;
+  const uid = c.req.param('uid')!;
+  const mando = await mandoEnLaOrg(c, org_id);
+  if (!administra(mando)) return err(c, 'sin_permiso', 403);
+  const empresa = await org(c.env, org_id);
+  if (!empresa) return err(c, 'org_desconocida', 404);
+  const previo = await miembro(c.env, org_id, uid);
+  if (!previo) return err(c, 'no_encontrado', 404, { miembro: uid });
+  if (uid === c.get('sesion').usuario_id) return err(c, 'sin_permiso', 403, { motivo: 'a_ti_mismo' });
+
+  const cuerpo = await c.req.json<{ rol?: Rol; apps?: string[] }>().catch(() => ({}) as never);
+  if (cuerpo.rol === undefined && cuerpo.apps === undefined) return err(c, 'datos_invalidos', 400, { falta: 'rol o apps' });
+  if (cuerpo.rol !== undefined && !ROLES.includes(cuerpo.rol)) return err(c, 'datos_invalidos', 400, { rol: ROLES });
+  const rol = cuerpo.rol ?? previo.rol;
+  if ((previo.rol === 'owner' || rol === 'owner') && !nombraDuenos(mando)) return err(c, 'sin_permiso', 403, { motivo: 'solo_un_dueno_toca_duenos' });
+  if (previo.rol === 'owner' && rol !== 'owner' && (await cuentaOwners(c.env, org_id)) <= 1) return err(c, 'ultimo_owner', 409);
+  const apps = cuerpo.apps === undefined ? { ok: true as const, apps: previo.apps } : appsLimpias(cuerpo.apps, empresa);
+  if (!apps.ok) return err(c, 'datos_invalidos', 400, apps.detalle);
+
+  await ponerMiembro(c.env, org_id, uid, rol, apps.apps, previo.negocios);
+  const u = await usuarioPorId(c.env, uid);
+  const yo = quien(c);
+  if (rol !== previo.rol) await apuntaAdmin(c.env, { quien: yo, org_id, campo: 'miembro.rol', antes: `${u?.correo ?? uid} (${previo.rol})`, despues: `${u?.correo ?? uid} (${rol})` });
+  if (JSON.stringify(apps.apps) !== JSON.stringify(previo.apps)) {
+    const dicho = (l: string[]) => (l.length ? l.join(', ') : 'todas');
+    await apuntaAdmin(c.env, { quien: yo, org_id, campo: 'miembro.apps', antes: `${u?.correo ?? uid}: ${dicho(previo.apps)}`, despues: `${u?.correo ?? uid}: ${dicho(apps.apps)}` });
+  }
+  return ok(c, { usuario_id: uid, correo: u?.correo ?? null, rol, apps: apps.apps });
 });
 
 rutas.delete('/orgs/:o/miembros/:uid', async (c) => {
   const org_id = c.req.param('o')!;
-  if (!(await mandaEnLaOrg(c, org_id))) return err(c, 'sin_permiso', 403);
   const uid = c.req.param('uid')!;
+  const mando = await mandoEnLaOrg(c, org_id);
+  if (!administra(mando)) return err(c, 'sin_permiso', 403);
   const previo = await miembro(c.env, org_id, uid);
+  if (!previo) return err(c, 'no_encontrado', 404, { miembro: uid });
+  if (uid === c.get('sesion').usuario_id) return err(c, 'sin_permiso', 403, { motivo: 'a_ti_mismo' });
+  if (previo.rol === 'owner' && !nombraDuenos(mando)) return err(c, 'sin_permiso', 403, { motivo: 'solo_un_dueno_toca_duenos' });
+  if (previo.rol === 'owner' && (await cuentaOwners(c.env, org_id)) <= 1) return err(c, 'ultimo_owner', 409);
+
   await quitarMiembro(c.env, org_id, uid);
-  if (previo) {
-    const u = await usuarioPorId(c.env, uid);
-    await apuntaAdmin(c.env, { quien: quien(c), org_id, campo: 'miembro', antes: `${u?.correo ?? uid} (${previo.rol})`, despues: null });
-  }
+  const u = await usuarioPorId(c.env, uid);
+  await apuntaAdmin(c.env, { quien: quien(c), org_id, campo: 'miembro', antes: `${u?.correo ?? uid} (${previo.rol})`, despues: null });
   return ok(c, { quitado: true });
 });
 
