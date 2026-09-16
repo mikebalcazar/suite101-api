@@ -1674,3 +1674,165 @@ describe('0.11.0 · quote101 puede crear su negocio, y nada más', () => {
     expect(r.detalle.permitidos).toEqual(['nombre', 'moneda']);
   });
 });
+
+describe('17 · la sesión la decide quién entra, no con qué entró (contrato 0.12.0)', () => {
+  const MES = 30 * 24 * 3600;
+  const MEDIO_DIA = 12 * 3600;
+  const SOCIA = 'dur-socia@ejemplo.mx';
+  const CLIENTA = 'dur-clienta@ejemplo.mx';
+  const PIN = '736104';
+  const CLAVE_SOCIA = 'astilla-remo-58';
+  const CLAVE_CLIENTA = 'bruma-tejado-64';
+  let galletaMike = '';
+  let clienta_id = '';
+
+  /* Lo que esto mide no es una preferencia: es un hueco que estaba abierto.
+   * Antes la duración la decidía el camino —PIN 12 horas; código, contraseña y
+   * Google 30 días—, y el camino que de verdad usan los clientes de peek101 es
+   * el código al correo. O sea que las 12 horas sólo se cumplían por el camino
+   * secundario, y al homologar la entrada a Google o contraseña se habrían
+   * dejado de cumplir siempre.
+   *
+   * EL BLOQUE SE ARMA SUS PROPIAS CUENTAS, y no es ceremonia. El primer intento
+   * reusaba la persona del bloque 12 y su clienta del bloque 6, y falló dos
+   * veces por estado heredado: el freno de intentos de esa persona ya estaba
+   * gastado (429), y `accesos` lleva una fila por USUARIO, así que dos usuarios
+   * pueden colgar del mismo cliente y quitarle el acceso al cliente apagó la
+   * fila del otro. Ninguna de las dos fallas era del código que se está
+   * midiendo — que es la peor clase de falla, porque manda a buscar donde no
+   * está. */
+
+  it('un socio se lleva 30 días, entre con código o con contraseña', async () => {
+    galletaMike = galleta;
+    const alta = await pedir(`/admin/orgs/${ORG}/miembros`, {
+      method: 'POST', body: JSON.stringify({ correo: SOCIA, nombre: 'Duración Socia', rol: 'socio' }),
+    });
+    expect(alta.estado).toBe(201);
+    galletaMike = galleta;
+
+    galleta = '';
+    const cod = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo: SOCIA }) });
+    const porCodigo = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: SOCIA, codigo: cod.data.codigo_prueba }) });
+    expect(porCodigo.estado).toBe(200);
+    expect(porCodigo.data.vive_segundos, 'un socio con código').toBe(MES);
+
+    expect((await pedir('/auth/clave', { method: 'POST', body: JSON.stringify({ clave: CLAVE_SOCIA }) })).estado).toBe(200);
+
+    galleta = '';
+    const porClave = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: SOCIA, clave: CLAVE_SOCIA }) });
+    expect(porClave.estado).toBe(200);
+    expect(porClave.data.vive_segundos, 'un socio con contraseña').toBe(MES);
+  });
+
+  it('una clienta se lleva 12 horas por los tres caminos, no sólo por el PIN', async () => {
+    galleta = galletaMike;
+    const negocios = await pedir(`/orgs/${ORG}/negocios`, { app: 'dash101' });
+    const nueva = await pedir(`/orgs/${ORG}/clientes`, {
+      app: 'dash101', method: 'POST',
+      body: JSON.stringify({ nombre: 'Clienta de la Duración', negocio_id: negocios.data.filas[0].id }),
+    });
+    expect(nueva.estado).toBe(201);
+    clienta_id = nueva.data.id;
+
+    const acc = await pedir(`/orgs/${ORG}/clientes/${clienta_id}/acceso`, {
+      app: 'dash101', method: 'POST', body: JSON.stringify({ correo: CLIENTA, pin: PIN }),
+    });
+    expect(acc.estado).toBe(201);
+    galletaMike = galleta;
+
+    // Por PIN. Ya daba 12 horas antes; se mide para que se vea que el cambio no
+    // se las quitó.
+    galleta = '';
+    const porPin = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CLIENTA, pin: PIN }) });
+    expect(porPin.estado).toBe(200);
+    expect(porPin.data.vive_segundos, 'una clienta con PIN').toBe(MEDIO_DIA);
+
+    // Con la sesión del PIN se pone contraseña: no tenía ninguna, así que no
+    // hace falta la anterior.
+    expect((await pedir('/auth/clave', { method: 'POST', body: JSON.stringify({ clave: CLAVE_CLIENTA }) })).estado,
+      'una clienta puede ponerse contraseña').toBe(200);
+
+    // Por contraseña: el camino que va a usar de ahora en adelante.
+    galleta = '';
+    const porClave = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CLIENTA, clave: CLAVE_CLIENTA }) });
+    expect(porClave.estado).toBe(200);
+    expect(porClave.data.vive_segundos, 'la contraseña no le regala un mes a una clienta').toBe(MEDIO_DIA);
+
+    // Por código: ESTE es el que estaba dando 30 días a un cliente.
+    galleta = '';
+    const cod = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo: CLIENTA }) });
+    const porCodigo = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CLIENTA, codigo: cod.data.codigo_prueba }) });
+    expect(porCodigo.estado).toBe(200);
+    expect(porCodigo.data.vive_segundos, 'el código al correo era el hueco: daba un mes').toBe(MEDIO_DIA);
+  });
+
+  it('la galleta del boleto de Google caduca cuando caduca la sesión, no un mes después', async () => {
+    /* `/auth/canje` sólo tiene la galleta firmada del boleto: no sabe de quién
+     * es ni cuánto le tocó. Antes le ponía 30 días fijos. Con la duración
+     * dependiendo de quién entra, a una clienta le habría quedado un mes de
+     * galleta sobre una sesión de 12 horas: el navegador la seguiría mandando,
+     * la API contestaría 401, y la pantalla se vería «dentro» hasta que algo
+     * fallara. Se lee de D1, que es la única verdad.
+     *
+     * Esto se mide con `SELF.fetch` y no con `pedir`, porque lo que hay que
+     * mirar es el `Max-Age` de la cabecera y `pedir` sólo devuelve el cuerpo. */
+    galleta = '';
+    const entrar = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CLIENTA, clave: CLAVE_CLIENTA }) });
+    expect(entrar.estado).toBe(200);
+    // El valor se corta en el PRIMER `=` pero se toma completo: la firma puede
+    // traer uno, y partir por todos deja la galleta trunca. Costó cinco
+    // despliegues en rojo en quote101 el 16-sep.
+    const valor = galleta.slice(galleta.indexOf('=') + 1);
+
+    const id = 'boleto-clienta-' + Date.now();
+    await entorno.MASTER.prepare(`INSERT INTO tickets (id, galleta, expira_at) VALUES (?,?,?)`)
+      .bind(id, valor, new Date(Date.now() + 60_000).toISOString()).run();
+
+    const r = await SELF.fetch('https://api.local/auth/canje', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entrada: id }),
+    });
+    expect(r.status).toBe(200);
+    const puesta = r.headers.get('Set-Cookie') || '';
+    const maxAge = Number(/Max-Age=(\d+)/i.exec(puesta)?.[1] ?? -1);
+    expect(maxAge, `Set-Cookie del canje: ${puesta}`).toBeGreaterThan(0);
+    expect(maxAge, 'a una clienta el canje no le puede dar un mes de galleta').toBeLessThanOrEqual(MEDIO_DIA);
+    expect(maxAge).toBeGreaterThan(MEDIO_DIA - 120);
+    galleta = galletaMike;
+  });
+
+  it('un boleto cuya sesión ya murió no entra, aunque el boleto siga en fecha', async () => {
+    galleta = galletaMike;
+    const id = 'boleto-sin-sesion-' + Date.now();
+    // Una galleta bien firmada de una sesión que no existe: el id es válido,
+    // la firma la pone la propia API al abrir una sesión y luego se borra.
+    const ent = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CLIENTA, clave: CLAVE_CLIENTA }) });
+    expect(ent.estado).toBe(200);
+    const valor = galleta.slice(galleta.indexOf('=') + 1);
+    await pedir('/auth/salir', { method: 'POST' });
+
+    await entorno.MASTER.prepare(`INSERT INTO tickets (id, galleta, expira_at) VALUES (?,?,?)`)
+      .bind(id, valor, new Date(Date.now() + 60_000).toISOString()).run();
+    galleta = '';
+    const r = await pedir('/auth/canje', { method: 'POST', body: JSON.stringify({ entrada: id }) });
+    expect(r.estado).toBe(401);
+    expect(r.error).toBe('entrada_invalida');
+    galleta = galletaMike;
+  });
+
+  it('quitarle el acceso le devuelve la sesión larga, porque ya no es clienta', async () => {
+    // No es un detalle de implementación: es lo que hace que la regla sea
+    // «quién eres hoy» y no «cómo te dieron de alta alguna vez».
+    galleta = galletaMike;
+    const fuera = await pedir(`/orgs/${ORG}/clientes/${clienta_id}/acceso`, { app: 'dash101', method: 'DELETE' });
+    expect(fuera.estado).toBe(200);
+    galletaMike = galleta;
+
+    galleta = '';
+    const cod = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo: CLIENTA }) });
+    const r = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CLIENTA, codigo: cod.data.codigo_prueba }) });
+    expect(r.estado).toBe(200);
+    expect(r.data.vive_segundos).toBe(MES);
+    galleta = galletaMike;
+  });
+});

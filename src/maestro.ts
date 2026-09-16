@@ -86,6 +86,21 @@ export async function secretosDe(env: Env, usuario_id: string): Promise<{ tiene_
   return { tiene_pin: !!f?.pin_hash, tiene_clave: !!f?.clave_hash };
 }
 
+/** Cuántos segundos le quedan a una sesión.
+ *
+ *  Existe para que la galleta caduque cuando caduca la sesión, y no un mes
+ *  después. `/auth/canje` sólo tiene la galleta firmada del boleto, no sabe de
+ *  quién es ni cuánto le tocó: si le pusiera 30 días fijos, a una clienta le
+ *  quedaría un mes de galleta sobre una sesión de 12 horas. El navegador la
+ *  seguiría mandando, la API contestaría 401 y la pantalla se vería «dentro»
+ *  hasta que algo fallara. La sesión en D1 es la única verdad; esto la lee. */
+export async function vidaQueQueda(env: Env, id: string): Promise<number> {
+  const s = await env.MASTER.prepare(`SELECT expira_at FROM sesiones WHERE id = ?`)
+    .bind(id).first<{ expira_at: string }>();
+  if (!s) return 0;
+  return Math.max(0, Math.floor((Date.parse(s.expira_at) - Date.now()) / 1000));
+}
+
 export async function cerrarSesion(env: Env, id: string): Promise<void> {
   await env.MASTER.prepare(`DELETE FROM sesiones WHERE id = ?`).bind(id).run();
 }
@@ -172,6 +187,32 @@ export async function ultimasEntradasDe(env: Env, org_id: string): Promise<Map<s
 }
 
 export interface Acceso { usuario_id: string; org_id: string; tipo: TipoAcceso; ref_id: string; activo: boolean }
+
+/** Cuánto dura la sesión de este usuario, decidido por QUIÉN es y no por con
+ *  qué entró (contrato 0.12.0).
+ *
+ *  Antes lo decidía el camino: el PIN daba 12 horas y el código, la contraseña
+ *  y Google daban 30 días. Eso dejaba un hueco abierto, y no teórico: el camino
+ *  que de verdad usan los clientes de peek101 es «código al correo», así que un
+ *  cliente ya se estaba llevando 30 días. Las 12 horas sólo se cumplían por el
+ *  camino secundario.
+ *
+ *  Y al homologar la entrada a Google o contraseña (16-sep-2026), amarrar la
+ *  duración al camino habría vuelto el hueco la regla: nadie entraría ya por el
+ *  único camino corto.
+ *
+ *  Quien tiene un `acceso` activo —un cliente de peek101, alguien de obra en
+ *  quell101— trae 12 horas. Un socio o la oficina, 30 días. Un celular de obra
+ *  perdido da medio día de acceso, no un mes, y eso ya no depende de por dónde
+ *  entró su dueño.
+ *
+ *  Si alguien fuera las dos cosas a la vez —tiene membresía Y acceso— gana la
+ *  corta. Un `acceso` tiene una sola fila por usuario y se le pone a clientes y
+ *  a personal, así que no debería pasar; y si pasa, equivocarse del lado de la
+ *  sesión corta cuesta un login y no una cuenta. */
+export async function vidaDe(env: Env, usuario_id: string): Promise<number> {
+  return (await acceso(env, usuario_id)) ? VIDA_ACCESO : VIDA_MIEMBRO;
+}
 
 export async function acceso(env: Env, usuario_id: string): Promise<Acceso | null> {
   const f = await env.MASTER.prepare(`SELECT * FROM accesos WHERE usuario_id = ? AND activo = 1`)

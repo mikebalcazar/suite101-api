@@ -247,6 +247,45 @@ async function recorrido() {
 
   galleta = galletaSuper2;
 
+  /* Contrato 0.12.0: la sesión la decide QUIÉN entra, no con qué entró.
+   *
+   * Se mide aquí, desde fuera y contra lo publicado, porque es lo que cambia
+   * de comportamiento en producción. Antes la duración la decidía el camino, y
+   * el camino que de verdad usan los clientes de peek101 es el código al
+   * correo: por ahí un cliente se llevaba 30 días. Las 12 horas sólo se
+   * cumplían por el PIN, que es el camino secundario. */
+  const MES = 30 * 24 * 3600;
+  const MEDIO_DIA = 12 * 3600;
+  rev(conClave.data?.vive_segundos === MES, 'un socio con contraseña se lleva 30 días', String(conClave.data?.vive_segundos));
+
+  const negD = await pedir(STAGING, `/orgs/${ORG}/negocios`, { app: 'dash101', method: 'POST', body: { nombre: 'Duración' } });
+  const cliD = await pedir(STAGING, `/orgs/${ORG}/clientes`, { app: 'dash101', method: 'POST', body: { nombre: 'Clienta de la duración', negocio_id: negD.data?.id } });
+  const CORREO_CLI = `clienta-${ORG}@ejemplo.mx`;
+  const PIN_CLI = '736104';
+  const CLAVE_CLI = `bruma-tejado-${Math.random().toString(36).slice(2, 8)}`;
+  const accD = await pedir(STAGING, `/orgs/${ORG}/clientes/${cliD.data?.id}/acceso`, {
+    app: 'dash101', method: 'POST', body: { correo: CORREO_CLI, pin: PIN_CLI },
+  });
+  rev(accD.estado === 201, 'se le da acceso de portal a una clienta', `${accD.estado} ${accD.error ?? ''}`);
+  const galletaSuper3 = galleta;
+
+  galleta = '';
+  const cliPin = await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO_CLI, pin: PIN_CLI } });
+  rev(cliPin.data?.vive_segundos === MEDIO_DIA, 'una clienta con PIN, 12 horas (esto ya era así)', String(cliPin.data?.vive_segundos));
+  const puestaCli = await pedir(STAGING, '/auth/clave', { method: 'POST', body: { clave: CLAVE_CLI } });
+  rev(puestaCli.estado === 200, 'una clienta puede ponerse contraseña con la sesión del PIN', `${puestaCli.estado} ${puestaCli.error ?? ''}`);
+
+  galleta = '';
+  const cliClave = await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO_CLI, clave: CLAVE_CLI } });
+  rev(cliClave.data?.vive_segundos === MEDIO_DIA, 'y con contraseña siguen siendo 12 horas: no le regala un mes', String(cliClave.data?.vive_segundos));
+
+  galleta = '';
+  const codCli = await pedir(STAGING, '/auth/codigo', { method: 'POST', body: { correo: CORREO_CLI } });
+  const cliCod = await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO_CLI, codigo: codCli.data?.codigo_prueba } });
+  rev(cliCod.data?.vive_segundos === MEDIO_DIA, 'y por código también: ÉSTE era el hueco, daba un mes', String(cliCod.data?.vive_segundos));
+
+  galleta = galletaSuper3;
+
   // Contrato 0.9.0: el folio de la cotización lo asigna la suite.
   const negF = await pedir(STAGING, `/orgs/${ORG}/negocios`, { app: 'dash101', method: 'POST', body: { nombre: 'Folios' } });
   const cotizar = (extra = {}) => pedir(STAGING, `/orgs/${ORG}/cotizaciones`, {

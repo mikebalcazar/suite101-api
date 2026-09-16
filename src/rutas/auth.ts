@@ -1,8 +1,19 @@
 /* auth101 — dentro de la API, como dice la decisión 11.
  *
- *   miembro (socio, oficina)  → Google, o código de 6 dígitos al correo
- *   cliente (peek101)         → correo + PIN de 6 dígitos
- *   personal (quell101)       → correo + PIN, o pantalla de estación
+ * DESDE EL 16-SEP-2026 la entrada se homologa, por encargo de Mike: en todas
+ * las apps menos roster101 se entra **con Google o con correo y contraseña**, y
+ * el código de 6 dígitos al correo se queda sólo para recuperar una contraseña
+ * olvidada (`POST /clave` con una sesión abierta por código no pide la
+ * anterior; ver más abajo).
+ *
+ * El PIN sigue aceptándose aquí a propósito, aunque ninguna pantalla nueva lo
+ * ofrezca: el APK de Android que la gente de obra ya tiene instalado lleva su
+ * propia pantalla adentro, con PIN, y quitarlo de la API los dejaría afuera el
+ * mismo día. Se va cuando ese APK se rearme.
+ *
+ * LA DURACIÓN DE LA SESIÓN NO LA DECIDE EL CAMINO, sino quién entra: ver
+ * `vidaDe` en `maestro.ts`. Amarrarla al camino dejaba un hueco por el que un
+ * cliente se llevaba 30 días, y homologar lo habría vuelto la regla.
  *
  * La sesión es una cookie `s101` con `id.firmaHMAC`: el id no dice nada por sí
  * solo, la sesión de verdad vive en D1 y se puede matar de un DELETE.
@@ -22,7 +33,8 @@ import {
   normalizaCorreo, pinAceptable, pinCoincide, revisaClave, sha256, ulid, vencida,
 } from '../lib';
 import {
-  VIDA_ACCESO, VIDA_MIEMBRO, abrirSesion, acceso, cerrarSesion, crearUsuario, esSuperadmin,
+  abrirSesion, acceso, cerrarSesion, crearUsuario, esSuperadmin, vidaDe,
+  vidaQueQueda,
   miembro, org, orgs, secretoDe, sembrarSuperadmin, usuarioPorCorreo, usuarioPorId,
   secretosDe, type Como,
 } from '../maestro';
@@ -117,7 +129,7 @@ rutas.post('/entrar', async (c) => {
     }
     await c.env.MASTER.prepare(`DELETE FROM codigos WHERE correo = ?`).bind(correo).run();
     await sembrarSuperadmin(c.env, usuario.id, correo);
-    return await entregarSesion(c, usuario.id, VIDA_MIEMBRO, 'codigo', aparato);
+    return await entregarSesion(c, usuario.id, await vidaDe(c.env, usuario.id), 'codigo', aparato);
   }
 
   if (cuerpo.pin) {
@@ -136,7 +148,7 @@ rutas.post('/entrar', async (c) => {
       return err(c, 'pin_invalido', 401);
     }
     await c.env.MASTER.prepare(`DELETE FROM intentos_pin WHERE correo = ?`).bind(correo).run();
-    return await entregarSesion(c, usuario.id, VIDA_ACCESO, 'pin', aparato);
+    return await entregarSesion(c, usuario.id, await vidaDe(c.env, usuario.id), 'pin', aparato);
   }
 
   // Contraseña (contrato 0.7.0). El mismo freno que el PIN, en su propia
@@ -158,7 +170,7 @@ rutas.post('/entrar', async (c) => {
       return err(c, 'clave_invalida', 401);
     }
     await c.env.MASTER.prepare(`DELETE FROM intentos_clave WHERE correo = ?`).bind(correo).run();
-    return await entregarSesion(c, usuario.id, VIDA_MIEMBRO, 'clave', aparato);
+    return await entregarSesion(c, usuario.id, await vidaDe(c.env, usuario.id), 'clave', aparato);
   }
 
   return err(c, 'datos_invalidos', 400, { falta: 'codigo, pin o clave' });
@@ -310,7 +322,8 @@ rutas.get('/google/callback', async (c) => {
   await c.env.MASTER.prepare(`UPDATE usuarios SET google_sub = ? WHERE id = ?`).bind(carga.sub, usuario.id).run();
   await sembrarSuperadmin(c.env, usuario.id, correo);
 
-  const s = await abrirSesion(c.env, usuario.id, appDe(c), VIDA_MIEMBRO, 'google');
+  const vida = await vidaDe(c.env, usuario.id);
+  const s = await abrirSesion(c.env, usuario.id, appDe(c), vida, 'google');
   const volver_a = c.req.query('state') || '/';
 
   // A una app detrás de su proxy no le sirve la cookie puesta aquí: es de
@@ -324,7 +337,7 @@ rutas.get('/google/callback', async (c) => {
     return c.redirect(u.toString(), 302);
   }
 
-  c.header('Set-Cookie', cookie(COOKIE, s.cookie, VIDA_MIEMBRO));
+  c.header('Set-Cookie', cookie(COOKIE, s.cookie, vida));
   return c.redirect(volver_a, 302);
 });
 
@@ -344,11 +357,21 @@ rutas.post('/canje', async (c) => {
   const t = await c.env.MASTER.prepare(`SELECT galleta, expira_at FROM tickets WHERE id = ?`).bind(id).first<{ galleta: string; expira_at: string }>();
   if (t) await c.env.MASTER.prepare(`DELETE FROM tickets WHERE id = ?`).bind(id).run();
   if (!t || vencida(t.expira_at)) return err(c, 'entrada_invalida', 401);
+
+  // La galleta caduca cuando caduca la sesión. Se lee de D1 en vez de suponer
+  // 30 días: desde el contrato 0.12.0 la duración depende de quién entró, y
+  // este boleto no lo sabe. Si la sesión ya no vive, el boleto no sirve —
+  // aunque el boleto mismo siga en fecha.
+  const { abrirCookie } = await import('../lib');
+  const sesion_id = await abrirCookie(t.galleta, await secretoDe(c.env));
+  const vida = sesion_id ? await vidaQueQueda(c.env, sesion_id) : 0;
+  if (vida <= 0) return err(c, 'entrada_invalida', 401, { motivo: 'la sesión ya no vive' });
+
   return ok(
     c,
     { entro: true, ...(aparato === true ? { token: t.galleta } : {}) },
     200,
-    { 'Set-Cookie': cookie(COOKIE, t.galleta, VIDA_MIEMBRO) },
+    { 'Set-Cookie': cookie(COOKIE, t.galleta, vida) },
   );
 });
 

@@ -13,7 +13,18 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.11.0 (consecutivos por serie: `POST
+ * Versión del contrato: 0.12.0 (la sesión la decide QUIÉN entra, no con qué
+ * entró: `vidaDe` en `maestro.ts`. Quien tiene un `acceso` activo —un cliente
+ * de peek101, alguien de obra en quell101— trae 12 horas; un socio o la
+ * oficina, 30 días, por los cuatro caminos. Antes la decidía el camino, y eso
+ * dejaba un hueco abierto: el camino que de verdad usan los clientes de
+ * peek101 es el código al correo, así que un cliente ya se estaba llevando 30
+ * días; las 12 horas sólo se cumplían por el PIN. Al homologar la entrada a
+ * Google o contraseña —encargo de Mike del 16-sep— amarrarla al camino habría
+ * vuelto el hueco la regla, porque nadie entraría ya por el único camino
+ * corto. De paso, la galleta de `/auth/canje` dura lo que dura la sesión y no
+ * 30 días fijos, y un boleto cuya sesión ya murió no entra). Antes: 0.11.0
+ * (consecutivos por serie: `POST
  * /orgs/:o/folios/:serie` aparta el siguiente número de una serie y `GET` lo
  * mira sin consumirlo, con el mismo contador atómico del OrgDB que ya pone el
  * folio de la cotización. Es para los consecutivos que todavía se calculaban
@@ -53,7 +64,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.11.0';
+export const VERSION_CONTRATO = '0.12.0';
 
 /* ─────────────── envoltura de toda respuesta ─────────────── */
 
