@@ -26,7 +26,15 @@ GitHub (`Annotations · 1 error`):
 Repos privados: los minutos y el almacenamiento de artefactos se cobran, con
 2,000 minutos y 500 MB incluidos al mes. El **límite de gasto** de la cuenta
 estaba en $0 (valor de fábrica), así que un centavo de excedente detiene todo.
-Mike lo subió el 17-sep ~06:30Z y los trabajos arrancaron al instante.
+Al 17-sep 06:35Z sigue igual: Mike sabe la causa y el ajuste es suyo.
+
+**Corrección a la primera versión de este recado, veinte minutos después.**
+Decía «Mike lo subió y los trabajos arrancaron al instante». Era falso: el
+disparo de las 06:30Z apareció un instante como `in_progress` y lo tomé como
+que había vuelto, sin mirar el job. El job `pruebas` murió igual, tres
+segundos, `runner_id: 0`. Un `in_progress` momentáneo NO es señal de nada;
+la señal es el `runner_id` del job. Lo dejo escrito porque es la misma clase
+de error que este recado pretende evitar.
 
 ## Lo que probablemente lo reventó, y no son los minutos
 
