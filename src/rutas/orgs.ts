@@ -13,9 +13,9 @@ import { Hono } from 'hono';
 import { DEFS, columnasDinero, esTabla } from '../tablas';
 import type { ApiOrgDB } from '../org-db';
 import { APPEND_ONLY, POR_SU_RUTA, revisarEscritura } from '../permisos';
-import { acceso, accesoDe, miembro, org, ponerAcceso, quitarAcceso, usuarioPorCorreo } from '../maestro';
+import { acceso, accesoDe, esSuperadmin, miembro, org, ponerAcceso, quitarAcceso, usuarioPorCorreo } from '../maestro';
 import { crearUsuario } from '../maestro';
-import { guardarPin, normalizaCorreo, pinAceptable, ulid } from '../lib';
+import { correoValido, guardarPin, normalizaCorreo, pinAceptable, ulid } from '../lib';
 import { err, ok, type Ctx, type Quien, type Vars } from '../http';
 import type { Env } from '../entorno';
 import { APPS, LLAVE_APP, type App, type Tabla } from '../../schema/tipos';
@@ -256,6 +256,59 @@ for (const par of [
     return ok(c, { quitado: !!a, usuario_id: a?.usuario_id ?? null, ref_id: fila.id });
   });
 }
+
+/* ─────────────── invitar a un cliente desde una app (0.15.0) ───────────────
+ * quell101 (y cualquier app con base propia) le abre la puerta de la suite a
+ * un cliente del taller sin pasar por dash101: si no hay cliente con ese
+ * correo en la base de la empresa se crea; si la persona no existe en la
+ * suite se crea; y queda con acceso tipo `cliente`. SIN PIN: entra con el
+ * código al correo y ahí pone su contraseña, como cualquiera. La app que
+ * invita manda su propio correo de invitación (sabe a qué obra); aquí no se
+ * manda nada.
+ *
+ * Un miembro de la empresa no se vuelve cliente (409 es_miembro), y una
+ * persona que ya es cliente de OTRA empresa tampoco (409 en_uso): `accesos`
+ * lleva una fila por usuario. */
+rutas.post('/:o/clientes/invitar', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403);
+  const cuerpo = await c.req.json<{ correo?: string; nombre?: string }>().catch(() => ({}) as never);
+  const correo = normalizaCorreo(cuerpo.correo);
+  const nombre = String(cuerpo.nombre || '').trim().slice(0, 120);
+  if (!correoValido(correo)) return err(c, 'datos_invalidos', 400, { correo: 'no parece un correo' });
+  if (!nombre) return err(c, 'datos_invalidos', 400, { falta: 'nombre' });
+
+  const yaEs = await usuarioPorCorreo(c.env, correo);
+  if (yaEs && ((await miembro(c.env, c.get('org_id'), yaEs.id)) || (await esSuperadmin(c.env, yaEs.id)))) {
+    return err(c, 'es_miembro', 409, { motivo: 'ese correo es de alguien de la empresa, no de un cliente' });
+  }
+  const previo = yaEs ? await acceso(c.env, yaEs.id) : null;
+  if (previo && previo.org_id !== c.get('org_id')) {
+    return err(c, 'en_uso', 409, { motivo: 'ese correo ya entra como cliente o personal de otra empresa' });
+  }
+  if (previo && previo.tipo !== 'cliente') {
+    return err(c, 'en_uso', 409, { motivo: 'ese correo es del personal de la empresa, no de un cliente' });
+  }
+
+  // El cliente en la base de la empresa: el que ya está con ese correo, o uno nuevo.
+  const lista = await stub(c).listar('clientes', {});
+  let cliente = lista.filas.find((f) => normalizaCorreo(f.correo) === correo) ?? null;
+  const nuevo_cliente = !cliente;
+  if (!cliente) {
+    // Un cliente cuelga de un negocio. El de quien invita si tiene uno
+    // acotado; si no, el primero de la empresa. Sin negocio no hay dónde
+    // colgarlo, y eso se dice, no se inventa.
+    const negocio_id = quien.negocios[0] ?? (await stub(c).listar('negocios', {})).filas[0]?.id;
+    if (!negocio_id) return err(c, 'sin_negocio', 409, { motivo: 'la empresa no tiene negocio todavía; se crea desde dash101 o quote101' });
+    cliente = await stub(c).crear('clientes', { nombre, correo, negocio_id }, { app: c.get('app'), usuario_id: quien.usuario_id });
+  }
+
+  const usuario = yaEs ?? (await crearUsuario(c.env, correo, nombre));
+  await ponerAcceso(c.env, { usuario_id: usuario.id, org_id: c.get('org_id'), tipo: 'cliente', ref_id: String(cliente.id) });
+  await stub(c).actualizar('clientes', String(cliente.id), { usuario_id: usuario.id, portal_activo: true });
+
+  return ok(c, { usuario_id: usuario.id, cliente_id: cliente.id, correo, nombre: String(cliente.nombre ?? nombre), nuevo_usuario: !yaEs, nuevo_cliente }, 201);
+});
 
 /* ─────────────── consecutivos por serie ───────────────
  *

@@ -47,6 +47,13 @@
  * folio: si lo manda, se le ignora; sólo `suite101` puede, y es para que la
  * mudanza traiga los viejos congelados. Un índice único en la base impide dos
  * folios iguales). Antes:
+ * 0.15.0 (invitar a un cliente desde una app con base propia:
+ * `POST /orgs/:o/clientes/invitar {correo, nombre}` deja al cliente en la
+ * base de la empresa si no estaba, crea la persona en la suite si no existía
+ * y le pone acceso tipo cliente, sin PIN: entra con el código al correo y
+ * pone su contraseña. 409 `es_miembro` si el correo es de alguien de la
+ * empresa, 409 `en_uso` si ya es cliente o personal de otra. Lo pide la cara
+ * de cliente de quell101; peek101 abre con la misma cuenta). Antes:
  * 0.13.0 (licencias por suscripción, base /licencias: la app activa con
  * clave + huella y late a diario; recibe un token firmado Ed25519 cuya llave
  * pública sirve GET /licencias/llave; el panel (superadmin) crea claves, marca
@@ -69,7 +76,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.14.0';
+export const VERSION_CONTRATO = '0.15.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
