@@ -7,7 +7,7 @@ Mike soltó el trabajo **B** hoy y decidió la puerta: **el cliente se invita
 desde la pantalla de inicio de quell101** (correo, nombre como va a aparecer,
 y a qué obras). Está publicado: suite101-api #75 (contrato **0.15.0**),
 bitacora-obra #70 (runner `35396410692` verde, migración `0012` aplicada en
-la base real: 6 personas con su rol intacto, membresías y dudas como estaban),
+la base real: 3 personas con su rol intacto —dueño, supervisor, contratista—, 69 ítems y la membresía como estaban),
 docs101 #3 (https://docs101.pages.dev/la-cara-de-cliente-de-quell101/).
 
 ## La identidad del cliente: una sola cuenta (cierra la pregunta del 10-sep)
