@@ -2220,3 +2220,105 @@ describe('19 · alta automática de empresas (contrato 0.14.0)', () => {
     expect((await pedir(`/admin/orgs/${PAGA}`, { method: 'DELETE' })).estado).toBe(200);
   });
 });
+
+describe('20 · invitar a un cliente desde una app (contrato 0.15.0)', () => {
+  const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const INVITADA = 'invitada-quell@ejemplo.mx';
+  const OTRA = 'invitar-otra';
+  let galletaSuper = '';
+  let clienteId = '';
+
+  async function comoSuper() {
+    if (galletaSuper) { galleta = galletaSuper; return; }
+    if (galletaMike) galleta = galletaMike;
+    const yo = await pedir('/yo');
+    if (yo.ok && yo.data.superadmin) { galletaSuper = galleta; galletaMike = galleta; return; }
+    galleta = '';
+    for (let i = 0; i < 3; i++) {
+      const c = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo: CORREO }) });
+      if (c.ok) {
+        const e = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CORREO, codigo: c.data.codigo_prueba }) });
+        expect(e.estado).toBe(200);
+        galletaSuper = galleta; galletaMike = galleta;
+        return;
+      }
+      await dormir(((c.detalle?.espera_segundos ?? 1) + 1) * 1000);
+    }
+    throw new Error('no se pudo entrar como superadmin');
+  }
+
+  it('la invitación deja cliente en la empresa, persona en la suite y acceso tipo cliente; repetirla no duplica', async () => {
+    await comoSuper();
+    // Un bloque anterior deja quell apagada en la empresa de pruebas; aquí se prende.
+    await pedir(`/admin/orgs/${ORG}`, { method: 'PATCH', body: JSON.stringify({ apps: { dash: true, quell: true, cotizador: true, peek: true, roster: true, nest: true } }) });
+    const r = await pedir(`/orgs/${ORG}/clientes/invitar`, { app: 'quell101', method: 'POST', body: JSON.stringify({ correo: INVITADA, nombre: 'Invitada Quell' }) });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    expect(r.data.nuevo_usuario).toBe(true);
+    expect(r.data.nuevo_cliente).toBe(true);
+    clienteId = r.data.cliente_id;
+    const lista = await pedir(`/orgs/${ORG}/clientes`, { app: 'dash101' });
+    const fila = lista.data.filas.find((f: any) => f.id === clienteId);
+    expect(fila?.correo).toBe(INVITADA);
+    expect(fila?.portal_activo).toBe(true);
+    expect(fila?.usuario_id).toBe(r.data.usuario_id);
+
+    const otraVez = await pedir(`/orgs/${ORG}/clientes/invitar`, { app: 'quell101', method: 'POST', body: JSON.stringify({ correo: INVITADA.toUpperCase(), nombre: 'Otro nombre' }) });
+    expect(otraVez.estado).toBe(201);
+    expect(otraVez.data.cliente_id).toBe(clienteId);
+    expect(otraVez.data.nuevo_usuario).toBe(false);
+    expect(otraVez.data.nuevo_cliente).toBe(false);
+    const cuantos = (await pedir(`/orgs/${ORG}/clientes`, { app: 'dash101' })).data.filas.filter((f: any) => f.correo === INVITADA).length;
+    expect(cuantos).toBe(1);
+  });
+
+  it('la invitada entra con el código al correo, sin PIN, y abre /peek como cliente; una app de la empresa no le abre tablas', async () => {
+    await comoSuper();
+    const deSuper = galleta;
+    galleta = '';
+    const c = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo: INVITADA }) });
+    expect(c.estado, JSON.stringify(c)).toBe(200);
+    // Aquí no hay Resend: el código no sale, pero la API lo devuelve para probar.
+    // Lo que importa es que la persona EXISTE y por eso hay código; un correo
+    // desconocido recibe «si tiene acceso, le llega» y ningún código.
+    expect(c.data.codigo_prueba).toMatch(/^\d{6}$/);
+    const e = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: INVITADA, codigo: c.data.codigo_prueba }) });
+    expect(e.estado).toBe(200);
+    const yo = await pedir('/yo');
+    expect(yo.data.acceso?.tipo).toBe('cliente');
+    expect(yo.data.acceso?.org_id).toBe(ORG);
+    expect(yo.data.orgs).toEqual([]);
+    const peek = await pedir(`/orgs/${ORG}/peek`, { app: 'peek101' });
+    expect(peek.estado).toBe(200);
+    expect(peek.data.cliente.correo).toBe(INVITADA);
+    expect((await pedir(`/orgs/${ORG}/items`, { app: 'quell101' })).estado).toBe(403);
+    // Un cliente no invita a nadie.
+    const noInvita = await pedir(`/orgs/${ORG}/clientes/invitar`, { app: 'quell101', method: 'POST', body: JSON.stringify({ correo: 'x@ejemplo.mx', nombre: 'X' }) });
+    expect(noInvita.estado).toBe(403);
+    galleta = deSuper;
+  });
+
+  it('un miembro de la empresa no se vuelve cliente, y una clienta de una empresa no se invita a otra', async () => {
+    await comoSuper();
+    // Ni el superadmin ni una socia de la empresa se vuelven clientes.
+    const miembro = await pedir(`/orgs/${ORG}/clientes/invitar`, { app: 'quell101', method: 'POST', body: JSON.stringify({ correo: CORREO, nombre: 'Mike' }) });
+    expect(miembro.estado, JSON.stringify(miembro)).toBe(409);
+    expect(miembro.error).toBe('es_miembro');
+    const oficina = await pedir(`/admin/orgs/${ORG}/miembros`, { method: 'POST', body: JSON.stringify({ correo: 'oficina-invitar@ejemplo.mx', rol: 'staff' }) });
+    expect(oficina.estado, JSON.stringify(oficina)).toBe(201);
+    const socia = await pedir(`/orgs/${ORG}/clientes/invitar`, { app: 'quell101', method: 'POST', body: JSON.stringify({ correo: 'oficina-invitar@ejemplo.mx', nombre: 'Oficina' }) });
+    expect(socia.estado, JSON.stringify(socia)).toBe(409);
+    expect(socia.error).toBe('es_miembro');
+    const mal = await pedir(`/orgs/${ORG}/clientes/invitar`, { app: 'quell101', method: 'POST', body: JSON.stringify({ correo: 'no-es-correo', nombre: 'X' }) });
+    expect(mal.estado).toBe(400);
+    const sinNombre = await pedir(`/orgs/${ORG}/clientes/invitar`, { app: 'quell101', method: 'POST', body: JSON.stringify({ correo: 'alguien@ejemplo.mx' }) });
+    expect(sinNombre.estado).toBe(400);
+
+    await pedir(`/admin/orgs/${OTRA}`, { method: 'DELETE' });
+    const alta = await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: OTRA, nombre: 'Otra Empresa', apps: { quell: true } }) });
+    expect(alta.estado, JSON.stringify(alta)).toBe(201);
+    const enUso = await pedir(`/orgs/${OTRA}/clientes/invitar`, { app: 'quell101', method: 'POST', body: JSON.stringify({ correo: INVITADA, nombre: 'Invitada Quell' }) });
+    expect(enUso.estado, JSON.stringify(enUso)).toBe(409);
+    expect(enUso.error).toBe('en_uso');
+    expect((await pedir(`/admin/orgs/${OTRA}`, { method: 'DELETE' })).estado).toBe(200);
+  });
+});

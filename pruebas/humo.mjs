@@ -211,6 +211,28 @@ async function recorrido() {
   const bienvenida = await pedir(STAGING, `/admin/orgs/${ORG}/bienvenida`, { method: 'POST', body: { correo: `duena-${ORG}@ejemplo.mx` } });
   rev(bienvenida.estado === 200 && bienvenida.data?.enviado === false, 'la bienvenida se intenta y en staging NO sale de verdad', `${bienvenida.estado} enviado=${bienvenida.data?.enviado} (${bienvenida.data?.motivo})`);
 
+  // Contrato 0.15.0: invitar a un cliente desde una app con base propia (quell101).
+  const negI = await pedir(STAGING, `/orgs/${ORG}/negocios`, { app: 'dash101', method: 'POST', body: { nombre: 'Invitaciones' } });
+  rev(negI.estado === 201, 'hay un negocio de dónde colgar clientes', `${negI.estado}`);
+  const inv = await pedir(STAGING, `/orgs/${ORG}/clientes/invitar`, { app: 'quell101', method: 'POST', body: { correo: `cliente-${ORG}@ejemplo.mx`, nombre: 'Cliente Invitado' } });
+  rev(inv.estado === 201 && inv.data?.nuevo_usuario === true && inv.data?.nuevo_cliente === true, 'quell101 invita a un cliente: cliente nuevo, persona nueva, acceso de cliente', `${inv.estado} ${inv.error || ''}`);
+  const inv2 = await pedir(STAGING, `/orgs/${ORG}/clientes/invitar`, { app: 'quell101', method: 'POST', body: { correo: `cliente-${ORG}@ejemplo.mx`, nombre: 'Cliente Invitado' } });
+  rev(inv2.estado === 201 && inv2.data?.cliente_id === inv.data?.cliente_id && inv2.data?.nuevo_cliente === false, 'invitarlo otra vez no duplica al cliente', `${inv2.estado}`);
+  const mikeCli = await pedir(STAGING, `/orgs/${ORG}/clientes/invitar`, { app: 'quell101', method: 'POST', body: { correo: CORREO, nombre: 'Mike' } });
+  rev(mikeCli.estado === 409 && mikeCli.error === 'es_miembro', 'el superadmin no se vuelve cliente', `${mikeCli.estado} ${mikeCli.error}`);
+  const galletaAntes = galleta;
+  galleta = '';
+  const codInv = await pedir(STAGING, "/auth/codigo", { method: "POST", body: { correo: `cliente-${ORG}@ejemplo.mx` } });
+  const entInv = await pedir(STAGING, "/auth/entrar", { method: "POST", body: { correo: `cliente-${ORG}@ejemplo.mx`, codigo: codInv.data?.codigo_prueba } });
+  rev(entInv.estado === 200, "el cliente invitado entra con el código, sin PIN", `${entInv.estado}`);
+  const yoC = await pedir(STAGING, '/yo');
+  rev(yoC.data?.acceso?.tipo === 'cliente' && (yoC.data?.orgs || []).length === 0, 'y la suite lo ve como cliente, no como miembro', JSON.stringify(yoC.data?.acceso));
+  const peekC = await pedir(STAGING, `/orgs/${ORG}/peek`, { app: 'peek101' });
+  rev(peekC.estado === 200 && peekC.data?.cliente?.correo === `cliente-${ORG}@ejemplo.mx`, 'abre /peek con la misma cuenta', `${peekC.estado}`);
+  const tablaC = await pedir(STAGING, `/orgs/${ORG}/items`, { app: 'quell101' });
+  rev(tablaC.estado === 403, 'y una tabla suelta con X-App quell101 le contesta 403', `${tablaC.estado}`);
+  galleta = galletaAntes;
+
   // La puerta aplica la lista: la socia entra a dash101 y a quell101, no a peek101 (que además está apagada) ni a workshop101.
   const galletaSuper = galleta;
   const codS = await pedir(STAGING, '/auth/codigo', { method: 'POST', body: { correo: `socia-${ORG}@ejemplo.mx` } });
