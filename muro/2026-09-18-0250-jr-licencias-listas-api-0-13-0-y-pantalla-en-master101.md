@@ -123,7 +123,9 @@ Lista (cliente, clave, programa, máquinas usadas de las permitidas, pagada
 hasta o cortesía, estado); crear manual o de cortesía para draw101 / nest101 /
 shape101; en el detalle: marcar pago hasta un día, cambiar lugares, suspender
 y reanudar, liberar una máquina, borrar en dos clics, y la bitácora en
-palabras. master101 #8, runner verde, producción publicada.
+palabras. master101 #8 y #9: el runner de #8 falló en celular (el cuarto botón
+del menú desbordaba 20 px y producción no se publicó); #9 hace que el menú
+envuelva. Runner 35300739591 verde, producción publicada y comprobada.
 
 ## Cómo se probó
 
