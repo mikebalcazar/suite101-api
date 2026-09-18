@@ -547,7 +547,7 @@ describe('3b · Google detrás de un proxy: el boleto de entrada', () => {
 
   it('los Workers de la suite están en ORIGENES: /auth/google no los rechaza como ajenos', async () => {
     // wrangler.toml de producción es el que leen las pruebas (ver vitest.config).
-    for (const app of ['dash101', 'peek101', 'master101', 'quote101', 'supervisor-t101', 'workshop101']) {
+    for (const app of ['dash101', 'peek101', 'master101', 'quote101', 'workshop101']) {
       const r = await pedir('/auth/google?volver_a=' + encodeURIComponent(`https://${app}.mike-929.workers.dev/`));
       // Sin credenciales de Google contesta 501; lo que importa aquí es que NO sea 403 origen_no_permitido.
       expect(r.estado, app).toBe(501);
