@@ -227,8 +227,10 @@ async function recorrido() {
   rev(entInv.estado === 200, "el cliente invitado entra con el código, sin PIN", `${entInv.estado}`);
   const yoC = await pedir(STAGING, '/yo');
   rev(yoC.data?.acceso?.tipo === 'cliente' && (yoC.data?.orgs || []).length === 0, 'y la suite lo ve como cliente, no como miembro', JSON.stringify(yoC.data?.acceso));
-  const peekC = await pedir(STAGING, `/orgs/${ORG}/peek`, { app: 'peek101' });
-  rev(peekC.estado === 200 && peekC.data?.cliente?.correo === `cliente-${ORG}@ejemplo.mx`, 'abre /peek con la misma cuenta', `${peekC.estado}`);
+  // En la org del humo peek101 está apagada a propósito (se prueba más abajo),
+  // así que /peek se pide con otra app: la ruta es del cliente, no de la app.
+  const peekC = await pedir(STAGING, `/orgs/${ORG}/peek`, { app: 'dash101' });
+  rev(peekC.estado === 200 && peekC.data?.cliente?.correo === `cliente-${ORG}@ejemplo.mx`, 'abre /peek con la misma cuenta', `${peekC.estado} ${peekC.error || ''}`);
   const tablaC = await pedir(STAGING, `/orgs/${ORG}/items`, { app: 'quell101' });
   rev(tablaC.estado === 403, 'y una tabla suelta con X-App quell101 le contesta 403', `${tablaC.estado}`);
   galleta = galletaAntes;
