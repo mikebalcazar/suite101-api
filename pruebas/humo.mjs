@@ -200,8 +200,8 @@ async function recorrido() {
   const manana = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   const vencida = await pedir(STAGING, `/admin/orgs/${ORG}`, { method: 'PATCH', body: { cortesia: false, paga_hasta: ayer } });
   rev(vencida.estado === 200 && vencida.data?.estado === 'sin_pago', 'pagada hasta ayer, la empresa queda «sin pago»', `${vencida.estado} ${vencida.data?.estado}`);
-  const cerrada = await pedir(STAGING, `/orgs/${ORG}`, { app: 'dash101' });
-  rev(cerrada.estado === 402 && cerrada.error === 'org_sin_pago', 'y sus apps contestan 402 org_sin_pago', `${cerrada.estado} ${cerrada.error}`);
+  const sinPago = await pedir(STAGING, `/orgs/${ORG}`, { app: 'dash101' });
+  rev(sinPago.estado === 402 && sinPago.error === 'org_sin_pago', 'y sus apps contestan 402 org_sin_pago', `${sinPago.estado} ${sinPago.error}`);
   const panel = await pedir(STAGING, `/orgs/${ORG}`, { app: 'workshop101' });
   rev(panel.estado === 200, 'pero el panel del director sigue abriendo', `${panel.estado}`);
   const pago = await pedir(STAGING, `/admin/orgs/${ORG}/pago`, { method: 'POST', body: { hasta: manana, referencia: 'humo' } });
