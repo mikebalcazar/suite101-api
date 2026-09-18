@@ -12,6 +12,7 @@ import { Hono } from 'hono';
 import auth, { conSesion, yo } from './rutas/auth';
 import orgs from './rutas/orgs';
 import admin from './rutas/admin';
+import licencias from './rutas/licencias';
 import importar, { paginaImportar } from './rutas/importar';
 import { err, ok, type Vars } from './http';
 import type { Env } from './entorno';
@@ -89,7 +90,7 @@ app.get('/', (c) =>
     servicio: 'suite101-api',
     que_es: 'La unica puerta a los datos de la suite 101. Ninguna app toca una base directo.',
     contrato: VERSION_CONTRATO,
-    empieza_en: ['/salud', '/auth/codigo', '/yo', '/orgs/:org'],
+    empieza_en: ['/salud', '/auth/codigo', '/yo', '/orgs/:org', '/licencias/llave'],
     manda: 'la cookie de sesion (o Authorization: Bearer, para una app empacada) y la cabecera X-App',
   }),
 );
@@ -104,6 +105,11 @@ app.route('/orgs', orgs);
  * navegador. La página es solo la pantalla: el POST que escribe sí está detrás
  * de la sesión y del superadmin. */
 app.get('/admin/importar', paginaImportar);
+
+/* Las licencias de las apps que se venden (draw101 primero). `activar` y
+ * `latido` los llama la app instalada, sin sesión ni X-App; lo demás es del
+ * panel de Mike y pide superadmin. */
+app.route('/licencias', licencias);
 
 app.route('/admin', admin);
 app.route('/admin', importar);

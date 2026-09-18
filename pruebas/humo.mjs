@@ -79,6 +79,15 @@ async function produccion() {
   const sin = await pedir(PROD, `/orgs/${ORG}`, { app: 'dash101' });
   rev(sin.estado === 401 && sin.error === 'sin_sesion', 'sin cookie no se pasa de la puerta', `${sin.estado} ${sin.error}`);
   // Contrato 0.8.0: la puerta del token existe, pero no regala nada.
+  // Licencias (0.13.0): en producción sólo se mira. La llave pública tiene que
+  // estar servida, y una clave inventada tiene que rebotar sin escribir nada.
+  const llave = await pedir(PROD, '/licencias/llave');
+  rev(llave.estado === 200 && llave.data?.alg === 'Ed25519' && /^[A-Za-z0-9_-]{43}$/.test(llave.data?.publica || ''), 'la llave pública de licencias se sirve (Ed25519)', `kid ${llave.data?.kid}`);
+  const claveFalsa = await pedir(PROD, '/licencias/activar', { method: 'POST', body: { clave: 'T101-AAAA-BBBB-CCCC', huella: 'humo-0123456789abcdef' } });
+  rev(claveFalsa.estado === 404 && claveFalsa.error === 'clave_inexistente', 'una clave inventada no activa nada', `${claveFalsa.estado} ${claveFalsa.error}`);
+  const panelSinSesion = await pedir(PROD, '/licencias');
+  rev(panelSinSesion.estado === 401, 'el panel de licencias no se ve sin sesión', `${panelSinSesion.estado}`);
+
   const conBasura = await pedir(PROD, '/yo', { token: 'no-soy-un-token.niFirma' });
   rev(conBasura.estado === 401 && conBasura.error === 'sin_sesion', 'un token inventado tampoco pasa de la puerta', `${conBasura.estado} ${conBasura.error}`);
 
@@ -446,6 +455,66 @@ async function recorrido() {
  * el recálculo de cachés corren en el runtime real, no en el de las pruebas.
  */
 
+/** Licencias por suscripción (0.13.0), contra staging: Mike crea una
+ *  cortesía, la app la activa, el token abre sólo con la llave pública, late,
+ *  y al borrarla la clave deja de existir. Lo que en vitest corre en workerd,
+ *  aquí corre contra el D1 de verdad. */
+async function licencias() {
+  linea('');
+  linea(`== Licencias (0.13.0) == ${STAGING}`);
+  const { createPublicKey, verify } = await import('node:crypto');
+  const yo = await pedir(STAGING, '/yo');
+  if (!(yo.ok && yo.data?.superadmin)) {
+    // Si el recorrido dejó otra sesión, se entra otra vez como Mike; si el freno
+    // de códigos está gastado, se espera lo que la API pida.
+    galleta = '';
+    for (let i = 0; i < 3; i++) {
+      const c = await pedir(STAGING, '/auth/codigo', { method: 'POST', body: { correo: CORREO } });
+      if (c.ok) { await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO, codigo: c.data?.codigo_prueba } }); break; }
+      await new Promise((r) => setTimeout(r, ((c.detalle?.espera_segundos ?? 1) + 1) * 1000));
+    }
+  }
+  const llave = await pedir(STAGING, '/licencias/llave');
+  rev(llave.estado === 200 && llave.data?.alg === 'Ed25519', 'staging sirve la llave pública', `kid ${llave.data?.kid}`);
+
+  const alta = await pedir(STAGING, '/licencias', { method: 'POST', body: { cliente: `Humo ${ORG}`, cortesia: true, notas: 'la borra el propio humo' } });
+  rev(alta.estado === 201 && /^T101-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(alta.data?.clave || ''), 'Mike crea una cortesía y recibe una clave T101-…', `${alta.estado} ${alta.error ?? ''}`);
+  if (alta.estado !== 201) return;
+  const id = alta.data.id;
+  const huella = `humo-${ORG}-0123456789abcdef`.replace(/[^A-Za-z0-9_-]/g, '-');
+
+  galleta = ''; // la app no trae sesión
+  const act = await pedir(STAGING, '/licencias/activar', { method: 'POST', body: { clave: alta.data.clave, huella, version: 'humo' } });
+  rev(act.estado === 201 && typeof act.data?.token === 'string', 'la app activa sin sesión y recibe un token', `${act.estado} ${act.error ?? ''} · ${act.ms} ms`);
+  let abre = false, carga = null;
+  try {
+    const [v, cuerpo, firma] = String(act.data?.token || '').split('.');
+    const deB64 = (t) => Buffer.from(t.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+    const publica = createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: llave.data.publica }, format: 'jwk' });
+    abre = v === 'v1' && verify(null, deB64(cuerpo), publica, deB64(firma));
+    carga = JSON.parse(deB64(cuerpo).toString('utf8'));
+  } catch (e) { carga = { error: e.message }; }
+  rev(abre === true && carga?.maquina === huella && carga?.licencia === id, 'el token abre con la llave pública, como lo hará draw101', `hasta ${carga?.hasta}`);
+  const lat = await pedir(STAGING, '/licencias/latido', { method: 'POST', body: { token: act.data?.token, huella } });
+  rev(lat.estado === 200 && typeof lat.data?.token === 'string', 'el latido devuelve un token nuevo', `${lat.estado} ${lat.error ?? ''}`);
+  const otra = await pedir(STAGING, '/licencias/activar', { method: 'POST', body: { clave: alta.data.clave, huella: `${huella}-otra` } });
+  rev(otra.estado === 409 && otra.error === 'sin_lugares', 'la segunda máquina no cabe en un lugar', `${otra.estado} ${otra.error}`);
+
+  // De vuelta como Mike: el detalle cuenta lo que pasó, y se borra lo creado.
+  const yo2 = await pedir(STAGING, '/yo');
+  if (!(yo2.ok && yo2.data?.superadmin)) {
+    galleta = '';
+    const c = await pedir(STAGING, '/auth/codigo', { method: 'POST', body: { correo: CORREO } });
+    await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO, codigo: c.data?.codigo_prueba } });
+  }
+  const det = await pedir(STAGING, `/licencias/${id}`);
+  rev(det.estado === 200 && det.data?.activaciones?.length === 1 && (det.data?.bitacora || []).some((b) => b.accion === 'activar'), 'el detalle trae la activación y la bitácora', `${det.data?.activaciones?.length} activaciones · ${det.data?.bitacora?.length} renglones`);
+  const borra = await pedir(STAGING, `/licencias/${id}`, { method: 'DELETE' });
+  rev(borra.estado === 200, 'la cortesía de humo se borra', `${borra.estado}`);
+  const ya = await pedir(STAGING, '/licencias/activar', { method: 'POST', body: { clave: alta.data.clave, huella } });
+  rev(ya.estado === 404, 'y su clave ya no existe para la app', `${ya.estado} ${ya.error}`);
+}
+
 async function importacion() {
   linea('');
   linea('== Importación (fase 2) ==');
@@ -655,6 +724,7 @@ const t0 = Date.now();
 try {
   await produccion();
   await recorrido();
+  await licencias();
   await importacion();
 } catch (e) {
   fallas++;

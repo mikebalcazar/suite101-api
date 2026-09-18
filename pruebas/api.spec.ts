@@ -1836,3 +1836,258 @@ describe('17 · la sesión la decide quién entra, no con qué entró (contrato 
     galleta = galletaMike;
   });
 });
+
+describe('18 · licencias por suscripción (contrato 0.13.0)', () => {
+  const HUELLA_A = 'maquina-a-0123456789abcdef';
+  const HUELLA_B = 'maquina-b-0123456789abcdef';
+  const dia = (desplaza: number) => new Date(Date.now() + desplaza * 86400000).toISOString().slice(0, 10);
+  let publica = '';
+  let cortesia: any = null;
+  let pagada: any = null;
+  let tokenA = '';
+  let galletaSuper = '';
+  const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  /* EL BLOQUE GUARDA SU PROPIA GALLETA de superadmin: la que viene del bloque
+   * anterior si es de Mike, o una nueva por código si el bloque corre solo.
+   * No se vuelve a pedir código a cada rato: el freno de intentos de Mike se
+   * gasta y un 429 aquí no mediría nada de licencias. */
+  async function comoSuper() {
+    if (galletaSuper) { galleta = galletaSuper; return; }
+    const yo = await pedir('/yo');
+    if (yo.ok && yo.data.superadmin) { galletaSuper = galleta; return; }
+    galleta = '';
+    for (let i = 0; i < 3; i++) {
+      const c = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo: CORREO }) });
+      if (c.ok) {
+        const e = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CORREO, codigo: c.data.codigo_prueba }) });
+        expect(e.estado).toBe(200);
+        galletaSuper = galleta;
+        return;
+      }
+      await dormir(((c.detalle?.espera_segundos ?? 1) + 1) * 1000);
+    }
+    throw new Error('no se pudo entrar como superadmin');
+  }
+
+  /** Abre el token como lo hará draw101: sólo con la llave pública. */
+  async function abrir(token: string) {
+    const [v, carga, firma] = token.split('.');
+    expect(v).toBe('v1');
+    const deB64 = (s: string) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (ch) => ch.charCodeAt(0));
+    const llave = await crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: publica }, { name: 'Ed25519' }, false, ['verify']);
+    const vale = await crypto.subtle.verify({ name: 'Ed25519' }, llave, deB64(firma), deB64(carga));
+    return { vale, carga: JSON.parse(new TextDecoder().decode(deB64(carga))) };
+  }
+
+  it('la llave pública se sirve sin sesión, es Ed25519 y es siempre la misma', async () => {
+    await comoSuper(); // guarda la galleta de Mike antes de soltarla
+    galleta = '';
+    const a = await pedir('/licencias/llave');
+    expect(a.estado).toBe(200);
+    expect(a.data.alg).toBe('Ed25519');
+    expect(a.data.publica).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const b = await pedir('/licencias/llave');
+    expect(b.data.publica).toBe(a.data.publica);
+    expect(b.data.kid).toBe(a.data.kid);
+    publica = a.data.publica;
+  });
+
+  it('el panel es sólo del superadmin', async () => {
+    galleta = '';
+    expect((await pedir('/licencias')).estado).toBe(401);
+    // Una socia de una empresa cualquiera: entra a la suite, pero no al panel.
+    await comoSuper();
+    await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: 'licencias', nombre: 'Pruebas de licencias' }) });
+    const alta = await pedir('/admin/orgs/licencias/miembros', { method: 'POST', body: JSON.stringify({ correo: 'lic-ajena@ejemplo.mx', nombre: 'Ajena', rol: 'socio' }) });
+    expect(alta.estado).toBe(201);
+    galleta = '';
+    const c = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo: 'lic-ajena@ejemplo.mx' }) });
+    const e = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: 'lic-ajena@ejemplo.mx', codigo: c.data.codigo_prueba }) });
+    expect(e.estado).toBe(200);
+    expect((await pedir('/licencias')).estado).toBe(403);
+    expect((await pedir('/licencias', { method: 'POST', body: JSON.stringify({ cliente: 'Intruso' }) })).estado).toBe(403);
+  });
+
+  it('Mike crea una cortesía y una de pago; la clave tiene forma y no repite', async () => {
+    await comoSuper();
+    const a = await pedir('/licencias', { method: 'POST', body: JSON.stringify({ cliente: 'Taller Regalado', cortesia: true, notas: 'para Fer' }) });
+    expect(a.estado).toBe(201);
+    expect(a.data.clave).toMatch(/^T101-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+    expect(a.data.programa).toBe('draw101');
+    expect(a.data.lugares).toBe(1);
+    expect(a.data.cortesia).toBe(1);
+    expect(a.data.vigente).toBe(true);
+    cortesia = a.data;
+
+    const b = await pedir('/licencias', { method: 'POST', body: JSON.stringify({ cliente: 'Taller que Paga', correo: 'Pagos@Ejemplo.MX' }) });
+    expect(b.estado).toBe(201);
+    expect(b.data.correo).toBe('pagos@ejemplo.mx');
+    expect(b.data.paga_hasta).toBeNull();
+    expect(b.data.vigente, 'sin pago y sin cortesía no entra: no hay periodo de prueba').toBe(false);
+    expect(b.data.clave).not.toBe(cortesia.clave);
+    pagada = b.data;
+
+    const sinNombre = await pedir('/licencias', { method: 'POST', body: JSON.stringify({ lugares: 2 }) });
+    expect(sinNombre.estado).toBe(400);
+    const malDia = await pedir('/licencias', { method: 'POST', body: JSON.stringify({ cliente: 'X', paga_hasta: '18/09/2026' }) });
+    expect(malDia.estado).toBe(400);
+    expect(malDia.detalle.campo).toBe('paga_hasta');
+  });
+
+  it('la app activa con clave y huella y recibe un token que sólo la llave pública abre', async () => {
+    galleta = '';
+    const r = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: cortesia.clave.toLowerCase(), huella: HUELLA_A, version: '0.21.0' }) });
+    expect(r.estado).toBe(201);
+    expect(r.data.lugares).toEqual({ usados: 1, total: 1 });
+    expect(r.data.licencia.correo, 'a la app no se le cuenta el correo').toBeUndefined();
+    tokenA = r.data.token;
+    const { vale, carga } = await abrir(tokenA);
+    expect(vale).toBe(true);
+    expect(carga.licencia).toBe(cortesia.id);
+    expect(carga.maquina).toBe(HUELLA_A);
+    expect(carga.programa).toBe('draw101');
+    const dias = (Date.parse(carga.hasta) - Date.parse(carga.emitido)) / 86400000;
+    expect(dias, 'una cortesía vale el horizonte: 30 días desde el latido').toBeCloseTo(30, 1);
+
+    // La misma máquina vuelve a activar (reinstaló): no gasta otro lugar.
+    const otraVez = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: cortesia.clave, huella: HUELLA_A }) });
+    expect(otraVez.estado).toBe(200);
+    expect(otraVez.data.lugares).toEqual({ usados: 1, total: 1 });
+  });
+
+  it('lo que la app no puede: clave inventada, huella corta, token manipulado', async () => {
+    const inventada = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: 'T101-AAAA-BBBB-CCCC', huella: HUELLA_A }) });
+    expect(inventada.estado).toBe(404);
+    expect(inventada.error).toBe('clave_inexistente');
+    const corta = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: cortesia.clave, huella: 'abc' }) });
+    expect(corta.estado).toBe(400);
+
+    const [v, carga, firma] = tokenA.split('.');
+    const cargaJson = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(carga.replace(/-/g, '+').replace(/_/g, '/')), (ch) => ch.charCodeAt(0))));
+    cargaJson.hasta = '2099-01-01T00:00:00.000Z';
+    const alterada = btoa(JSON.stringify(cargaJson)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const manipulado = await pedir('/licencias/latido', { method: 'POST', body: JSON.stringify({ token: `${v}.${alterada}.${firma}`, huella: HUELLA_A }) });
+    expect(manipulado.estado).toBe(401);
+    expect(manipulado.error).toBe('token_invalido');
+
+    const otraMaquina = await pedir('/licencias/latido', { method: 'POST', body: JSON.stringify({ token: tokenA, huella: HUELLA_B }) });
+    expect(otraMaquina.estado).toBe(403);
+    expect(otraMaquina.error).toBe('maquina_desconocida');
+  });
+
+  it('un lugar es un lugar: la segunda máquina espera a que la primera se libere, o a que Mike suba lugares', async () => {
+    const b = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: cortesia.clave, huella: HUELLA_B }) });
+    expect(b.estado).toBe(409);
+    expect(b.error).toBe('sin_lugares');
+    expect(b.detalle).toMatchObject({ lugares: 1, ocupados: 1 });
+
+    const libre = await pedir('/licencias/desactivar', { method: 'POST', body: JSON.stringify({ token: tokenA, huella: HUELLA_A }) });
+    expect(libre.estado).toBe(200);
+    expect(libre.data.lugares).toEqual({ usados: 0, total: 1 });
+    const ahoraSi = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: cortesia.clave, huella: HUELLA_B }) });
+    expect(ahoraSi.estado).toBe(201);
+
+    // A ya no tiene lugar: su latido lo dice, no lo deja pasar en silencio.
+    const latidoA = await pedir('/licencias/latido', { method: 'POST', body: JSON.stringify({ token: tokenA, huella: HUELLA_A }) });
+    expect(latidoA.estado).toBe(403);
+    expect(latidoA.error).toBe('maquina_desconocida');
+
+    await comoSuper();
+    const sube = await pedir(`/licencias/${cortesia.id}`, { method: 'PATCH', body: JSON.stringify({ lugares: 2 }) });
+    expect(sube.estado).toBe(200);
+    expect(sube.data.lugares).toBe(2);
+    galleta = '';
+    const aOtraVez = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: cortesia.clave, huella: HUELLA_A }) });
+    expect(aOtraVez.estado).toBe(201);
+    expect(aOtraVez.data.lugares).toEqual({ usados: 2, total: 2 });
+    tokenA = aOtraVez.data.token;
+  });
+
+  it('el latido renueva el token; suspender lo niega y volver a activar lo devuelve', async () => {
+    await dormir(20);
+    const l = await pedir('/licencias/latido', { method: 'POST', body: JSON.stringify({ token: tokenA, huella: HUELLA_A, version: '0.21.1' }) });
+    expect(l.estado).toBe(200);
+    const nuevo = await abrir(l.data.token);
+    const viejo = await abrir(tokenA);
+    expect(nuevo.vale).toBe(true);
+    expect(Date.parse(nuevo.carga.emitido)).toBeGreaterThan(Date.parse(viejo.carga.emitido));
+    tokenA = l.data.token;
+
+    await comoSuper();
+    expect((await pedir(`/licencias/${cortesia.id}`, { method: 'PATCH', body: JSON.stringify({ estado: 'suspendida' }) })).data.vigente).toBe(false);
+    galleta = '';
+    const negado = await pedir('/licencias/latido', { method: 'POST', body: JSON.stringify({ token: tokenA, huella: HUELLA_A }) });
+    expect(negado.estado).toBe(403);
+    expect(negado.error).toBe('suspendida');
+    const niActivar = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: cortesia.clave, huella: HUELLA_A }) });
+    expect(niActivar.estado).toBe(403);
+
+    await comoSuper();
+    await pedir(`/licencias/${cortesia.id}`, { method: 'PATCH', body: JSON.stringify({ estado: 'activa' }) });
+    galleta = '';
+    expect((await pedir('/licencias/latido', { method: 'POST', body: JSON.stringify({ token: tokenA, huella: HUELLA_A }) })).estado).toBe(200);
+  });
+
+  it('la de pago: sin fecha no entra; con pago hasta mañana entra y el token acaba ese día; vencida, el latido lo dice', async () => {
+    galleta = '';
+    const sinPago = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: pagada.clave, huella: HUELLA_A }) });
+    expect(sinPago.estado).toBe(402);
+    expect(sinPago.error).toBe('sin_pago');
+
+    await comoSuper();
+    const pago = await pedir(`/licencias/${pagada.id}/pago`, { method: 'POST', body: JSON.stringify({ hasta: dia(1), referencia: 'transferencia 1234' }) });
+    expect(pago.estado).toBe(200);
+    expect(pago.data.paga_hasta).toBe(dia(1));
+    expect(pago.data.origen).toBe('manual');
+    expect(pago.data.vigente).toBe(true);
+
+    galleta = '';
+    const entra = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: pagada.clave, huella: HUELLA_A }) });
+    expect(entra.estado).toBe(201);
+    expect(entra.data.hasta, 'el token acaba al final del último día pagado, no en 30 días').toBe(`${dia(1)}T23:59:59.000Z`);
+    const tokenPago = entra.data.token;
+
+    await comoSuper();
+    const vencido = await pedir(`/licencias/${pagada.id}/pago`, { method: 'POST', body: JSON.stringify({ hasta: dia(-1), origen: 'stripe', referencia: 'evt_prueba' }) });
+    expect(vencido.data.origen).toBe('stripe');
+    expect(vencido.data.vigente).toBe(false);
+    galleta = '';
+    const late = await pedir('/licencias/latido', { method: 'POST', body: JSON.stringify({ token: tokenPago, huella: HUELLA_A }) });
+    expect(late.estado).toBe(402);
+    expect(late.error).toBe('sin_pago');
+    expect(late.detalle.paga_hasta).toBe(dia(-1));
+  });
+
+  it('la lista y el detalle le dicen a Mike quién está activo y qué pasó', async () => {
+    await comoSuper();
+    const lista = await pedir('/licencias');
+    expect(lista.estado).toBe(200);
+    const fila = lista.data.filas.find((f: any) => f.id === cortesia.id);
+    expect(fila.activaciones).toBe(2);
+    expect(fila.vigente).toBe(true);
+    expect(lista.data.filas.find((f: any) => f.id === pagada.id).vigente).toBe(false);
+
+    const det = await pedir(`/licencias/${cortesia.id}`);
+    expect(det.estado).toBe(200);
+    expect(det.data.activaciones.map((a: any) => [a.huella, a.activa]).sort()).toEqual([[HUELLA_A, 1], [HUELLA_B, 1]]);
+    const acciones = det.data.bitacora.map((b: any) => b.accion);
+    for (const a of ['crear', 'activar', 'desactivar', 'cambiar', 'latido_negado']) expect(acciones, a).toContain(a);
+    expect(det.data.bitacora.find((b: any) => b.accion === 'crear').quien).toBe(CORREO);
+    expect(det.data.bitacora.find((b: any) => b.accion === 'activar').quien).toBe('app');
+
+    expect((await pedir('/licencias/01INVENTADA')).estado).toBe(404);
+    const suelta = await pedir(`/licencias/${cortesia.id}/desactivar`, { method: 'POST', body: JSON.stringify({ huella: HUELLA_B }) });
+    expect(suelta.data.lugares).toEqual({ usados: 1, total: 2 });
+  });
+
+  it('borrar se lleva la suscripción y sus activaciones; la clave deja de existir para la app', async () => {
+    await comoSuper();
+    expect((await pedir(`/licencias/${pagada.id}`, { method: 'DELETE' })).estado).toBe(200);
+    expect((await pedir(`/licencias/${pagada.id}`)).estado).toBe(404);
+    galleta = '';
+    const r = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: pagada.clave, huella: HUELLA_A }) });
+    expect(r.estado).toBe(404);
+    expect(r.error).toBe('clave_inexistente');
+  });
+});
