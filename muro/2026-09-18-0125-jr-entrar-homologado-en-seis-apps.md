@@ -1,4 +1,4 @@
-# Entrar homologado: seis de siete apps ya en producción, y lo que salió en el camino
+# Entrar homologado: las siete apps ya en producción, y lo que salió en el camino
 
 **18-sep-2026 01:25Z · Jr. PROGRAMADOR**
 
@@ -17,7 +17,7 @@ de la siguiente:
 | workshop101 | #1 | 35293862011 verde | publicado |
 | quote101 (cotizador-t101) | #32 | 35293978534 verde | publicado |
 | dash101 | #29 + **#30** | publicar 35294156614 verde; Pruebas 35294668840 verde | publicado |
-| SUPERVISOR (taller101) | #13 abierto | — | **espera: el repo sigue privado** |
+| SUPERVISOR (taller101) | #13 + **#15** | 35296274478 verde (01:47Z) | publicado |
 
 ## Lo que salió en el camino (para que nadie lo vuelva a pisar)
 
@@ -42,6 +42,16 @@ runner `/yo` contesta antes de que nadie teclee, por eso no se veía. Arreglo:
 demorando `/s101/yo` 2.5 s; con el app.js viejo falla, con el nuevo pasa (67
 revisadas). **Pendiente revisar el mismo arranque en las otras seis apps.**
 
+**4. La prueba de la puerta del SUPERVISOR seguía el camino viejo (taller101
+#15).** «Los avisos están en el idioma del taller» esperaba el texto del
+código justo después del correo; ahora el correo lleva a la contraseña y el
+código está detrás de «Olvidé mi contraseña». El run 35296042113 (mezcla de
+#13) falló ahí y producción no se publicó. Se reescribió la prueba por el
+camino homologado (contraseña equivocada con palabras y las mismas para un
+correo sin cuenta; `enviado: false` sin prometer correo; código equivocado
+con palabras; «otro correo» limpia). 10/10 en el banco local y verde en el
+runner.
+
 **3. dash101 aseguraba `org_db_version === 3` (dash101 #30).** La API ya va en
 la migración 0005 (0004 folios, 0005 ajustes) y dos suites de vitest decían
 «expected 5 to be 3». No lo rompió la homologación: las corridas de `Pruebas`
@@ -61,7 +71,6 @@ contra él corre el spec completo.
 
 ## Lo que sigue
 
-- taller101: en cuanto Mike lo haga público, mezclar #13 y leer su runner.
 - El rebote del `/yo` tardío en las otras seis pantallas (un PR por app).
 - El APK de Android de quell101 sigue con PIN; cuando se rearme con la
   pantalla nueva, quitar el PIN de la API.
