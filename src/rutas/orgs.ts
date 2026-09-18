@@ -49,6 +49,12 @@ rutas.use('/:o/*', async (c, next) => {
   // master101, workshop101 y suite101 son paneles de control: no se apagan
   // desde `apps` ni se reparten por persona.
   const esPanel = PANELES.has(app);
+
+  // 0.14.0 · una empresa pagada hasta un día vence sola al terminar ese día.
+  // Las apps se cierran; los paneles siguen abriendo para poder arreglarlo.
+  if (!esPanel && !empresa.vigente) {
+    return err(c, 'org_sin_pago', 402, { paga_hasta: empresa.paga_hasta, mensaje: 'La suscripción de la empresa venció. Avísale a quien la administra.' });
+  }
   if (!esPanel && empresa.apps[LLAVE_APP[app]] !== true) {
     return err(c, 'app_inactiva', 403, { app, activas: Object.entries(empresa.apps).filter(([, v]) => v).map(([k]) => k) });
   }

@@ -27,6 +27,8 @@ export interface Env {
    *  dominio de la app, y armar la dirección de regreso con él mandaría a
    *  Google a una puerta que no existe (las apps sólo sirven /s101/*). */
   URL_PUBLICA?: string;
+  /** El panel del director (workshop101): a donde lo manda el correo de bienvenida. */
+  URL_PANEL_DIRECTOR?: string;
 
   ENTORNO: string; // 'produccion' | 'staging' | 'prueba'
   ORIGENES: string; // CSV de orígenes con permiso de CORS

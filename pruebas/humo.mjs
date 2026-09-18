@@ -194,6 +194,23 @@ async function recorrido() {
   const bit2 = await pedir(STAGING, `/admin/orgs/${ORG}/bitacora`);
   rev((bit2.data?.filas || []).some((r) => r.campo === 'miembro.apps' && r.quien === CORREO), 'el cambio de apps quedó en la bitácora de la empresa');
 
+  // Contrato 0.14.0: el alta automática (plan y cobro por empresa, bienvenida).
+  rev(mia?.cortesia === true && mia?.estado === 'activa', 'una empresa sin fecha de pago es de cortesía y está activa', `${mia?.cortesia} ${mia?.estado}`);
+  const ayer = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const manana = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const vencida = await pedir(STAGING, `/admin/orgs/${ORG}`, { method: 'PATCH', body: { cortesia: false, paga_hasta: ayer } });
+  rev(vencida.estado === 200 && vencida.data?.estado === 'sin_pago', 'pagada hasta ayer, la empresa queda «sin pago»', `${vencida.estado} ${vencida.data?.estado}`);
+  const cerrada = await pedir(STAGING, `/orgs/${ORG}`, { app: 'dash101' });
+  rev(cerrada.estado === 402 && cerrada.error === 'org_sin_pago', 'y sus apps contestan 402 org_sin_pago', `${cerrada.estado} ${cerrada.error}`);
+  const panel = await pedir(STAGING, `/orgs/${ORG}`, { app: 'workshop101' });
+  rev(panel.estado === 200, 'pero el panel del director sigue abriendo', `${panel.estado}`);
+  const pago = await pedir(STAGING, `/admin/orgs/${ORG}/pago`, { method: 'POST', body: { hasta: manana, referencia: 'humo' } });
+  rev(pago.estado === 200 && pago.data?.estado === 'activa' && pago.data?.paga_hasta === manana, 'marcar el pago hasta mañana la reabre', `${pago.estado} ${pago.data?.estado}`);
+  const abierta = await pedir(STAGING, `/orgs/${ORG}`, { app: 'dash101' });
+  rev(abierta.estado === 200, 'y las apps vuelven a contestar 200', `${abierta.estado}`);
+  const bienvenida = await pedir(STAGING, `/admin/orgs/${ORG}/bienvenida`, { method: 'POST', body: { correo: `duena-${ORG}@ejemplo.mx` } });
+  rev(bienvenida.estado === 200 && bienvenida.data?.enviado === false, 'la bienvenida se intenta y en staging NO sale de verdad', `${bienvenida.estado} enviado=${bienvenida.data?.enviado} (${bienvenida.data?.motivo})`);
+
   // La puerta aplica la lista: la socia entra a dash101 y a quell101, no a peek101 (que además está apagada) ni a workshop101.
   const galletaSuper = galleta;
   const codS = await pedir(STAGING, '/auth/codigo', { method: 'POST', body: { correo: `socia-${ORG}@ejemplo.mx` } });
