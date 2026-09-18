@@ -47,6 +47,11 @@
  * folio: si lo manda, se le ignora; sólo `suite101` puede, y es para que la
  * mudanza traiga los viejos congelados. Un índice único en la base impide dos
  * folios iguales). Antes:
+ * 0.13.0 (licencias por suscripción, base /licencias: la app activa con
+ * clave + huella y late a diario; recibe un token firmado Ed25519 cuya llave
+ * pública sirve GET /licencias/llave; el panel (superadmin) crea claves, marca
+ * pagos, sube lugares, suspende; hay cortesías sin fecha y no hay periodo de
+ * prueba. Decisiones de Mike del 18-sep-2026). Antes:
  * 0.8.0 (la puerta de las apps empacadas: quien entra
  * con `{ aparato: true }` recibe además `token`, la misma galleta firmada, y
  * puede volver con `Authorization: Bearer`. Es la misma sesión de D1 y el
@@ -64,7 +69,67 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.12.0';
+export const VERSION_CONTRATO = '0.13.0';
+
+/* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
+
+export type EstadoSuscripcion = 'activa' | 'suspendida';
+export type OrigenPago = 'manual' | 'stripe';
+
+export interface Suscripcion {
+  id: string;
+  /** T101-XXXX-XXXX-XXXX. Es lo que el cliente teclea al instalar. */
+  clave: string;
+  programa: string;
+  cliente: string;
+  correo: string | null;
+  plan: string;
+  /** Máquinas activas a la vez. Mike lo sube por cliente desde master101. */
+  lugares: number;
+  estado: EstadoSuscripcion;
+  origen: OrigenPago;
+  /** 1 = regalo sin fecha de corte. */
+  cortesia: 0 | 1;
+  /** 'AAAA-MM-DD', último día pagado. null = nunca ha pagado. */
+  paga_hasta: string | null;
+  notas: string | null;
+  creado_at: string;
+  actualizado_at: string;
+}
+
+export interface Activacion {
+  id: string;
+  suscripcion_id: string;
+  huella: string;
+  version: string | null;
+  alta_at: string;
+  ultimo_latido_at: string;
+  activa: 0 | 1;
+}
+
+export interface RenglonBitacoraLicencia {
+  id: number;
+  cuando: string;
+  suscripcion_id: string | null;
+  quien: string;
+  accion: string;
+  detalle: string | null;
+}
+
+/** Lo que va dentro del token `v1.<carga>.<firma>` (Ed25519). */
+export interface TokenLicencia {
+  v: 1;
+  kid: string;
+  programa: string;
+  licencia: string;
+  cliente: string;
+  plan: string;
+  lugares: number;
+  /** La huella de la máquina que lo pidió. Otro equipo no lo puede usar. */
+  maquina: string;
+  emitido: string;
+  hasta: string;
+}
 
 /* ─────────────── envoltura de toda respuesta ─────────────── */
 
@@ -97,7 +162,15 @@ export type ErrorApi =
   | 'ultimo_owner'
   | 'clave_invalida'
   | 'clave_debil'
-  | 'app_no_permitida';
+  | 'app_no_permitida'
+  // licencias (0.13.0)
+  | 'clave_inexistente'
+  | 'licencia_desconocida'
+  | 'sin_pago'
+  | 'sin_lugares'
+  | 'suspendida'
+  | 'token_invalido'
+  | 'maquina_desconocida';
 
 /* ─────────────── apps ─────────────── */
 
