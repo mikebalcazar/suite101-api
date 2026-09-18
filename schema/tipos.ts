@@ -69,7 +69,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.13.0';
+export const VERSION_CONTRATO = '0.14.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -152,6 +152,7 @@ export type ErrorApi =
   | 'dinero_no_entero'
   | 'org_desconocida'
   | 'org_inactiva'
+  | 'org_sin_pago'
   | 'correo_no_configurado'
   | 'google_no_configurado'
   | 'codigo_invalido'
@@ -205,6 +206,8 @@ export const LLAVE_APP: Record<App, string> = {
 export type Rol = 'owner' | 'admin' | 'socio' | 'staff';
 export type TipoAcceso = 'cliente' | 'personal';
 
+export type EstadoEmpresa = 'activa' | 'suspendida' | 'sin_pago';
+
 export interface Org {
   id: string; // slug, y también el nombre del Durable Object
   nombre: string;
@@ -213,6 +216,22 @@ export interface Org {
   moneda: string;
   activa: boolean;
   creado_at: string;
+  // 0.14.0 · lo que se necesita para vender y cobrar
+  razon_social: string | null;
+  rfc: string | null;
+  telefono: string | null;
+  director_correo: string | null;
+  director_nombre: string | null;
+  director_telefono: string | null;
+  /** Sin fecha de pago: no vence nunca. Las empresas que ya existían quedaron así. */
+  cortesia: boolean;
+  /** 'AAAA-MM-DD'; vence al terminar ese día. */
+  paga_hasta: string | null;
+  origen_pago: OrigenPago;
+  bienvenida_at: string | null;
+  /** Lo que se calcula: `vigente` = activa y (cortesía o pagada al día). */
+  vigente: boolean;
+  estado: EstadoEmpresa;
 }
 
 export interface Usuario {

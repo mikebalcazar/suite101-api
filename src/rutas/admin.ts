@@ -14,10 +14,13 @@
 import { Hono } from 'hono';
 import {
   apuntaAdmin, bitacoraAdmin, borrarOrg, conConteos, conteosDeOrgs, crearOrg, crearUsuario, cuentaOwners, esSuperadmin,
-  miembro, miembrosDe, org, orgs, ponerMiembro, ponerSuperadmin, quitarMiembro, quitarSuperadmin,
+  marcarBienvenida, miembro, miembrosDe, org, orgs, pagarOrg, ponerMiembro, ponerSuperadmin, quitarMiembro, quitarSuperadmin,
   superadmins, ultimasEntradasDe, usuarioPorId,
 } from '../maestro';
-import { normalizaCorreo } from '../lib';
+import { correoValido, normalizaCorreo } from '../lib';
+import { correoBienvenida, enviarCorreo } from '../auth/correo';
+import { LLAVE_APP, APPS } from '../../schema/tipos';
+import type { Org } from '../../schema/tipos';
 import { err, ok, type Ctx, type Vars } from '../http';
 import type { Env } from '../entorno';
 import type { Rol } from '../../schema/tipos';
@@ -56,21 +59,94 @@ rutas.get('/orgs/:o', async (c) => {
   return ok(c, conConteos(o, await conteosDeOrgs(c.env)));
 });
 
+const DIA = /^\d{4}-\d{2}-\d{2}$/;
+const texto = (v: unknown, max = 120): string | null => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
+
+/** Los nombres con los que se le cuentan al director sus apps. */
+const nombresDeApps = (o: Org): string[] =>
+  APPS.filter((a) => o.apps[LLAVE_APP[a]] === true && !['master101', 'workshop101', 'suite101'].includes(a));
+
+/** Manda el correo de bienvenida al director y lo apunta. Nunca truena: si el
+ *  correo no sale, la empresa ya quedó creada y master101 lo dice con palabras. */
+async function mandarBienvenida(c: Ctx, o: Org, correo: string, nombre: string | null): Promise<{ enviado: boolean; motivo?: string }> {
+  const urlPanel = c.env.URL_PANEL_DIRECTOR || 'https://workshop101.mike-929.workers.dev';
+  const msg = correoBienvenida({ empresa: o.nombre, director: nombre, correo, urlPanel, apps: nombresDeApps(o) });
+  const envio = await enviarCorreo(c.env, { para: correo, ...msg });
+  if (envio.enviado) await marcarBienvenida(c.env, o.id);
+  await apuntaAdmin(c.env, { quien: quien(c), org_id: o.id, campo: 'bienvenida', despues: envio.enviado ? `enviada a ${correo}` : `no salió (${envio.motivo}) a ${correo}` });
+  return envio;
+}
+
+/** 0.14.0 · el alta en un paso: la empresa, su base, su director como dueño y
+ *  el correo de bienvenida. `director` es opcional para no romper a quien
+ *  todavía la crea en dos pasos (empresa y luego miembro). */
 rutas.post('/orgs', async (c) => {
   if (!(await soySuper(c))) return err(c, 'sin_permiso', 403);
-  const cuerpo = await c.req.json<{ id?: string; nombre?: string; plan?: string; apps?: Record<string, boolean>; moneda?: string }>().catch(() => ({}) as never);
+  const cuerpo = await c.req.json<{
+    id?: string; nombre?: string; plan?: string; apps?: Record<string, boolean>; moneda?: string;
+    razon_social?: string; rfc?: string; telefono?: string;
+    director?: { correo?: string; nombre?: string; telefono?: string };
+    cortesia?: boolean; paga_hasta?: string | null;
+  }>().catch(() => ({}) as never);
   const id = String(cuerpo.id || '').trim().toLowerCase();
   if (!/^[a-z0-9-]{2,40}$/.test(id)) return err(c, 'datos_invalidos', 400, { id: 'slug de a-z, 0-9 y guiones' });
   if (!cuerpo.nombre) return err(c, 'datos_invalidos', 400, { falta: 'nombre' });
+  if (cuerpo.paga_hasta && !DIA.test(cuerpo.paga_hasta)) return err(c, 'datos_invalidos', 400, { paga_hasta: 'AAAA-MM-DD' });
+  const directorCorreo = cuerpo.director ? normalizaCorreo(cuerpo.director.correo) : '';
+  if (cuerpo.director && !correoValido(directorCorreo)) return err(c, 'datos_invalidos', 400, { director: 'correo' });
   if (await org(c.env, id)) return err(c, 'datos_invalidos', 409, { id: 'ya existe' });
 
-  const nueva = await crearOrg(c.env, { id, nombre: cuerpo.nombre, plan: cuerpo.plan, apps: cuerpo.apps, moneda: cuerpo.moneda });
+  const nueva = await crearOrg(c.env, {
+    id, nombre: cuerpo.nombre, plan: cuerpo.plan, apps: cuerpo.apps, moneda: cuerpo.moneda,
+    razon_social: texto(cuerpo.razon_social), rfc: texto(cuerpo.rfc, 20), telefono: texto(cuerpo.telefono, 30),
+    director_correo: directorCorreo || null, director_nombre: texto(cuerpo.director?.nombre), director_telefono: texto(cuerpo.director?.telefono, 30),
+    cortesia: cuerpo.cortesia, paga_hasta: cuerpo.paga_hasta ?? null,
+  });
 
   // Se le habla al DO para que nazca y se migre aquí y no en la primera visita.
   const version = await (c.env.ORG.get(c.env.ORG.idFromName(id)) as unknown as ApiOrgDB).version();
 
-  await apuntaAdmin(c.env, { quien: quien(c), org_id: id, campo: 'creada', despues: `${nueva.nombre} · ${Object.entries(nueva.apps).filter(([, v]) => v).map(([k]) => k).join(', ') || 'sin apps'}` });
-  return ok(c, { org: nueva, org_db_version: version }, 201);
+  await apuntaAdmin(c.env, { quien: quien(c), org_id: id, campo: 'creada', despues: `${nueva.nombre} · ${Object.entries(nueva.apps).filter(([, v]) => v).map(([k]) => k).join(', ') || 'sin apps'} · ${nueva.cortesia ? 'cortesía' : `pagada hasta ${nueva.paga_hasta}`}` });
+
+  let director: { usuario_id: string; correo: string; rol: 'owner' } | null = null;
+  let bienvenida: { enviado: boolean; motivo?: string } | null = null;
+  if (directorCorreo) {
+    const usuario = await crearUsuario(c.env, directorCorreo, texto(cuerpo.director?.nombre));
+    await ponerMiembro(c.env, id, usuario.id, 'owner', [], []);
+    await apuntaAdmin(c.env, { quien: quien(c), org_id: id, campo: 'miembro', antes: null, despues: `${directorCorreo} (owner) · director` });
+    director = { usuario_id: usuario.id, correo: directorCorreo, rol: 'owner' };
+    bienvenida = await mandarBienvenida(c, nueva, directorCorreo, texto(cuerpo.director?.nombre));
+  }
+  const conTodo = (await org(c.env, id))!;
+  return ok(c, { org: conTodo, org_db_version: version, director, bienvenida }, 201);
+});
+
+/** Marca hasta qué día está pagada la empresa (0.14.0). Mike a mano, o Stripe
+ *  cuando se conecte, con `origen: 'stripe'`. */
+rutas.post('/orgs/:o/pago', async (c) => {
+  if (!(await soySuper(c))) return err(c, 'sin_permiso', 403);
+  const id = c.req.param('o')!;
+  const antes = await org(c.env, id);
+  if (!antes) return err(c, 'org_desconocida', 404);
+  const cuerpo = await c.req.json<{ hasta?: string; origen?: string; referencia?: string }>().catch(() => ({}) as never);
+  if (!cuerpo.hasta || !DIA.test(cuerpo.hasta)) return err(c, 'datos_invalidos', 400, { hasta: 'AAAA-MM-DD' });
+  const origen = cuerpo.origen === 'stripe' ? 'stripe' : 'manual';
+  await pagarOrg(c.env, id, cuerpo.hasta, origen);
+  await apuntaAdmin(c.env, { quien: quien(c), org_id: id, campo: 'pago', antes: antes.cortesia ? 'cortesía' : antes.paga_hasta, despues: `${cuerpo.hasta} (${origen}${cuerpo.referencia ? ` · ${String(cuerpo.referencia).slice(0, 80)}` : ''})` });
+  return ok(c, conConteos((await org(c.env, id))!, await conteosDeOrgs(c.env)));
+});
+
+/** Vuelve a mandar el correo de bienvenida al director (0.14.0). */
+rutas.post('/orgs/:o/bienvenida', async (c) => {
+  if (!(await soySuper(c))) return err(c, 'sin_permiso', 403);
+  const id = c.req.param('o')!;
+  const o = await org(c.env, id);
+  if (!o) return err(c, 'org_desconocida', 404);
+  const cuerpo = await c.req.json<{ correo?: string }>().catch(() => ({}) as never);
+  const correo = normalizaCorreo(cuerpo.correo) || o.director_correo || '';
+  if (!correoValido(correo)) return err(c, 'datos_invalidos', 400, { falta: 'correo del director' });
+  const envio = await mandarBienvenida(c, o, correo, o.director_nombre);
+  return ok(c, { correo, ...envio });
 });
 
 /* Reiniciar una empresa: vacía su Durable Object y quita sus filas del D1.
@@ -92,7 +168,12 @@ rutas.patch('/orgs/:o', async (c) => {
   const id = c.req.param('o')!;
   const antes = await org(c.env, id);
   if (!antes) return err(c, 'org_desconocida', 404);
-  const cuerpo = await c.req.json<{ plan?: string; apps?: Record<string, boolean>; nombre?: string; activa?: boolean }>().catch(() => ({}) as never);
+  const cuerpo = await c.req.json<{
+    plan?: string; apps?: Record<string, boolean>; nombre?: string; activa?: boolean;
+    razon_social?: string | null; rfc?: string | null; telefono?: string | null;
+    director_nombre?: string | null; director_telefono?: string | null; director_correo?: string | null;
+    cortesia?: boolean; paga_hasta?: string | null;
+  }>().catch(() => ({}) as never);
 
   const sets: string[] = [];
   const args: unknown[] = [];
@@ -100,6 +181,20 @@ rutas.patch('/orgs/:o', async (c) => {
   if (cuerpo.plan !== undefined) { sets.push('plan = ?'); args.push(cuerpo.plan); }
   if (cuerpo.apps !== undefined) { sets.push('apps = ?'); args.push(JSON.stringify(cuerpo.apps)); }
   if (cuerpo.activa !== undefined) { sets.push('activa = ?'); args.push(cuerpo.activa ? 1 : 0); }
+  // 0.14.0 · los datos con los que se vende y se cobra
+  for (const [campo, max] of [['razon_social', 120], ['rfc', 20], ['telefono', 30], ['director_nombre', 120], ['director_telefono', 30]] as const) {
+    if (cuerpo[campo] !== undefined) { sets.push(`${campo} = ?`); args.push(texto(cuerpo[campo], max)); }
+  }
+  if (cuerpo.director_correo !== undefined) {
+    const dc = normalizaCorreo(cuerpo.director_correo);
+    if (dc && !correoValido(dc)) return err(c, 'datos_invalidos', 400, { director_correo: 'correo' });
+    sets.push('director_correo = ?'); args.push(dc || null);
+  }
+  if (cuerpo.paga_hasta !== undefined) {
+    if (cuerpo.paga_hasta !== null && !DIA.test(cuerpo.paga_hasta)) return err(c, 'datos_invalidos', 400, { paga_hasta: 'AAAA-MM-DD' });
+    sets.push('paga_hasta = ?'); args.push(cuerpo.paga_hasta);
+  }
+  if (cuerpo.cortesia !== undefined) { sets.push('cortesia = ?'); args.push(cuerpo.cortesia ? 1 : 0); }
   if (!sets.length) return err(c, 'datos_invalidos', 400, { falta: 'algo que cambiar' });
 
   await c.env.MASTER.prepare(`UPDATE orgs SET ${sets.join(', ')} WHERE id = ?`).bind(...args, id).run();
@@ -110,6 +205,11 @@ rutas.patch('/orgs/:o', async (c) => {
   if (antes.nombre !== despues.nombre) await apuntaAdmin(c.env, { quien: yo, org_id: id, campo: 'nombre', antes: antes.nombre, despues: despues.nombre });
   if (antes.plan !== despues.plan) await apuntaAdmin(c.env, { quien: yo, org_id: id, campo: 'plan', antes: antes.plan, despues: despues.plan });
   if (antes.activa !== despues.activa) await apuntaAdmin(c.env, { quien: yo, org_id: id, campo: 'activa', antes: String(antes.activa), despues: String(despues.activa) });
+  if (antes.cortesia !== despues.cortesia) await apuntaAdmin(c.env, { quien: yo, org_id: id, campo: 'cortesia', antes: String(antes.cortesia), despues: String(despues.cortesia) });
+  if (antes.paga_hasta !== despues.paga_hasta) await apuntaAdmin(c.env, { quien: yo, org_id: id, campo: 'paga_hasta', antes: antes.paga_hasta, despues: despues.paga_hasta });
+  for (const campo of ['razon_social', 'rfc', 'telefono', 'director_correo', 'director_nombre', 'director_telefono'] as const) {
+    if (antes[campo] !== despues[campo]) await apuntaAdmin(c.env, { quien: yo, org_id: id, campo, antes: antes[campo], despues: despues[campo] });
+  }
   for (const k of new Set([...Object.keys(antes.apps), ...Object.keys(despues.apps)])) {
     const a = antes.apps[k] === true, d = despues.apps[k] === true;
     if (a !== d) await apuntaAdmin(c.env, { quien: yo, org_id: id, campo: `apps.${k}`, antes: String(a), despues: String(d) });

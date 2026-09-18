@@ -2,7 +2,7 @@
  * contra el directorio: si algo falta, se agrega aquí. */
 
 import { ahora, enSegundos, firmarId, normalizaCorreo, ulid } from './lib';
-import type { App, Org, Rol, TipoAcceso, Usuario, OrgConConteos, Superadmin, RenglonBitacoraAdmin } from '../schema/tipos';
+import type { App, Org, Rol, TipoAcceso, Usuario, OrgConConteos, Superadmin, RenglonBitacoraAdmin, EstadoEmpresa } from '../schema/tipos';
 import type { Env } from './entorno';
 
 export const VIDA_MIEMBRO = 30 * 24 * 3600; // 30 días
@@ -107,12 +107,38 @@ export async function cerrarSesion(env: Env, id: string): Promise<void> {
 
 /* ─────────────── orgs, miembros, accesos ─────────────── */
 
-interface FilaOrg { id: string; nombre: string; plan: string; apps: string; moneda: string; activa: number; creado_at: string }
+interface FilaOrg {
+  id: string; nombre: string; plan: string; apps: string; moneda: string; activa: number; creado_at: string;
+  razon_social: string | null; rfc: string | null; telefono: string | null;
+  director_correo: string | null; director_nombre: string | null; director_telefono: string | null;
+  cortesia: number; paga_hasta: string | null; origen_pago: string; bienvenida_at: string | null;
+}
+
+const hoy = (): string => ahora().slice(0, 10);
+
+/** Vigente = activa y (cortesía o pagada al día). Una empresa vence al
+ *  terminar el día de `paga_hasta` (contrato 0.14.0). */
+export const estadoEmpresa = (f: { activa: number | boolean; cortesia: number | boolean; paga_hasta: string | null }): { vigente: boolean; estado: EstadoEmpresa } => {
+  if (!f.activa) return { vigente: false, estado: 'suspendida' };
+  if (f.cortesia || (f.paga_hasta && f.paga_hasta >= hoy())) return { vigente: true, estado: 'activa' };
+  return { vigente: false, estado: 'sin_pago' };
+};
 
 const armaOrg = (f: FilaOrg): Org => ({
   ...f,
   activa: !!f.activa,
   apps: JSON.parse(f.apps || '{}'),
+  razon_social: f.razon_social ?? null,
+  rfc: f.rfc ?? null,
+  telefono: f.telefono ?? null,
+  director_correo: f.director_correo ?? null,
+  director_nombre: f.director_nombre ?? null,
+  director_telefono: f.director_telefono ?? null,
+  cortesia: !!f.cortesia,
+  paga_hasta: f.paga_hasta ?? null,
+  origen_pago: (f.origen_pago === 'stripe' ? 'stripe' : 'manual'),
+  bienvenida_at: f.bienvenida_at ?? null,
+  ...estadoEmpresa(f),
 });
 
 export async function org(env: Env, id: string): Promise<Org | null> {
@@ -125,11 +151,17 @@ export async function orgs(env: Env): Promise<Org[]> {
   return (r.results ?? []).map(armaOrg);
 }
 
-export async function crearOrg(
-  env: Env,
-  datos: { id: string; nombre: string; plan?: string; apps?: Record<string, boolean>; moneda?: string },
-): Promise<Org> {
-  const fila = {
+export interface DatosEmpresa {
+  id: string; nombre: string; plan?: string; apps?: Record<string, boolean>; moneda?: string;
+  razon_social?: string | null; rfc?: string | null; telefono?: string | null;
+  director_correo?: string | null; director_nombre?: string | null; director_telefono?: string | null;
+  /** Sin `paga_hasta` es cortesía, salvo que se diga `cortesia: false` a propósito. */
+  cortesia?: boolean; paga_hasta?: string | null;
+}
+
+export async function crearOrg(env: Env, datos: DatosEmpresa): Promise<Org> {
+  const cortesia = datos.cortesia ?? !datos.paga_hasta;
+  const fila: FilaOrg = {
     id: datos.id,
     nombre: datos.nombre,
     plan: datos.plan ?? 'base',
@@ -137,11 +169,32 @@ export async function crearOrg(
     moneda: datos.moneda ?? 'MXN',
     activa: 1,
     creado_at: ahora(),
+    razon_social: datos.razon_social ?? null,
+    rfc: datos.rfc ?? null,
+    telefono: datos.telefono ?? null,
+    director_correo: datos.director_correo ?? null,
+    director_nombre: datos.director_nombre ?? null,
+    director_telefono: datos.director_telefono ?? null,
+    cortesia: cortesia ? 1 : 0,
+    paga_hasta: datos.paga_hasta ?? null,
+    origen_pago: 'manual',
+    bienvenida_at: null,
   };
-  await env.MASTER.prepare(`INSERT INTO orgs (id, nombre, plan, apps, moneda, activa, creado_at) VALUES (?,?,?,?,?,?,?)`)
-    .bind(fila.id, fila.nombre, fila.plan, fila.apps, fila.moneda, fila.activa, fila.creado_at)
-    .run();
-  return armaOrg(fila as FilaOrg);
+  await env.MASTER.prepare(
+    `INSERT INTO orgs (id, nombre, plan, apps, moneda, activa, creado_at, razon_social, rfc, telefono, director_correo, director_nombre, director_telefono, cortesia, paga_hasta, origen_pago)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  ).bind(fila.id, fila.nombre, fila.plan, fila.apps, fila.moneda, fila.activa, fila.creado_at, fila.razon_social, fila.rfc, fila.telefono,
+    fila.director_correo, fila.director_nombre, fila.director_telefono, fila.cortesia, fila.paga_hasta, fila.origen_pago).run();
+  return armaOrg(fila);
+}
+
+/** Marca hasta qué día está pagada la empresa. Deja de ser cortesía. */
+export async function pagarOrg(env: Env, id: string, hasta: string, origen: 'manual' | 'stripe'): Promise<void> {
+  await env.MASTER.prepare(`UPDATE orgs SET paga_hasta = ?, cortesia = 0, origen_pago = ? WHERE id = ?`).bind(hasta, origen, id).run();
+}
+
+export async function marcarBienvenida(env: Env, id: string): Promise<void> {
+  await env.MASTER.prepare(`UPDATE orgs SET bienvenida_at = ? WHERE id = ?`).bind(ahora(), id).run();
 }
 
 export interface Miembro { org_id: string; usuario_id: string; rol: Rol; apps: string[]; negocios: string[] }

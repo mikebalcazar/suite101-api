@@ -23,6 +23,8 @@ const CORREO = 'mike@forespot.com';
 const ORG = 'pruebas';
 
 let galleta = '';
+/** La galleta de Mike que un bloque ya consiguió, para que el siguiente no vuelva a pedir código (el freno de intentos da 429). */
+let galletaMike = '';
 
 async function pedir(ruta: string, opciones: RequestInit & { app?: string } = {}) {
   const cabeceras: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -1853,9 +1855,10 @@ describe('18 · licencias por suscripción (contrato 0.13.0)', () => {
    * No se vuelve a pedir código a cada rato: el freno de intentos de Mike se
    * gasta y un 429 aquí no mediría nada de licencias. */
   async function comoSuper() {
-    if (galletaSuper) { galleta = galletaSuper; return; }
+    if (galletaSuper) { galleta = galletaSuper; galletaMike = galleta; return; }
+    if (galletaMike) galleta = galletaMike;
     const yo = await pedir('/yo');
-    if (yo.ok && yo.data.superadmin) { galletaSuper = galleta; return; }
+    if (yo.ok && yo.data.superadmin) { galletaSuper = galleta; galletaMike = galleta; return; }
     galleta = '';
     for (let i = 0; i < 3; i++) {
       const c = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo: CORREO }) });
@@ -1863,6 +1866,7 @@ describe('18 · licencias por suscripción (contrato 0.13.0)', () => {
         const e = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CORREO, codigo: c.data.codigo_prueba }) });
         expect(e.estado).toBe(200);
         galletaSuper = galleta;
+        galletaMike = galleta;
         return;
       }
       await dormir(((c.detalle?.espera_segundos ?? 1) + 1) * 1000);
@@ -2089,5 +2093,130 @@ describe('18 · licencias por suscripción (contrato 0.13.0)', () => {
     const r = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: pagada.clave, huella: HUELLA_A }) });
     expect(r.estado).toBe(404);
     expect(r.error).toBe('clave_inexistente');
+  });
+});
+
+describe('19 · alta automática de empresas (contrato 0.14.0)', () => {
+  const dia = (desplaza: number) => new Date(Date.now() + desplaza * 86400000).toISOString().slice(0, 10);
+  const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  let galletaSuper = '';
+  const CORT = 'alta-cortesia';
+  const PAGA = 'alta-pagada';
+  const DIRECTORA = 'directora-alta@ejemplo.mx';
+
+  async function comoSuper() {
+    if (galletaSuper) { galleta = galletaSuper; galletaMike = galleta; return; }
+    if (galletaMike) galleta = galletaMike;
+    const yo = await pedir('/yo');
+    if (yo.ok && yo.data.superadmin) { galletaSuper = galleta; galletaMike = galleta; return; }
+    galleta = '';
+    for (let i = 0; i < 3; i++) {
+      const c = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo: CORREO }) });
+      if (c.ok) {
+        const e = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: CORREO, codigo: c.data.codigo_prueba }) });
+        expect(e.estado).toBe(200);
+        galletaSuper = galleta;
+        galletaMike = galleta;
+        return;
+      }
+      await dormir(((c.detalle?.espera_segundos ?? 1) + 1) * 1000);
+    }
+    throw new Error('no se pudo entrar como superadmin');
+  }
+
+  it('el alta en un paso deja empresa, base, director como dueño y el intento de bienvenida', async () => {
+    await comoSuper();
+    await pedir(`/admin/orgs/${CORT}`, { method: 'DELETE' });
+    const r = await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({
+      id: CORT, nombre: 'Muebles Alta', razon_social: 'Muebles Alta SA de CV', rfc: 'MAL010101AAA', telefono: '55 1234 5678',
+      director: { correo: DIRECTORA, nombre: 'Directora Alta', telefono: '55 8765 4321' },
+    }) });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    expect(r.data.org.cortesia).toBe(true); // sin fecha de pago es cortesía
+    expect(r.data.org.estado).toBe('activa');
+    expect(r.data.org.rfc).toBe('MAL010101AAA');
+    expect(r.data.org.director_correo).toBe(DIRECTORA);
+    expect(r.data.director.rol).toBe('owner');
+    // Aquí no hay Resend ni es producción: el correo no sale, y se dice por qué.
+    expect(r.data.bienvenida.enviado).toBe(false);
+    expect(['correo_no_configurado', 'correo_apagado_fuera_de_produccion']).toContain(r.data.bienvenida.motivo);
+    expect(r.data.org.bienvenida_at).toBeNull();
+
+    const gente = await pedir(`/admin/orgs/${CORT}/miembros`);
+    const d = gente.data.filas.find((f: any) => f.correo === DIRECTORA);
+    expect(d?.rol).toBe('owner');
+    const bit = await pedir(`/admin/orgs/${CORT}/bitacora`);
+    const campos = bit.data.filas.map((f: any) => f.campo);
+    expect(campos).toEqual(expect.arrayContaining(['creada', 'miembro', 'bienvenida']));
+  });
+
+  it('una empresa pagada hasta ayer venció: las apps contestan 402 y los paneles siguen abriendo', async () => {
+    await comoSuper();
+    await pedir(`/admin/orgs/${PAGA}`, { method: 'DELETE' });
+    const r = await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: PAGA, nombre: 'Pagada Ayer', paga_hasta: dia(-1) }) });
+    expect(r.estado).toBe(201);
+    expect(r.data.org.cortesia).toBe(false);
+    expect(r.data.org.estado).toBe('sin_pago');
+    expect(r.data.org.vigente).toBe(false);
+
+    const app = await pedir(`/orgs/${PAGA}`, { app: 'dash101' });
+    expect(app.estado).toBe(402);
+    expect(app.error).toBe('org_sin_pago');
+    expect(app.detalle.paga_hasta).toBe(dia(-1));
+    const panel = await pedir(`/orgs/${PAGA}`, { app: 'workshop101' });
+    expect(panel.estado).toBe(200);
+  });
+
+  it('marcar el pago hasta mañana la reabre, y la bitácora lo apunta', async () => {
+    await comoSuper();
+    const mal = await pedir(`/admin/orgs/${PAGA}/pago`, { method: 'POST', body: JSON.stringify({ hasta: 'mañana' }) });
+    expect(mal.estado).toBe(400);
+    const p = await pedir(`/admin/orgs/${PAGA}/pago`, { method: 'POST', body: JSON.stringify({ hasta: dia(1), referencia: 'transferencia 123' }) });
+    expect(p.estado).toBe(200);
+    expect(p.data.estado).toBe('activa');
+    expect(p.data.paga_hasta).toBe(dia(1));
+    expect(p.data.origen_pago).toBe('manual');
+    const app = await pedir(`/orgs/${PAGA}`, { app: 'dash101' });
+    expect(app.estado).toBe(200);
+    const bit = await pedir(`/admin/orgs/${PAGA}/bitacora`);
+    const pago = bit.data.filas.find((f: any) => f.campo === 'pago');
+    expect(pago?.despues).toContain(dia(1));
+    expect(pago?.despues).toContain('transferencia 123');
+  });
+
+  it('pagada hasta hoy sigue vigente; PATCH cortesia la deja sin fecha y también vigente; quitarle la cortesía la vence', async () => {
+    await comoSuper();
+    const hoy = await pedir(`/admin/orgs/${PAGA}/pago`, { method: 'POST', body: JSON.stringify({ hasta: dia(0) }) });
+    expect(hoy.data.estado).toBe('activa');
+    const cort = await pedir(`/admin/orgs/${PAGA}`, { method: 'PATCH', body: JSON.stringify({ cortesia: true, paga_hasta: null }) });
+    expect(cort.estado).toBe(200);
+    expect(cort.data.cortesia).toBe(true);
+    expect(cort.data.estado).toBe('activa');
+    const sin = await pedir(`/admin/orgs/${PAGA}`, { method: 'PATCH', body: JSON.stringify({ cortesia: false }) });
+    expect(sin.data.estado).toBe('sin_pago');
+    expect((await pedir(`/orgs/${PAGA}`, { app: 'dash101' })).estado).toBe(402);
+    const bit = await pedir(`/admin/orgs/${PAGA}/bitacora`);
+    expect(bit.data.filas.some((f: any) => f.campo === 'cortesia')).toBe(true);
+  });
+
+  it('la bienvenida se puede volver a mandar al director, y sin director pide correo', async () => {
+    await comoSuper();
+    const otra = await pedir(`/admin/orgs/${CORT}/bienvenida`, { method: 'POST', body: JSON.stringify({}) });
+    expect(otra.estado).toBe(200);
+    expect(otra.data.correo).toBe(DIRECTORA);
+    expect(otra.data.enviado).toBe(false);
+    const sinDirector = await pedir(`/admin/orgs/${PAGA}/bienvenida`, { method: 'POST', body: JSON.stringify({}) });
+    expect(sinDirector.estado).toBe(400);
+    const conCorreo = await pedir(`/admin/orgs/${PAGA}/bienvenida`, { method: 'POST', body: JSON.stringify({ correo: 'otra@ejemplo.mx' }) });
+    expect(conCorreo.estado).toBe(200);
+  });
+
+  it('un director con correo inválido no crea nada; y las dos empresas de prueba se van', async () => {
+    await comoSuper();
+    const mal = await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: 'alta-mala', nombre: 'Mala', director: { correo: 'no-es-correo' } }) });
+    expect(mal.estado).toBe(400);
+    expect((await pedir('/admin/orgs/alta-mala')).estado).toBe(404);
+    expect((await pedir(`/admin/orgs/${CORT}`, { method: 'DELETE' })).estado).toBe(200);
+    expect((await pedir(`/admin/orgs/${PAGA}`, { method: 'DELETE' })).estado).toBe(200);
   });
 });

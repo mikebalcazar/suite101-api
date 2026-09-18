@@ -85,3 +85,45 @@ export function correoCodigo(codigo: string): { asunto: string; html: string; te
 </td></tr></table></body></html>`,
   };
 }
+
+/** 0.14.0 · lo que recibe el director cuando MASTER101 abre su empresa. No
+ *  lleva ningún secreto: entra con su correo y el código que le llega al
+ *  momento, en el panel de su empresa o en cualquiera de sus apps. */
+export function correoBienvenida(d: { empresa: string; director: string | null; correo: string; urlPanel: string; apps: string[] }): { asunto: string; html: string; texto: string } {
+  const saludo = d.director ? `Hola, ${d.director}.` : 'Hola.';
+  const apps = d.apps.length ? d.apps.join(', ') : 'las que se prendan después';
+  const texto = `${saludo}
+
+Tu empresa ${d.empresa} ya está dada de alta en la Suite 101 y tú quedaste como su director.
+
+Entra aquí con este correo (${d.correo}): ${d.urlPanel}
+No hay contraseña que recordar: al escribir tu correo te llega un código de acceso. Si prefieres, ahí mismo puedes ponerte una contraseña o entrar con tu cuenta de Google.
+
+Desde ese panel das de alta a tu gente y decides quién entra a qué. Apps de tu empresa: ${apps}.
+
+Si tú no esperabas este correo, ignóralo.`;
+  return {
+    asunto: `${d.empresa} ya está en la Suite 101 — tu acceso como director`,
+    texto,
+    html: `<!doctype html><html lang="es"><body style="margin:0;background:#f4f6f8;font-family:${TEXTO};color:${OSCURO}">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px"><tr><td align="center">
+  <table role="presentation" width="100%" style="max-width:560px;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 14px rgba(18,39,51,.08)">
+    <tr><td style="background:${AZUL};padding:20px 26px">
+      <span style="color:#fff;font-size:20px;font-weight:700;letter-spacing:.5px">SUITE 101</span>
+    </td></tr>
+    <tr><td style="padding:28px 26px">
+      <h1 style="margin:0 0 14px;font-size:20px;font-family:${TEXTO}">${escapa(d.empresa)} ya está dada de alta</h1>
+      <p style="margin:0 0 14px;font-size:15px;line-height:1.6">${escapa(saludo)} Quedaste como <b>director</b> de la empresa: desde tu panel das de alta a tu gente y decides quién entra a qué.</p>
+      <p style="margin:0 0 18px;font-size:15px;line-height:1.6">Entra con este correo, <b>${escapa(d.correo)}</b>. No hay contraseña que recordar: al escribirlo te llega un código de acceso. Ahí mismo puedes ponerte una contraseña o entrar con tu cuenta de Google.</p>
+      <p style="margin:0 0 22px;text-align:center"><a href="${escapa(d.urlPanel)}" style="display:inline-block;background:${AZUL};color:#fff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 22px;border-radius:9px">Entrar a mi panel</a></p>
+      <p style="margin:0;font-size:13px;color:#6b7a85">Apps de tu empresa: ${escapa(apps)}.<br>Si tú no esperabas este correo, ignóralo.</p>
+    </td></tr>
+    <tr><td style="padding:16px 26px 24px;border-top:1px solid #e6ebef;font-size:12px;color:#6b7a85">
+      Mensaje automático de la Suite 101.
+    </td></tr>
+  </table>
+</td></tr></table></body></html>`,
+  };
+}
+
+const escapa = (t: string): string => t.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch] as string);

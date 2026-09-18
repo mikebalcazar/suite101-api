@@ -42,7 +42,7 @@ fallthrough = true
 
 [vars]
 ENTORNO = "produccion"
-API_VERSION = "0.13.0"
+API_VERSION = "0.14.0"
 CORREO_REMITENTE = "Suite 101 <acceso@envios.taller101.mx>"
 CORREO_SUPERADMIN = "mike@forespot.com"
 # Origenes con permiso de CORS. La cookie va con SameSite=None, asi que aqui no
@@ -53,6 +53,7 @@ CORREO_SUPERADMIN = "mike@forespot.com"
 ORIGENES = "https://conta-master.netlify.app,https://cuenta-taller101.netlify.app,https://cotizador-t101.netlify.app,https://t101-portal.mike-929.workers.dev,https://bitacora-obra.mike-929.workers.dev,https://dash101.mike-929.workers.dev,https://peek101.mike-929.workers.dev,https://master101.mike-929.workers.dev,https://quote101.mike-929.workers.dev,https://workshop101.mike-929.workers.dev,http://localhost:5173"
 # El origen público de esta API: es a donde Google devuelve (ver auth.ts).
 URL_PUBLICA = "https://suite101-api.mike-929.workers.dev"
+URL_PANEL_DIRECTOR = "https://workshop101.mike-929.workers.dev"
 
 # ─────────────── staging ───────────────
 # Mismo codigo, otra base y otro bucket. Aqui ENTORNO no es "produccion", asi
@@ -90,8 +91,9 @@ fallthrough = true
 
 [env.staging.vars]
 ENTORNO = "staging"
-API_VERSION = "0.13.0"
+API_VERSION = "0.14.0"
 CORREO_REMITENTE = "Suite 101 <acceso@envios.taller101.mx>"
 CORREO_SUPERADMIN = "mike@forespot.com"
 ORIGENES = "*"
 URL_PUBLICA = "https://suite101-api-staging.mike-929.workers.dev"
+URL_PANEL_DIRECTOR = "https://workshop101-staging.mike-929.workers.dev"
