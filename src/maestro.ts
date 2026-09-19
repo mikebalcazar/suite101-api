@@ -79,11 +79,17 @@ export async function leerSesion(env: Env, id: string): Promise<{ usuario_id: st
 
 /** Qué secretos tiene puestos un usuario. La API NUNCA devuelve los hashes:
  *  sólo si existen, para que la pantalla sepa qué ofrecer. */
-export async function secretosDe(env: Env, usuario_id: string): Promise<{ tiene_pin: boolean; tiene_clave: boolean }> {
-  const f = await env.MASTER.prepare(`SELECT pin_hash, clave_hash FROM usuarios WHERE id = ?`)
+/* Qué tiene esta persona para volver a entrar mañana. Nunca el hash ni el
+ * identificador de Google: sólo si existen. `tiene_google` hace falta para no
+ * exigirle una contraseña a quien ya tiene por dónde volver —entrar con
+ * Google es una forma de entrar, no un atajo—; sin él, quien entraba con un
+ * código se topaba con «ponle una contraseña» aunque tuviera Google ligado
+ * desde hace semanas. */
+export async function secretosDe(env: Env, usuario_id: string): Promise<{ tiene_pin: boolean; tiene_clave: boolean; tiene_google: boolean }> {
+  const f = await env.MASTER.prepare(`SELECT pin_hash, clave_hash, google_sub FROM usuarios WHERE id = ?`)
     .bind(usuario_id)
-    .first<{ pin_hash: string | null; clave_hash: string | null }>();
-  return { tiene_pin: !!f?.pin_hash, tiene_clave: !!f?.clave_hash };
+    .first<{ pin_hash: string | null; clave_hash: string | null; google_sub: string | null }>();
+  return { tiene_pin: !!f?.pin_hash, tiene_clave: !!f?.clave_hash, tiene_google: !!f?.google_sub };
 }
 
 /** Cuántos segundos le quedan a una sesión.
