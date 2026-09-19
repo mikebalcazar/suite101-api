@@ -14,6 +14,7 @@ import orgs from './rutas/orgs';
 import admin from './rutas/admin';
 import licencias from './rutas/licencias';
 import importar, { paginaImportar } from './rutas/importar';
+import mudanza from './rutas/mudanza';
 import { err, ok, type Vars } from './http';
 import type { Env } from './entorno';
 import { VERSION_CONTRATO } from '../schema/tipos';
@@ -113,6 +114,7 @@ app.route('/licencias', licencias);
 
 app.route('/admin', admin);
 app.route('/admin', importar);
+app.route('/admin', mudanza);
 
 app.notFound((c) => err(c as never, 'no_encontrado', 404, { ruta: c.req.path }));
 

@@ -47,6 +47,13 @@
  * folio: si lo manda, se le ignora; sólo `suite101` puede, y es para que la
  * mudanza traiga los viejos congelados. Un índice único en la base impide dos
  * folios iguales). Antes:
+ * 0.16.0 (quell101 vive en la base de la empresa: la migración 0006 del
+ * OrgDB trae sus catorce tablas con prefijo `quell_`, y el motor de la
+ * bitácora de obra —el mismo código que corría en el Worker de quell101—
+ * atiende en `/orgs/:o/quell/*` con la sesión que resolvió la puerta. Un
+ * cliente abre, además de /peek, lo que quell101 le recorta. `POST
+ * /admin/mudar-quell {org, modo}` trae la D1 y el bucket viejos. Decisión
+ * de Mike del 19-sep: todo lo de una empresa en su base de la suite). Antes:
  * 0.15.0 (invitar a un cliente desde una app con base propia:
  * `POST /orgs/:o/clientes/invitar {correo, nombre}` deja al cliente en la
  * base de la empresa si no estaba, crea la persona en la suite si no existía
@@ -76,7 +83,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.15.0';
+export const VERSION_CONTRATO = '0.16.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -600,7 +607,14 @@ export type Tabla = (typeof TABLAS)[number];
  *  nadie esperaba también truene—, y esa lista tiene que salir de un solo
  *  lugar. El 16-sep un conteo de migraciones escrito a mano en una prueba dejó
  *  un despliegue en rojo; es la misma clase de cosa. */
-export const TABLAS_INTERNAS = ['folios'] as const;
+/* Las de quell101 (0006) no salen por el CRUD genérico: las usa el motor de
+ * la bitácora de obra por /orgs/:o/quell/*, con sus propias reglas. */
+export const TABLAS_INTERNAS = [
+  'folios',
+  'quell_users', 'quell_projects', 'quell_project_members', 'quell_plans', 'quell_elements', 'quell_log_entries',
+  'quell_punch_items', 'quell_photos', 'quell_operaciones', 'quell_etapas', 'quell_element_etapas', 'quell_dudas',
+  'quell_duda_respuestas', 'quell_element_contratistas',
+] as const;
 
 /* ─────────────── lo que devuelven las rutas con nombre ─────────────── */
 

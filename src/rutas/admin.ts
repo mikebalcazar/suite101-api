@@ -59,6 +59,16 @@ rutas.get('/orgs/:o', async (c) => {
   return ok(c, conConteos(o, await conteosDeOrgs(c.env)));
 });
 
+/* 0.16.0 · cuántas filas de quell101 tiene una empresa. Lo enseña master101 en
+ * el detalle de la empresa, y es con lo que se mide la mudanza. */
+rutas.get('/orgs/:o/quell', async (c) => {
+  if (!(await soySuper(c))) return err(c, 'sin_permiso', 403);
+  const id = c.req.param('o')!;
+  if (!(await org(c.env, id))) return err(c, 'org_desconocida', 404);
+  const filas = await (c.env.ORG.get(c.env.ORG.idFromName(id)) as unknown as ApiOrgDB).conteosQuell();
+  return ok(c, { org: id, filas });
+});
+
 const DIA = /^\d{4}-\d{2}-\d{2}$/;
 const texto = (v: unknown, max = 120): string | null => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 
