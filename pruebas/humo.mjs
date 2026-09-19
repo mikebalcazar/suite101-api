@@ -235,6 +235,20 @@ async function recorrido() {
   rev(tablaC.estado === 403, 'y una tabla suelta con X-App quell101 le contesta 403', `${tablaC.estado}`);
   galleta = galletaAntes;
 
+  // Contrato 0.16.0: quell101 vive en la base de la empresa. El dueño de la
+  // suite entra a la bitácora de la empresa del humo, levanta una obra y un
+  // ítem, y la borra; master101 cuenta lo que hay.
+  const yoQuell = await pedir(STAGING, `/orgs/${ORG}/quell/me`, { app: 'quell101' });
+  rev(yoQuell.estado === 200 && yoQuell.data === undefined && yoQuell.user?.role === 'admin', 'el dueño de la suite entra a quell101 de la empresa y nace como dueño de la bitácora', `${yoQuell.estado} ${yoQuell.user?.role}`);
+  const obra = await pedir(STAGING, `/orgs/${ORG}/quell/projects`, { app: 'quell101', method: 'POST', body: { name: `Obra de humo ${ORG}`, client: 'Cliente de humo' } });
+  rev(obra.estado === 200 && !!obra.id, 'levanta una obra', `${obra.estado}`);
+  const conteo = await pedir(STAGING, `/admin/orgs/${ORG}/quell`);
+  rev(conteo.estado === 200 && conteo.data?.filas?.quell_projects === 1 && conteo.data?.filas?.quell_etapas === 5, 'master101 cuenta 1 obra y las 5 etapas', JSON.stringify(conteo.data?.filas));
+  const borrada = await pedir(STAGING, `/orgs/${ORG}/quell/projects/${obra.id}`, { app: 'quell101', method: 'DELETE' });
+  rev(borrada.estado === 200, 'y la borra', `${borrada.estado}`);
+  const sinCliente = await pedir(STAGING, `/orgs/${ORG}/quell/me`, { app: 'quell101', token: 'inventado' });
+  rev(sinCliente.estado === 401, 'sin sesión la bitácora contesta 401', `${sinCliente.estado}`);
+
   // La puerta aplica la lista: la socia entra a dash101 y a quell101, no a peek101 (que además está apagada) ni a workshop101.
   const galletaSuper = galleta;
   const codS = await pedir(STAGING, '/auth/codigo', { method: 'POST', body: { correo: `socia-${ORG}@ejemplo.mx` } });

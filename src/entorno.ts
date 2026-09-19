@@ -29,6 +29,13 @@ export interface Env {
   URL_PUBLICA?: string;
   /** El panel del director (workshop101): a donde lo manda el correo de bienvenida. */
   URL_PANEL_DIRECTOR?: string;
+  /** El remitente de los correos de quell101 (invitaciones y avisos de obra). */
+  CORREO_QUELL?: string;
+  /** La D1 y el bucket viejos de quell101, sólo para la mudanza (POST
+   *  /admin/mudar-quell). Se leen, nunca se escriben. Cuando la mudanza quede
+   *  atrás, estas dos ligas se quitan de wrangler.toml y de aquí. */
+  QUELL_D1?: D1Database;
+  QUELL_R2?: R2Bucket;
 
   ENTORNO: string; // 'produccion' | 'staging' | 'prueba'
   ORIGENES: string; // CSV de orígenes con permiso de CORS

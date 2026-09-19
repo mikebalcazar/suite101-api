@@ -92,8 +92,9 @@ describe('el esquema del OrgDB', () => {
 
   it('el dinero es INTEGER en todas partes: ni un REAL', () => {
     const reales = [...sinNotas.matchAll(/(\w+)\s+REAL\b/gi)].map((m) => m[1]);
-    // `avance` es una proporción de 0 a 1, no dinero. Es el único REAL que hay.
-    expect(reales).toEqual(['avance']);
+    // `avance` es una proporción de 0 a 1, no dinero; `x` y `y` son la
+    // posición de un ítem en el plano (0006, quell101). Nada más es REAL.
+    expect(reales).toEqual(['avance', 'x', 'y']);
     for (const col of ['monto', 'total', 'saldo_inicial', 'precio_venta', 'cobrado', 'pagado_prov', 'compromiso', 'monto_acordado', 'monto_pagado']) {
       expect(sinNotas).toMatch(new RegExp(`${col}\\s+INTEGER`));
     }

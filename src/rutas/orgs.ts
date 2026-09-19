@@ -13,9 +13,10 @@ import { Hono } from 'hono';
 import { DEFS, columnasDinero, esTabla } from '../tablas';
 import type { ApiOrgDB } from '../org-db';
 import { APPEND_ONLY, POR_SU_RUTA, revisarEscritura } from '../permisos';
-import { acceso, accesoDe, esSuperadmin, miembro, org, ponerAcceso, quitarAcceso, usuarioPorCorreo } from '../maestro';
+import { acceso, accesoDe, miembro, org, ponerAcceso, quitarAcceso, usuarioPorCorreo, usuarioPorId } from '../maestro';
+import { invitarClienteEnSuite } from '../clientes';
 import { crearUsuario } from '../maestro';
-import { correoValido, guardarPin, normalizaCorreo, pinAceptable, ulid } from '../lib';
+import { guardarPin, normalizaCorreo, pinAceptable, ulid } from '../lib';
 import { err, ok, type Ctx, type Quien, type Vars } from '../http';
 import type { Env } from '../entorno';
 import { APPS, LLAVE_APP, type App, type Tabla } from '../../schema/tipos';
@@ -270,44 +271,73 @@ for (const par of [
  * persona que ya es cliente de OTRA empresa tampoco (409 en_uso): `accesos`
  * lleva una fila por usuario. */
 rutas.post('/:o/clientes/invitar', async (c) => {
-  const quien = c.get('quien');
-  if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403);
   const cuerpo = await c.req.json<{ correo?: string; nombre?: string }>().catch(() => ({}) as never);
-  const correo = normalizaCorreo(cuerpo.correo);
-  const nombre = String(cuerpo.nombre || '').trim().slice(0, 120);
-  if (!correoValido(correo)) return err(c, 'datos_invalidos', 400, { correo: 'no parece un correo' });
-  if (!nombre) return err(c, 'datos_invalidos', 400, { falta: 'nombre' });
+  const r = await invitarClienteEnSuite(c.env, c.get('org_id'), c.get('quien'), stub(c), c.get('app'), cuerpo.correo, cuerpo.nombre);
+  return r.ok ? ok(c, r.data, 201) : err(c, r.error, r.estado, r.detalle);
+});
 
-  const yaEs = await usuarioPorCorreo(c.env, correo);
-  if (yaEs && ((await miembro(c.env, c.get('org_id'), yaEs.id)) || (await esSuperadmin(c.env, yaEs.id)))) {
-    return err(c, 'es_miembro', 409, { motivo: 'ese correo es de alguien de la empresa, no de un cliente' });
-  }
-  const previo = yaEs ? await acceso(c.env, yaEs.id) : null;
-  if (previo && previo.org_id !== c.get('org_id')) {
-    return err(c, 'en_uso', 409, { motivo: 'ese correo ya entra como cliente o personal de otra empresa' });
-  }
-  if (previo && previo.tipo !== 'cliente') {
-    return err(c, 'en_uso', 409, { motivo: 'ese correo es del personal de la empresa, no de un cliente' });
-  }
+/* ─────────────── quell101: la bitácora de obra, dentro de la empresa (0.16.0) ───────────────
+ *
+ * Desde el 19-sep quell101 no tiene base propia: sus tablas viven en el
+ * OrgDB (migración 0006) y su motor —el mismo código que corría en su Worker—
+ * corre dentro del Durable Object (src/quell/motor.js). Esta ruta es la
+ * puerta: la sesión, la empresa, la app prendida y quién viene ya los resolvió
+ * el middleware de arriba; aquí se le pasan al motor en cabeceras y se le
+ * reenvía la petición tal cual (formularios con fotos incluidos).
+ *
+ * Un cliente (`quien.clase === 'cliente'`) sí pasa por aquí: es la cara de
+ * cliente de quell101, y el recorte de lo que ve lo hace el motor, en el
+ * servidor. Es la excepción a «un cliente sólo abre /peek», y es una sola:
+ * lo que el motor le da a un cliente está probado renglón por renglón.
+ *
+ * Los archivos (planos y fotos) se sirven desde aquí, no desde el objeto:
+ * bytes de R2 bajo `orgs/{org}/quell/`, sólo para quien ya pasó la puerta. */
 
-  // El cliente en la base de la empresa: el que ya está con ese correo, o uno nuevo.
-  const lista = await stub(c).listar('clientes', {});
-  let cliente = lista.filas.find((f) => normalizaCorreo(f.correo) === correo) ?? null;
-  const nuevo_cliente = !cliente;
-  if (!cliente) {
-    // Un cliente cuelga de un negocio. El de quien invita si tiene uno
-    // acotado; si no, el primero de la empresa. Sin negocio no hay dónde
-    // colgarlo, y eso se dice, no se inventa.
-    const negocio_id = quien.negocios[0] ?? (await stub(c).listar('negocios', {})).filas[0]?.id;
-    if (!negocio_id) return err(c, 'sin_negocio', 409, { motivo: 'la empresa no tiene negocio todavía; se crea desde dash101 o quote101' });
-    cliente = await stub(c).crear('clientes', { nombre, correo, negocio_id }, { app: c.get('app'), usuario_id: quien.usuario_id });
+const quellPuedeAbrir = (c: Ctx) => c.get('quien').clase === 'miembro' || c.get('quien').clase === 'cliente';
+
+rutas.get('/:o/quell/files/*', async (c) => {
+  if (!quellPuedeAbrir(c)) return err(c, 'sin_permiso', 403);
+  const llave = decodeURIComponent(c.req.path.replace(/^\/orgs\/[^/]+\/quell\/files\//, ''));
+  // Sólo lo de ESTA empresa: la llave lleva la empresa adentro y aquí se
+  // comprueba contra la de la sesión, no contra lo que diga la dirección.
+  if (!llave.startsWith(`orgs/${c.get('org_id')}/quell/`)) return err(c, 'sin_permiso', 403, { motivo: 'ese archivo no es de esta empresa' });
+  const obj = await c.env.ARCHIVOS.get(llave);
+  if (!obj) return err(c, 'no_encontrado', 404);
+  const h = new Headers();
+  obj.writeHttpMetadata(h);
+  h.set('etag', obj.httpEtag);
+  h.set('cache-control', 'private, max-age=31536000, immutable');
+  return new Response(obj.body, { headers: h });
+});
+
+rutas.all('/:o/quell/*', async (c) => {
+  if (!quellPuedeAbrir(c)) return err(c, 'sin_permiso', 403);
+  const s = c.get('sesion');
+  const quien = c.get('quien');
+  const org_id = c.get('org_id');
+  const entrada = new URL(c.req.url);
+  const resto = entrada.pathname.replace(/^\/orgs\/[^/]+\/quell/, '') || '/';
+  const interna = new URL(`https://quell.local/quell${resto}${entrada.search}`);
+
+  const cabeceras = new Headers();
+  for (const nombre of ['content-type', 'content-length']) {
+    const v = c.req.header(nombre);
+    if (v) cabeceras.set(nombre, v);
   }
+  cabeceras.set('x-org', org_id);
+  cabeceras.set('x-sitio', c.req.header('X-Sitio') || '');
+  const usuario = await usuarioPorId(c.env, s.usuario_id);
+  cabeceras.set('x-sesion', JSON.stringify({
+    correo: s.correo, nombre: usuario?.nombre ?? null, superadmin: s.superadmin,
+    quien: { clase: quien.clase, rol: quien.rol, usuario_id: quien.usuario_id },
+  }));
 
-  const usuario = yaEs ?? (await crearUsuario(c.env, correo, nombre));
-  await ponerAcceso(c.env, { usuario_id: usuario.id, org_id: c.get('org_id'), tipo: 'cliente', ref_id: String(cliente.id) });
-  await stub(c).actualizar('clientes', String(cliente.id), { usuario_id: usuario.id, portal_activo: true });
-
-  return ok(c, { usuario_id: usuario.id, cliente_id: cliente.id, correo, nombre: String(cliente.nombre ?? nombre), nuevo_usuario: !yaEs, nuevo_cliente }, 201);
+  // El cuerpo se lee entero antes de pasarlo: si el motor contesta sin leer
+  // (un 403 temprano), un flujo a medias deja «can't read from request
+  // stream» en el registro. Un plano son unos MB; cabe.
+  const cuerpo = c.req.method === 'GET' || c.req.method === 'HEAD' ? null : await c.req.raw.arrayBuffer();
+  const peticion = new Request(interna.toString(), { method: c.req.method, headers: cabeceras, body: cuerpo });
+  return stub(c).fetch(peticion);
 });
 
 /* ─────────────── consecutivos por serie ───────────────

@@ -18,6 +18,10 @@ import partidasATabla from '../migrations/org/0002_partidas.sql';
 import conciliaciones from '../migrations/org/0003_conciliaciones.sql';
 import folios from '../migrations/org/0004_folios.sql';
 import ajustes from '../migrations/org/0005_ajustes.sql';
+import quell from '../migrations/org/0006_quell.sql';
+import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
+import { invitarClienteEnSuite } from './clientes';
+import type { Quien } from './http';
 import { DEFS, type Def, type Tipo } from './tablas';
 import { ahora, normalizar, ulid } from './lib';
 import { TABLAS, type Aviso, type Etapa, type Peek, type Pool, type Tabla } from '../schema/tipos';
@@ -32,7 +36,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell];
 
 /** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
  *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
@@ -108,8 +112,45 @@ export interface ApiOrgDB {
   /** Puerta de servicio: solo la usa POST /admin/importar (fase 2). */
   importar(args: { filas: Record<string, Fila[]>; seco: boolean }): Promise<Importacion>;
   conteos(): Promise<{ filas: Record<string, number>; sumas: Record<string, number> }>;
+  /** Cuántas filas hay en cada tabla de quell101. Para master101 y para medir la mudanza. */
+  conteosQuell(): Promise<Record<string, number>>;
+  /** Puerta de servicio: mete las filas de quell101 tal cual (misma llave, misma
+   *  fecha). Sólo la usa POST /admin/mudar-quell. `seco` deshace al final. */
+  importarQuell(args: { filas: Record<string, Fila[]>; seco: boolean }): Promise<{ antes: Record<string, number>; despues: Record<string, number>; escritas: Record<string, number> }>;
   fetch(req: Request): Promise<Response>;
 }
+
+/* ─────────────── quell101 sobre el SqlStorage ───────────────
+ * El motor de quell101 (src/quell/motor.js) habla D1: prepare · bind · first ·
+ * all · run · batch. El SqlStorage del Durable Object habla `exec(sql, ...args)`
+ * y devuelve un cursor. Esto es la traducción, y es lo único que cambió del
+ * motor al mudarse: las consultas son las mismas. */
+export function baseSobreSql(sql: SqlStorage): BaseQuell {
+  const arma = (q: string, args: unknown[]) => ({
+    async first() {
+      const filas = sql.exec(q, ...(args as SqlStorageValue[])).toArray();
+      return filas.length ? filas[0] : null;
+    },
+    async all() { return { results: sql.exec(q, ...(args as SqlStorageValue[])).toArray() }; },
+    async run() {
+      const cursor = sql.exec(q, ...(args as SqlStorageValue[]));
+      cursor.toArray();
+      return { success: true, meta: { changes: cursor.rowsWritten } };
+    },
+  });
+  return {
+    prepare(q: string) { const sin = arma(q, []); return { ...sin, bind: (...args: unknown[]) => arma(q, args) }; },
+    async batch(stmts) { const out: unknown[] = []; for (const st of stmts) out.push(await st.run()); return out; },
+  };
+}
+
+/** Las tablas de quell101 en el orden en que se pueden insertar (las llaves
+ *  foráneas apuntan hacia arriba). La mudanza y el conteo las recorren así. */
+export const TABLAS_QUELL = [
+  'quell_users', 'quell_projects', 'quell_project_members', 'quell_plans', 'quell_elements', 'quell_log_entries',
+  'quell_punch_items', 'quell_photos', 'quell_operaciones', 'quell_etapas', 'quell_element_etapas', 'quell_dudas',
+  'quell_duda_respuestas', 'quell_element_contratistas',
+] as const;
 
 /** Lo que devuelve una corrida del importador. Todo son números medidos
  *  dentro del SQLite, no lo que el importador creyó escribir. */
@@ -987,6 +1028,51 @@ export class OrgDB extends DurableObject<Env> {
     return { filas: this.contarFilas(), sumas: this.sumarDinero() };
   }
 
+  conteosQuell(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const t of TABLAS_QUELL) out[t] = (this.sql.exec(`SELECT COUNT(*) AS n FROM ${t}`).one() as { n: number }).n;
+    return out;
+  }
+
+  /* ─────────────── puerta de servicio: la mudanza de quell101 ───────────────
+   * Trae las filas tal cual venían de la D1 de quell101: mismas llaves, mismas
+   * fechas, mismo orden de inserción que las llaves foráneas. Escribe por
+   * llave (INSERT OR REPLACE), así que correrla dos veces no duplica. `seco`
+   * hace todo dentro de una transacción y la deshace al final. Sólo la alcanza
+   * POST /admin/mudar-quell (superadmin). */
+  importarQuell(args: { filas: Record<string, Fila[]>; seco: boolean }): { antes: Record<string, number>; despues: Record<string, number>; escritas: Record<string, number> } {
+    const antes = this.conteosQuell();
+    const escritas: Record<string, number> = {};
+    let despues = antes;
+    class Deshacer extends Error {}
+    try {
+      this.ctx.storage.transactionSync(() => {
+        for (const tabla of TABLAS_QUELL) {
+          const filas = args.filas[tabla] ?? [];
+          for (const fila of filas) {
+            const cols = Object.keys(fila);
+            if (!cols.length) continue;
+            // Upsert, y NO «INSERT OR REPLACE»: REPLACE borra y vuelve a meter,
+            // y el borrado dispara los ON DELETE CASCADE de las tablas hijas.
+            // Se vio en la prueba: volver a correr la mudanza sobre un plano
+            // se llevaba los ítems que la empresa había creado después.
+            this.sql.exec(
+              `INSERT INTO ${tabla} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})
+               ON CONFLICT DO UPDATE SET ${cols.map((c) => `${c} = excluded.${c}`).join(', ')}`,
+              ...(cols.map((c) => fila[c] ?? null) as SqlStorageValue[]),
+            );
+          }
+          escritas[tabla] = filas.length;
+        }
+        despues = this.conteosQuell();
+        if (args.seco) throw new Deshacer('seco');
+      });
+    } catch (e) {
+      if (!(e instanceof Deshacer)) throw e;
+    }
+    return { antes, despues, escritas };
+  }
+
   /* ─────────────── pool para autocompletar (§7) ─────────────── */
 
   pool(): Pool {
@@ -1056,8 +1142,32 @@ export class OrgDB extends DurableObject<Env> {
    * leer dinero por REST tampoco lo recibe por aquí. */
 
   async fetch(req: Request): Promise<Response> {
-    if (req.headers.get('Upgrade') !== 'websocket') return new Response('solo websocket', { status: 426 });
     const url = new URL(req.url);
+    // quell101: la ruta del Worker (src/rutas/orgs.ts) ya resolvió empresa,
+    // app y quién viene, y lo manda en cabeceras. Aquí corre el motor de la
+    // bitácora sobre el SQLite de esta empresa.
+    if (url.pathname === '/quell' || url.pathname.startsWith('/quell/')) {
+      const sesion = JSON.parse(req.headers.get('x-sesion') || 'null') as SesionQuell | null;
+      if (!sesion) return new Response(JSON.stringify({ error: 'no autorizado' }), { status: 401, headers: { 'content-type': 'application/json' } });
+      const org = req.headers.get('x-org') || '';
+      const e = this.env;
+      return atenderQuell(req, {
+        DB: baseSobreSql(this.sql),
+        FILES: e.ARCHIVOS,
+        SESION: sesion,
+        PREFIJO_R2: `orgs/${org}/quell/`,
+        SITIO: req.headers.get('x-sitio') || 'https://bitacora-obra.mike-929.workers.dev',
+        APP_NAME: 'quell101',
+        MAIL_FROM: e.CORREO_QUELL || 'quell101 <bitacora@envios.taller101.mx>',
+        RESEND_API_KEY: e.RESEND_API_KEY,
+        CORREO_SALE: e.ENTORNO === 'produccion' || e.CORREO_DE_VERDAD === '1',
+        // La invitación del cliente en la suite, desde adentro: el motor la
+        // pide después de revisar que quien invita sea el dueño de la obra.
+        INVITAR_EN_SUITE: (correo: string, nombre: string) =>
+          invitarClienteEnSuite(e, org, { ...sesion.quien, negocios: [], ve_dinero: true, ve_costos: true } as Quien, this as unknown as ApiOrgDB, 'quell101', correo, nombre),
+      }, url, url.pathname);
+    }
+    if (req.headers.get('Upgrade') !== 'websocket') return new Response('solo websocket', { status: 426 });
     const par = new WebSocketPair();
     const [cliente, servidor] = Object.values(par);
     this.ctx.acceptWebSocket(servidor);
