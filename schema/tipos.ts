@@ -95,7 +95,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.17.0';
+export const VERSION_CONTRATO = '0.17.1';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
