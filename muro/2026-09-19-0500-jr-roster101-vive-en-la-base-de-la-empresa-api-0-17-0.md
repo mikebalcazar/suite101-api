@@ -72,7 +72,9 @@ dos pasos, como el de quell101.
    consentimientos, 373 renglones de bitácora, 2 cuentas del panel.
 3. Se mezcla t101-portal-trabajadores #21: producción pasa a la suite. Quien
    tuviera sesión de trabajador abierta vuelve a pedir su código (cambió el
-   secreto que la firma).
+   secreto que la firma). **Hecho 05:17Z** (Mike contó y trajo, cuadró; run
+   35423438280 verde: pruebas, staging con humo, producción, medición 23/0,
+   `/api/salud` → `datos: 'suite', empresa: 'forespot'`).
 4. Mike vuelve a «Traer de verdad»: trae lo escrito en la D1 vieja entre 2 y 3.
 5. La D1 y el bucket viejos se quedan unos días; luego se borran (Mike).
 
