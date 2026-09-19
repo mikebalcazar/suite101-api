@@ -13,7 +13,12 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.21.0 (órdenes de compra y contabilidad fiscal, el
+ * Versión del contrato: 0.21.1 (quien abre una empresa como dueño sin ser
+ * miembro de ella —el superadmin de la suite, que es de Taller 101— sale en
+ * `GET /orgs/:o/ordenes/contadores` y se puede marcar a sí mismo. Sin esto,
+ * en una empresa recién dada de alta la pantalla salía vacía y no había
+ * quién pagara: lo cachó el humo contra staging, no las pruebas).
+ * Antes: 0.21.0 (órdenes de compra y contabilidad fiscal, el
  * encargo del chat de dash101 del 19-sep. Migraciones 0008 y 0009 del OrgDB.
  *
  * Órdenes: cualquiera de la empresa pide una compra y cae directa al buzón
@@ -154,7 +159,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.21.0';
+export const VERSION_CONTRATO = '0.21.1';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
