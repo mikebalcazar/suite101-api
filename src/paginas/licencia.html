@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Activar con tu cuenta — Suite 101</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;500;600&family=Raleway:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Identidad Taller 101: azul #0080C1, Raleway en el texto, Fira Sans con
+     cifras tabulares en los números. Esta pantalla la abre la propia app en
+     una ventana chica, así que todo cabe en 420 px de ancho. */
+  :root { --azul:#0080C1; --tinta:#16202a; --suave:#5b6b78; --linea:#dfe6eb; --fondo:#f6f8fa; --verde:#1a7f4b; --rojo:#b3261e; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:28px 20px; background:var(--fondo); color:var(--tinta);
+         font:400 16px/1.5 Raleway,system-ui,sans-serif; }
+  .caja { max-width:420px; margin:0 auto; background:#fff; border:1px solid var(--linea);
+          border-radius:14px; padding:24px; }
+  h1 { font:700 22px/1.25 Raleway,sans-serif; margin:0 0 4px; }
+  .sub { color:var(--suave); font-size:14px; margin:0 0 20px; }
+  label { display:block; font-size:14px; font-weight:600; margin:0 0 16px; }
+  input { display:block; width:100%; margin-top:6px; padding:11px 12px; font:400 16px Raleway,sans-serif;
+          border:1px solid var(--linea); border-radius:9px; background:#fff; color:var(--tinta); }
+  input:focus { outline:2px solid var(--azul); outline-offset:1px; }
+  #codigo { font:500 22px/1 'Fira Sans',monospace; font-variant-numeric:tabular-nums; letter-spacing:.22em; text-align:center; }
+  .btn { display:block; width:100%; padding:12px; margin:0 0 10px; border:0; border-radius:9px;
+         background:var(--azul); color:#fff; font:600 16px Raleway,sans-serif; cursor:pointer; }
+  .btn:disabled { opacity:.55; cursor:default; }
+  .btn.suave { background:#fff; color:var(--azul); border:1px solid var(--linea); }
+  .liga { display:block; width:100%; background:none; border:0; color:var(--azul); font:500 14px Raleway,sans-serif;
+          cursor:pointer; padding:8px 0; text-align:center; }
+  .err { color:var(--rojo); font-size:14px; min-height:20px; margin:0 0 8px; }
+  .bien { color:var(--verde); font-weight:600; }
+  .nota { color:var(--suave); font-size:13px; }
+  .sep { border:0; border-top:1px solid var(--linea); margin:18px 0; }
+  .dato { font:500 15px 'Fira Sans',sans-serif; font-variant-numeric:tabular-nums; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<div class="caja">
+  <h1 id="titulo">Activar</h1>
+  <p class="sub" id="sub">Entra con tu cuenta de la suite 101 y la app se abre sola.</p>
+
+  <div id="v-cargando"><p class="nota">Un momento…</p></div>
+
+  <div id="v-correo" hidden>
+    <label for="correo">Tu correo<input id="correo" type="email" autocomplete="username" inputmode="email" autocapitalize="off" spellcheck="false" name="username"></label>
+    <div class="err" id="err-correo"></div>
+    <button class="btn" type="button" id="b-correo">Continuar</button>
+    <button class="btn suave" type="button" id="b-google">Entrar con Google</button>
+  </div>
+
+  <div id="v-clave" hidden>
+    <p class="nota" id="p-clave"></p>
+    <label for="clave">Tu contraseña<input id="clave" type="password" autocomplete="current-password" name="password"></label>
+    <div class="err" id="err-clave"></div>
+    <button class="btn" type="button" id="b-clave">Entrar</button>
+    <button class="liga" type="button" id="b-olvide">Olvidé mi contraseña</button>
+    <button class="liga" type="button" id="b-otro">Usar otro correo</button>
+  </div>
+
+  <div id="v-codigo" hidden>
+    <p class="nota" id="p-codigo"></p>
+    <label for="codigo">Código<input id="codigo" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></label>
+    <div class="err" id="err-codigo"></div>
+    <button class="btn" type="button" id="b-codigo">Entrar</button>
+    <button class="liga" type="button" id="b-reenviar">Mandar otro código</button>
+    <button class="liga" type="button" id="b-otro-2">Usar otro correo</button>
+  </div>
+
+  <div id="v-nueva" hidden>
+    <p class="nota">Entraste con un código, y el código sirve una sola vez. Ponle una contraseña a tu cuenta para poder volver mañana.</p>
+    <label for="nueva">Contraseña nueva<input id="nueva" type="password" autocomplete="new-password" name="new-password"></label>
+    <label for="nueva2">Otra vez<input id="nueva2" type="password" autocomplete="new-password" name="new-password"></label>
+    <div class="err" id="err-nueva"></div>
+    <button class="btn" type="button" id="b-nueva">Guardar y activar</button>
+  </div>
+
+  <div id="v-listo" hidden>
+    <p class="bien" id="p-listo"></p>
+    <p class="dato" id="p-detalle"></p>
+    <p class="nota">Ya puedes cerrar esta ventana.</p>
+  </div>
+
+  <div id="v-problema" hidden>
+    <p class="err" id="p-problema"></p>
+    <hr class="sep">
+    <p class="nota" id="p-quien"></p>
+    <button class="liga" type="button" id="b-otro-3">Entrar con otra cuenta</button>
+  </div>
+</div>
+
+<script>
+/* La activación por cuenta (contrato 0.20.0). La app abre esta página en una
+ * ventana propia; cuando la licencia queda activada, deja el token en
+ * `window.__t101_licencia` y cambia el fragmento a `#listo`. El cascarón de
+ * la app escucha ese cambio y lee el objeto.
+ *
+ * El token NO viaja en la dirección: una dirección se copia, se pega y se
+ * queda en registros. El fragmento sólo dice «listo». */
+const $ = (id) => document.getElementById(id);
+const P = new URLSearchParams(location.search);
+const PROGRAMA = (P.get('programa') || '').toLowerCase();
+const HUELLA = P.get('huella') || '';
+const VERSION = P.get('version') || '';
+const NOMBRE = P.get('app') || PROGRAMA || 'la app';
+
+const ERRORES = {
+  codigo_invalido: 'Ese código no es. Revisa tu correo y vuelve a intentar.',
+  clave_invalida: 'Esa contraseña no es.',
+  demasiados_intentos: 'Demasiados intentos. Espera un momento y vuelve a intentar.',
+  sin_permiso: 'Ese correo no tiene cuenta. Pídesela a quien te vendió la licencia.',
+  sin_sesion: 'Tu sesión terminó. Vuelve a entrar.',
+  datos_invalidos: 'Revisa lo que escribiste.',
+  correo_no_configurado: 'El envío de códigos no está disponible ahora. Intenta más tarde.',
+  google_no_configurado: 'Entrar con Google todavía no está prendido. Entra con tu correo.',
+  entrada_invalida: 'El boleto de Google ya no sirve. Vuelve a intentar.',
+  sin_respuesta: 'No hubo forma de llegar al servidor. Revisa tu conexión.',
+};
+
+async function pedir(ruta, cuerpo) {
+  let r;
+  try {
+    r = await fetch(ruta, {
+      method: cuerpo ? 'POST' : 'GET',
+      headers: cuerpo ? { 'Content-Type': 'application/json' } : undefined,
+      body: cuerpo ? JSON.stringify(cuerpo) : undefined,
+      credentials: 'same-origin',
+    });
+  } catch { throw Object.assign(new Error(ERRORES.sin_respuesta), { cual: 'sin_respuesta' }); }
+  let d = null;
+  try { d = await r.json(); } catch { /* no vino JSON */ }
+  if (!r.ok || !d?.ok) {
+    const cual = d?.error ?? 'sin_respuesta';
+    throw Object.assign(new Error(ERRORES[cual] ?? `Algo no salió bien (${cual}).`), { cual, detalle: d?.detalle });
+  }
+  return d.data;
+}
+
+const ver = (cual) => { for (const v of ['v-cargando','v-correo','v-clave','v-codigo','v-nueva','v-listo','v-problema']) $(v).hidden = v !== cual; };
+let correo = '';
+
+const diaLegible = (d) => {
+  if (!d) return 'sin fecha';
+  const [a, m, dd] = d.split('-');
+  const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  return `${Number(dd)} de ${meses[Number(m) - 1]} de ${a}`;
+};
+
+/** Ya hay sesión: se pide la licencia de este correo para este programa. */
+async function activar() {
+  ver('v-cargando');
+  let yo = null;
+  try { yo = await pedir('/yo'); } catch (e) { $('err-correo').textContent = e.message; ver('v-correo'); return; }
+
+  // Con Google ligado no se pide contraseña: Google ya es una forma de volver
+  // (contrato 0.17.2). Sólo a quien entró con código y no tiene ninguna.
+  if (!yo.tiene_clave && !yo.tiene_google && yo.entro_con === 'codigo') {
+    $('nueva').value = ''; $('nueva2').value = ''; $('err-nueva').textContent = '';
+    ver('v-nueva'); $('nueva').focus();
+    return;
+  }
+
+  try {
+    const r = await pedir('/licencias/mia', { programa: PROGRAMA, huella: HUELLA, version: VERSION || undefined });
+    $('p-listo').textContent = `Listo: ${NOMBRE} ya está activada.`;
+    $('p-detalle').textContent =
+      `${yo.usuario?.correo ?? correo} · ${r.licencia?.perpetua ? 'no vence' : `pagada hasta ${diaLegible(r.licencia?.paga_hasta)}`}`
+      + ` · equipo ${r.lugares?.usados} de ${r.lugares?.total}`;
+    ver('v-listo');
+    // La app escucha esto. El objeto va antes que el fragmento, para que
+    // cuando el cascarón despierte ya esté puesto.
+    window.__t101_licencia = { token: r.token, hasta: r.hasta, licencia: r.licencia, correo: yo.usuario?.correo ?? correo };
+    location.replace(`${location.pathname}${location.search}#listo`);
+  } catch (e) {
+    $('p-quien').textContent = `Entraste como ${yo.usuario?.correo ?? correo}.`;
+    $('p-problema').textContent =
+      e.cual === 'sin_licencia' ? `Esta cuenta no tiene licencia de ${NOMBRE}. Si la compraste con otro correo, entra con ése.`
+      : e.cual === 'sin_pago' ? `La licencia de ${NOMBRE} de esta cuenta no está al corriente${e.detalle?.paga_hasta ? ` (pagada hasta ${diaLegible(e.detalle.paga_hasta)})` : ''}.`
+      : e.cual === 'suspendida' ? `La licencia de ${NOMBRE} de esta cuenta está suspendida.`
+      : e.cual === 'sin_lugares' ? `Tu licencia permite ${e.detalle?.lugares} equipo(s) a la vez y ya están ocupados. Libera uno o pide más.`
+      : e.message;
+    ver('v-problema');
+  }
+}
+
+$('b-correo').onclick = () => {
+  $('err-correo').textContent = '';
+  const v = $('correo').value.trim();
+  if (!v) { $('err-correo').textContent = 'Escribe tu correo.'; return; }
+  correo = v;
+  $('p-clave').textContent = `La de tu cuenta, ${correo}.`;
+  $('clave').value = ''; $('err-clave').textContent = '';
+  ver('v-clave'); $('clave').focus();
+};
+$('correo').onkeydown = (e) => { if (e.key === 'Enter') $('b-correo').click(); };
+
+$('b-clave').onclick = async () => {
+  $('err-clave').textContent = '';
+  const v = $('clave').value;  // sin recortar: un espacio es parte de ella
+  if (!v) { $('err-clave').textContent = 'Escribe tu contraseña.'; return; }
+  $('b-clave').disabled = true;
+  try {
+    await pedir('/auth/entrar', { correo, clave: v });
+    await activar();
+  } catch (e) {
+    // «no tiene cuenta» y «contraseña equivocada» se dicen igual a propósito:
+    // distinguirlos diría qué correos tienen cuenta aquí.
+    $('err-clave').textContent = (e.cual === 'sin_permiso' || e.cual === 'clave_invalida')
+      ? 'Ese correo y esa contraseña no coinciden.' : e.message;
+    $('clave').value = '';
+  } finally { $('b-clave').disabled = false; }
+};
+$('clave').onkeydown = (e) => { if (e.key === 'Enter') $('b-clave').click(); };
+
+async function mandarCodigo(boton, donde) {
+  $(donde).textContent = '';
+  $(boton).disabled = true;
+  try {
+    await pedir('/auth/codigo', { correo });
+    $('p-codigo').textContent = `Te mandamos un código de 6 dígitos a ${correo}. Vence en 10 minutos.`;
+    $('codigo').value = ''; $('err-codigo').textContent = '';
+    ver('v-codigo'); $('codigo').focus();
+  } catch (e) { $(donde).textContent = e.message; }
+  finally { $(boton).disabled = false; }
+}
+$('b-olvide').onclick = () => mandarCodigo('b-olvide', 'err-clave');
+$('b-reenviar').onclick = () => mandarCodigo('b-reenviar', 'err-codigo');
+
+$('b-codigo').onclick = async () => {
+  $('err-codigo').textContent = '';
+  const v = $('codigo').value.replace(/\D/g, '');
+  if (v.length !== 6) { $('err-codigo').textContent = 'El código son 6 dígitos.'; return; }
+  $('b-codigo').disabled = true;
+  try { await pedir('/auth/entrar', { correo, codigo: v }); await activar(); }
+  catch (e) { $('err-codigo').textContent = e.message; $('codigo').value = ''; }
+  finally { $('b-codigo').disabled = false; }
+};
+$('codigo').onkeydown = (e) => { if (e.key === 'Enter') $('b-codigo').click(); };
+
+$('b-nueva').onclick = async () => {
+  $('err-nueva').textContent = '';
+  const a = $('nueva').value, c = $('nueva2').value;
+  if (a.length < 10) { $('err-nueva').textContent = 'La contraseña necesita al menos 10 caracteres.'; return; }
+  if (a !== c) {
+    $('err-nueva').textContent = 'No coincidieron. Vamos otra vez, desde el principio.';
+    $('nueva').value = ''; $('nueva2').value = ''; $('nueva').focus();
+    return;
+  }
+  $('b-nueva').disabled = true;
+  try { await pedir('/auth/clave', { clave: a }); await activar(); }
+  catch (e) {
+    $('err-nueva').textContent = e.detalle?.porque || e.message;
+    $('nueva').value = ''; $('nueva2').value = ''; $('nueva').focus();
+  } finally { $('b-nueva').disabled = false; }
+};
+$('nueva2').onkeydown = (e) => { if (e.key === 'Enter') $('b-nueva').click(); };
+
+const otroCorreo = async () => {
+  try { await pedir('/auth/salir', {}); } catch { /* si no había sesión, da igual */ }
+  correo = '';
+  for (const x of ['err-correo','err-clave','err-codigo','err-nueva']) $(x).textContent = '';
+  ver('v-correo'); $('correo').focus();
+};
+$('b-otro').onclick = otroCorreo;
+$('b-otro-2').onclick = otroCorreo;
+$('b-otro-3').onclick = otroCorreo;
+
+$('b-google').onclick = () => {
+  // `volver_a` es una ruta de aquí mismo, con los mismos parámetros: al
+  // volver, la página se encuentra con sesión y activa sola.
+  location.href = `/auth/google?volver_a=${encodeURIComponent(location.pathname + location.search)}`;
+};
+
+(async () => {
+  $('titulo').textContent = `Activar ${NOMBRE}`;
+  if (!PROGRAMA || !HUELLA) {
+    $('p-problema').textContent = 'Esta pantalla la abre la app con los datos de tu equipo. Ábrela desde la app.';
+    $('p-quien').textContent = '';
+    ver('v-problema');
+    return;
+  }
+  const u = new URL(location.href);
+  const entrada = u.searchParams.get('entrada');
+  if (entrada) {
+    // Boleto de Google: se canjea una sola vez y se limpia la dirección.
+    u.searchParams.delete('entrada');
+    history.replaceState(null, '', u.toString());
+    try { await pedir('/auth/canje', { entrada }); } catch (e) { $('err-correo').textContent = e.message; ver('v-correo'); return; }
+  }
+  await activar();
+})();
+</script>
+</body>
+</html>
