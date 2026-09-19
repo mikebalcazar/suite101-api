@@ -327,10 +327,12 @@ rutas.all('/:o/quell/*', async (c) => {
   cabeceras.set('x-org', org_id);
   cabeceras.set('x-sitio', c.req.header('X-Sitio') || '');
   const usuario = await usuarioPorId(c.env, s.usuario_id);
-  cabeceras.set('x-sesion', JSON.stringify({
+  // Codificada: una cabecera sólo lleva ASCII, y un nombre con ñ o acento la
+  // rompe en el navegador y saca un aviso en workerd. El objeto la decodifica.
+  cabeceras.set('x-sesion', encodeURIComponent(JSON.stringify({
     correo: s.correo, nombre: usuario?.nombre ?? null, superadmin: s.superadmin,
     quien: { clase: quien.clase, rol: quien.rol, usuario_id: quien.usuario_id },
-  }));
+  })));
 
   // El cuerpo se lee entero antes de pasarlo: si el motor contesta sin leer
   // (un 403 temprano), un flujo a medias deja «can't read from request

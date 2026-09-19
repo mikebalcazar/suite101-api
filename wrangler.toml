@@ -44,6 +44,17 @@ database_id = "PENDIENTE"
 binding = "QUELL_R2"
 bucket_name = "bitacora-obra-files"
 
+# La D1 y el bucket viejos de roster101 (el portal de Taller 101): sólo los lee
+# la mudanza (POST /admin/mudar-roster). El id es el de siempre, no un secreto.
+[[d1_databases]]
+binding = "ROSTER_D1"
+database_name = "t101-trabajadores"
+database_id = "64afff63-bbb7-424d-8d25-1d440af2b840"
+
+[[r2_buckets]]
+binding = "ROSTER_R2"
+bucket_name = "t101-documentos"
+
 # Las migraciones del OrgDB se importan como texto: el Durable Object las
 # aplica al despertar y a runtime no hay disco del que leerlas.
 [[rules]]
@@ -53,7 +64,7 @@ fallthrough = true
 
 [vars]
 ENTORNO = "produccion"
-API_VERSION = "0.16.0"
+API_VERSION = "0.17.0"
 CORREO_REMITENTE = "Suite 101 <acceso@envios.taller101.mx>"
 CORREO_SUPERADMIN = "mike@forespot.com"
 # Origenes con permiso de CORS. La cookie va con SameSite=None, asi que aqui no
@@ -66,6 +77,7 @@ ORIGENES = "https://conta-master.netlify.app,https://cuenta-taller101.netlify.ap
 URL_PUBLICA = "https://suite101-api.mike-929.workers.dev"
 URL_PANEL_DIRECTOR = "https://workshop101.mike-929.workers.dev"
 CORREO_QUELL = "quell101 <bitacora@envios.taller101.mx>"
+CORREO_ROSTER = "roster101 <expedientes@envios.taller101.mx>"
 
 # ─────────────── staging ───────────────
 # Mismo codigo, otra base y otro bucket. Aqui ENTORNO no es "produccion", asi
@@ -103,10 +115,11 @@ fallthrough = true
 
 [env.staging.vars]
 ENTORNO = "staging"
-API_VERSION = "0.16.0"
+API_VERSION = "0.17.0"
 CORREO_REMITENTE = "Suite 101 <acceso@envios.taller101.mx>"
 CORREO_SUPERADMIN = "mike@forespot.com"
 ORIGENES = "*"
 URL_PUBLICA = "https://suite101-api-staging.mike-929.workers.dev"
 URL_PANEL_DIRECTOR = "https://workshop101-staging.mike-929.workers.dev"
 CORREO_QUELL = "quell101 <bitacora@envios.taller101.mx>"
+CORREO_ROSTER = "roster101 <expedientes@envios.taller101.mx>"

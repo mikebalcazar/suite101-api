@@ -15,6 +15,7 @@ import admin from './rutas/admin';
 import licencias from './rutas/licencias';
 import importar, { paginaImportar } from './rutas/importar';
 import mudanza from './rutas/mudanza';
+import roster from './rutas/roster';
 import { err, ok, type Vars } from './http';
 import type { Env } from './entorno';
 import { VERSION_CONTRATO } from '../schema/tipos';
@@ -99,6 +100,13 @@ app.get('/', (c) =>
 app.get('/yo', yo);
 app.route('/auth', auth);
 app.route('/orgs', orgs);
+
+/* roster101 (0.17.0): la puerta de los expedientes. Es aparte de /orgs porque
+ * el trabajador entra sin cuenta en la suite —su correo y un código— y esa
+ * puerta exige sesión para todo. Aquí la sesión de la suite es opcional: si
+ * viene y le toca, el motor abre el panel de la empresa; si no, sólo abre lo
+ * del trabajador con su propia cookie. */
+app.route('/roster', roster);
 
 /* La página del importador va ANTES del router de /admin, que exige sesión
  * para todo lo que cuelga de él. Quien abre esta página todavía no ha entrado

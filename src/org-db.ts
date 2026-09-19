@@ -19,8 +19,11 @@ import conciliaciones from '../migrations/org/0003_conciliaciones.sql';
 import folios from '../migrations/org/0004_folios.sql';
 import ajustes from '../migrations/org/0005_ajustes.sql';
 import quell from '../migrations/org/0006_quell.sql';
+import roster from '../migrations/org/0007_roster.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
+import { atender as atenderRoster, type DatosEmpresaRoster, type SesionRoster } from './roster/motor.js';
 import { invitarClienteEnSuite } from './clientes';
+import { secretoDe } from './maestro';
 import type { Quien } from './http';
 import { DEFS, type Def, type Tipo } from './tablas';
 import { ahora, normalizar, ulid } from './lib';
@@ -36,7 +39,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster];
 
 /** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
  *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
@@ -117,6 +120,11 @@ export interface ApiOrgDB {
   /** Puerta de servicio: mete las filas de quell101 tal cual (misma llave, misma
    *  fecha). Sólo la usa POST /admin/mudar-quell. `seco` deshace al final. */
   importarQuell(args: { filas: Record<string, Fila[]>; seco: boolean }): Promise<{ antes: Record<string, number>; despues: Record<string, number>; escritas: Record<string, number> }>;
+  /** Cuántas filas hay en cada tabla de roster101. Para master101 y para medir la mudanza. */
+  conteosRoster(): Promise<Record<string, number>>;
+  /** Puerta de servicio: mete las filas de roster101 tal cual. Sólo la usa
+   *  POST /admin/mudar-roster. `seco` deshace al final. */
+  importarRoster(args: { filas: Record<string, Fila[]>; seco: boolean }): Promise<{ antes: Record<string, number>; despues: Record<string, number>; escritas: Record<string, number> }>;
   fetch(req: Request): Promise<Response>;
 }
 
@@ -141,6 +149,34 @@ export function baseSobreSql(sql: SqlStorage): BaseQuell {
   return {
     prepare(q: string) { const sin = arma(q, []); return { ...sin, bind: (...args: unknown[]) => arma(q, args) }; },
     async batch(stmts) { const out: unknown[] = []; for (const st of stmts) out.push(await st.run()); return out; },
+  };
+}
+
+/** Una cabecera que viajó codificada (encodeURIComponent) del Worker al
+ *  objeto, porque una cabecera sólo lleva ASCII. Tolera la forma vieja. */
+function cabeceraJson<T>(valor: string | null, siNo: T): T {
+  if (!valor) return siNo;
+  let texto = valor;
+  try { texto = decodeURIComponent(valor); } catch { /* venía sin codificar */ }
+  try { return JSON.parse(texto) as T; } catch { return siNo; }
+}
+
+/** Las tablas de roster101 (0007) en el orden en que se pueden insertar. Los
+ *  códigos de acceso se cuentan pero no se mudan: valen diez minutos. */
+export const TABLAS_ROSTER = [
+  'roster_trabajadores', 'roster_documentos', 'roster_consentimientos', 'roster_papelera', 'roster_bitacora',
+  'roster_administradores', 'roster_codigos',
+] as const;
+
+/** El bucket de la suite con el prefijo de una app dentro de una empresa:
+ *  el motor de roster101 guarda llaves relativas (`trabajadores/{id}/…`) y
+ *  todas caen bajo `orgs/{org}/roster/`. */
+function bucketConPrefijo(b: R2Bucket, prefijo: string) {
+  return {
+    get: (k: string) => b.get(prefijo + k),
+    head: (k: string) => b.head(prefijo + k),
+    put: (k: string, cuerpo: ArrayBuffer | Uint8Array | ReadableStream, o?: R2PutOptions) => b.put(prefijo + k, cuerpo as ArrayBuffer, o),
+    delete: (k: string) => b.delete(prefijo + k),
   };
 }
 
@@ -1028,26 +1064,36 @@ export class OrgDB extends DurableObject<Env> {
     return { filas: this.contarFilas(), sumas: this.sumarDinero() };
   }
 
-  conteosQuell(): Record<string, number> {
+  conteosQuell(): Record<string, number> { return this.contarTablas(TABLAS_QUELL); }
+  conteosRoster(): Record<string, number> { return this.contarTablas(TABLAS_ROSTER); }
+
+  private contarTablas(tablas: readonly string[]): Record<string, number> {
     const out: Record<string, number> = {};
-    for (const t of TABLAS_QUELL) out[t] = (this.sql.exec(`SELECT COUNT(*) AS n FROM ${t}`).one() as { n: number }).n;
+    for (const t of tablas) out[t] = (this.sql.exec(`SELECT COUNT(*) AS n FROM ${t}`).one() as { n: number }).n;
     return out;
   }
 
-  /* ─────────────── puerta de servicio: la mudanza de quell101 ───────────────
-   * Trae las filas tal cual venían de la D1 de quell101: mismas llaves, mismas
-   * fechas, mismo orden de inserción que las llaves foráneas. Escribe por
-   * llave (INSERT OR REPLACE), así que correrla dos veces no duplica. `seco`
-   * hace todo dentro de una transacción y la deshace al final. Sólo la alcanza
-   * POST /admin/mudar-quell (superadmin). */
+  /* ─────────────── puerta de servicio: las mudanzas ───────────────
+   * Trae las filas tal cual venían de la D1 vieja de una app: mismas llaves,
+   * mismas fechas, mismo orden de inserción que las llaves foráneas. Escribe
+   * por llave (upsert), así que correrla dos veces no duplica. `seco` hace
+   * todo dentro de una transacción y la deshace al final. Sólo las alcanzan
+   * POST /admin/mudar-quell y POST /admin/mudar-roster (superadmin). */
   importarQuell(args: { filas: Record<string, Fila[]>; seco: boolean }): { antes: Record<string, number>; despues: Record<string, number>; escritas: Record<string, number> } {
-    const antes = this.conteosQuell();
+    return this.importarTablas(TABLAS_QUELL, args);
+  }
+  importarRoster(args: { filas: Record<string, Fila[]>; seco: boolean }): { antes: Record<string, number>; despues: Record<string, number>; escritas: Record<string, number> } {
+    return this.importarTablas(TABLAS_ROSTER, args);
+  }
+
+  private importarTablas(tablas: readonly string[], args: { filas: Record<string, Fila[]>; seco: boolean }): { antes: Record<string, number>; despues: Record<string, number>; escritas: Record<string, number> } {
+    const antes = this.contarTablas(tablas);
     const escritas: Record<string, number> = {};
     let despues = antes;
     class Deshacer extends Error {}
     try {
       this.ctx.storage.transactionSync(() => {
-        for (const tabla of TABLAS_QUELL) {
+        for (const tabla of tablas) {
           const filas = args.filas[tabla] ?? [];
           for (const fila of filas) {
             const cols = Object.keys(fila);
@@ -1064,7 +1110,7 @@ export class OrgDB extends DurableObject<Env> {
           }
           escritas[tabla] = filas.length;
         }
-        despues = this.conteosQuell();
+        despues = this.contarTablas(tablas);
         if (args.seco) throw new Deshacer('seco');
       });
     } catch (e) {
@@ -1147,7 +1193,7 @@ export class OrgDB extends DurableObject<Env> {
     // app y quién viene, y lo manda en cabeceras. Aquí corre el motor de la
     // bitácora sobre el SQLite de esta empresa.
     if (url.pathname === '/quell' || url.pathname.startsWith('/quell/')) {
-      const sesion = JSON.parse(req.headers.get('x-sesion') || 'null') as SesionQuell | null;
+      const sesion = cabeceraJson<SesionQuell | null>(req.headers.get('x-sesion'), null);
       if (!sesion) return new Response(JSON.stringify({ error: 'no autorizado' }), { status: 401, headers: { 'content-type': 'application/json' } });
       const org = req.headers.get('x-org') || '';
       const e = this.env;
@@ -1166,6 +1212,37 @@ export class OrgDB extends DurableObject<Env> {
         INVITAR_EN_SUITE: (correo: string, nombre: string) =>
           invitarClienteEnSuite(e, org, { ...sesion.quien, negocios: [], ve_dinero: true, ve_costos: true } as Quien, this as unknown as ApiOrgDB, 'quell101', correo, nombre),
       }, url, url.pathname);
+    }
+    // roster101: igual que quell101, pero la sesión de la suite puede venir
+    // vacía: el trabajador entra con su propia cookie, que el motor firma y
+    // verifica con el secreto de la suite. Los datos de la empresa (nombre,
+    // razón social…) vienen de su Worker en `x-roster`.
+    if (url.pathname === '/roster' || url.pathname.startsWith('/roster/')) {
+      const sesion = cabeceraJson<SesionRoster | null>(req.headers.get('x-sesion'), null);
+      const org = req.headers.get('x-org') || '';
+      const datos = cabeceraJson<DatosEmpresaRoster>(req.headers.get('x-roster'), {});
+      let nombreOrg = 'la empresa';
+      try { nombreOrg = decodeURIComponent(req.headers.get('x-empresa') || '') || nombreOrg; } catch { /* venía sin codificar */ }
+      const e = this.env;
+      const interna = new URL(url.toString());
+      interna.pathname = url.pathname.replace(/^\/roster/, '') || '/';
+      const peticion = new Request(interna.toString(), req);
+      return atenderRoster(peticion, {
+        DB: baseSobreSql(this.sql),
+        DOCS: bucketConPrefijo(e.ARCHIVOS, `orgs/${org}/roster/`),
+        SESION: sesion,
+        SECRETO: await secretoDe(e),
+        RESEND_API_KEY: e.RESEND_API_KEY,
+        CORREO_SALE: e.ENTORNO === 'produccion' || e.CORREO_DE_VERDAD === '1',
+        EMPRESA: datos.empresa || nombreOrg,
+        RAZON_SOCIAL: datos.razon_social || datos.empresa || nombreOrg,
+        DOMICILIO: datos.domicilio || '',
+        CORREO_PRIVACIDAD: datos.correo_privacidad || datos.correo_avisos || '',
+        CORREO_AVISOS: datos.correo_avisos || '',
+        CORREO_REMITENTE: datos.correo_remitente || e.CORREO_ROSTER || 'roster101 <expedientes@envios.taller101.mx>',
+        AVISO_VERSION: datos.aviso_version || '1',
+        PORTAL_VERSION: datos.version || '',
+      }, { waitUntil: (p: Promise<unknown>) => this.ctx.waitUntil(p) });
     }
     if (req.headers.get('Upgrade') !== 'websocket') return new Response('solo websocket', { status: 426 });
     const par = new WebSocketPair();
