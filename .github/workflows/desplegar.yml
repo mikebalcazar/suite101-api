@@ -98,13 +98,8 @@ jobs:
             echo "$id"
           }
           PROD_ID=$(crear_base suite101-master)
-          # La D1 vieja de quell101, sólo para la mudanza. Existe desde el 4-sep;
-          # si no existiera, crear_base la crearía vacía y la mudanza no tendría
-          # nada que traer, que es lo correcto en una cuenta nueva.
-          QUELL_ID=$(crear_base bitacora-obra)
           STAG_ID=$(crear_base suite101-master-staging)
           echo "prod_id=$PROD_ID" >> "$GITHUB_OUTPUT"
-          echo "quell_id=$QUELL_ID" >> "$GITHUB_OUTPUT"
           echo "stag_id=$STAG_ID" >> "$GITHUB_OUTPUT"
 
           npx wrangler r2 bucket create suite101 || echo "el bucket suite101 ya estaba"
@@ -117,7 +112,7 @@ jobs:
           import os, pathlib, re
           p = pathlib.Path('wrangler.toml')
           t = p.read_text()
-          ids = [os.environ['PROD_ID'], os.environ['QUELL_ID'], os.environ['STAG_ID']]  # en el orden en que aparecen
+          ids = [os.environ['PROD_ID'], os.environ['STAG_ID']]  # en el orden en que aparecen
           i = iter(ids)
           t = re.sub(r'database_id = "PENDIENTE"', lambda m: f'database_id = "{next(i)}"', t)
           p.write_text(t)
@@ -125,7 +120,6 @@ jobs:
           grep -n 'database_id' wrangler.toml | sed 's/= ".\{8\}.*/= "…(puesto)"/'
         env:
           PROD_ID: ${{ steps.infra.outputs.prod_id }}
-          QUELL_ID: ${{ steps.infra.outputs.quell_id }}
           STAG_ID: ${{ steps.infra.outputs.stag_id }}
 
       - name: Aplicar las migraciones del D1

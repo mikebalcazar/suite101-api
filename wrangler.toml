@@ -33,38 +33,16 @@ new_sqlite_classes = ["OrgDB"]
 binding = "ARCHIVOS"
 bucket_name = "suite101"
 
-# La D1 y el bucket viejos de quell101: sólo los lee la mudanza (POST
-# /admin/mudar-quell). Se quitan cuando la mudanza quede atrás.
-[[d1_databases]]
-binding = "QUELL_D1"
-database_name = "bitacora-obra"
-database_id = "PENDIENTE"
-
-[[r2_buckets]]
-binding = "QUELL_R2"
-bucket_name = "bitacora-obra-files"
-
-# La D1 y el bucket viejos de roster101 (el portal de Taller 101): sólo los lee
-# la mudanza (POST /admin/mudar-roster). El id es el de siempre, no un secreto.
-[[d1_databases]]
-binding = "ROSTER_D1"
-database_name = "t101-trabajadores"
-database_id = "64afff63-bbb7-424d-8d25-1d440af2b840"
-
-[[r2_buckets]]
-binding = "ROSTER_R2"
-bucket_name = "t101-documentos"
-
 # Las migraciones del OrgDB se importan como texto: el Durable Object las
 # aplica al despertar y a runtime no hay disco del que leerlas.
 [[rules]]
 type = "Text"
-globs = ["migrations/org/*.sql", "src/importar/*.html", "pruebas/*.sql"]
+globs = ["migrations/org/*.sql", "src/importar/*.html"]
 fallthrough = true
 
 [vars]
 ENTORNO = "produccion"
-API_VERSION = "0.17.2"
+API_VERSION = "0.18.0"
 CORREO_REMITENTE = "Suite 101 <acceso@envios.taller101.mx>"
 CORREO_SUPERADMIN = "mike@forespot.com"
 # Origenes con permiso de CORS. La cookie va con SameSite=None, asi que aqui no
@@ -110,12 +88,12 @@ bucket_name = "suite101-staging"
 
 [[env.staging.rules]]
 type = "Text"
-globs = ["migrations/org/*.sql", "src/importar/*.html", "pruebas/*.sql"]
+globs = ["migrations/org/*.sql", "src/importar/*.html"]
 fallthrough = true
 
 [env.staging.vars]
 ENTORNO = "staging"
-API_VERSION = "0.17.2"
+API_VERSION = "0.18.0"
 CORREO_REMITENTE = "Suite 101 <acceso@envios.taller101.mx>"
 CORREO_SUPERADMIN = "mike@forespot.com"
 ORIGENES = "*"
