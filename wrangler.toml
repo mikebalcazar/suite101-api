@@ -42,7 +42,7 @@ fallthrough = true
 
 [vars]
 ENTORNO = "produccion"
-API_VERSION = "0.18.0"
+API_VERSION = "0.19.0"
 CORREO_REMITENTE = "Suite 101 <acceso@envios.taller101.mx>"
 CORREO_SUPERADMIN = "mike@forespot.com"
 # Origenes con permiso de CORS. La cookie va con SameSite=None, asi que aqui no
@@ -93,7 +93,7 @@ fallthrough = true
 
 [env.staging.vars]
 ENTORNO = "staging"
-API_VERSION = "0.18.0"
+API_VERSION = "0.19.0"
 CORREO_REMITENTE = "Suite 101 <acceso@envios.taller101.mx>"
 CORREO_SUPERADMIN = "mike@forespot.com"
 ORIGENES = "*"
