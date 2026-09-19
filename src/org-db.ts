@@ -20,6 +20,8 @@ import folios from '../migrations/org/0004_folios.sql';
 import ajustes from '../migrations/org/0005_ajustes.sql';
 import quell from '../migrations/org/0006_quell.sql';
 import roster from '../migrations/org/0007_roster.sql';
+import ordenes from '../migrations/org/0008_ordenes.sql';
+import fiscal from '../migrations/org/0009_fiscal.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { atender as atenderRoster, type DatosEmpresaRoster, type SesionRoster } from './roster/motor.js';
 import { invitarClienteEnSuite } from './clientes';
@@ -39,7 +41,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal];
 
 /** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
  *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
@@ -119,6 +121,32 @@ export interface ApiOrgDB {
   conteosQuell(): Promise<Record<string, number>>;
   /** Cuántas filas hay en cada tabla de roster101. Para master101 y para medir la mudanza. */
   conteosRoster(): Promise<Record<string, number>>;
+  /* Órdenes de compra (0008). Los permisos los resuelve el Worker; aquí sólo
+   * viven las reglas que son verdad de la base —una orden pagada no se vuelve
+   * a pagar— y lo que tiene que pasar todo o nada. */
+  personalDeUsuario(usuario_id: string): Promise<Fila | null>;
+  asegurarPersonal(args: { usuario_id: string; nombre: string; correo?: string | null }): Promise<Fila>;
+  esContador(usuario_id: string): Promise<boolean>;
+  marcarContador(args: { personal_id: string; valor: boolean; quien_usuario_id: string; quien_nombre?: string | null }): Promise<Fila | null>;
+  crearOrden(args: Record<string, unknown>): Promise<Fila | { error: string; detalle?: unknown }>;
+  misOrdenes(usuario_id: string): Promise<Fila[]>;
+  buzon(hoy?: string): Promise<{ filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number }>;
+  verOrden(id: string): Promise<{ orden: Fila; eventos: Fila[]; archivos: Fila[] } | null>;
+  pagarOrden(args: Record<string, unknown>): Promise<{ ok: true; orden: Fila; movimiento: Fila; partida_id: string | null } | { error: string; detalle?: unknown }>;
+  resolverOrden(args: { id: string; que: 'devuelta' | 'rechazada'; nota: string; quien_usuario_id: string; quien_nombre?: string | null }): Promise<Fila | { error: string; detalle?: unknown }>;
+  corregirOrden(args: { id: string; quien_usuario_id: string; quien_nombre?: string | null; cambios: Record<string, unknown> }): Promise<Fila | { error: string; detalle?: unknown }>;
+
+  /* Contabilidad fiscal (0009). Una sola lista de movimientos; la fiscal es
+   * la misma filtrada por `facturado`. */
+  crearCfdi(args: Record<string, unknown>): Promise<Fila | { error: string; detalle?: unknown }>;
+  ligarCfdi(args: { cfdi_id: string; movimiento_id: string; monto_aplicado?: number }): Promise<{ ok: true; cfdi: Fila; movimiento: Fila; aplicado_total: number } | { error: string; detalle?: unknown }>;
+  cancelarCfdi(id: string): Promise<Fila | { error: string }>;
+  marcarFacturado(args: Record<string, unknown>): Promise<Fila | { error: string; detalle?: unknown }>;
+  ivaDelMes(desde: string, hasta: string): Promise<{ desde: string; hasta: string; trasladado: number; acreditable: number; retenciones: number; a_enterar: number; facturas: { emitidas: number; recibidas: number; canceladas: number } }>;
+  facturadoVsReal(desde: string, hasta: string): Promise<{ desde: string; hasta: string; ingresos: { total: number; facturado: number; fuera: number }; egresos: { total: number; facturado: number; fuera: number } }>;
+  pendientesDeFactura(): Promise<Fila[]>;
+  listaCfdi(args: { desde?: string; hasta?: string; tipo?: string; estado?: string }): Promise<Fila[]>;
+
   fetch(req: Request): Promise<Response>;
 }
 
@@ -1065,6 +1093,553 @@ export class OrgDB extends DurableObject<Env> {
     const out: Record<string, number> = {};
     for (const t of tablas) out[t] = (this.sql.exec(`SELECT COUNT(*) AS n FROM ${t}`).one() as { n: number }).n;
     return out;
+  }
+
+
+  /* ─────────────── órdenes de compra (0008) ───────────────
+   * Encargo de dash101 del 19-sep. Lo que está aquí adentro y no en el Worker
+   * es lo que tiene que pasar TODO O NADA: pagar una orden crea el egreso,
+   * la liga, deja el evento y recalcula los cachés del proyecto. Un solo hilo
+   * por empresa, así que aquí no hay carreras ni transacciones distribuidas.
+   *
+   * Los permisos NO están aquí: se resuelven en el Worker, antes de llegar
+   * (§7). Lo que sí está es la regla de negocio —una orden pagada no se
+   * vuelve a pagar—, porque eso no es un permiso: es la verdad de la base.
+   */
+
+  /** La fila de `personal` de un usuario de la suite, si la tiene. Un socio o
+   *  la oficina pueden no estar en `personal` y aun así pedir compras. */
+  personalDeUsuario(usuario_id: string): Fila | null {
+    const f = this.sql.exec(`SELECT * FROM personal WHERE usuario_id = ? LIMIT 1`, usuario_id).toArray()[0];
+    return (f as Fila) ?? null;
+  }
+
+  /* Las tablas de 0008 y 0009 NO están en DEFS: no salen por el CRUD
+   * genérico, así que `obtener()` no las conoce (usa DEFS para saber qué
+   * columna es booleana o JSON). Este lector hace lo mismo para ellas, y de
+   * paso deja dicho qué columnas son 0/1 en SQLite y true/false hacia
+   * afuera: una pantalla que recibe `1` y espera `true` pinta la casilla al
+   * revés, y eso no truena, sólo miente. */
+  private static readonly BOOLS_INTERNAS: Record<string, readonly string[]> = {
+    ordenes: ['con_factura', 'urgente'],
+  };
+
+  private filaInterna(tabla: string, f: Fila | undefined | null): Fila | null {
+    if (!f) return null;
+    const bools = OrgDB.BOOLS_INTERNAS[tabla] ?? [];
+    const out: Fila = { ...f };
+    for (const b of bools) if (out[b] !== undefined && out[b] !== null) out[b] = out[b] === 1 || out[b] === true;
+    return out;
+  }
+
+  private leerInterna(tabla: string, id: string): Fila | null {
+    return this.filaInterna(tabla, this.sql.exec(`SELECT * FROM ${tabla} WHERE id = ?`, id).toArray()[0] as Fila | undefined);
+  }
+
+  private leerInternas(tabla: string, filas: Fila[]): Fila[] {
+    return filas.map((f) => this.filaInterna(tabla, f)!);
+  }
+
+  /** La fila de `personal` de un usuario, creándola si no la tiene.
+   *
+   *  Hace falta porque «contador» es una etiqueta de `personal` y hay gente
+   *  de la empresa que NO está en `personal`: esa tabla la llenan roster101 y
+   *  quell101, y una empresa que sólo usa dash101 no tiene ninguna fila. Sin
+   *  esto, la decisión de Mike —«se le asigna a cualquier miembro, y el dueño
+   *  y el administrador se marcan los dos»— no se podría cumplir en la mitad
+   *  de las empresas.
+   *
+   *  Crea lo mínimo: nombre, correo y el enlace al usuario. No inventa
+   *  puesto ni permisos de otras apps. */
+  asegurarPersonal(args: { usuario_id: string; nombre: string; correo?: string | null }): Fila {
+    const ya = this.sql.exec(`SELECT * FROM personal WHERE usuario_id = ? LIMIT 1`, args.usuario_id).toArray()[0];
+    if (ya) return ya as Fila;
+    const id = ulid();
+    this.sql.exec(
+      `INSERT INTO personal (id, nombre, nombre_norm, correo, activo, usuario_id, creado_en_app, creado_at)
+       VALUES (?,?,?,?,1,?,'dash101',?)`,
+      id, args.nombre, normalizar(args.nombre), args.correo ?? null, args.usuario_id, ahora(),
+    );
+    return this.obtener('personal', id)!;
+  }
+
+  /** ¿Este usuario puede pagar? Lo dice su etiqueta, no su rol. */
+  esContador(usuario_id: string): boolean {
+    const f = this.sql
+      .exec(`SELECT es_contador FROM personal WHERE usuario_id = ? LIMIT 1`, usuario_id)
+      .toArray()[0] as { es_contador: number } | undefined;
+    return !!f && f.es_contador === 1;
+  }
+
+  /** Enciende o apaga la etiqueta de contador y lo deja apuntado. Quién puede
+   *  llamarla lo decide el Worker (sólo el dueño). */
+  marcarContador(args: { personal_id: string; valor: boolean; quien_usuario_id: string; quien_nombre?: string | null }): Fila | null {
+    const persona = this.sql.exec(`SELECT id, nombre FROM personal WHERE id = ?`, args.personal_id).toArray()[0] as Fila | undefined;
+    if (!persona) return null;
+    this.sql.exec(`UPDATE personal SET es_contador = ? WHERE id = ?`, args.valor ? 1 : 0, args.personal_id);
+    this.apuntarOrden({
+      orden_id: null,
+      que: 'contador',
+      quien_usuario_id: args.quien_usuario_id,
+      quien_nombre: args.quien_nombre ?? null,
+      sobre_personal_id: args.personal_id,
+      nota: args.valor ? `${persona.nombre} ya puede pagar órdenes` : `${persona.nombre} ya no puede pagar órdenes`,
+    });
+    return this.obtener('personal', args.personal_id);
+  }
+
+  private apuntarOrden(e: {
+    orden_id: string | null; que: string; quien_usuario_id: string;
+    quien_nombre?: string | null; sobre_personal_id?: string | null; nota?: string | null;
+  }): void {
+    this.sql.exec(
+      `INSERT INTO orden_eventos (id, orden_id, que, quien_usuario_id, quien_nombre, sobre_personal_id, nota, ts)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      ulid(), e.orden_id, e.que, e.quien_usuario_id, e.quien_nombre ?? null,
+      e.sobre_personal_id ?? null, e.nota ?? null, ahora(),
+    );
+  }
+
+  /** El desglose: se captura el TOTAL y la suite lo separa.
+   *
+   *  Se parte del total hacia atrás —subtotal = total / (1 + tasa)— y el IVA
+   *  es la resta, nunca otra multiplicación. Así `subtotal + iva` da el total
+   *  exacto siempre, sin un peso perdido por redondeo. $1,160 al 16 % da
+   *  1 000 00 y 160 00, que es justo lo que pidió la prueba del encargo.
+   *
+   *  Sin factura NO se inventa un desglose: subtotal es el total y el IVA es
+   *  cero, para que la suma siga cuadrando y nada entre al IVA del mes. */
+  private desglosar(monto: number, con_factura: boolean, tasa: number, dados?: { subtotal?: number; iva?: number }):
+    { subtotal: number; iva: number; tasa_iva: number } | { error: string } {
+    if (!con_factura) return { subtotal: monto, iva: 0, tasa_iva: 0 };
+    if (dados && (dados.subtotal !== undefined || dados.iva !== undefined)) {
+      const subtotal = Math.round(Number(dados.subtotal ?? 0));
+      const iva = Math.round(Number(dados.iva ?? 0));
+      if (subtotal < 0 || iva < 0) return { error: 'desglose_negativo' };
+      if (subtotal + iva !== monto) return { error: 'desglose_no_cuadra' };
+      return { subtotal, iva, tasa_iva: subtotal > 0 ? Math.round((iva * 10000) / subtotal) : 0 };
+    }
+    const t = Number.isFinite(tasa) && tasa >= 0 ? Math.round(tasa) : 1600;
+    const subtotal = Math.round((monto * 10000) / (10000 + t));
+    return { subtotal, iva: monto - subtotal, tasa_iva: t };
+  }
+
+  crearOrden(args: {
+    negocio_id: string; solicitante_usuario_id: string; solicitante_id?: string | null;
+    solicitante_correo?: string | null; solicitante_nombre?: string | null;
+    proveedor_id?: string | null; proveedor_nombre?: string | null;
+    proyecto_id?: string | null; partida_id?: string | null;
+    concepto: string; monto: number; moneda?: string;
+    con_factura?: boolean; subtotal?: number; iva?: number; tasa_iva?: number;
+    fecha_maxima_pago?: string | null; urgente?: boolean;
+  }): Fila | { error: string; detalle?: unknown } {
+    const monto = Math.round(Number(args.monto));
+    if (!Number.isFinite(monto) || monto <= 0) return { error: 'monto_invalido' };
+    if (!String(args.concepto ?? '').trim()) return { error: 'falta_concepto' };
+    const d = this.desglosar(monto, !!args.con_factura, Number(args.tasa_iva ?? 1600), { subtotal: args.subtotal, iva: args.iva });
+    if ('error' in d) return { error: d.error, detalle: { monto, subtotal: args.subtotal, iva: args.iva } };
+
+    const id = ulid();
+    const folio = `OC-${String(this.apartarNumero('OC')).padStart(6, '0')}`;
+    const t = ahora();
+    this.sql.exec(
+      `INSERT INTO ordenes (id, negocio_id, folio, solicitante_usuario_id, solicitante_id, solicitante_correo,
+        solicitante_nombre, proveedor_id, proveedor_nombre, proyecto_id, partida_id, concepto, monto, moneda,
+        con_factura, subtotal, iva, tasa_iva, fecha_maxima_pago, urgente, estado, creado_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'en_buzon',?)`,
+      id, args.negocio_id, folio, args.solicitante_usuario_id, args.solicitante_id ?? null,
+      args.solicitante_correo ?? null, args.solicitante_nombre ?? null,
+      args.proveedor_id ?? null, args.proveedor_nombre ?? null,
+      args.proyecto_id ?? null, args.partida_id ?? null,
+      String(args.concepto).trim(), monto, args.moneda ?? 'MXN',
+      args.con_factura ? 1 : 0, d.subtotal, d.iva, d.tasa_iva,
+      args.fecha_maxima_pago ?? null, args.urgente ? 1 : 0, t,
+    );
+    this.apuntarOrden({
+      orden_id: id, que: 'creada', quien_usuario_id: args.solicitante_usuario_id,
+      quien_nombre: args.solicitante_nombre ?? null, nota: `${args.concepto} · ${args.proveedor_nombre ?? 'sin proveedor'}`,
+    });
+    this.avisar({ t: 'orden.nueva', id, folio, monto } as unknown as Aviso, 'dinero');
+    return this.leerInterna('ordenes', id)!;
+  }
+
+  /** Lo que ve quien pidió: SÓLO lo suyo. El filtro va aquí y no en la
+   *  pantalla; una pantalla que filtra es una pantalla que se puede saltar. */
+  misOrdenes(usuario_id: string): Fila[] {
+    const filas = this.sql
+      .exec(`SELECT * FROM ordenes WHERE solicitante_usuario_id = ? ORDER BY creado_at DESC`, usuario_id)
+      .toArray() as Fila[];
+    return this.leerInternas('ordenes', filas);
+  }
+
+  /** El buzón del contador: lo que vence primero, arriba. Las que ya vencieron
+   *  van antes que todo, que es como se lee una bandeja de pagos. */
+  buzon(hoy?: string): { filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number } {
+    const dia = (hoy ?? ahora()).slice(0, 10);
+    const filas = this.leerInternas('ordenes', this.sql
+      .exec(`SELECT * FROM ordenes WHERE estado = 'en_buzon'
+             ORDER BY (fecha_maxima_pago IS NULL), fecha_maxima_pago ASC, creado_at ASC`)
+      .toArray() as Fila[]);
+    const enOchoDias = new Date(Date.parse(`${dia}T00:00:00Z`) + 7 * 86400000).toISOString().slice(0, 10);
+    let total = 0, semana = 0, vencidas = 0;
+    for (const f of filas) {
+      const m = Number(f.monto || 0);
+      total += m;
+      const v = f.fecha_maxima_pago ? String(f.fecha_maxima_pago) : null;
+      if (v && v < dia) { vencidas++; semana += m; } else if (v && v <= enOchoDias) semana += m;
+    }
+    return { filas, total, vence_esta_semana: semana, vencidas };
+  }
+
+  /** Una orden con toda su historia y sus archivos. */
+  verOrden(id: string): { orden: Fila; eventos: Fila[]; archivos: Fila[] } | null {
+    const orden = this.leerInterna('ordenes', id);
+    if (!orden) return null;
+    return {
+      orden,
+      eventos: this.sql.exec(`SELECT * FROM orden_eventos WHERE orden_id = ? ORDER BY ts`, id).toArray() as Fila[],
+      archivos: this.sql.exec(`SELECT * FROM archivos WHERE de_tabla = 'ordenes' AND de_id = ? ORDER BY creado_at`, id).toArray() as Fila[],
+    };
+  }
+
+  /** Pagar: TODO O NADA.
+   *
+   *  Crea el egreso, lo liga, deja el evento, recalcula los cachés del
+   *  proyecto y de la partida, y deja la orden en `pagada`. Si algo truena a
+   *  la mitad no queda ni medio egreso.
+   *
+   *  Una orden que no está en el buzón NO se paga: es lo que impide el doble
+   *  egreso cuando alguien pica dos veces o se le va el dedo en el celular. */
+  pagarOrden(args: {
+    id: string; cuenta_id: string; fecha?: string; quien_usuario_id: string; quien_nombre?: string | null;
+    nota?: string | null; crear_partida?: boolean;
+  }): { ok: true; orden: Fila; movimiento: Fila; partida_id: string | null } | { error: string; detalle?: unknown } {
+    const orden = this.leerInterna('ordenes', args.id);
+    if (!orden) return { error: 'no_encontrado' };
+    if (orden.estado !== 'en_buzon') return { error: 'orden_no_esta_en_buzon', detalle: { estado: orden.estado } };
+    const cuenta = this.sql.exec(`SELECT id FROM cuentas WHERE id = ?`, String(args.cuenta_id)).toArray()[0];
+    if (!cuenta) return { error: 'cuenta_desconocida', detalle: { cuenta_id: args.cuenta_id } };
+
+    const mov_id = ulid();
+    const t = ahora();
+    const fecha = (args.fecha ?? t).slice(0, 10);
+    let partida_id = orden.partida_id ? String(orden.partida_id) : null;
+
+    this.ctx.storage.transactionSync(() => {
+      /* Con proyecto y sin partida que le quede, se crea la partida por el
+       * monto de la orden. El `compromiso` del proyecto sube ese monto una
+       * sola vez, porque lo recalcula `recalcularProyecto` sumando partidas.
+       * Con partida existente NO se toca `monto_acordado`: ya estaba
+       * comprometido, y subirlo lo contaría dos veces. */
+      if (orden.proyecto_id && !partida_id && args.crear_partida !== false) {
+        partida_id = ulid();
+        this.sql.exec(
+          `INSERT INTO partidas (id, proyecto_id, proveedor_id, proveedor_nombre, concepto, monto_acordado, creado_at)
+           VALUES (?,?,?,?,?,?,?)`,
+          partida_id, orden.proyecto_id, orden.proveedor_id ?? null, orden.proveedor_nombre ?? null,
+          orden.concepto, Number(orden.monto), t,
+        );
+        this.sql.exec(`UPDATE ordenes SET partida_id = ? WHERE id = ?`, partida_id, args.id);
+      }
+
+      this.sql.exec(
+        `INSERT INTO movimientos (id, negocio_id, tipo, monto, fecha, cuenta_id, proyecto_id,
+          contraparte_tipo, contraparte_id, contraparte_nombre, descripcion, categoria, creado_por, creado_at,
+          facturado, subtotal, iva, tasa_iva)
+         VALUES (?,?,'egreso',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        mov_id, orden.negocio_id, Number(orden.monto), fecha, args.cuenta_id, orden.proyecto_id ?? null,
+        orden.proveedor_id ? 'proveedor' : 'otro', orden.proveedor_id ?? null, orden.proveedor_nombre ?? null,
+        `${orden.folio} · ${orden.concepto}`, 'orden_de_compra', args.quien_usuario_id, t,
+        /* `facturado` arranca en 0 aunque la orden diga «con factura»: la
+         * marca dice que YA LLEGÓ el CFDI, no que se espera. La factura casi
+         * siempre llega después, y es justo lo que persigue la lista de
+         * pendientes de factura. */
+        0, Number(orden.subtotal ?? 0), Number(orden.iva ?? 0), Number(orden.tasa_iva ?? 0),
+      );
+      this.sql.exec(
+        `UPDATE ordenes SET estado = 'pagada', movimiento_id = ?, pagada_at = ?, pagada_por = ?, actualizado_at = ? WHERE id = ?`,
+        mov_id, t, args.quien_usuario_id, t, args.id,
+      );
+      this.apuntarOrden({
+        orden_id: args.id, que: 'pagada', quien_usuario_id: args.quien_usuario_id,
+        quien_nombre: args.quien_nombre ?? null, nota: args.nota ?? null,
+      });
+    });
+
+    if (orden.proyecto_id) this.recalcularProyecto(String(orden.proyecto_id));
+    this.avisar({ t: 'orden.pagada', id: args.id, folio: orden.folio } as unknown as Aviso, 'dinero');
+    return {
+      ok: true,
+      orden: this.leerInterna('ordenes', args.id)!,
+      movimiento: this.obtener('movimientos', mov_id)!,
+      partida_id,
+    };
+  }
+
+  /** Devolver para corregir, o rechazar de plano. El motivo es obligatorio:
+   *  una orden que vuelve sin decir por qué se vuelve a mandar igual. */
+  resolverOrden(args: { id: string; que: 'devuelta' | 'rechazada'; nota: string; quien_usuario_id: string; quien_nombre?: string | null }):
+    Fila | { error: string; detalle?: unknown } {
+    const orden = this.leerInterna('ordenes', args.id);
+    if (!orden) return { error: 'no_encontrado' };
+    if (orden.estado !== 'en_buzon') return { error: 'orden_no_esta_en_buzon', detalle: { estado: orden.estado } };
+    if (!String(args.nota ?? '').trim()) return { error: 'falta_motivo' };
+    this.sql.exec(
+      `UPDATE ordenes SET estado = ?, nota_contador = ?, actualizado_at = ? WHERE id = ?`,
+      args.que, String(args.nota).trim(), ahora(), args.id,
+    );
+    this.apuntarOrden({
+      orden_id: args.id, que: args.que, quien_usuario_id: args.quien_usuario_id,
+      quien_nombre: args.quien_nombre ?? null, nota: String(args.nota).trim(),
+    });
+    return this.leerInterna('ordenes', args.id)!;
+  }
+
+  /** El solicitante corrige su orden devuelta y vuelve al buzón. MISMO folio y
+   *  toda su historia: una orden corregida no es otra orden. */
+  corregirOrden(args: {
+    id: string; quien_usuario_id: string; quien_nombre?: string | null;
+    cambios: Record<string, unknown>;
+  }): Fila | { error: string; detalle?: unknown } {
+    const orden = this.leerInterna('ordenes', args.id);
+    if (!orden) return { error: 'no_encontrado' };
+    if (orden.estado !== 'devuelta') return { error: 'orden_no_esta_devuelta', detalle: { estado: orden.estado } };
+
+    const c = args.cambios ?? {};
+    const monto = c.monto !== undefined ? Math.round(Number(c.monto)) : Number(orden.monto);
+    if (!Number.isFinite(monto) || monto <= 0) return { error: 'monto_invalido' };
+    const con_factura = c.con_factura !== undefined ? !!c.con_factura : orden.con_factura === 1;
+    const d = this.desglosar(monto, con_factura, Number(c.tasa_iva ?? orden.tasa_iva ?? 1600),
+      { subtotal: c.subtotal as number | undefined, iva: c.iva as number | undefined });
+    if ('error' in d) return { error: d.error };
+
+    const campos: Record<string, unknown> = {
+      monto, con_factura: con_factura ? 1 : 0, subtotal: d.subtotal, iva: d.iva, tasa_iva: d.tasa_iva,
+      estado: 'en_buzon', nota_contador: null, actualizado_at: ahora(),
+    };
+    for (const k of ['concepto', 'proveedor_id', 'proveedor_nombre', 'proyecto_id', 'partida_id', 'fecha_maxima_pago', 'urgente'] as const) {
+      if (c[k] !== undefined) campos[k] = k === 'urgente' ? (c[k] ? 1 : 0) : (c[k] as string | null);
+    }
+    const llaves = Object.keys(campos);
+    this.sql.exec(
+      `UPDATE ordenes SET ${llaves.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`,
+      ...(llaves.map((k) => campos[k]) as SqlStorageValue[]), args.id,
+    );
+    this.apuntarOrden({
+      orden_id: args.id, que: 'corregida', quien_usuario_id: args.quien_usuario_id,
+      quien_nombre: args.quien_nombre ?? null, nota: 'corregida y de vuelta al buzón',
+    });
+    return this.leerInterna('ordenes', args.id)!;
+  }
+
+
+  /* ─────────────── contabilidad fiscal (0009) ───────────────
+   * No hay dos contabilidades. Hay una lista de movimientos y cada uno dice
+   * si es fiscal. Lo de aquí es: capturar facturas, ligarlas a los pagos que
+   * ya existen, y sacar los tres números que se miran cada mes.
+   *
+   * Una advertencia que va también en la pantalla: esto ORDENA la información
+   * fiscal, no presenta declaraciones ni sustituye al contador. Los números
+   * salen de lo que se capture.
+   */
+
+  crearCfdi(args: {
+    negocio_id: string; uuid: string; rfc?: string | null; razon_social?: string | null;
+    tipo: 'ingreso' | 'egreso'; subtotal?: number; iva?: number; retenciones?: number; total?: number;
+    fecha: string; forma_pago?: string | null; creado_por: string;
+  }): Fila | { error: string; detalle?: unknown } {
+    const uuid = String(args.uuid ?? '').trim().toUpperCase();
+    if (!uuid) return { error: 'falta_uuid' };
+    if (args.tipo !== 'ingreso' && args.tipo !== 'egreso') return { error: 'tipo_invalido' };
+    if (!/^\d{4}-\d{2}-\d{2}/.test(String(args.fecha ?? ''))) return { error: 'fecha_invalida' };
+    // Capturar dos veces la misma factura es el error más fácil de cometer y
+    // el que más ensucia el IVA del mes. Se caza antes de escribir, para
+    // poder decir cuál es la que ya estaba.
+    const ya = this.sql.exec(`SELECT id, fecha FROM cfdi WHERE uuid = ?`, uuid).toArray()[0] as Fila | undefined;
+    if (ya) return { error: 'uuid_repetido', detalle: { uuid, ya_capturada: ya.id, fecha: ya.fecha } };
+
+    const n = (v: unknown) => Math.round(Number(v ?? 0)) || 0;
+    const subtotal = n(args.subtotal), iva = n(args.iva), retenciones = n(args.retenciones);
+    const total = args.total !== undefined ? n(args.total) : subtotal + iva - retenciones;
+    const id = ulid();
+    this.sql.exec(
+      `INSERT INTO cfdi (id, negocio_id, uuid, rfc, razon_social, tipo, subtotal, iva, retenciones, total,
+        fecha, forma_pago, estado, creado_por, creado_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'vigente',?,?)`,
+      id, args.negocio_id, uuid, args.rfc ?? null, args.razon_social ?? null, args.tipo,
+      subtotal, iva, retenciones, total, String(args.fecha).slice(0, 10), args.forma_pago ?? null,
+      args.creado_por, ahora(),
+    );
+    return this.leerInterna('cfdi', id)!;
+  }
+
+  /** Liga una factura a un pago que YA EXISTE, y con eso el movimiento se
+   *  vuelve fiscal. Éste es el camino que una segunda contabilidad no puede
+   *  recorrer: la factura casi siempre llega después del pago. */
+  ligarCfdi(args: { cfdi_id: string; movimiento_id: string; monto_aplicado?: number }):
+    { ok: true; cfdi: Fila; movimiento: Fila; aplicado_total: number } | { error: string; detalle?: unknown } {
+    const cfdi = this.leerInterna('cfdi', args.cfdi_id);
+    if (!cfdi) return { error: 'cfdi_desconocido' };
+    const mov = this.obtener('movimientos', args.movimiento_id);
+    if (!mov) return { error: 'movimiento_desconocido' };
+    const aplicado = args.monto_aplicado !== undefined
+      ? Math.round(Number(args.monto_aplicado))
+      : Math.min(Number(cfdi.total || 0), Number(mov.monto || 0));
+    if (!Number.isFinite(aplicado) || aplicado <= 0) return { error: 'monto_invalido' };
+
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(
+        `INSERT INTO cfdi_movimientos (cfdi_id, movimiento_id, monto_aplicado, creado_at) VALUES (?,?,?,?)
+         ON CONFLICT(cfdi_id, movimiento_id) DO UPDATE SET monto_aplicado = excluded.monto_aplicado`,
+        args.cfdi_id, args.movimiento_id, aplicado, ahora(),
+      );
+      /* El movimiento queda facturado. `uuid_cfdi` y `fecha_cfdi` se copian
+       * SÓLO cuando es la única factura de ese pago: con dos o más, un solo
+       * hueco no puede decir la verdad, y la verdad completa está en la
+       * tabla de liga. */
+      const cuantas = (this.sql
+        .exec(`SELECT COUNT(*) AS n FROM cfdi_movimientos WHERE movimiento_id = ?`, args.movimiento_id)
+        .one() as { n: number }).n;
+      if (cuantas === 1) {
+        this.sql.exec(
+          `UPDATE movimientos SET facturado = 1, uuid_cfdi = ?, fecha_cfdi = ?, subtotal = ?, iva = ?, retenciones = ? WHERE id = ?`,
+          cfdi.uuid, cfdi.fecha, Number(cfdi.subtotal || 0), Number(cfdi.iva || 0), Number(cfdi.retenciones || 0), args.movimiento_id,
+        );
+      } else {
+        this.sql.exec(`UPDATE movimientos SET facturado = 1, uuid_cfdi = NULL WHERE id = ?`, args.movimiento_id);
+      }
+    });
+
+    const aplicado_total = (this.sql
+      .exec(`SELECT COALESCE(SUM(monto_aplicado),0) AS s FROM cfdi_movimientos WHERE cfdi_id = ?`, args.cfdi_id)
+      .one() as { s: number }).s;
+    return { ok: true, cfdi: this.leerInterna('cfdi', args.cfdi_id)!, movimiento: this.obtener('movimientos', args.movimiento_id)!, aplicado_total };
+  }
+
+  /** Cancelar una factura. NO se borra: sale del IVA del mes y se queda a la
+   *  vista en su lista. Un renglón borrado es un hueco que nadie explica. */
+  cancelarCfdi(id: string): Fila | { error: string } {
+    const cfdi = this.leerInterna('cfdi', id);
+    if (!cfdi) return { error: 'cfdi_desconocido' };
+    const t = ahora();
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(`UPDATE cfdi SET estado = 'cancelada', cancelada_at = ?, actualizado_at = ? WHERE id = ?`, t, t, id);
+      // Los pagos que sólo esa factura respaldaba vuelven a estar sin
+      // facturar: el pago ocurrió, la factura ya no vale.
+      for (const l of this.sql.exec(`SELECT movimiento_id FROM cfdi_movimientos WHERE cfdi_id = ?`, id).toArray() as Fila[]) {
+        const vivas = (this.sql
+          .exec(`SELECT COUNT(*) AS n FROM cfdi_movimientos lm JOIN cfdi c ON c.id = lm.cfdi_id
+                 WHERE lm.movimiento_id = ? AND c.estado = 'vigente'`, l.movimiento_id)
+          .one() as { n: number }).n;
+        if (vivas === 0) {
+          this.sql.exec(`UPDATE movimientos SET facturado = 0, uuid_cfdi = NULL, fecha_cfdi = NULL WHERE id = ?`, l.movimiento_id);
+        }
+      }
+    });
+    return this.leerInterna('cfdi', id)!;
+  }
+
+  /** Marcar un movimiento como facturado a mano, con su desglose, sin capturar
+   *  el CFDI completo. Es la puerta rápida para lo que ya está conciliado. */
+  marcarFacturado(args: {
+    movimiento_id: string; facturado: boolean; subtotal?: number; iva?: number; tasa_iva?: number;
+    retenciones?: number; uuid_cfdi?: string | null; fecha_cfdi?: string | null; forma_pago?: string | null;
+  }): Fila | { error: string; detalle?: unknown } {
+    const mov = this.obtener('movimientos', args.movimiento_id);
+    if (!mov) return { error: 'movimiento_desconocido' };
+    if (!args.facturado) {
+      this.sql.exec(
+        `UPDATE movimientos SET facturado = 0, uuid_cfdi = NULL, fecha_cfdi = NULL WHERE id = ?`,
+        args.movimiento_id,
+      );
+      return this.obtener('movimientos', args.movimiento_id)!;
+    }
+    const monto = Number(mov.monto || 0);
+    const d = this.desglosar(monto, true, Number(args.tasa_iva ?? 1600), { subtotal: args.subtotal, iva: args.iva });
+    if ('error' in d) return { error: d.error, detalle: { monto } };
+    this.sql.exec(
+      `UPDATE movimientos SET facturado = 1, subtotal = ?, iva = ?, tasa_iva = ?, retenciones = ?,
+        uuid_cfdi = ?, fecha_cfdi = ?, forma_pago = COALESCE(?, forma_pago) WHERE id = ?`,
+      d.subtotal, d.iva, d.tasa_iva, Math.round(Number(args.retenciones ?? 0)) || 0,
+      args.uuid_cfdi ?? null, args.fecha_cfdi ?? null, args.forma_pago ?? null, args.movimiento_id,
+    );
+    return this.obtener('movimientos', args.movimiento_id)!;
+  }
+
+  /** El IVA del mes: lo que pagaste a proveedores contra lo que cobraste a
+   *  clientes, y la diferencia. Ese número decide cuánto enteras.
+   *
+   *  Sale de los CFDI vigentes, NO de los movimientos: el IVA se acredita con
+   *  la factura, y una factura puede cubrir varios pagos. Una cancelada no
+   *  cuenta, por eso el filtro de estado.
+   *
+   *  El acreditable resta las retenciones: lo que te retuvieron ya no lo
+   *  acreditas tú. Es una simplificación —aquí no se separa retención de IVA
+   *  de retención de ISR— y está dicha a propósito, porque el número vale lo
+   *  que valga lo capturado. */
+  ivaDelMes(desde: string, hasta: string): {
+    desde: string; hasta: string;
+    trasladado: number; acreditable: number; retenciones: number; a_enterar: number;
+    facturas: { emitidas: number; recibidas: number; canceladas: number };
+  } {
+    const d = String(desde).slice(0, 10), h = String(hasta).slice(0, 10);
+    const suma = (tipo: string) => this.sql
+      .exec(`SELECT COALESCE(SUM(iva),0) AS iva, COALESCE(SUM(retenciones),0) AS ret, COUNT(*) AS n
+             FROM cfdi WHERE estado = 'vigente' AND tipo = ? AND fecha >= ? AND fecha <= ?`, tipo, d, h)
+      .one() as { iva: number; ret: number; n: number };
+    const ing = suma('ingreso'), egr = suma('egreso');
+    const canceladas = (this.sql
+      .exec(`SELECT COUNT(*) AS n FROM cfdi WHERE estado = 'cancelada' AND fecha >= ? AND fecha <= ?`, d, h)
+      .one() as { n: number }).n;
+    const acreditable = egr.iva - egr.ret;
+    return {
+      desde: d, hasta: h,
+      trasladado: ing.iva, acreditable, retenciones: egr.ret,
+      a_enterar: ing.iva - acreditable,
+      facturas: { emitidas: ing.n, recibidas: egr.n, canceladas },
+    };
+  }
+
+  /** Lo facturado contra lo real. La diferencia es lo que anda fuera. */
+  facturadoVsReal(desde: string, hasta: string): {
+    desde: string; hasta: string;
+    ingresos: { total: number; facturado: number; fuera: number };
+    egresos: { total: number; facturado: number; fuera: number };
+  } {
+    const d = String(desde).slice(0, 10), h = String(hasta).slice(0, 10);
+    const lado = (tipo: string) => {
+      const r = this.sql
+        .exec(`SELECT COALESCE(SUM(monto),0) AS total,
+                      COALESCE(SUM(CASE WHEN facturado = 1 THEN monto ELSE 0 END),0) AS fact
+               FROM movimientos WHERE tipo = ? AND fecha >= ? AND fecha <= ?`, tipo, d, h)
+        .one() as { total: number; fact: number };
+      return { total: r.total, facturado: r.fact, fuera: r.total - r.fact };
+    };
+    return { desde: d, hasta: h, ingresos: lado('ingreso'), egresos: lado('egreso') };
+  }
+
+  /** Pagos que se hicieron esperando factura y cuyo CFDI todavía no llega. Es
+   *  la lista que hay que perseguir cada mes. */
+  pendientesDeFactura(): Fila[] {
+    return this.sql
+      .exec(`SELECT m.*, o.folio AS orden_folio, o.proveedor_nombre AS orden_proveedor
+             FROM movimientos m
+             JOIN ordenes o ON o.movimiento_id = m.id
+             WHERE o.con_factura = 1 AND m.facturado = 0
+             ORDER BY m.fecha`)
+      .toArray() as Fila[];
+  }
+
+  /** Las facturas de un rango, para la pantalla y para el reporte. */
+  listaCfdi(args: { desde?: string; hasta?: string; tipo?: string; estado?: string }): Fila[] {
+    const donde: string[] = [];
+    const vals: SqlStorageValue[] = [];
+    if (args.desde) { donde.push('fecha >= ?'); vals.push(String(args.desde).slice(0, 10)); }
+    if (args.hasta) { donde.push('fecha <= ?'); vals.push(String(args.hasta).slice(0, 10)); }
+    if (args.tipo) { donde.push('tipo = ?'); vals.push(args.tipo); }
+    if (args.estado) { donde.push('estado = ?'); vals.push(args.estado); }
+    const filtro = donde.length ? ` WHERE ${donde.join(' AND ')}` : '';
+    return this.leerInternas('cfdi', this.sql.exec(`SELECT * FROM cfdi${filtro} ORDER BY fecha DESC, creado_at DESC`, ...vals).toArray() as Fila[]);
   }
 
   /* ─────────────── pool para autocompletar (§7) ─────────────── */
