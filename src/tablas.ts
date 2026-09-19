@@ -69,9 +69,14 @@ export const DEFS: Record<Tabla, Def> = {
       ...IDENT, nombre: 'texto', nombre_norm: 'texto', correo: 'texto', puesto: 'texto', activo: 'bool',
       expediente_ref: 'texto', etapas_permitidas: 'json', ve_dinero: 'bool', estacion_default: 'texto',
       usuario_id: 'texto', creado_en_app: 'texto',
+      /* 0008 · quién puede PAGAR una orden de compra. No se reusa `ve_dinero`:
+       * ésa dice quién ve cifras. Se enciende sólo por POST
+       * /orgs/:o/ordenes/contadores, que exige ser dueño; por eso NO está en
+       * ESCRITORES.personal, o cualquiera con dash101 se marcaría solo. */
+      es_contador: 'bool',
     },
     requeridos: ['nombre'],
-    filtros: ['activo', 'usuario_id'],
+    filtros: ['activo', 'usuario_id', 'es_contador'],
     orden: 'nombre_norm',
   },
   estaciones: {
@@ -136,9 +141,15 @@ export const DEFS: Record<Tabla, Def> = {
       ...IDENT, negocio_id: 'texto', tipo: 'texto', monto: 'dinero', fecha: 'texto', cuenta_id: 'texto',
       proyecto_id: 'texto', item_id: 'texto', contraparte_tipo: 'texto', contraparte_id: 'texto',
       contraparte_nombre: 'texto', transfer_id: 'texto', descripcion: 'texto', categoria: 'texto', creado_por: 'texto',
+      /* Fiscal (0009). No hay dos contabilidades: la fiscal es esta misma
+       * lista filtrada por `facturado`. `tasa_iva` va en puntos base
+       * (1600 = 16.00 %), como entero: una tasa no es dinero, pero en REAL
+       * arrastra el mismo error de coma flotante. */
+      facturado: 'bool', subtotal: 'dinero', iva: 'dinero', tasa_iva: 'entero', retenciones: 'dinero',
+      uuid_cfdi: 'texto', fecha_cfdi: 'texto', forma_pago: 'texto',
     },
     requeridos: ['negocio_id', 'tipo', 'monto', 'fecha', 'cuenta_id'],
-    filtros: ['negocio_id', 'proyecto_id', 'item_id', 'cuenta_id', 'tipo'],
+    filtros: ['negocio_id', 'proyecto_id', 'item_id', 'cuenta_id', 'tipo', 'facturado'],
     orden: 'fecha',
     fecha: 'fecha',
   },

@@ -632,6 +632,63 @@ async function licencias() {
   rev(ya.estado === 404, 'y su clave ya no existe para la app', `${ya.estado} ${ya.error}`);
 }
 
+/* ─────────────── órdenes de compra y fiscal (0.21.0) ───────────────
+ * Lo mínimo que no se puede medir con vitest: que en staging de verdad la
+ * orden nazca en el buzón, que el pago cree UN egreso y no dos, y que la
+ * factura que llega después se cuelgue del movimiento que ya existe. */
+async function ordenesYFiscal() {
+  linea('');
+  linea('== Órdenes de compra y fiscal ==');
+  if (!galleta) {
+    const c = await pedir(STAGING, '/auth/codigo', { method: 'POST', body: { correo: CORREO } });
+    await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO, codigo: c.data?.codigo_prueba } });
+  }
+  const app = 'dash101';
+  const neg = await pedir(STAGING, `/orgs/${ORG}/negocios`, { app, method: 'POST', body: { nombre: 'Compras de humo' } });
+  const cta = await pedir(STAGING, `/orgs/${ORG}/cuentas`, { app, method: 'POST', body: { nombre: 'Banco OC', tipo: 'banco', negocio_id: neg.data?.id, saldo_inicial: 0 } });
+  if (neg.estado !== 201 || cta.estado !== 201) { rev(false, 'se pudo preparar negocio y cuenta', `${neg.estado}/${cta.estado}`); return; }
+
+  const yo = await pedir(STAGING, '/yo');
+  const marca = await pedir(STAGING, `/orgs/${ORG}/ordenes/contadores`, { app, method: 'POST', body: { usuario_id: yo.data?.usuario?.id, valor: true } });
+  rev(marca.estado === 200 && marca.data?.es_contador === true, 'el dueño se marca como contador y queda apuntado', `${marca.estado}`);
+
+  const oc = await pedir(STAGING, `/orgs/${ORG}/ordenes`, { app, method: 'POST', body: {
+    negocio_id: neg.data?.id, proveedor_nombre: 'Maderas de humo', concepto: 'Triplay',
+    monto: 116000, con_factura: true, fecha_maxima_pago: new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10),
+  } });
+  rev(oc.estado === 201 && oc.data?.estado === 'en_buzon', 'la orden nace en el buzón, sin autorización previa', `${oc.estado} ${oc.data?.folio ?? ''}`);
+  rev(oc.data?.subtotal === 100000 && oc.data?.iva === 16000, 'se captura el total y la suite lo separa', `${oc.data?.subtotal} + ${oc.data?.iva}`);
+
+  const buzon = await pedir(STAGING, `/orgs/${ORG}/ordenes/buzon`, { app });
+  rev(buzon.estado === 200 && (buzon.data?.filas || []).some((f) => f.id === oc.data?.id), 'sale en el buzón del contador', `${buzon.data?.filas?.length} por pagar`);
+
+  const pago = await pedir(STAGING, `/orgs/${ORG}/ordenes/${oc.data?.id}/pagar`, { app, method: 'POST', body: { cuenta_id: cta.data?.id } });
+  rev(pago.estado === 200 && pago.data?.orden?.estado === 'pagada', 'se paga y queda ligada al egreso', `${pago.estado}`);
+  rev(pago.data?.movimiento?.monto === 116000 && pago.data?.movimiento?.tipo === 'egreso', 'el egreso es por el monto exacto');
+  rev(pago.data?.correo?.enviado === false, 'el correo se encola pero NO sale fuera de producción', `${pago.data?.correo?.motivo}`);
+
+  const otra = await pedir(STAGING, `/orgs/${ORG}/ordenes/${oc.data?.id}/pagar`, { app, method: 'POST', body: { cuenta_id: cta.data?.id } });
+  rev(otra.estado === 409, 'la misma orden no se paga dos veces: nada de dobles egresos', `${otra.estado} ${otra.error ?? ''}`);
+
+  // La factura llega después del pago y se cuelga del movimiento que ya existe.
+  const uuid = `HUMO-${Date.now()}`;
+  const hoy = new Date().toISOString().slice(0, 10);
+  const cfdi = await pedir(STAGING, `/orgs/${ORG}/fiscal/cfdi`, { app, method: 'POST', body: {
+    negocio_id: neg.data?.id, uuid, tipo: 'egreso', subtotal: 100000, iva: 16000, total: 116000, fecha: hoy,
+  } });
+  rev(cfdi.estado === 201, 'se captura el CFDI', `${cfdi.estado} ${cfdi.error ?? ''}`);
+  const rep = await pedir(STAGING, `/orgs/${ORG}/fiscal/cfdi`, { app, method: 'POST', body: {
+    negocio_id: neg.data?.id, uuid, tipo: 'egreso', subtotal: 1, iva: 1, total: 2, fecha: hoy,
+  } });
+  rev(rep.estado === 409, 'el mismo UUID capturado dos veces se rechaza', `${rep.estado} ${rep.error ?? ''}`);
+
+  const liga = await pedir(STAGING, `/orgs/${ORG}/fiscal/cfdi/${cfdi.data?.id}/ligar`, { app, method: 'POST', body: { movimiento_id: pago.data?.movimiento?.id } });
+  rev(liga.estado === 200 && liga.data?.movimiento?.facturado === true, 'la factura que llega después se cuelga del pago que ya existía', `${liga.estado}`);
+
+  const iva = await pedir(STAGING, `/orgs/${ORG}/fiscal/iva?desde=${hoy}&hasta=${hoy}`, { app });
+  rev(iva.estado === 200 && iva.data?.acreditable === 16000, 'el IVA del mes lo toma', `acreditable ${iva.data?.acreditable}`);
+}
+
 async function importacion() {
   linea('');
   linea('== Importación (fase 2) ==');
@@ -842,6 +899,7 @@ try {
   await produccion();
   await recorrido();
   await licencias();
+  await ordenesYFiscal();
   await importacion();
 } catch (e) {
   fallas++;

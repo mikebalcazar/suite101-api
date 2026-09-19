@@ -13,7 +13,32 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.20.0 (la licencia se abre con tu cuenta:
+ * Versión del contrato: 0.21.0 (órdenes de compra y contabilidad fiscal, el
+ * encargo del chat de dash101 del 19-sep. Migraciones 0008 y 0009 del OrgDB.
+ *
+ * Órdenes: cualquiera de la empresa pide una compra y cae directa al buzón
+ * del contador —sin autorización previa—; al marcarla pagada se crea el
+ * egreso, se liga, se recalculan los cachés del proyecto y de la partida, y
+ * se le avisa por correo a quien la pidió. Todo eso en UNA transacción, y
+ * una orden que no está en el buzón no se paga: es lo que impide el doble
+ * egreso de un doble clic. `POST /orgs/:o/ordenes`, `GET` (sólo las mías),
+ * `/ordenes/buzon`, `/ordenes/:id/pagar|devolver|rechazar`, `PATCH` para
+ * corregir una devuelta (mismo folio, misma historia) y
+ * `/ordenes/contadores` para repartir la etiqueta, que sólo el dueño toca.
+ * El proyecto es opcional (gasto general); con proyecto se liga a una
+ * partida existente o se crea una nueva.
+ *
+ * Fiscal: NO hay dos contabilidades. Una sola lista de movimientos y cada
+ * uno dice si es `facturado`; la fiscal es esa lista filtrada. Tabla `cfdi`
+ * con UUID único por empresa y una liga con monto aplicado, porque un CFDI
+ * puede cubrir varios pagos y un pago varios CFDI. La factura casi siempre
+ * llega DESPUÉS del pago, y por eso se le cuelga al movimiento que ya
+ * existe. `GET /orgs/:o/fiscal/iva|cuadre|pendientes|cfdi` y sus POST.
+ *
+ * Las cuatro tablas nuevas NO salen por el CRUD genérico: un miembro tiene
+ * que ver sólo SUS órdenes, y ese filtro no se puede expresar ahí. `tasa_iva`
+ * va en puntos base (1600 = 16.00 %). Decisiones de Mike del 19-sep).
+ * Antes: 0.20.0 (la licencia se abre con tu cuenta:
  * `POST /licencias/mia {programa, huella, version}` activa, con la sesión de
  * la suite y SIN clave tecleada, la licencia que va con el correo de quien
  * entró. Devuelve el mismo token firmado que `/activar`, porque la regla de
@@ -129,7 +154,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.20.1';
+export const VERSION_CONTRATO = '0.21.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -689,6 +714,13 @@ export const TABLAS_INTERNAS = [
   // roster101 (0007): las usa el motor de los expedientes por /roster/:o/api/*.
   'roster_trabajadores', 'roster_documentos', 'roster_codigos', 'roster_bitacora', 'roster_consentimientos',
   'roster_papelera', 'roster_administradores',
+  /* Órdenes de compra y fiscal (0008 y 0009). NO salen por el CRUD genérico, y
+   * es a propósito: el CRUD genérico entrega la tabla entera a quien puede
+   * leerla, y aquí un miembro tiene que ver SÓLO SUS órdenes (decisión de
+   * Mike). Ese filtro no se puede expresar en el CRUD, así que estas cuatro
+   * se atienden por /orgs/:o/ordenes/* y /orgs/:o/fiscal/*, donde el permiso
+   * se resuelve renglón por renglón. */
+  'ordenes', 'orden_eventos', 'cfdi', 'cfdi_movimientos',
 ] as const;
 
 /* ─────────────── lo que devuelven las rutas con nombre ─────────────── */
