@@ -13,7 +13,19 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.18.0 (se van las dos mudanzas: `POST
+ * Versión del contrato: 0.19.0 (el tipo de licencia y lo perpetuo, que son
+ * dos cosas: `suscripciones.tipo` dice de dónde salió —cortesia, suite101,
+ * stripe, appstore— y la columna que se llamaba `cortesia` ahora se llama
+ * `perpetua`, que es lo que siempre quiso decir: sin fecha de corte. Así una
+ * perpetua comprada en la App Store sigue contando como de App Store al
+ * filtrar, que es justo lo que se perdía con una sola lista. `GET /licencias`
+ * filtra por `tipo`, `programa`, `correo` y `vigentes=1`, y devuelve
+ * `por_tipo` con cuántas hay de cada uno SIN el filtro de tipo puesto, para
+ * pintar los botones. Un tipo fuera de la lista es 400, no una lista vacía.
+ * `POST /licencias/:id/pago` con `origen: 'stripe'` pone `tipo = 'stripe'`
+ * solo, para que el día de la pasarela la lista se llene sin que nadie la
+ * toque; un pago a mano no cambia el tipo. Decisión de Mike del 19-sep, con
+ * botones). Antes: 0.18.0 (se van las dos mudanzas: `POST
  * /admin/mudar-quell` y `POST /admin/mudar-roster` ya no existen, y con ellas
  * los enlaces a la D1 y al bucket viejos de cada app (`QUELL_D1`, `QUELL_R2`,
  * `ROSTER_D1`, `ROSTER_R2`). Las dos ya se corrieron en producción el 19-sep
@@ -103,12 +115,34 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.18.0';
+export const VERSION_CONTRATO = '0.19.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
 export type EstadoSuscripcion = 'activa' | 'suspendida';
 export type OrigenPago = 'manual' | 'stripe';
+
+/** De dónde salió la licencia. NO dice si vence: eso es `perpetua`, aparte,
+ *  para que una perpetua comprada en la App Store siga contando como de App
+ *  Store al filtrar (decisión de Mike, 19-sep-2026, con botones).
+ *
+ *  · cortesia — regalada, no la pagó nadie.
+ *  · suite101 — va incluida en lo que la empresa ya paga por la suite.
+ *  · stripe   — la cobró la pasarela.
+ *  · appstore — la cobró la tienda de Apple (para cuando haya versión de Mac).
+ *
+ *  Es una lista cerrada a propósito: un tipo escrito a mano («Stripe», «strype»)
+ *  rompe el filtro sin avisar. Agregar uno es una línea aquí y otra en la API. */
+export const TIPOS_LICENCIA = ['cortesia', 'suite101', 'stripe', 'appstore'] as const;
+export type TipoLicencia = (typeof TIPOS_LICENCIA)[number];
+
+/** Cómo se llama cada tipo en pantalla. */
+export const NOMBRE_TIPO_LICENCIA: Record<TipoLicencia, string> = {
+  cortesia: 'Cortesía',
+  suite101: 'Incluida en suite101',
+  stripe: 'Pago por Stripe',
+  appstore: 'App Store',
+};
 
 export interface Suscripcion {
   id: string;
@@ -122,8 +156,12 @@ export interface Suscripcion {
   lugares: number;
   estado: EstadoSuscripcion;
   origen: OrigenPago;
-  /** 1 = regalo sin fecha de corte. */
-  cortesia: 0 | 1;
+  /** De dónde salió: cortesía, incluida en suite101, Stripe o App Store. */
+  tipo: TipoLicencia;
+  /** 1 = no vence nunca. Hasta 0.18.0 esta columna se llamaba `cortesia`, que
+   *  era el nombre equivocado: siempre significó «sin fecha de corte», y una
+   *  perpetua puede estar pagada. Lo regalado lo dice `tipo`. */
+  perpetua: 0 | 1;
   /** 'AAAA-MM-DD', último día pagado. null = nunca ha pagado. */
   paga_hasta: string | null;
   notas: string | null;

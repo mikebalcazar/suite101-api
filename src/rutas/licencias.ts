@@ -11,8 +11,15 @@
  *     llama Mike a mano.
  *
  * Lo que Mike decidió el 18-sep-2026 (con botones): pago a mano por ahora y
- * preparado para Stripe; cortesías sin fecha; sin periodo de prueba; un lugar
- * por suscripción, ajustable por cliente.
+ * preparado para Stripe; licencias sin fecha de corte; sin periodo de prueba;
+ * un lugar por suscripción, ajustable por cliente.
+ *
+ * Y el 19-sep-2026, también con botones: el TIPO (de dónde salió: cortesía,
+ * incluida en suite101, Stripe, App Store) y lo PERPETUO (si vence o no) son
+ * dos cosas distintas, no una lista sola. Así una perpetua comprada en la App
+ * Store sigue saliendo al filtrar por App Store. La columna que antes se
+ * llamaba `cortesia` ahora se llama `perpetua`, que es lo que siempre quiso
+ * decir.
  *
  * Todo lo que cambia una suscripción deja renglón en `bitacora_licencias`.
  */
@@ -25,7 +32,8 @@ import { soySuper } from './admin';
 import {
   CLAVE_FORMA, DIA, abrirToken, cargaDe, claveNueva, firmarToken, hastaDe, idNuevo, llavePublica, normalizaClave, vigencia,
 } from '../licencias';
-import type { Activacion, EstadoSuscripcion, OrigenPago, RenglonBitacoraLicencia, Suscripcion } from '../../schema/tipos';
+import { TIPOS_LICENCIA } from '../../schema/tipos';
+import type { Activacion, EstadoSuscripcion, OrigenPago, RenglonBitacoraLicencia, Suscripcion, TipoLicencia } from '../../schema/tipos';
 
 const rutas = new Hono<{ Bindings: Env; Variables: Vars }>();
 
@@ -51,7 +59,7 @@ const huellaValida = (h: unknown): h is string => typeof h === 'string' && /^[A-
 const versionDe = (v: unknown): string | null => (typeof v === 'string' && v.length <= 40 ? v : null);
 
 /** Lo que se le cuenta a la app de su licencia: sin correo ni notas. */
-const paraLaApp = (s: Suscripcion) => ({ id: s.id, programa: s.programa, cliente: s.cliente, plan: s.plan, lugares: s.lugares, cortesia: s.cortesia === 1, paga_hasta: s.paga_hasta });
+const paraLaApp = (s: Suscripcion) => ({ id: s.id, programa: s.programa, cliente: s.cliente, plan: s.plan, lugares: s.lugares, tipo: s.tipo, perpetua: s.perpetua === 1, paga_hasta: s.paga_hasta });
 
 /* ─────────────── lo que usa la app ─────────────── */
 
@@ -147,13 +155,51 @@ rutas.use('/*', async (c, next) => {
 });
 const quien = (c: Ctx) => c.get('sesion').correo;
 
-const conVigencia = (s: Suscripcion) => ({ ...s, cortesia: (s.cortesia ? 1 : 0) as 0 | 1, vigente: vigencia(s).vigente });
+const conVigencia = (s: Suscripcion) => ({ ...s, perpetua: (s.perpetua ? 1 : 0) as 0 | 1, vigente: vigencia(s).vigente });
 
+/* La lista, con filtros. Los tres primeros los resuelve SQLite; `vigentes` no,
+ * porque ser vigente depende de la fecha de hoy y de `estado`, y eso ya lo
+ * decide `vigencia()` en un solo lugar. Repetir esa regla en un WHERE sería
+ * tener dos definiciones de «vigente» que algún día no coinciden.
+ *
+ *   ?tipo=cortesia|suite101|stripe|appstore
+ *   ?programa=draw101
+ *   ?correo=quien@ejemplo.mx   (exacto, normalizado)
+ *   ?vigentes=1                (sólo las que hoy dejan entrar)
+ *
+ * Un tipo que no está en la lista es 400, no una lista vacía: pedir
+ * `?tipo=strype` y que conteste «no hay ninguna» se lee como que no vendiste
+ * nada, y es mentira. */
 rutas.get('/', async (c) => {
-  const filas = (await c.env.MASTER.prepare(`SELECT * FROM suscripciones ORDER BY creado_at DESC`).all<Suscripcion>()).results;
+  const q = c.req.query();
+  const donde: string[] = [];
+  const args: unknown[] = [];
+  if (q.tipo !== undefined && q.tipo !== '') {
+    if (!(TIPOS_LICENCIA as readonly string[]).includes(q.tipo)) {
+      return err(c, 'datos_invalidos', 400, { campo: 'tipo', vale: TIPOS_LICENCIA });
+    }
+    donde.push('tipo = ?'); args.push(q.tipo);
+  }
+  if (q.programa) { donde.push('programa = ?'); args.push(q.programa.trim().toLowerCase()); }
+  if (q.correo) { donde.push('correo = ?'); args.push(normalizaCorreo(q.correo)); }
+  const filtro = donde.length ? ` WHERE ${donde.join(' AND ')}` : '';
+
+  const filas = (await c.env.MASTER.prepare(`SELECT * FROM suscripciones${filtro} ORDER BY creado_at DESC`).bind(...args).all<Suscripcion>()).results;
   const conteo = (await c.env.MASTER.prepare(`SELECT suscripcion_id AS sid, COUNT(*) AS n FROM activaciones WHERE activa = 1 GROUP BY suscripcion_id`).all<{ sid: string; n: number }>()).results;
   const activas = new Map(conteo.map((r) => [r.sid, r.n]));
-  return ok(c, { total: filas.length, filas: filas.map((s) => ({ ...conVigencia(s), activaciones: activas.get(s.id) ?? 0 })) });
+  let salida = filas.map((s) => ({ ...conVigencia(s), activaciones: activas.get(s.id) ?? 0 }));
+  const soloVigentes = q.vigentes === '1' || q.vigentes === 'true';
+  if (soloVigentes) salida = salida.filter((s) => s.vigente);
+
+  /* Cuántas hay de cada tipo, SIN el filtro de tipo puesto: es lo que le
+   * pinta los botones del filtro a master101, y si se contara ya filtrado
+   * todos dirían cero menos el escogido. */
+  const porTipo = (await c.env.MASTER.prepare(`SELECT tipo, COUNT(*) AS n FROM suscripciones GROUP BY tipo`).all<{ tipo: string; n: number }>()).results;
+  return ok(c, {
+    total: salida.length,
+    filas: salida,
+    por_tipo: Object.fromEntries(TIPOS_LICENCIA.map((t) => [t, porTipo.find((r) => r.tipo === t)?.n ?? 0])),
+  });
 });
 
 /** Lo que se puede escribir de una suscripción, validado campo por campo. */
@@ -191,9 +237,15 @@ function leerCampos(b: Record<string, unknown>, sobre: Partial<Suscripcion> = {}
     if (b.estado !== 'activa' && b.estado !== 'suspendida') return { error: 'datos_invalidos', detalle: { campo: 'estado' } };
     cambios.estado = b.estado as EstadoSuscripcion;
   }
-  if (b.cortesia !== undefined) {
-    if (typeof b.cortesia !== 'boolean' && b.cortesia !== 0 && b.cortesia !== 1) return { error: 'datos_invalidos', detalle: { campo: 'cortesia' } };
-    cambios.cortesia = b.cortesia === true || b.cortesia === 1 ? 1 : 0;
+  if (b.tipo !== undefined) {
+    if (!(TIPOS_LICENCIA as readonly string[]).includes(String(b.tipo))) {
+      return { error: 'datos_invalidos', detalle: { campo: 'tipo', vale: TIPOS_LICENCIA } };
+    }
+    cambios.tipo = b.tipo as TipoLicencia;
+  }
+  if (b.perpetua !== undefined) {
+    if (typeof b.perpetua !== 'boolean' && b.perpetua !== 0 && b.perpetua !== 1) return { error: 'datos_invalidos', detalle: { campo: 'perpetua' } };
+    cambios.perpetua = b.perpetua === true || b.perpetua === 1 ? 1 : 0;
   }
   if (b.paga_hasta !== undefined) {
     if (b.paga_hasta === null || b.paga_hasta === '') cambios.paga_hasta = null;
@@ -223,17 +275,20 @@ rutas.post('/', async (c) => {
     lugares: ch.lugares ?? 1,
     estado: ch.estado ?? 'activa',
     origen: 'manual',
-    cortesia: ch.cortesia ?? 0,
+    // Quien da de alta a mano regala, salvo que diga otra cosa: por eso el
+    // tipo por omisión es cortesía y no Stripe, que nadie cobra desde aquí.
+    tipo: ch.tipo ?? 'cortesia',
+    perpetua: ch.perpetua ?? 0,
     paga_hasta: ch.paga_hasta ?? null,
     notas: ch.notas ?? null,
     creado_at: t,
     actualizado_at: t,
   };
   await c.env.MASTER.prepare(
-    `INSERT INTO suscripciones (id, clave, programa, cliente, correo, plan, lugares, estado, origen, cortesia, paga_hasta, notas, creado_at, actualizado_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-  ).bind(s.id, s.clave, s.programa, s.cliente, s.correo, s.plan, s.lugares, s.estado, s.origen, s.cortesia, s.paga_hasta, s.notas, s.creado_at, s.actualizado_at).run();
-  await apunta(c.env, { suscripcion_id: s.id, quien: quien(c), accion: 'crear', detalle: { cliente: s.cliente, programa: s.programa, lugares: s.lugares, cortesia: s.cortesia, paga_hasta: s.paga_hasta } });
+    `INSERT INTO suscripciones (id, clave, programa, cliente, correo, plan, lugares, estado, origen, tipo, perpetua, paga_hasta, notas, creado_at, actualizado_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  ).bind(s.id, s.clave, s.programa, s.cliente, s.correo, s.plan, s.lugares, s.estado, s.origen, s.tipo, s.perpetua, s.paga_hasta, s.notas, s.creado_at, s.actualizado_at).run();
+  await apunta(c.env, { suscripcion_id: s.id, quien: quien(c), accion: 'crear', detalle: { cliente: s.cliente, programa: s.programa, lugares: s.lugares, tipo: s.tipo, perpetua: s.perpetua, paga_hasta: s.paga_hasta } });
   return ok(c, { ...conVigencia(s), activaciones: 0 }, 201);
 });
 
@@ -275,8 +330,14 @@ rutas.post('/:id/pago', async (c) => {
   }
   const origen: OrigenPago = b.origen === 'stripe' ? 'stripe' : 'manual';
   const referencia = typeof b.referencia === 'string' ? b.referencia.slice(0, 120) : null;
-  await c.env.MASTER.prepare(`UPDATE suscripciones SET paga_hasta = ?, origen = ?, actualizado_at = ? WHERE id = ?`).bind(b.hasta, origen, ahora(), s.id).run();
-  await apunta(c.env, { suscripcion_id: s.id, quien: quien(c), accion: 'pago', detalle: { antes: s.paga_hasta, hasta: b.hasta, origen, referencia } });
+  /* Si el que cobró fue Stripe, la licencia ES de Stripe: el tipo se pone
+   * solo, que es lo que Mike pidió («que se llene automático cuando
+   * implementemos el pago por Stripe»). Un pago marcado a mano NO cambia el
+   * tipo: una cortesía a la que alguien le apunta una fecha sigue siendo
+   * cortesía hasta que se diga lo contrario a propósito. */
+  const tipo = origen === 'stripe' ? 'stripe' : s.tipo;
+  await c.env.MASTER.prepare(`UPDATE suscripciones SET paga_hasta = ?, origen = ?, tipo = ?, actualizado_at = ? WHERE id = ?`).bind(b.hasta, origen, tipo, ahora(), s.id).run();
+  await apunta(c.env, { suscripcion_id: s.id, quien: quien(c), accion: 'pago', detalle: { antes: s.paga_hasta, hasta: b.hasta, origen, tipo, referencia } });
   const nueva = (await porId(c.env, s.id))!;
   return ok(c, { ...conVigencia(nueva), activaciones: await ocupados(c.env, s.id) });
 });

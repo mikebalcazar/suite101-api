@@ -1858,12 +1858,13 @@ describe('17 · la sesión la decide quién entra, no con qué entró (contrato 
   });
 });
 
-describe('18 · licencias por suscripción (contrato 0.13.0)', () => {
+describe('18 · licencias por suscripción (0.13.0; tipo y perpetua desde 0.19.0)', () => {
   const HUELLA_A = 'maquina-a-0123456789abcdef';
   const HUELLA_B = 'maquina-b-0123456789abcdef';
   const dia = (desplaza: number) => new Date(Date.now() + desplaza * 86400000).toISOString().slice(0, 10);
   let publica = '';
-  let cortesia: any = null;
+  let perpetua: any = null;
+  let conTipo: any = null;
   let pagada: any = null;
   let tokenA = '';
   let galletaSuper = '';
@@ -1932,23 +1933,24 @@ describe('18 · licencias por suscripción (contrato 0.13.0)', () => {
     expect((await pedir('/licencias', { method: 'POST', body: JSON.stringify({ cliente: 'Intruso' }) })).estado).toBe(403);
   });
 
-  it('Mike crea una cortesía y una de pago; la clave tiene forma y no repite', async () => {
+  it('Mike crea una perpetua y una de pago; la clave tiene forma y no repite', async () => {
     await comoSuper();
-    const a = await pedir('/licencias', { method: 'POST', body: JSON.stringify({ cliente: 'Taller Regalado', cortesia: true, notas: 'para Fer' }) });
+    const a = await pedir('/licencias', { method: 'POST', body: JSON.stringify({ cliente: 'Taller Regalado', perpetua: true, notas: 'para Fer' }) });
     expect(a.estado).toBe(201);
     expect(a.data.clave).toMatch(/^T101-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
     expect(a.data.programa).toBe('draw101');
     expect(a.data.lugares).toBe(1);
-    expect(a.data.cortesia).toBe(1);
+    expect(a.data.perpetua).toBe(1);
+    expect(a.data.tipo, 'quien da de alta a mano regala, salvo que diga otra cosa').toBe('cortesia');
     expect(a.data.vigente).toBe(true);
-    cortesia = a.data;
+    perpetua = a.data;
 
     const b = await pedir('/licencias', { method: 'POST', body: JSON.stringify({ cliente: 'Taller que Paga', correo: 'Pagos@Ejemplo.MX' }) });
     expect(b.estado).toBe(201);
     expect(b.data.correo).toBe('pagos@ejemplo.mx');
     expect(b.data.paga_hasta).toBeNull();
-    expect(b.data.vigente, 'sin pago y sin cortesía no entra: no hay periodo de prueba').toBe(false);
-    expect(b.data.clave).not.toBe(cortesia.clave);
+    expect(b.data.vigente, 'sin pago y sin ser perpetua no entra: no hay periodo de prueba').toBe(false);
+    expect(b.data.clave).not.toBe(perpetua.clave);
     pagada = b.data;
 
     const sinNombre = await pedir('/licencias', { method: 'POST', body: JSON.stringify({ lugares: 2 }) });
@@ -1960,21 +1962,21 @@ describe('18 · licencias por suscripción (contrato 0.13.0)', () => {
 
   it('la app activa con clave y huella y recibe un token que sólo la llave pública abre', async () => {
     galleta = '';
-    const r = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: cortesia.clave.toLowerCase(), huella: HUELLA_A, version: '0.21.0' }) });
+    const r = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: perpetua.clave.toLowerCase(), huella: HUELLA_A, version: '0.21.0' }) });
     expect(r.estado).toBe(201);
     expect(r.data.lugares).toEqual({ usados: 1, total: 1 });
     expect(r.data.licencia.correo, 'a la app no se le cuenta el correo').toBeUndefined();
     tokenA = r.data.token;
     const { vale, carga } = await abrir(tokenA);
     expect(vale).toBe(true);
-    expect(carga.licencia).toBe(cortesia.id);
+    expect(carga.licencia).toBe(perpetua.id);
     expect(carga.maquina).toBe(HUELLA_A);
     expect(carga.programa).toBe('draw101');
     const dias = (Date.parse(carga.hasta) - Date.parse(carga.emitido)) / 86400000;
     expect(dias, 'una cortesía vale el horizonte: 30 días desde el latido').toBeCloseTo(30, 1);
 
     // La misma máquina vuelve a activar (reinstaló): no gasta otro lugar.
-    const otraVez = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: cortesia.clave, huella: HUELLA_A }) });
+    const otraVez = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: perpetua.clave, huella: HUELLA_A }) });
     expect(otraVez.estado).toBe(200);
     expect(otraVez.data.lugares).toEqual({ usados: 1, total: 1 });
   });
@@ -1983,7 +1985,7 @@ describe('18 · licencias por suscripción (contrato 0.13.0)', () => {
     const inventada = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: 'T101-AAAA-BBBB-CCCC', huella: HUELLA_A }) });
     expect(inventada.estado).toBe(404);
     expect(inventada.error).toBe('clave_inexistente');
-    const corta = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: cortesia.clave, huella: 'abc' }) });
+    const corta = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: perpetua.clave, huella: 'abc' }) });
     expect(corta.estado).toBe(400);
 
     const [v, carga, firma] = tokenA.split('.');
@@ -2000,7 +2002,7 @@ describe('18 · licencias por suscripción (contrato 0.13.0)', () => {
   });
 
   it('un lugar es un lugar: la segunda máquina espera a que la primera se libere, o a que Mike suba lugares', async () => {
-    const b = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: cortesia.clave, huella: HUELLA_B }) });
+    const b = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: perpetua.clave, huella: HUELLA_B }) });
     expect(b.estado).toBe(409);
     expect(b.error).toBe('sin_lugares');
     expect(b.detalle).toMatchObject({ lugares: 1, ocupados: 1 });
@@ -2008,7 +2010,7 @@ describe('18 · licencias por suscripción (contrato 0.13.0)', () => {
     const libre = await pedir('/licencias/desactivar', { method: 'POST', body: JSON.stringify({ token: tokenA, huella: HUELLA_A }) });
     expect(libre.estado).toBe(200);
     expect(libre.data.lugares).toEqual({ usados: 0, total: 1 });
-    const ahoraSi = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: cortesia.clave, huella: HUELLA_B }) });
+    const ahoraSi = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: perpetua.clave, huella: HUELLA_B }) });
     expect(ahoraSi.estado).toBe(201);
 
     // A ya no tiene lugar: su latido lo dice, no lo deja pasar en silencio.
@@ -2017,11 +2019,11 @@ describe('18 · licencias por suscripción (contrato 0.13.0)', () => {
     expect(latidoA.error).toBe('maquina_desconocida');
 
     await comoSuper();
-    const sube = await pedir(`/licencias/${cortesia.id}`, { method: 'PATCH', body: JSON.stringify({ lugares: 2 }) });
+    const sube = await pedir(`/licencias/${perpetua.id}`, { method: 'PATCH', body: JSON.stringify({ lugares: 2 }) });
     expect(sube.estado).toBe(200);
     expect(sube.data.lugares).toBe(2);
     galleta = '';
-    const aOtraVez = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: cortesia.clave, huella: HUELLA_A }) });
+    const aOtraVez = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: perpetua.clave, huella: HUELLA_A }) });
     expect(aOtraVez.estado).toBe(201);
     expect(aOtraVez.data.lugares).toEqual({ usados: 2, total: 2 });
     tokenA = aOtraVez.data.token;
@@ -2038,16 +2040,16 @@ describe('18 · licencias por suscripción (contrato 0.13.0)', () => {
     tokenA = l.data.token;
 
     await comoSuper();
-    expect((await pedir(`/licencias/${cortesia.id}`, { method: 'PATCH', body: JSON.stringify({ estado: 'suspendida' }) })).data.vigente).toBe(false);
+    expect((await pedir(`/licencias/${perpetua.id}`, { method: 'PATCH', body: JSON.stringify({ estado: 'suspendida' }) })).data.vigente).toBe(false);
     galleta = '';
     const negado = await pedir('/licencias/latido', { method: 'POST', body: JSON.stringify({ token: tokenA, huella: HUELLA_A }) });
     expect(negado.estado).toBe(403);
     expect(negado.error).toBe('suspendida');
-    const niActivar = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: cortesia.clave, huella: HUELLA_A }) });
+    const niActivar = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: perpetua.clave, huella: HUELLA_A }) });
     expect(niActivar.estado).toBe(403);
 
     await comoSuper();
-    await pedir(`/licencias/${cortesia.id}`, { method: 'PATCH', body: JSON.stringify({ estado: 'activa' }) });
+    await pedir(`/licencias/${perpetua.id}`, { method: 'PATCH', body: JSON.stringify({ estado: 'activa' }) });
     galleta = '';
     expect((await pedir('/licencias/latido', { method: 'POST', body: JSON.stringify({ token: tokenA, huella: HUELLA_A }) })).estado).toBe(200);
   });
@@ -2086,12 +2088,12 @@ describe('18 · licencias por suscripción (contrato 0.13.0)', () => {
     await comoSuper();
     const lista = await pedir('/licencias');
     expect(lista.estado).toBe(200);
-    const fila = lista.data.filas.find((f: any) => f.id === cortesia.id);
+    const fila = lista.data.filas.find((f: any) => f.id === perpetua.id);
     expect(fila.activaciones).toBe(2);
     expect(fila.vigente).toBe(true);
     expect(lista.data.filas.find((f: any) => f.id === pagada.id).vigente).toBe(false);
 
-    const det = await pedir(`/licencias/${cortesia.id}`);
+    const det = await pedir(`/licencias/${perpetua.id}`);
     expect(det.estado).toBe(200);
     expect(det.data.activaciones.map((a: any) => [a.huella, a.activa]).sort()).toEqual([[HUELLA_A, 1], [HUELLA_B, 1]]);
     const acciones = det.data.bitacora.map((b: any) => b.accion);
@@ -2100,8 +2102,74 @@ describe('18 · licencias por suscripción (contrato 0.13.0)', () => {
     expect(det.data.bitacora.find((b: any) => b.accion === 'activar').quien).toBe('app');
 
     expect((await pedir('/licencias/01INVENTADA')).estado).toBe(404);
-    const suelta = await pedir(`/licencias/${cortesia.id}/desactivar`, { method: 'POST', body: JSON.stringify({ huella: HUELLA_B }) });
+    const suelta = await pedir(`/licencias/${perpetua.id}/desactivar`, { method: 'POST', body: JSON.stringify({ huella: HUELLA_B }) });
     expect(suelta.data.lugares).toEqual({ usados: 1, total: 2 });
+  });
+
+
+  /* El tipo y lo perpetuo son dos cosas (contrato 0.19.0, decisión de Mike del
+   * 19-sep con botones). Lo que se mide aquí es justo lo que se perdería si
+   * fueran una sola lista: que una perpetua de App Store siga saliendo al
+   * filtrar por App Store. */
+  it('el tipo se guarda aparte de lo perpetuo, y un tipo inventado no pasa', async () => {
+    await comoSuper();
+    const tienda = await pedir('/licencias', { method: 'POST', body: JSON.stringify({ cliente: 'Comprada en la tienda', correo: 'mac@ejemplo.mx', programa: 'nest101', tipo: 'appstore', perpetua: true }) });
+    expect(tienda.estado).toBe(201);
+    expect(tienda.data.tipo).toBe('appstore');
+    expect(tienda.data.perpetua).toBe(1);
+    expect(tienda.data.vigente, 'no vence: entra sin fecha de pago').toBe(true);
+    conTipo = tienda.data;
+
+    const inventado = await pedir('/licencias', { method: 'POST', body: JSON.stringify({ cliente: 'X', tipo: 'strype' }) });
+    expect(inventado.estado).toBe(400);
+    expect(inventado.detalle.campo).toBe('tipo');
+
+    const cambia = await pedir(`/licencias/${conTipo.id}`, { method: 'PATCH', body: JSON.stringify({ tipo: 'suite101' }) });
+    expect(cambia.data.tipo).toBe('suite101');
+    expect(cambia.data.perpetua, 'cambiar el tipo no le quita lo perpetuo').toBe(1);
+    await pedir(`/licencias/${conTipo.id}`, { method: 'PATCH', body: JSON.stringify({ tipo: 'appstore' }) });
+  });
+
+  it('la lista filtra por tipo, por programa, por correo y por vigentes, y cuenta cuántas hay de cada tipo', async () => {
+    await comoSuper();
+    const todas = await pedir('/licencias');
+    expect(todas.data.por_tipo.appstore, 'el conteo por tipo NO se filtra a sí mismo').toBeGreaterThanOrEqual(1);
+    expect(Object.keys(todas.data.por_tipo).sort()).toEqual(['appstore', 'cortesia', 'stripe', 'suite101']);
+
+    const soloTienda = await pedir('/licencias?tipo=appstore');
+    expect(soloTienda.data.filas.every((f: any) => f.tipo === 'appstore')).toBe(true);
+    expect(soloTienda.data.filas.some((f: any) => f.id === conTipo.id)).toBe(true);
+    expect(soloTienda.data.por_tipo.cortesia, 'y sigue contando las de los demás tipos').toBeGreaterThanOrEqual(1);
+
+    const porPrograma = await pedir('/licencias?programa=nest101');
+    expect(porPrograma.data.filas.every((f: any) => f.programa === 'nest101')).toBe(true);
+    expect(porPrograma.data.filas.some((f: any) => f.id === conTipo.id)).toBe(true);
+
+    const porCorreo = await pedir('/licencias?correo=MAC@Ejemplo.mx');
+    expect(porCorreo.data.filas.map((f: any) => f.id), 'el correo se normaliza antes de buscar').toEqual([conTipo.id]);
+
+    const vigentes = await pedir('/licencias?vigentes=1');
+    expect(vigentes.data.filas.every((f: any) => f.vigente)).toBe(true);
+    expect(vigentes.data.filas.some((f: any) => f.id === conTipo.id)).toBe(true);
+
+    const malTipo = await pedir('/licencias?tipo=strype');
+    expect(malTipo.estado, 'un tipo inventado es 400, no una lista vacía que se lee como «no vendiste nada»').toBe(400);
+  });
+
+  it('un pago marcado por Stripe pone el tipo solo; uno marcado a mano no lo toca', async () => {
+    await comoSuper();
+    const regalada = await pedir('/licencias', { method: 'POST', body: JSON.stringify({ cliente: 'Regalada que luego paga' }) });
+    expect(regalada.data.tipo).toBe('cortesia');
+
+    const aMano = await pedir(`/licencias/${regalada.data.id}/pago`, { method: 'POST', body: JSON.stringify({ hasta: dia(30) }) });
+    expect(aMano.data.tipo, 'un pago a mano no la convierte en otra cosa').toBe('cortesia');
+    expect(aMano.data.origen).toBe('manual');
+
+    const porStripe = await pedir(`/licencias/${regalada.data.id}/pago`, { method: 'POST', body: JSON.stringify({ hasta: dia(60), origen: 'stripe', referencia: 'in_123' }) });
+    expect(porStripe.data.tipo, 'si cobró Stripe, la licencia es de Stripe').toBe('stripe');
+    expect(porStripe.data.origen).toBe('stripe');
+    expect((await pedir(`/licencias/${regalada.data.id}`)).data.bitacora.some((b: any) => b.accion === 'pago')).toBe(true);
+    await pedir(`/licencias/${regalada.data.id}`, { method: 'DELETE' });
   });
 
   it('borrar se lleva la suscripción y sus activaciones; la clave deja de existir para la app', async () => {

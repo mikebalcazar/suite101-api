@@ -101,20 +101,20 @@ export const hoy = (): string => ahora().slice(0, 10);
 export const DIA = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Si la suscripción deja entrar hoy, y si no, por qué. `sin_pago` cubre el
- *  «no hay periodo de prueba» que Mike escogió: sin fecha y sin cortesía, no
- *  entra. */
+ *  «no hay periodo de prueba» que Mike escogió: sin fecha y sin ser perpetua,
+ *  no entra. */
 export function vigencia(s: Suscripcion): { vigente: true } | { vigente: false; motivo: 'suspendida' | 'sin_pago' } {
   if (s.estado !== 'activa') return { vigente: false, motivo: 'suspendida' };
-  if (s.cortesia) return { vigente: true };
+  if (s.perpetua) return { vigente: true };
   if (s.paga_hasta && s.paga_hasta >= hoy()) return { vigente: true };
   return { vigente: false, motivo: 'sin_pago' };
 }
 
 /** Hasta cuándo vale el token que se emite ahora: el fin del último día pagado,
- *  y nunca más allá del horizonte. Una cortesía sólo tiene horizonte. */
+ *  y nunca más allá del horizonte. Una perpetua sólo tiene horizonte. */
 export function hastaDe(s: Suscripcion, desdeMs = Date.now()): string {
   const horizonte = desdeMs + HORIZONTE_SEGUNDOS * 1000;
-  if (s.cortesia || !s.paga_hasta) return new Date(horizonte).toISOString();
+  if (s.perpetua || !s.paga_hasta) return new Date(horizonte).toISOString();
   const finDia = Date.parse(`${s.paga_hasta}T23:59:59.000Z`);
   return new Date(Math.min(horizonte, finDia)).toISOString();
 }

@@ -570,9 +570,19 @@ async function licencias() {
   const llave = await pedir(STAGING, '/licencias/llave');
   rev(llave.estado === 200 && llave.data?.alg === 'Ed25519', 'staging sirve la llave pública', `kid ${llave.data?.kid}`);
 
-  const alta = await pedir(STAGING, '/licencias', { method: 'POST', body: { cliente: `Humo ${ORG}`, cortesia: true, notas: 'la borra el propio humo' } });
-  rev(alta.estado === 201 && /^T101-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(alta.data?.clave || ''), 'Mike crea una cortesía y recibe una clave T101-…', `${alta.estado} ${alta.error ?? ''}`);
+  const alta = await pedir(STAGING, '/licencias', { method: 'POST', body: { cliente: `Humo ${ORG}`, correo: `humo-${ORG}@ejemplo.mx`, programa: 'nest101', tipo: 'appstore', perpetua: true, notas: 'la borra el propio humo' } });
+  rev(alta.estado === 201 && /^T101-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(alta.data?.clave || ''), 'Mike crea una perpetua y recibe una clave T101-…', `${alta.estado} ${alta.error ?? ''}`);
   if (alta.estado !== 201) return;
+  rev(alta.data?.tipo === 'appstore' && alta.data?.perpetua === 1 && alta.data?.vigente === true,
+    'el tipo y lo perpetuo viajan aparte, y sin fecha de pago entra igual (0.19.0)', `tipo ${alta.data?.tipo} · perpetua ${alta.data?.perpetua}`);
+
+  const filtrada = await pedir(STAGING, `/licencias?tipo=appstore&correo=humo-${ORG}@ejemplo.mx`);
+  rev(filtrada.estado === 200 && (filtrada.data?.filas || []).some((f) => f.id === alta.data.id) && (filtrada.data?.filas || []).every((f) => f.tipo === 'appstore'),
+    'la lista filtra por tipo y por correo', `${filtrada.data?.filas?.length} fila(s)`);
+  rev(typeof filtrada.data?.por_tipo?.cortesia === 'number',
+    'y sigue contando cuántas hay de cada tipo, con el filtro puesto', JSON.stringify(filtrada.data?.por_tipo));
+  const malTipo = await pedir(STAGING, '/licencias?tipo=strype');
+  rev(malTipo.estado === 400, 'un tipo inventado es 400, no una lista vacía', `${malTipo.estado} ${malTipo.error ?? ''}`);
   const id = alta.data.id;
   const huella = `humo-${ORG}-0123456789abcdef`.replace(/[^A-Za-z0-9_-]/g, '-');
 
@@ -603,7 +613,7 @@ async function licencias() {
   const det = await pedir(STAGING, `/licencias/${id}`);
   rev(det.estado === 200 && det.data?.activaciones?.length === 1 && (det.data?.bitacora || []).some((b) => b.accion === 'activar'), 'el detalle trae la activación y la bitácora', `${det.data?.activaciones?.length} activaciones · ${det.data?.bitacora?.length} renglones`);
   const borra = await pedir(STAGING, `/licencias/${id}`, { method: 'DELETE' });
-  rev(borra.estado === 200, 'la cortesía de humo se borra', `${borra.estado}`);
+  rev(borra.estado === 200, 'la licencia de humo se borra', `${borra.estado}`);
   const ya = await pedir(STAGING, '/licencias/activar', { method: 'POST', body: { clave: alta.data.clave, huella } });
   rev(ya.estado === 404, 'y su clave ya no existe para la app', `${ya.estado} ${ya.error}`);
 }
