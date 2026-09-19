@@ -69,6 +69,15 @@ rutas.get('/orgs/:o/quell', async (c) => {
   return ok(c, { org: id, filas });
 });
 
+/* 0.17.0 · lo mismo para roster101: cuántos expedientes, documentos, cuentas. */
+rutas.get('/orgs/:o/roster', async (c) => {
+  if (!(await soySuper(c))) return err(c, 'sin_permiso', 403);
+  const id = c.req.param('o')!;
+  if (!(await org(c.env, id))) return err(c, 'org_desconocida', 404);
+  const filas = await (c.env.ORG.get(c.env.ORG.idFromName(id)) as unknown as ApiOrgDB).conteosRoster();
+  return ok(c, { org: id, filas });
+});
+
 const DIA = /^\d{4}-\d{2}-\d{2}$/;
 const texto = (v: unknown, max = 120): string | null => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 

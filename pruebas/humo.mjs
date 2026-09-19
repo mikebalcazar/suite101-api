@@ -88,6 +88,17 @@ async function produccion() {
   const panelSinSesion = await pedir(PROD, '/licencias');
   rev(panelSinSesion.estado === 401, 'el panel de licencias no se ve sin sesión', `${panelSinSesion.estado}`);
 
+  // roster101 (0.17.0): la puerta de los expedientes está en pie. En producción
+  // sólo se mira: sin sesión el panel contesta 401 y nadie pide un código
+  // (eso escribe en la base de la empresa y manda un correo de verdad).
+  const rosterSalud = await pedir(PROD, '/roster/forespot/api/salud', { app: 'roster101' });
+  rev((rosterSalud.estado === 200 && rosterSalud.datos === 'suite') || (rosterSalud.estado === 403 && rosterSalud.error === 'app_inactiva'),
+    'la puerta de roster101 de forespot está en pie (200 con datos en la suite, o 403 si roster101 está apagada)', `${rosterSalud.estado} ${rosterSalud.datos ?? rosterSalud.error ?? ''}`);
+  const rosterPanel = await pedir(PROD, '/roster/forespot/api/admin/yo', { app: 'roster101' });
+  rev(rosterPanel.estado === 401 || rosterPanel.estado === 403, 'y su panel no abre sin sesión', `${rosterPanel.estado}`);
+  const rosterSinApp = await pedir(PROD, '/roster/forespot/api/salud');
+  rev(rosterSinApp.estado === 400 && rosterSinApp.error === 'sin_app', 'sin X-App roster101 no se pasa', `${rosterSinApp.estado} ${rosterSinApp.error}`);
+
   const conBasura = await pedir(PROD, '/yo', { token: 'no-soy-un-token.niFirma' });
   rev(conBasura.estado === 401 && conBasura.error === 'sin_sesion', 'un token inventado tampoco pasa de la puerta', `${conBasura.estado} ${conBasura.error}`);
 
@@ -249,6 +260,31 @@ async function recorrido() {
   const sinCliente = await pedir(STAGING, `/orgs/${ORG}/quell/me`, { app: 'quell101', token: 'inventado' });
   rev(sinCliente.estado === 401, 'sin sesión la bitácora contesta 401', `${sinCliente.estado}`);
 
+  // Contrato 0.17.0: roster101 vive en la base de la empresa. El dueño de la
+  // suite abre el panel de expedientes de la empresa del humo; un trabajador
+  // entra por SU puerta (correo y código, sin cuenta en la suite; staging
+  // devuelve el código), ve su expediente vacío y sale; master101 cuenta.
+  const cabeceraEmpresa = encodeURIComponent(JSON.stringify({ empresa: `Empresa de humo ${ORG}`, aviso_version: '2026-09-03', version: 'humo' }));
+  const yoRoster = await pedir(STAGING, `/roster/${ORG}/api/admin/yo`, { app: 'roster101' });
+  rev(yoRoster.estado === 200 && yoRoster.nivel === 'dueno' && yoRoster.de_la_suite === true, 'el dueño de la suite abre el panel de roster101 de la empresa como dueño', `${yoRoster.estado} ${yoRoster.nivel ?? yoRoster.error ?? ''}`);
+  const configR = await fetch(`${STAGING}/roster/${ORG}/api/config`, { headers: { 'X-App': 'roster101', 'X-Roster': cabeceraEmpresa } }).then((r) => r.json()).catch(() => ({}));
+  rev(configR.empresa === `Empresa de humo ${ORG}` && configR.aviso_version === '2026-09-03', 'los datos de la empresa llegan desde la cabecera de su Worker', JSON.stringify(configR));
+  const galletaDelSuper = galleta;
+  galleta = '';
+  const correoT = `trabajador-${ORG}@ejemplo.mx`;
+  const codT = await pedir(STAGING, `/roster/${ORG}/api/codigo`, { app: 'roster101', method: 'POST', body: { email: correoT } });
+  rev(codT.estado === 200 && /^\d{6}$/.test(String(codT.codigo_prueba || '')), 'un trabajador pide su código por su propia puerta, sin cuenta en la suite (staging lo devuelve)', `${codT.estado} ${codT.error ?? ''}`);
+  const entT = await pedir(STAGING, `/roster/${ORG}/api/entrar`, { app: 'roster101', method: 'POST', body: { email: correoT, codigo: codT.codigo_prueba } });
+  rev(entT.estado === 200 && entT.nuevo === true && galleta.startsWith('t101_sesion='), 'entra, es nuevo, y su sesión es la cookie de siempre', `${entT.estado} ${galleta.slice(0, 12)}`);
+  const yoT = await pedir(STAGING, `/roster/${ORG}/api/yo`, { app: 'roster101' });
+  rev(yoT.estado === 200 && yoT.trabajador?.email === correoT && yoT.trabajador?.folio === 1 && yoT.aviso === null, 've su expediente vacío, folio 1, sin aviso aceptado', `${yoT.estado} ${yoT.trabajador?.folio}`);
+  const panelT = await pedir(STAGING, `/roster/${ORG}/api/admin/yo`, { app: 'roster101' });
+  rev(panelT.estado === 401, 'y con esa cookie el panel no abre', `${panelT.estado}`);
+  await pedir(STAGING, `/roster/${ORG}/api/salir`, { app: 'roster101', method: 'POST' });
+  galleta = galletaDelSuper;
+  const conteoR = await pedir(STAGING, `/admin/orgs/${ORG}/roster`);
+  rev(conteoR.estado === 200 && conteoR.data?.filas?.roster_trabajadores === 1 && conteoR.data?.filas?.roster_administradores === 0, 'master101 cuenta 1 expediente y 0 cuentas del panel', JSON.stringify(conteoR.data?.filas));
+
   // La puerta aplica la lista: la socia entra a dash101 y a quell101, no a peek101 (que además está apagada) ni a workshop101.
   const galletaSuper = galleta;
   const codS = await pedir(STAGING, '/auth/codigo', { method: 'POST', body: { correo: `socia-${ORG}@ejemplo.mx` } });
@@ -259,6 +295,8 @@ async function recorrido() {
   const sPanel = await pedir(STAGING, `/orgs/${ORG}`, { app: 'workshop101' });
   rev(sDash.estado === 200, 'la socia entra a dash101 (está en su lista)', `${sDash.estado}`);
   rev(sRoster.estado === 403 && sRoster.error === 'app_no_permitida', 'y roster101 le contesta app_no_permitida', `${sRoster.estado} ${sRoster.error}`);
+  const sPanelRoster = await pedir(STAGING, `/roster/${ORG}/api/admin/yo`, { app: 'roster101' });
+  rev(sPanelRoster.estado === 401, 'ni el panel de expedientes la deja entrar (no trae roster en su lista)', `${sPanelRoster.estado}`);
   rev(sPanel.estado === 403 && sPanel.detalle?.motivo === 'solo_administra', 'workshop101 no la deja entrar: no administra', `${sPanel.estado} ${sPanel.detalle?.motivo ?? sPanel.error}`);
   rev((await pedir(STAGING, `/admin/orgs/${ORG}/miembros`)).estado === 403, 'ni puede ver la gente de la empresa');
   galleta = galletaSuper;

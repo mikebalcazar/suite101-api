@@ -47,6 +47,18 @@
  * folio: si lo manda, se le ignora; sólo `suite101` puede, y es para que la
  * mudanza traiga los viejos congelados. Un índice único en la base impide dos
  * folios iguales). Antes:
+ * 0.17.0 (roster101 vive en la base de la empresa: la migración 0007 del
+ * OrgDB trae sus siete tablas con prefijo `roster_`, y el motor de los
+ * expedientes —el mismo código que corría en el Worker de roster101—
+ * atiende en `/roster/:o/api/*`. Esa puerta es nueva y distinta de
+ * `/orgs/:o/*`: el trabajador entra sin cuenta en la suite (correo y
+ * código, cookie propia firmada con el secreto de la suite), y el panel de
+ * la empresa entra con su sesión de la suite, que la puerta resuelve si
+ * viene. El dueño y la administración de la empresa abren el panel como
+ * dueños aunque no tengan renglón en él. `POST /admin/mudar-roster {org,
+ * modo}` trae la D1 y el bucket viejos; `GET /admin/orgs/:o/roster` cuenta.
+ * La central de roster101 se retira: el alta va por master101. Decisiones
+ * de Mike del 19-sep). Antes:
  * 0.16.0 (quell101 vive en la base de la empresa: la migración 0006 del
  * OrgDB trae sus catorce tablas con prefijo `quell_`, y el motor de la
  * bitácora de obra —el mismo código que corría en el Worker de quell101—
@@ -83,7 +95,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.16.0';
+export const VERSION_CONTRATO = '0.17.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -614,6 +626,9 @@ export const TABLAS_INTERNAS = [
   'quell_users', 'quell_projects', 'quell_project_members', 'quell_plans', 'quell_elements', 'quell_log_entries',
   'quell_punch_items', 'quell_photos', 'quell_operaciones', 'quell_etapas', 'quell_element_etapas', 'quell_dudas',
   'quell_duda_respuestas', 'quell_element_contratistas',
+  // roster101 (0007): las usa el motor de los expedientes por /roster/:o/api/*.
+  'roster_trabajadores', 'roster_documentos', 'roster_codigos', 'roster_bitacora', 'roster_consentimientos',
+  'roster_papelera', 'roster_administradores',
 ] as const;
 
 /* ─────────────── lo que devuelven las rutas con nombre ─────────────── */

@@ -125,4 +125,98 @@ rutas.post('/mudar-quell', async (c: Ctx) => {
   });
 });
 
+
+/* ─────────────── POST /admin/mudar-roster ───────────────
+ *
+ * Lo mismo para roster101: trae lo que vivía en la D1 `t101-trabajadores` y en
+ * el bucket `t101-documentos` (el portal de Taller 101) al OrgDB de una empresa
+ * (tablas `roster_*`, migración 0007) y al bucket de la suite bajo
+ * `orgs/{org}/roster/`. Las llaves de los documentos NO cambian en la base
+ * (`trabajadores/{id}/…`): el motor las lee ya con el prefijo puesto. Los
+ * códigos de acceso (valen diez minutos) y las tablas de la contraseña vieja
+ * del panel se quedan atrás. Las cuentas del panel se traen tal cual y se dice
+ * cuáles no tienen todavía cuenta en la suite: ésas no van a poder entrar
+ * hasta que se den de alta en workshop101, igual que hoy. */
+
+const COLUMNAS_ROSTER: Record<string, string[]> = {
+  trabajadores: ['id', 'folio', 'email', 'nombre', 'apellido_paterno', 'apellido_materno', 'celular', 'nss', 'curp', 'rfc',
+    'banco', 'clabe', 'beneficiario', 'emerg_nombre', 'emerg_parentesco', 'emerg_telefono', 'emerg_email', 'puesto',
+    'estado', 'creado_en', 'actualizado_en', 'confirmado_en'],
+  documentos: ['id', 'trabajador_id', 'tipo', 'etiqueta', 'nombre_archivo', 'llave', 'mime', 'tamano', 'subido_en'],
+  consentimientos: ['trabajador_id', 'version', 'aceptado_en'],
+  papelera: ['trabajador_id', 'borrado_en', 'borra_el'],
+  bitacora: ['id', 'cuando', 'quien', 'accion', 'detalle'],
+  administradores: ['id', 'email', 'nombre', 'nivel', 'activo', 'creado_en', 'creado_por', 'ultimo_acceso'],
+};
+
+rutas.post('/mudar-roster', async (c: Ctx) => {
+  if (!(await soySuper(c))) return err(c, 'sin_permiso', 403, { puerta: 'mudar-roster es solo del superadmin' });
+  const cuerpo = await c.req.json<Cuerpo>().catch(() => ({}) as Cuerpo);
+  const org_id = String(cuerpo.org || '').trim();
+  if (!org_id) return err(c, 'datos_invalidos', 400, { falta: 'org' });
+  const empresa = await org(c.env, org_id);
+  if (!empresa) return err(c, 'org_desconocida', 404, { org: org_id });
+  const fuente = c.env.ROSTER_D1;
+  if (!fuente) return err(c, 'sin_fuente', 503, { falta: 'ROSTER_D1', motivo: 'la D1 vieja de roster101 no está ligada a esta API' });
+  const seco = cuerpo.modo !== 'escribir';
+  const conArchivos = cuerpo.archivos !== false;
+  const prefijo = `orgs/${org_id}/roster/`;
+
+  // 1 · leer la D1 vieja, tabla por tabla, sólo las columnas que se traen.
+  const filas: Record<string, Fila[]> = {};
+  for (const [tabla, cols] of Object.entries(COLUMNAS_ROSTER)) {
+    const r = await fuente.prepare(`SELECT ${cols.join(', ')} FROM ${tabla}`).all<Fila>();
+    filas[`roster_${tabla}`] = r.results ?? [];
+  }
+
+  // 2 · un documento cuyo trabajador ya no existe no se trae: en la base nueva
+  //     la llave foránea lo rechazaría y tiraría toda la mudanza.
+  const vivos = new Set(filas.roster_trabajadores.map((t) => String(t.id)));
+  const huerfanos = filas.roster_documentos.filter((d) => !vivos.has(String(d.trabajador_id))).length;
+  filas.roster_documentos = filas.roster_documentos.filter((d) => vivos.has(String(d.trabajador_id)));
+
+  // 3 · las cuentas del panel: cuáles tienen ya cuenta en la suite.
+  const sinCuenta: string[] = [];
+  for (const a of filas.roster_administradores) {
+    const cuenta = await usuarioPorCorreo(c.env, normalizaCorreo(a.email));
+    if (!cuenta) sinCuenta.push(String(a.email));
+  }
+
+  // 4 · los archivos: misma llave, bajo la empresa. Los bytes se copian.
+  const archivos = { total: filas.roster_documentos.length, copiados: 0, ya_estaban: 0, fallos: [] as Array<{ llave: string; motivo: string }>, bytes: 0 };
+  if (!seco && conArchivos) {
+    const bucket = c.env.ROSTER_R2;
+    if (!bucket) return err(c, 'sin_fuente', 503, { falta: 'ROSTER_R2' });
+    for (const d of filas.roster_documentos) {
+      const llave = String(d.llave);
+      try {
+        if (await c.env.ARCHIVOS.head(prefijo + llave)) { archivos.ya_estaban++; continue; }
+        const obj = await bucket.get(llave);
+        if (!obj) { archivos.fallos.push({ llave, motivo: 'no está en el bucket viejo' }); continue; }
+        const cuerpoArchivo = await obj.arrayBuffer();
+        await c.env.ARCHIVOS.put(prefijo + llave, cuerpoArchivo, { httpMetadata: obj.httpMetadata });
+        archivos.copiados++;
+        archivos.bytes += cuerpoArchivo.byteLength;
+      } catch (e) {
+        archivos.fallos.push({ llave, motivo: (e as Error).message });
+      }
+    }
+  }
+
+  // 5 · las filas, al OrgDB de la empresa (en seco se deshace adentro).
+  const stub = c.env.ORG.get(c.env.ORG.idFromName(org_id)) as unknown as ApiOrgDB;
+  const r = await stub.importarRoster({ filas, seco });
+
+  const leidas: Record<string, number> = {};
+  for (const [t, f] of Object.entries(filas)) leidas[t] = f.length;
+  return ok(c, {
+    org: org_id, modo: seco ? 'seco' : 'escribir',
+    leidas, escritas: r.escritas, antes: r.antes, despues: r.despues,
+    documentos_sin_trabajador: huerfanos,
+    cuentas_del_panel: filas.roster_administradores.length,
+    cuentas_sin_suite: sinCuenta,
+    archivos: seco ? { total: archivos.total, nota: 'en seco no se copia nada' } : archivos,
+  });
+});
+
 export default rutas;
