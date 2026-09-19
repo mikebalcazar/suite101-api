@@ -182,7 +182,35 @@ rutas.post('/mudar-roster', async (c: Ctx) => {
     if (!cuenta) sinCuenta.push(String(a.email));
   }
 
-  // 4 · los archivos: misma llave, bajo la empresa. Los bytes se copian.
+  // 4 · los correos, ANTES de copiar un solo byte. El portal ya apunta a la
+  //     base de la empresa, así que alguien pudo entrar y abrir un expediente
+  //     en blanco con un correo que la base vieja también trae; el correo es
+  //     único. Un expediente en blanco se retira al escribir; uno con datos
+  //     detiene la mudanza entera, y entonces no se copia nada.
+  const stub = c.env.ORG.get(c.env.ORG.idFromName(org_id)) as unknown as ApiOrgDB;
+  const revision = await stub.revisarRoster(filas.roster_trabajadores);
+  const leidas: Record<string, number> = {};
+  for (const [t, f] of Object.entries(filas)) leidas[t] = f.length;
+  const comun = {
+    org: org_id, modo: seco ? 'seco' : 'escribir',
+    leidas,
+    documentos_sin_trabajador: huerfanos,
+    cuentas_del_panel: filas.roster_administradores.length,
+    cuentas_sin_suite: sinCuenta,
+  };
+  if (revision.conflictos.length) {
+    const conteos = await stub.conteosRoster();
+    return err(c, 'expedientes_encimados', 409, {
+      ...comun,
+      antes: conteos, despues: conteos, escritas: {},
+      expedientes_en_blanco_retirados: [],
+      conflictos: revision.conflictos,
+      archivos: { total: filas.roster_documentos.length, nota: 'no se copió nada' },
+      mensaje: 'Esos correos ya tienen un expediente CON DATOS en la base de la empresa, distinto del que trae la base vieja. No se escribió nada.',
+    });
+  }
+
+  // 5 · los archivos: misma llave, bajo la empresa. Los bytes se copian.
   const archivos = { total: filas.roster_documentos.length, copiados: 0, ya_estaban: 0, fallos: [] as Array<{ llave: string; motivo: string }>, bytes: 0 };
   if (!seco && conArchivos) {
     const bucket = c.env.ROSTER_R2;
@@ -203,18 +231,27 @@ rutas.post('/mudar-roster', async (c: Ctx) => {
     }
   }
 
-  // 5 · las filas, al OrgDB de la empresa (en seco se deshace adentro).
-  const stub = c.env.ORG.get(c.env.ORG.idFromName(org_id)) as unknown as ApiOrgDB;
+  // 6 · las filas, al OrgDB de la empresa (en seco se deshace adentro). La
+  //     revisión de correos se repite ahí dentro, con la transacción abierta:
+  //     entre el paso 4 y este alguien pudo haber entrado.
   const r = await stub.importarRoster({ filas, seco });
+  if (r.conflictos.length) {
+    return err(c, 'expedientes_encimados', 409, {
+      ...comun,
+      antes: r.antes, despues: r.despues, escritas: {},
+      expedientes_en_blanco_retirados: [],
+      conflictos: r.conflictos,
+      archivos: seco ? { total: archivos.total, nota: 'en seco no se copia nada' } : archivos,
+      mensaje: 'Esos correos ya tienen un expediente CON DATOS en la base de la empresa, distinto del que trae la base vieja. No se escribió nada.',
+    });
+  }
 
-  const leidas: Record<string, number> = {};
-  for (const [t, f] of Object.entries(filas)) leidas[t] = f.length;
   return ok(c, {
-    org: org_id, modo: seco ? 'seco' : 'escribir',
-    leidas, escritas: r.escritas, antes: r.antes, despues: r.despues,
-    documentos_sin_trabajador: huerfanos,
-    cuentas_del_panel: filas.roster_administradores.length,
-    cuentas_sin_suite: sinCuenta,
+    ...comun,
+    escritas: r.escritas, antes: r.antes, despues: r.despues,
+    // Correos que ya habían abierto un expediente en blanco aquí y se
+    // retiraron para que entrara el de verdad.
+    expedientes_en_blanco_retirados: r.cascarones,
     archivos: seco ? { total: archivos.total, nota: 'en seco no se copia nada' } : archivos,
   });
 });

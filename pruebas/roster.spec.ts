@@ -442,3 +442,66 @@ describe('la mudanza desde la D1 vieja (POST /admin/mudar-roster)', () => {
     expect(otraVez.data.despues.roster_bitacora).toBeGreaterThan(2);
   });
 });
+
+/* El portal apunta a la base de la empresa desde antes de la mudanza, así que
+ * alguien puede entrar y abrir un expediente EN BLANCO con un correo que la
+ * base vieja también trae. El correo es único: sin esto, la mudanza entera se
+ * caía. Pasó en producción el 19-sep. */
+describe('la mudanza cuando alguien ya entró antes (correos encimados)', () => {
+  const e = env as unknown as Env;
+
+  it('un expediente en blanco se retira y entra el de verdad, con sus documentos', async () => {
+    const ORG2 = 'mudanza-encimada';
+    expect((await pedir('mike', '/admin/orgs', { method: 'POST', json: { id: ORG2, nombre: 'Entró antes' }, app: '' })).estado).toBe(201);
+    // El trabajador entra antes de la mudanza: se le abre un expediente vacío.
+    await entrarTrabajador('temprano', 'viejo1@ejemplo.mx', ORG2);
+    const vacio = await pedir('temprano', `/roster/${ORG2}/api/yo`);
+    expect(vacio.trabajador.id).not.toBe('t-1');
+    expect(vacio.documentos.length).toBe(0);
+
+    const seco = await pedir('mike', '/admin/mudar-roster', { method: 'POST', json: { org: ORG2 }, app: '' });
+    expect(seco.estado, JSON.stringify(seco)).toBe(200);
+    expect(seco.data.expedientes_en_blanco_retirados).toEqual(['viejo1@ejemplo.mx']);
+
+    const r = await pedir('mike', '/admin/mudar-roster', { method: 'POST', json: { org: ORG2, modo: 'escribir' }, app: '' });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.expedientes_en_blanco_retirados).toEqual(['viejo1@ejemplo.mx']);
+    expect(r.data.despues.roster_trabajadores).toBe(2); // t-1 y t-2, no tres
+
+    // El expediente que quedó es el de verdad, con sus documentos y su fecha.
+    const uno = await pedir('mike', `/roster/${ORG2}/api/admin/trabajadores/t-1`);
+    expect(uno.estado).toBe(200);
+    expect(uno.documentos.length).toBe(2);
+    expect(uno.trabajador.creado_en).toBe('2026-09-01T00:00:00.000Z');
+    // Y al volver a entrar, el trabajador ve el suyo, no el cascarón.
+    await entrarTrabajador('temprano', 'viejo1@ejemplo.mx', ORG2);
+    const suyo = await pedir('temprano', `/roster/${ORG2}/api/yo`);
+    expect(suyo.trabajador.id).toBe('t-1');
+    expect(suyo.documentos.length).toBe(2);
+    // Repetirla no vuelve a retirar nada: ya es el mismo id.
+    const otraVez = await pedir('mike', '/admin/mudar-roster', { method: 'POST', json: { org: ORG2, modo: 'escribir' }, app: '' });
+    expect(otraVez.data.expedientes_en_blanco_retirados).toEqual([]);
+    expect(otraVez.data.despues.roster_trabajadores).toBe(2);
+  });
+
+  it('un expediente CON datos no se toca: la mudanza se detiene entera y dice de quién es', async () => {
+    const ORG3 = 'mudanza-con-datos';
+    expect((await pedir('mike', '/admin/orgs', { method: 'POST', json: { id: ORG3, nombre: 'Escribió antes' }, app: '' })).estado).toBe(201);
+    await entrarTrabajador('escribio', 'viejo1@ejemplo.mx', ORG3);
+    expect((await pedir('escribio', `/roster/${ORG3}/api/aviso`, { method: 'POST' })).estado).toBe(200);
+    const puso = await pedir('escribio', `/roster/${ORG3}/api/yo`, { method: 'PUT', json: { nombre: 'Ya Escribí Algo', __parcial: true } });
+    expect(puso.estado, JSON.stringify(puso)).toBe(200);
+    const suId = puso.trabajador.id;
+
+    const r = await pedir('mike', '/admin/mudar-roster', { method: 'POST', json: { org: ORG3, modo: 'escribir' }, app: '' });
+    expect(r.estado, JSON.stringify(r)).toBe(409);
+    expect(r.error).toBe('expedientes_encimados');
+    expect(r.detalle.conflictos.map((x: any) => x.email)).toEqual(['viejo1@ejemplo.mx']);
+    expect(r.detalle.conflictos[0].porque).toMatch(/escribió datos/);
+    // NADA se escribió: sigue sólo el suyo, y los archivos no se copiaron.
+    expect(r.detalle.despues).toEqual(r.detalle.antes);
+    const lista = await pedir('mike', `/roster/${ORG3}/api/admin/trabajadores`);
+    expect(lista.trabajadores.map((t: any) => t.id)).toEqual([suId]);
+    expect(await e.ARCHIVOS.head(`orgs/${ORG3}/roster/trabajadores/t-1/foto-1.jpg`)).toBeNull();
+  });
+});
