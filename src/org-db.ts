@@ -117,25 +117,8 @@ export interface ApiOrgDB {
   conteos(): Promise<{ filas: Record<string, number>; sumas: Record<string, number> }>;
   /** Cuántas filas hay en cada tabla de quell101. Para master101 y para medir la mudanza. */
   conteosQuell(): Promise<Record<string, number>>;
-  /** Puerta de servicio: mete las filas de quell101 tal cual (misma llave, misma
-   *  fecha). Sólo la usa POST /admin/mudar-quell. `seco` deshace al final. */
-  importarQuell(args: { filas: Record<string, Fila[]>; seco: boolean }): Promise<{ antes: Record<string, number>; despues: Record<string, number>; escritas: Record<string, number> }>;
   /** Cuántas filas hay en cada tabla de roster101. Para master101 y para medir la mudanza. */
   conteosRoster(): Promise<Record<string, number>>;
-  /** Puerta de servicio: mete las filas de roster101 tal cual. Sólo la usa
-   *  POST /admin/mudar-roster. `seco` deshace al final.
-   *
-   *  Antes de escribir revisa los correos: el portal ya apunta a esta base, así
-   *  que alguien pudo haber entrado y abierto un expediente EN BLANCO con el
-   *  mismo correo que trae la base vieja. Como el correo es único, eso tiraría
-   *  toda la mudanza. Un expediente en blanco (sin nombre, sin CURP, sin NSS y
-   *  sin documentos) se retira para que entre el de verdad; uno con algo
-   *  escrito NO se toca: la mudanza se detiene entera y lo dice. */
-  importarRoster(args: { filas: Record<string, Fila[]>; seco: boolean }): Promise<ResultadoImportacion & { cascarones: string[]; conflictos: Array<{ email: string; porque: string }> }>;
-  /** La misma revisión de correos, sin escribir ni leer archivos: la ruta la
-   *  hace ANTES de copiar nada, para que una mudanza que se va a rechazar no
-   *  deje bytes en el bucket. */
-  revisarRoster(filas: Fila[]): Promise<{ cascarones: string[]; conflictos: Array<{ email: string; porque: string }> }>;
   fetch(req: Request): Promise<Response>;
 }
 
@@ -170,13 +153,6 @@ function cabeceraJson<T>(valor: string | null, siNo: T): T {
   let texto = valor;
   try { texto = decodeURIComponent(valor); } catch { /* venía sin codificar */ }
   try { return JSON.parse(texto) as T; } catch { return siNo; }
-}
-
-/** Lo que devuelve una importación de servicio (las dos mudanzas). */
-export interface ResultadoImportacion {
-  antes: Record<string, number>;
-  despues: Record<string, number>;
-  escritas: Record<string, number>;
 }
 
 /** Las tablas de roster101 (0007) en el orden en que se pueden insertar. Los
@@ -1089,106 +1065,6 @@ export class OrgDB extends DurableObject<Env> {
     const out: Record<string, number> = {};
     for (const t of tablas) out[t] = (this.sql.exec(`SELECT COUNT(*) AS n FROM ${t}`).one() as { n: number }).n;
     return out;
-  }
-
-  /* ─────────────── puerta de servicio: las mudanzas ───────────────
-   * Trae las filas tal cual venían de la D1 vieja de una app: mismas llaves,
-   * mismas fechas, mismo orden de inserción que las llaves foráneas. Escribe
-   * por llave (upsert), así que correrla dos veces no duplica. `seco` hace
-   * todo dentro de una transacción y la deshace al final. Sólo las alcanzan
-   * POST /admin/mudar-quell y POST /admin/mudar-roster (superadmin). */
-  importarQuell(args: { filas: Record<string, Fila[]>; seco: boolean }): ResultadoImportacion {
-    return this.importarTablas(TABLAS_QUELL, args);
-  }
-  /* El correo de un trabajador es único en la base. Desde que el portal
-   * apunta aquí, quien entre antes de la mudanza abre un expediente EN BLANCO
-   * con su correo; si luego llega el suyo de verdad con otro id, la llave
-   * única lo rechaza y se cae la mudanza completa (pasó: por eso existe esto).
-   *
-   * La regla: un expediente en blanco —sin nombre, sin CURP, sin NSS y sin
-   * documentos— se retira, porque no tiene nada que perder y el de verdad trae
-   * todo. Uno con algo escrito no se toca: ahí sí hay trabajo de alguien, y
-   * decidir cuál gana no es cosa de una mudanza. En ese caso NO se escribe
-   * nada y se dice de quién es el choque, para resolverlo a mano. */
-  importarRoster(args: { filas: Record<string, Fila[]>; seco: boolean }): ResultadoImportacion & { cascarones: string[]; conflictos: Array<{ email: string; porque: string }> } {
-    const { cascarones, conflictos } = this.revisarRoster(args.filas.roster_trabajadores ?? []);
-    // Con un choque de verdad no se escribe NADA: media mudanza es peor que
-    // ninguna, y quien la corre tiene que poder confiar en el resultado.
-    if (conflictos.length) {
-      const antes = this.contarTablas(TABLAS_ROSTER);
-      return { antes, despues: antes, escritas: {}, cascarones: [], conflictos };
-    }
-
-    const porCorreo = new Set(cascarones);
-    const r = this.importarTablas(TABLAS_ROSTER, args, () => {
-      for (const email of porCorreo) {
-        const viejo = this.sql.exec(`SELECT id FROM roster_trabajadores WHERE lower(email) = ?`, email).toArray()[0] as { id: string } | undefined;
-        if (!viejo) continue;
-        // Un expediente en blanco no tiene hijos, pero se barren igual: si
-        // mañana la regla se afloja, esto no deja huérfanos.
-        for (const t of ['roster_documentos', 'roster_consentimientos', 'roster_papelera']) {
-          this.sql.exec(`DELETE FROM ${t} WHERE trabajador_id = ?`, viejo.id);
-        }
-        this.sql.exec(`DELETE FROM roster_trabajadores WHERE id = ?`, viejo.id);
-      }
-    });
-    return { ...r, cascarones, conflictos: [] };
-  }
-
-  revisarRoster(filas: Fila[]): { cascarones: string[]; conflictos: Array<{ email: string; porque: string }> } {
-    const cascarones: string[] = [];
-    const conflictos: Array<{ email: string; porque: string }> = [];
-    for (const fila of filas) {
-      const email = String(fila.email ?? '').trim().toLowerCase();
-      const id = String(fila.id ?? '');
-      if (!email || !id) continue;
-      const aqui = this.sql
-        .exec(`SELECT id, nombre, curp, nss FROM roster_trabajadores WHERE lower(email) = ?`, email)
-        .toArray()[0] as { id: string; nombre: string | null; curp: string | null; nss: string | null } | undefined;
-      if (!aqui || aqui.id === id) continue; // no está, o es el mismo: el upsert lo resuelve
-
-      const docs = (this.sql.exec(`SELECT COUNT(*) AS n FROM roster_documentos WHERE trabajador_id = ?`, aqui.id).one() as { n: number }).n;
-      const escrito = [aqui.nombre, aqui.curp, aqui.nss].some((v) => String(v ?? '').trim() !== '');
-      if (docs === 0 && !escrito) cascarones.push(email);
-      else conflictos.push({ email, porque: docs > 0 ? `ya subió ${docs} documento(s) aquí` : 'ya escribió datos aquí' });
-    }
-    return { cascarones, conflictos };
-  }
-
-  /** `previo` corre DENTRO de la transacción, antes de escribir: lo que haga
-   *  se deshace igual que lo demás cuando la corrida es en seco. */
-  private importarTablas(tablas: readonly string[], args: { filas: Record<string, Fila[]>; seco: boolean }, previo?: () => void): ResultadoImportacion {
-    const antes = this.contarTablas(tablas);
-    const escritas: Record<string, number> = {};
-    let despues = antes;
-    class Deshacer extends Error {}
-    try {
-      this.ctx.storage.transactionSync(() => {
-        if (previo) previo();
-        for (const tabla of tablas) {
-          const filas = args.filas[tabla] ?? [];
-          for (const fila of filas) {
-            const cols = Object.keys(fila);
-            if (!cols.length) continue;
-            // Upsert, y NO «INSERT OR REPLACE»: REPLACE borra y vuelve a meter,
-            // y el borrado dispara los ON DELETE CASCADE de las tablas hijas.
-            // Se vio en la prueba: volver a correr la mudanza sobre un plano
-            // se llevaba los ítems que la empresa había creado después.
-            this.sql.exec(
-              `INSERT INTO ${tabla} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})
-               ON CONFLICT DO UPDATE SET ${cols.map((c) => `${c} = excluded.${c}`).join(', ')}`,
-              ...(cols.map((c) => fila[c] ?? null) as SqlStorageValue[]),
-            );
-          }
-          escritas[tabla] = filas.length;
-        }
-        despues = this.contarTablas(tablas);
-        if (args.seco) throw new Deshacer('seco');
-      });
-    } catch (e) {
-      if (!(e instanceof Deshacer)) throw e;
-    }
-    return { antes, despues, escritas };
   }
 
   /* ─────────────── pool para autocompletar (§7) ─────────────── */

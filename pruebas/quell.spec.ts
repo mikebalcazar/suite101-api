@@ -14,7 +14,6 @@
 import { SELF, env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Env } from '../src/entorno';
-import esquemaViejo from './quell-d1.sql';
 
 const CORREO = 'mike@forespot.com';
 const ORG = 'obra';
@@ -352,88 +351,5 @@ describe('borrar una obra y contar lo de quell101', () => {
     const conteos = await pedir('mike', `/admin/orgs/${ORG}/quell`, { app: '' });
     expect(conteos.data.filas.quell_projects).toBe(1);
     expect(conteos.data.filas.quell_plans).toBe(1);
-  });
-});
-
-describe('la mudanza desde la D1 vieja (POST /admin/mudar-quell)', () => {
-  const MUD = 'mudanza';
-  const e = env as unknown as Env;
-  beforeAll(async () => {
-    // Una D1 igual a la de producción, sembrada con una obra chica.
-    const d1 = e.QUELL_D1!;
-    const sinNotas = esquemaViejo.split('\n').filter((l: string) => !l.trim().startsWith('--')).join('\n');
-    for (const st of sinNotas.split(';').map((x: string) => x.trim()).filter(Boolean)) await d1.prepare(st).run();
-    const filas = [
-      `INSERT INTO users (id, email, name, role, company, active, created_at) VALUES ('u-mike', '${CORREO}', 'mike', 'admin', '', 1, '2026-09-04T00:00:00.000Z')`,
-      `INSERT INTO users (id, email, name, role, company, active, created_at, pin_hash) VALUES ('u-viejo', 'viejo@ejemplo.mx', 'Viejo sin cuenta', 'con', 'Taller viejo', 1, '2026-09-04T00:00:00.000Z', 'x')`,
-      `INSERT INTO projects (id, name, client, status, created_by, created_at) VALUES ('p-vieja', 'Obra vieja', 'Cliente viejo', 'activo', 'u-mike', '2026-09-05T00:00:00.000Z')`,
-      `INSERT INTO project_members (project_id, user_id, rol) VALUES ('p-vieja', 'u-viejo', 'con')`,
-      `INSERT INTO plans (id, project_id, name, file_name, image_key, source_key, width, height, sort, created_at) VALUES ('pl-1', 'p-vieja', 'Planta', 'planta.pdf', 'plans/p-vieja/pl-1.png', 'plans/p-vieja/pl-1-src.pdf', 1000, 800, 1, '2026-09-05T00:00:00.000Z')`,
-      `INSERT INTO elements (id, plan_id, project_id, code, type, name, resp, x, y, fase, created_by, created_at) VALUES ('e-1', 'pl-1', 'p-vieja', 'MW-07', 'Mueble', 'Mueble TV', 'taller101', 0.5, 0.5, 'punchlist', 'u-mike', '2026-09-06T00:00:00.000Z')`,
-      `INSERT INTO elements (id, plan_id, project_id, code, type, name, resp, x, y, fase, created_by, created_at) VALUES ('e-2', 'pl-1', NULL, 'PT-03', 'Puerta', 'Puerta', 'Berna', 0.2, 0.2, 'produccion', 'u-mike', '2026-09-06T00:00:00.000Z')`,
-      `INSERT INTO log_entries (id, element_id, user_id, kind, text, created_at) VALUES ('l-1', 'e-1', 'u-mike', 'trabajo', 'Se entregó', '2026-09-07T00:00:00.000Z')`,
-      `INSERT INTO punch_items (id, element_id, title, status, assignee_id, created_by, created_at) VALUES ('k-1', 'e-1', 'Rayón', 'pend', 'u-viejo', 'u-mike', '2026-09-08T00:00:00.000Z')`,
-      `INSERT INTO photos (id, owner_type, owner_id, r2_key, file_name, size, user_id, created_at) VALUES ('f-1', 'log', 'l-1', 'photos/log/l-1/f-1.jpg', 'foto.jpg', ${PNG.byteLength}, 'u-mike', '2026-09-07T00:00:00.000Z')`,
-      `INSERT INTO operaciones (id, cuando) VALUES ('op-1', '2026-09-07T00:00:00.000Z')`,
-      `INSERT INTO element_etapas (element_id, etapa, hecha_en, hecha_por) VALUES ('e-1', 'entrega', '2026-09-07T00:00:00.000Z', 'u-mike')`,
-      `INSERT INTO dudas (id, project_id, element_id, user_id, texto, estado, para, created_at) VALUES ('d-1', 'p-vieja', 'e-1', 'u-viejo', '¿Va cromado?', 'abierta', 'taller', '2026-09-08T00:00:00.000Z')`,
-      `INSERT INTO duda_respuestas (id, duda_id, user_id, texto, created_at) VALUES ('r-1', 'd-1', 'u-mike', 'Sí', '2026-09-08T01:00:00.000Z')`,
-      `INSERT INTO element_contratistas (element_id, user_id, asignado_por, asignado_at) VALUES ('e-1', 'u-viejo', 'u-mike', '2026-09-08T00:00:00.000Z')`,
-    ];
-    for (const f of filas) await d1.prepare(f).run();
-    for (const llave of ['plans/p-vieja/pl-1.png', 'plans/p-vieja/pl-1-src.pdf', 'photos/log/l-1/f-1.jpg']) await e.QUELL_R2!.put(llave, PNG, { httpMetadata: { contentType: 'image/png' } });
-    const alta = await pedir('mike', '/admin/orgs', { method: 'POST', json: { id: MUD, nombre: 'Empresa mudada' }, app: '' });
-    expect(alta.estado, JSON.stringify(alta)).toBe(201);
-  }, 60000);
-
-  it('sólo el superadmin, y sólo a una empresa que existe', async () => {
-    expect((await pedir('goyo', '/admin/mudar-quell', { method: 'POST', json: { org: MUD }, app: '' })).estado).toBe(403);
-    expect((await pedir('mike', '/admin/mudar-quell', { method: 'POST', json: { org: 'no-existe' }, app: '' })).estado).toBe(404);
-  });
-  it('en seco cuenta todo, casa a la gente con su cuenta y no escribe nada', async () => {
-    const r = await pedir('mike', '/admin/mudar-quell', { method: 'POST', json: { org: MUD }, app: '' });
-    expect(r.estado, JSON.stringify(r)).toBe(200);
-    expect(r.data.modo).toBe('seco');
-    expect(r.data.leidas.quell_elements).toBe(2);
-    expect(r.data.despues.quell_elements).toBe(2);
-    expect(r.data.despues.quell_etapas).toBe(5); // las cinco de siempre, sin duplicar con la semilla de la 0006
-    expect(r.data.personas_con_cuenta).toBe(1);
-    expect(r.data.personas_sin_cuenta).toEqual(['viejo@ejemplo.mx']);
-    expect(r.data.items_sin_obra).toBe(0); // e-2 la heredó del plano
-    expect(r.data.archivos.total).toBe(3);
-    // Deshecho: la empresa sigue vacía.
-    const obras = await pedir('mike', `/orgs/${MUD}/quell/projects`);
-    expect(obras.projects).toEqual([]);
-    expect((await e.ARCHIVOS.head(`orgs/${MUD}/quell/plans/p-vieja/pl-1.png`))).toBeNull();
-  });
-  it('de verdad: filas y archivos llegan, con la misma llave y la misma fecha; el motor los ve; repetirla no duplica', async () => {
-    const r = await pedir('mike', '/admin/mudar-quell', { method: 'POST', json: { org: MUD, modo: 'escribir' }, app: '' });
-    expect(r.estado, JSON.stringify(r)).toBe(200);
-    expect(r.data.archivos.copiados).toBe(3);
-    expect(r.data.archivos.fallos).toEqual([]);
-    expect(r.data.despues.quell_elements).toBe(2);
-    const obras = await pedir('mike', `/orgs/${MUD}/quell/projects`);
-    expect(obras.projects.map((p: any) => p.id)).toEqual(['p-vieja']);
-    const obra = await pedir('mike', `/orgs/${MUD}/quell/projects/p-vieja`);
-    expect(obra.plans[0].image_key).toBe(`orgs/${MUD}/quell/plans/p-vieja/pl-1.png`);
-    expect(obra.elements.map((x: any) => x.code).sort()).toEqual(['MW-07', 'PT-03']);
-    expect(obra.elements.find((x: any) => x.id === 'e-2').project_id).toBe('p-vieja');
-    const item = await pedir('mike', `/orgs/${MUD}/quell/elements/e-1`);
-    expect(item.log[0].created_at).toBe('2026-09-07T00:00:00.000Z');
-    expect(item.log[0].photos[0].r2_key).toBe(`orgs/${MUD}/quell/photos/log/l-1/f-1.jpg`);
-    expect(item.punch[0].assignee_name).toBe('Viejo sin cuenta');
-    expect(item.contratistas.map((c: any) => c.name)).toEqual(['Viejo sin cuenta']);
-    expect(item.hechas.map((h: any) => h.etapa)).toEqual(['entrega']);
-    const bytes = await SELF.fetch(`https://api.local/orgs/${MUD}/quell/files/orgs/${MUD}/quell/plans/p-vieja/pl-1.png`, { headers: { Cookie: galletas.mike, 'X-App': 'quell101' } });
-    expect(bytes.status).toBe(200);
-    // La cerradura del código sigue puesta sobre lo mudado.
-    const choque = await pedir('mike', `/orgs/${MUD}/quell/plans/pl-1/elements`, { method: 'POST', json: { name: 'Otro', type: 'Mueble', code: 'MW-07', x: 0.1, y: 0.1, op_id: crypto.randomUUID() } });
-    expect(choque.estado).toBe(409);
-    const siguiente = await pedir('mike', `/orgs/${MUD}/quell/plans/pl-1/elements`, { method: 'POST', json: { name: 'Otro', type: 'Mueble', x: 0.1, y: 0.1, op_id: crypto.randomUUID() } });
-    expect(siguiente.code).toBe('MW-08');
-    const otraVez = await pedir('mike', '/admin/mudar-quell', { method: 'POST', json: { org: MUD, modo: 'escribir' }, app: '' });
-    expect(otraVez.data.archivos.ya_estaban).toBe(3);
-    expect(otraVez.data.despues.quell_elements).toBe(3); // los dos viejos (mismas llaves) y el nuevo
-    expect(otraVez.data.despues.quell_users).toBe(2);
   });
 });

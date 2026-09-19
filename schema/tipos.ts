@@ -13,7 +13,16 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.12.0 (la sesión la decide QUIÉN entra, no con qué
+ * Versión del contrato: 0.18.0 (se van las dos mudanzas: `POST
+ * /admin/mudar-quell` y `POST /admin/mudar-roster` ya no existen, y con ellas
+ * los enlaces a la D1 y al bucket viejos de cada app (`QUELL_D1`, `QUELL_R2`,
+ * `ROSTER_D1`, `ROSTER_R2`). Las dos ya se corrieron en producción el 19-sep
+ * y cuadraron; la base vieja se retira, así que una ruta que lee de ella no
+ * tendría de dónde traer. `GET /admin/orgs/:o/quell` y `GET
+ * /admin/orgs/:o/roster` se quedan: cuentan lo que hay en la base de la
+ * empresa, que es de donde se leen los conteos del panel. Quitar una ruta es
+ * un cambio de contrato aunque nadie más la llamara, por eso sube la menor.
+ * Decisión de Mike del 19-sep). Antes: 0.12.0 (la sesión la decide QUIÉN entra, no con qué
  * entró: `vidaDe` en `maestro.ts`. Quien tiene un `acceso` activo —un cliente
  * de peek101, alguien de obra en quell101— trae 12 horas; un socio o la
  * oficina, 30 días, por los cuatro caminos. Antes la decidía el camino, y eso
@@ -55,8 +64,7 @@
  * código, cookie propia firmada con el secreto de la suite), y el panel de
  * la empresa entra con su sesión de la suite, que la puerta resuelve si
  * viene. El dueño y la administración de la empresa abren el panel como
- * dueños aunque no tengan renglón en él. `POST /admin/mudar-roster {org,
- * modo}` trae la D1 y el bucket viejos; `GET /admin/orgs/:o/roster` cuenta.
+ * dueños aunque no tengan renglón en él. `GET /admin/orgs/:o/roster` cuenta.
  * La central de roster101 se retira: el alta va por master101. Decisiones
  * de Mike del 19-sep). Antes:
  * 0.16.0 (quell101 vive en la base de la empresa: la migración 0006 del
@@ -95,7 +103,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.17.2';
+export const VERSION_CONTRATO = '0.18.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
