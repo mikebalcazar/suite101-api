@@ -2239,7 +2239,11 @@ describe('18 · licencias por suscripción (0.13.0; tipo y perpetua desde 0.19.0
     const html = await r.text();
     expect(html, 'trae la entrada homologada: contraseña, código y Google').toMatch(/Entrar con Google/);
     expect(html).toMatch(/licencias\/mia/);
-    expect(html, 'y no se guarda en ningún caché: lleva sesión de por medio').toMatch(/__t101_licencia/);
+    expect(html, 'la app sólo sabe de esto: el objeto y el fragmento #listo').toMatch(/__t101_licencia/);
+    // El camino de la clave tecleada, que Mike decidió conservar, vive en la
+    // misma pantalla: así las dos apps no tienen que construirlo cada una.
+    expect(html, 'y ofrece la clave tecleada como segunda forma').toMatch(/Tengo una clave/);
+    expect(html).toMatch(/licencias\/activar/);
   });
 
   it('borrar se lleva la suscripción y sus activaciones; la clave deja de existir para la app', async () => {
