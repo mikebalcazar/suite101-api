@@ -261,11 +261,15 @@ describe('19 · órdenes de compra (los casos del encargo)', () => {
     expect(lista.data.filas.some((f: any) => f.usuario_id === uBeto && f.es_contador), 'Beto sale marcado').toBe(true);
     /* Salen los MIEMBROS de la empresa aunque nadie haya llenado `personal`:
      * eso es lo que hace posible la decisión 6 en una empresa que sólo usa
-     * dash101. Mike no sale porque aquí entra como superadmin de la suite, no
-     * como miembro de esta empresa: es de Taller 101, no de ella. */
+     * dash101. */
     for (const g of Object.values(GENTE)) {
       expect(lista.data.filas.some((f: any) => f.correo === g.correo), `${g.correo} sale en la lista`).toBe(true);
     }
+    /* Y sale quien está leyendo. Mike entra aquí como superadmin de la suite,
+     * no como miembro de esta empresa —es de Taller 101, no de ella—, así que
+     * no está en la lista de miembros; aun así tiene que poder marcarse, o una
+     * empresa recién dada de alta se queda sin quién pague. */
+    expect(lista.data.filas.some((f: any) => f.correo === CORREO), 'quien lee sale en la lista').toBe(true);
 
     const r = await o('mike', '/ordenes/contadores', { method: 'POST', json: { usuario_id: uAna, valor: true } });
     expect(r.estado).toBe(200);
@@ -274,6 +278,20 @@ describe('19 · órdenes de compra (los casos del encargo)', () => {
     // Y se le quita, y surte efecto al momento.
     await o('mike', '/ordenes/contadores', { method: 'POST', json: { personal_id: pAna, valor: false } });
     expect((await o('ana', '/ordenes/buzon')).estado).toBe(403);
+  });
+
+  it('quien abre como dueño sin ser miembro se puede marcar a sí mismo', async () => {
+    // El superadmin no está en la lista de miembros de la empresa, pero sí
+    // pasó la puerta de dueño de ESTA empresa. Sin esto, una empresa recién
+    // dada de alta no tiene a nadie que pueda pagar.
+    const yo = (await pedir('mike', '/yo', { app: '' })).data.usuario.id;
+    const r = await o('mike', '/ordenes/contadores', { method: 'POST', json: { usuario_id: yo, valor: true } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.es_contador).toBe(true);
+    expect((await o('mike', '/ordenes/buzon')).estado, 'ya puede pagar').toBe(200);
+    // Y se deja como estaba, para no dejarle el buzón abierto a las que siguen.
+    await o('mike', '/ordenes/contadores', { method: 'POST', json: { usuario_id: yo, valor: false } });
+    expect((await o('mike', '/ordenes/buzon')).estado).toBe(403);
   });
 
   it('el desglose que se manda a mano tiene que cuadrar con el total', async () => {

@@ -92,6 +92,14 @@ export function montarOrdenes(rutas: App): void {
         rol: 'personal' as never, personal_id: String(p.id), es_contador: !!p.es_contador,
       });
     }
+    // Y quien está leyendo, si no salió en ninguna de las dos listas: el
+    // superadmin abre como dueño sin ser miembro, y la pantalla tiene que
+    // dejarlo marcarse (si no, sale vacía y no hay quién pague).
+    const yo = c.get('quien').usuario_id;
+    if (!salida.some((f) => f.usuario_id === yo)) {
+      const correo = c.get('sesion').correo;
+      salida.unshift({ usuario_id: yo, correo, nombre: correo, rol: 'owner', personal_id: null, es_contador: false });
+    }
     return ok(c, { filas: salida });
   });
 
@@ -113,9 +121,15 @@ export function montarOrdenes(rutas: App): void {
       }
       const m = (await miembrosDe(c.env, c.get('org_id'))).find((x) => x.usuario_id === b.usuario_id);
       const ya = await stub(c).personalDeUsuario(b.usuario_id);
-      if (!m && !ya) return err(c, 'no_encontrado', 404, { motivo: 'no es de esta empresa', usuario_id: b.usuario_id });
+      // El superadmin entra a cualquier empresa como dueño, pero NO sale en
+      // `miembrosDe`: es de Taller 101, no de la empresa. Marcarse a sí mismo
+      // sí se vale —ya pasó la puerta de dueño de ESTA empresa—, y es lo que
+      // hace falta para dejar armada una empresa recién dada de alta.
+      const soyYo = b.usuario_id === c.get('quien').usuario_id;
+      if (!m && !ya && !soyYo) return err(c, 'no_encontrado', 404, { motivo: 'no es de esta empresa', usuario_id: b.usuario_id });
+      const correoYo = soyYo ? c.get('sesion').correo : null;
       const fila = ya ?? (await stub(c).asegurarPersonal({
-        usuario_id: b.usuario_id, nombre: m?.nombre || m?.correo || 'Sin nombre', correo: m?.correo ?? null,
+        usuario_id: b.usuario_id, nombre: m?.nombre || m?.correo || correoYo || 'Sin nombre', correo: m?.correo ?? correoYo,
       }));
       personal_id = String(fila.id);
     }
