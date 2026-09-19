@@ -13,7 +13,21 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.19.0 (el tipo de licencia y lo perpetuo, que son
+ * Versión del contrato: 0.20.0 (la licencia se abre con tu cuenta:
+ * `POST /licencias/mia {programa, huella, version}` activa, con la sesión de
+ * la suite y SIN clave tecleada, la licencia que va con el correo de quien
+ * entró. Devuelve el mismo token firmado que `/activar`, porque la regla de
+ * quién entra tiene que ser una sola. Con varias licencias suyas vigentes
+ * gana la que ya tiene esa máquina activada y si no la primera con lugar
+ * libre, para no gastar un lugar de más; si no hay ninguna vigente contesta
+ * el motivo de la que venció más tarde, no el de la primera. `GET
+ * /licencias/entrar?programa=&huella=&app=` es la pantalla que la app abre
+ * en su propia ventana: la entrada homologada de la suite, y al terminar
+ * deja el token en `window.__t101_licencia` y el fragmento en `#listo` —el
+ * token nunca viaja en la dirección—. La clave tecleada NO se va: sigue
+ * siendo la segunda forma, por las máquinas sin internet estable, las claves
+ * ya repartidas y la App Store. Decisiones de Mike del 19-sep, con botones).
+ * Antes: 0.19.0 (el tipo de licencia y lo perpetuo, que son
  * dos cosas: `suscripciones.tipo` dice de dónde salió —cortesia, suite101,
  * stripe, appstore— y la columna que se llamaba `cortesia` ahora se llama
  * `perpetua`, que es lo que siempre quiso decir: sin fecha de corte. Así una
@@ -115,7 +129,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.19.0';
+export const VERSION_CONTRATO = '0.20.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

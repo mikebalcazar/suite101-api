@@ -1865,6 +1865,7 @@ describe('18 · licencias por suscripción (0.13.0; tipo y perpetua desde 0.19.0
   let publica = '';
   let perpetua: any = null;
   let conTipo: any = null;
+  let porCuenta: any = null;
   let pagada: any = null;
   let tokenA = '';
   let galletaSuper = '';
@@ -2170,6 +2171,75 @@ describe('18 · licencias por suscripción (0.13.0; tipo y perpetua desde 0.19.0
     expect(porStripe.data.origen).toBe('stripe');
     expect((await pedir(`/licencias/${regalada.data.id}`)).data.bitacora.some((b: any) => b.accion === 'pago')).toBe(true);
     await pedir(`/licencias/${regalada.data.id}`, { method: 'DELETE' });
+  });
+
+
+  /* La licencia que va con la cuenta (contrato 0.20.0). Encargo de Mike: que
+   * la app se abra entrando con el correo o con Google, sin teclear clave. La
+   * clave se queda como respaldo, así que aquí se mide que las dos formas
+   * lleguen al mismo lugar. */
+  it('la app se activa con la cuenta de la suite, sin clave, y el token es el mismo de siempre', async () => {
+    await comoSuper();
+    const HUELLA_C = 'maquina-c-0123456789abcdef';
+    const mia = await pedir('/licencias', { method: 'POST', body: JSON.stringify({ cliente: 'Mike mismo', correo: CORREO, programa: 'nest101', perpetua: true, tipo: 'suite101' }) });
+    expect(mia.estado).toBe(201);
+    porCuenta = mia.data;
+
+    const r = await pedir('/licencias/mia', { method: 'POST', body: JSON.stringify({ programa: 'nest101', huella: HUELLA_C, version: '1.0.0' }) });
+    expect(r.estado, 'se activa sin haber tecleado clave alguna').toBe(201);
+    const { vale, carga } = await abrir(r.data.token);
+    expect(vale, 'y lo firma la misma llave que ya valida draw101').toBe(true);
+    expect(carga.licencia).toBe(porCuenta.id);
+    expect(carga.maquina).toBe(HUELLA_C);
+    expect(r.data.lugares).toEqual({ usados: 1, total: 1 });
+
+    const otraVez = await pedir('/licencias/mia', { method: 'POST', body: JSON.stringify({ programa: 'nest101', huella: HUELLA_C }) });
+    expect(otraVez.estado, 'la misma máquina otra vez no gasta otro lugar').toBe(200);
+
+    // Quién activó queda con su correo, no con «app»: por aquí se entra con cuenta.
+    const det = await pedir(`/licencias/${porCuenta.id}`);
+    expect(det.data.bitacora.find((b: any) => b.accion === 'activar').quien).toBe(CORREO);
+
+    const sinLugar = await pedir('/licencias/mia', { method: 'POST', body: JSON.stringify({ programa: 'nest101', huella: 'maquina-d-0123456789abcdef' }) });
+    expect(sinLugar.estado).toBe(409);
+    expect(sinLugar.error).toBe('sin_lugares');
+  });
+
+  it('sin sesión no se activa por cuenta, y una cuenta sin licencia de ese programa lo dice con su nombre', async () => {
+    await comoSuper();
+    const deOtro = await pedir('/licencias/mia', { method: 'POST', body: JSON.stringify({ programa: 'draw101', huella: 'maquina-e-0123456789abcdef' }) });
+    expect(deOtro.estado, 'tiene licencia de nest101, no de draw101').toBe(404);
+    expect(deOtro.error).toBe('sin_licencia');
+    expect(deOtro.detalle.programa).toBe('draw101');
+
+    const sinPrograma = await pedir('/licencias/mia', { method: 'POST', body: JSON.stringify({ huella: 'maquina-e-0123456789abcdef' }) });
+    expect(sinPrograma.estado).toBe(400);
+
+    galleta = '';
+    const sinSesion = await pedir('/licencias/mia', { method: 'POST', body: JSON.stringify({ programa: 'nest101', huella: 'maquina-e-0123456789abcdef' }) });
+    expect(sinSesion.estado).toBe(401);
+    expect(sinSesion.error).toBe('sin_sesion');
+  });
+
+  it('una licencia suya que no está al corriente contesta sin_pago, no sin_licencia', async () => {
+    await comoSuper();
+    await pedir(`/licencias/${porCuenta.id}`, { method: 'PATCH', body: JSON.stringify({ perpetua: false, paga_hasta: dia(-1) }) });
+    const r = await pedir('/licencias/mia', { method: 'POST', body: JSON.stringify({ programa: 'nest101', huella: 'maquina-f-0123456789abcdef' }) });
+    expect(r.estado).toBe(402);
+    expect(r.error).toBe('sin_pago');
+    expect(r.detalle.paga_hasta, 'y dice hasta cuándo estuvo pagada, que es lo que hace falta para saber qué pagar').toBe(dia(-1));
+    await pedir(`/licencias/${porCuenta.id}`, { method: 'DELETE' });
+  });
+
+  it('la pantalla que abre la app se sirve sin sesión y sin X-App', async () => {
+    galleta = '';
+    const r = await SELF.fetch('https://api.prueba/licencias/entrar?programa=nest101&huella=maquina-c-0123456789abcdef&app=nest101');
+    expect(r.status).toBe(200);
+    expect(r.headers.get('content-type')).toMatch(/text\/html/);
+    const html = await r.text();
+    expect(html, 'trae la entrada homologada: contraseña, código y Google').toMatch(/Entrar con Google/);
+    expect(html).toMatch(/licencias\/mia/);
+    expect(html, 'y no se guarda en ningún caché: lleva sesión de por medio').toMatch(/__t101_licencia/);
   });
 
   it('borrar se lleva la suscripción y sus activaciones; la clave deja de existir para la app', async () => {

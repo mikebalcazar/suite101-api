@@ -37,12 +37,12 @@ bucket_name = "suite101"
 # aplica al despertar y a runtime no hay disco del que leerlas.
 [[rules]]
 type = "Text"
-globs = ["migrations/org/*.sql", "src/importar/*.html"]
+globs = ["migrations/org/*.sql", "src/importar/*.html", "src/paginas/*.html"]
 fallthrough = true
 
 [vars]
 ENTORNO = "produccion"
-API_VERSION = "0.19.0"
+API_VERSION = "0.20.0"
 CORREO_REMITENTE = "Suite 101 <acceso@envios.taller101.mx>"
 CORREO_SUPERADMIN = "mike@forespot.com"
 # Origenes con permiso de CORS. La cookie va con SameSite=None, asi que aqui no
@@ -88,12 +88,12 @@ bucket_name = "suite101-staging"
 
 [[env.staging.rules]]
 type = "Text"
-globs = ["migrations/org/*.sql", "src/importar/*.html"]
+globs = ["migrations/org/*.sql", "src/importar/*.html", "src/paginas/*.html"]
 fallthrough = true
 
 [env.staging.vars]
 ENTORNO = "staging"
-API_VERSION = "0.19.0"
+API_VERSION = "0.20.0"
 CORREO_REMITENTE = "Suite 101 <acceso@envios.taller101.mx>"
 CORREO_SUPERADMIN = "mike@forespot.com"
 ORIGENES = "*"

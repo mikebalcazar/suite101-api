@@ -612,6 +612,20 @@ async function licencias() {
   }
   const det = await pedir(STAGING, `/licencias/${id}`);
   rev(det.estado === 200 && det.data?.activaciones?.length === 1 && (det.data?.bitacora || []).some((b) => b.accion === 'activar'), 'el detalle trae la activación y la bitácora', `${det.data?.activaciones?.length} activaciones · ${det.data?.bitacora?.length} renglones`);
+  /* Activarse con la cuenta, sin clave (0.20.0). La sesión de Mike ya está
+   * puesta aquí arriba; la licencia se encontró por su correo. */
+  const conCuenta = await pedir(STAGING, '/licencias', { method: 'POST', body: { cliente: `Humo cuenta ${ORG}`, correo: CORREO, programa: 'draw101', perpetua: true, tipo: 'suite101', notas: 'la borra el propio humo' } });
+  if (conCuenta.estado === 201) {
+    const huella2 = `humo-cuenta-${ORG}-0123456789abcdef`.replace(/[^A-Za-z0-9_-]/g, '-');
+    const mia = await pedir(STAGING, '/licencias/mia', { method: 'POST', body: { programa: 'draw101', huella: huella2, version: 'humo' } });
+    rev(mia.estado === 201 && typeof mia.data?.token === 'string', 'la app se activa con la cuenta de la suite, sin teclear clave', `${mia.estado} ${mia.error ?? ''}`);
+    const pantalla = await fetch(`${STAGING}/licencias/entrar?programa=draw101&huella=${huella2}&app=draw101`).then((r) => r.text()).catch((e) => `error: ${e.message}`);
+    rev(/Entrar con Google/.test(pantalla) && /__t101_licencia/.test(pantalla), 'la pantalla que abre la app se sirve y trae la entrada de la suite');
+    await pedir(STAGING, `/licencias/${conCuenta.data.id}`, { method: 'DELETE' });
+  } else {
+    rev(false, 'se pudo crear una licencia ligada al correo de Mike', `${conCuenta.estado} ${conCuenta.error ?? ''}`);
+  }
+
   const borra = await pedir(STAGING, `/licencias/${id}`, { method: 'DELETE' });
   rev(borra.estado === 200, 'la licencia de humo se borra', `${borra.estado}`);
   const ya = await pedir(STAGING, '/licencias/activar', { method: 'POST', body: { clave: alta.data.clave, huella } });

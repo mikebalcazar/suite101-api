@@ -25,6 +25,7 @@
  */
 
 import { Hono } from 'hono';
+import paginaEntrar from '../paginas/licencia.html';
 import { err, ok, type Ctx, type Vars } from '../http';
 import type { Env } from '../entorno';
 import { ahora, correoValido, normalizaCorreo } from '../lib';
@@ -36,6 +37,12 @@ import { TIPOS_LICENCIA } from '../../schema/tipos';
 import type { Activacion, EstadoSuscripcion, OrigenPago, RenglonBitacoraLicencia, Suscripcion, TipoLicencia } from '../../schema/tipos';
 
 const rutas = new Hono<{ Bindings: Env; Variables: Vars }>();
+
+/** La pantalla que la app abre para activarse con la cuenta de la suite.
+ *  Se sirve desde el mismo origen que la API a propósito: así la galleta de
+ *  sesión es de primera parte y el regreso de Google es una ruta de aquí. */
+export const paginaLicencia = (c: Ctx): Response =>
+  new Response(paginaEntrar, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': 'no-store' } });
 
 /* ─────────────── acceso a la base ─────────────── */
 
@@ -146,7 +153,84 @@ rutas.post('/desactivar', async (c) => {
   return ok(c, { liberada: true, lugares: { usados: await ocupados(c.env, s.id), total: s.lugares } });
 });
 
+/* ─────────────── la licencia que va con tu cuenta (0.20.0) ───────────────
+ * Encargo de Mike del 19-sep: que la app se abra entrando con la cuenta de la
+ * suite —correo y contraseña, o Google— en vez de tecleando una clave. La
+ * clave se queda como respaldo (también lo decidió él, con botones): hay
+ * máquinas de taller sin internet estable, claves ya repartidas, y en la App
+ * Store no se puede obligar a crear cuenta.
+ *
+ * Aquí NO hay clave: la licencia se encuentra por el correo de la sesión. Lo
+ * demás —los lugares, la vigencia, el token firmado— es exactamente lo mismo
+ * que en `/activar`, y a propósito: dos formas de entrar, una sola regla de
+ * quién entra. */
+rutas.post('/mia', async (c) => {
+  const sesion = c.get('sesion');
+  if (!sesion) return err(c, 'sin_sesion', 401);
+  const b = await c.req.json<{ programa?: unknown; huella?: unknown; version?: unknown }>().catch(() => ({}) as never);
+  const programa = String(b.programa ?? '').trim().toLowerCase();
+  if (!/^[a-z0-9]{2,20}$/.test(programa)) return err(c, 'datos_invalidos', 400, { campo: 'programa' });
+  if (!huellaValida(b.huella)) return err(c, 'datos_invalidos', 400, { falta: 'huella' });
+  const huella = b.huella;
+  const correo = normalizaCorreo(sesion.correo);
+
+  const suyas = (await c.env.MASTER.prepare(`SELECT * FROM suscripciones WHERE correo = ? AND programa = ? ORDER BY creado_at`)
+    .bind(correo, programa).all<Suscripcion>()).results;
+  if (!suyas.length) return err(c, 'sin_licencia', 404, { correo, programa });
+
+  const vigentes = suyas.filter((s) => vigencia(s).vigente);
+  if (!vigentes.length) {
+    /* Tiene licencia pero hoy no entra. Se le dice cuál es el motivo de la
+     * MENOS mala —la que venció más tarde—, no el de la primera que se
+     * encontró: «tu licencia venció el 3 de enero» cuando hay otra que venció
+     * ayer no le sirve a nadie para saber qué pagar. */
+    const menosMala = suyas.slice().sort((a, z) => String(z.paga_hasta ?? '').localeCompare(String(a.paga_hasta ?? '')))[0];
+    const v = vigencia(menosMala) as { vigente: false; motivo: 'suspendida' | 'sin_pago' };
+    return err(c, v.motivo, v.motivo === 'sin_pago' ? 402 : 403, { paga_hasta: menosMala.paga_hasta, licencia: paraLaApp(menosMala) });
+  }
+
+  /* Con varias vigentes gana, en este orden: la que ya tiene a esta máquina
+   * activada (para no gastar un lugar de otra), y si no, la primera con lugar
+   * libre. Una persona puede tener dos —una de cortesía y otra de la empresa—
+   * y escoger la equivocada le quitaría un lugar sin motivo. */
+  let escogida: Suscripcion | null = null;
+  let yaActivada = false;
+  for (const s of vigentes) {
+    const act = await activacionDe(c.env, s.id, huella);
+    if (act && act.activa === 1) { escogida = s; yaActivada = true; break; }
+  }
+  if (!escogida) {
+    for (const s of vigentes) {
+      if ((await ocupados(c.env, s.id, huella)) < s.lugares) { escogida = s; break; }
+    }
+  }
+  if (!escogida) {
+    const s = vigentes[0]!;
+    return err(c, 'sin_lugares', 409, { lugares: s.lugares, ocupados: await ocupados(c.env, s.id, huella), licencia: paraLaApp(s) });
+  }
+
+  const s = escogida;
+  const ya = await activacionDe(c.env, s.id, huella);
+  const usados = await ocupados(c.env, s.id, huella);
+  const t = ahora();
+  const version = versionDe(b.version);
+  if (ya) {
+    await c.env.MASTER.prepare(`UPDATE activaciones SET activa = 1, version = ?, ultimo_latido_at = ? WHERE id = ?`).bind(version, t, ya.id).run();
+  } else {
+    await c.env.MASTER.prepare(`INSERT INTO activaciones (id, suscripcion_id, huella, version, alta_at, ultimo_latido_at, activa) VALUES (?,?,?,?,?,?,1)`)
+      .bind(idNuevo(), s.id, huella, version, t, t).run();
+  }
+  // Quién activó queda apuntado con su correo, no con «app»: por aquí se
+  // entra con cuenta, y saber quién fue es la mitad de para qué sirve.
+  if (!ya || ya.activa === 0) await apunta(c.env, { suscripcion_id: s.id, quien: correo, accion: 'activar', detalle: { huella, version, por: 'cuenta' } });
+
+  const carga = cargaDe(s, huella);
+  const token = await firmarToken(c.env, carga);
+  return ok(c, { token, hasta: carga.hasta, licencia: paraLaApp(s), lugares: { usados: usados + 1, total: s.lugares } }, yaActivada ? 200 : 201);
+});
+
 /* ─────────────── lo que usa el panel (superadmin) ─────────────── */
+
 
 rutas.use('/*', async (c, next) => {
   if (!c.get('sesion')) return err(c, 'sin_sesion', 401);
