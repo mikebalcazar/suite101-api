@@ -736,6 +736,9 @@ describe('12 · la contraseña, junto al código, el PIN y Google (contrato 0.7.
     const antes = await pedir('/yo');
     expect(antes.data.tiene_clave).toBe(false);
     expect(antes.data.tiene_pin).toBe(false);
+    // 0.17.2: sin Google ligado. Es lo que mira la pantalla para decidir si
+    // le exige una contraseña a quien entró con un código.
+    expect(antes.data.tiene_google).toBe(false);
     expect(antes.data.entro_con).toBe('codigo');
 
     // Las débiles no pasan, y la API dice por qué con palabras.
@@ -760,6 +763,22 @@ describe('12 · la contraseña, junto al código, el PIN y Google (contrato 0.7.
 
     const despues = await pedir('/yo');
     expect(despues.data.tiene_clave).toBe(true);
+  });
+
+  it('con Google ligado, /yo lo dice aunque se entre con un código (0.17.2)', async () => {
+    const correo = `con-google-${Date.now()}@ejemplo.mx`;
+    galleta = galletaMike;
+    const alta = await pedir(`/admin/orgs/${ORG}/miembros`, { method: 'POST', body: JSON.stringify({ correo, nombre: 'Con Google', rol: 'staff' }) });
+    expect(alta.estado, JSON.stringify(alta)).toBe(201);
+    // Como si ya hubiera entrado con Google alguna vez: es lo único que hace
+    // el callback de Google con la cuenta.
+    await entorno.MASTER.prepare(`UPDATE usuarios SET google_sub = ? WHERE correo = ?`).bind('sub-de-google-123', correo).run();
+    await entrarConCodigo(correo);
+    const yo = await pedir('/yo');
+    expect(yo.data.tiene_clave).toBe(false);
+    expect(yo.data.tiene_google).toBe(true);
+    expect(yo.data.entro_con).toBe('codigo');
+    galleta = galletaMike;
   });
 
   it('se entra con la contraseña, y la equivocada no dice de más', async () => {
