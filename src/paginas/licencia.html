@@ -50,6 +50,16 @@
     <div class="err" id="err-correo"></div>
     <button class="btn" type="button" id="b-correo">Continuar</button>
     <button class="btn suave" type="button" id="b-google">Entrar con Google</button>
+    <hr class="sep">
+    <button class="liga" type="button" id="b-tengo-clave">Tengo una clave T101-…</button>
+  </div>
+
+  <div id="v-clave-licencia" hidden>
+    <p class="nota">La clave que te dieron, tal cual. Sirve sin cuenta: es para una máquina de taller sin internet estable o para una licencia que ya te habían entregado.</p>
+    <label for="clave-lic">Clave<input id="clave-lic" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="T101-XXXX-XXXX-XXXX"></label>
+    <div class="err" id="err-clave-lic"></div>
+    <button class="btn" type="button" id="b-clave-lic">Activar</button>
+    <button class="liga" type="button" id="b-mejor-cuenta">Mejor entro con mi cuenta</button>
   </div>
 
   <div id="v-clave" hidden>
@@ -110,6 +120,7 @@ const NOMBRE = P.get('app') || PROGRAMA || 'la app';
 const ERRORES = {
   codigo_invalido: 'Ese código no es. Revisa tu correo y vuelve a intentar.',
   clave_invalida: 'Esa contraseña no es.',
+  clave_inexistente: 'Esa clave no existe. Revísala tal cual te la dieron.',
   demasiados_intentos: 'Demasiados intentos. Espera un momento y vuelve a intentar.',
   sin_permiso: 'Ese correo no tiene cuenta. Pídesela a quien te vendió la licencia.',
   sin_sesion: 'Tu sesión terminó. Vuelve a entrar.',
@@ -139,7 +150,7 @@ async function pedir(ruta, cuerpo) {
   return d.data;
 }
 
-const ver = (cual) => { for (const v of ['v-cargando','v-correo','v-clave','v-codigo','v-nueva','v-listo','v-problema']) $(v).hidden = v !== cual; };
+const ver = (cual) => { for (const v of ['v-cargando','v-correo','v-clave','v-codigo','v-nueva','v-listo','v-problema','v-clave-licencia']) $(v).hidden = v !== cual; };
 let correo = '';
 
 const diaLegible = (d) => {
@@ -165,15 +176,7 @@ async function activar() {
 
   try {
     const r = await pedir('/licencias/mia', { programa: PROGRAMA, huella: HUELLA, version: VERSION || undefined });
-    $('p-listo').textContent = `Listo: ${NOMBRE} ya está activada.`;
-    $('p-detalle').textContent =
-      `${yo.usuario?.correo ?? correo} · ${r.licencia?.perpetua ? 'no vence' : `pagada hasta ${diaLegible(r.licencia?.paga_hasta)}`}`
-      + ` · equipo ${r.lugares?.usados} de ${r.lugares?.total}`;
-    ver('v-listo');
-    // La app escucha esto. El objeto va antes que el fragmento, para que
-    // cuando el cascarón despierte ya esté puesto.
-    window.__t101_licencia = { token: r.token, hasta: r.hasta, licencia: r.licencia, correo: yo.usuario?.correo ?? correo };
-    location.replace(`${location.pathname}${location.search}#listo`);
+    lista(r, yo.usuario?.correo ?? correo);
   } catch (e) {
     $('p-quien').textContent = `Entraste como ${yo.usuario?.correo ?? correo}.`;
     $('p-problema').textContent =
@@ -185,6 +188,45 @@ async function activar() {
     ver('v-problema');
   }
 }
+
+/** Lo mismo para los dos caminos, el de cuenta y el de clave: la app sólo
+ *  sabe de `#listo` y de `window.__t101_licencia`. */
+function lista(r, quien) {
+  $('p-listo').textContent = `Listo: ${NOMBRE} ya está activada.`;
+  $('p-detalle').textContent =
+    `${quien ? `${quien} · ` : ''}${r.licencia?.perpetua ? 'no vence' : `pagada hasta ${diaLegible(r.licencia?.paga_hasta)}`}`
+    + ` · equipo ${r.lugares?.usados} de ${r.lugares?.total}`;
+  ver('v-listo');
+  // La app escucha esto. El objeto va ANTES que el fragmento, para que cuando
+  // el cascarón despierte ya esté puesto.
+  window.__t101_licencia = { token: r.token, hasta: r.hasta, licencia: r.licencia, correo: quien || null };
+  location.replace(`${location.pathname}${location.search}#listo`);
+}
+
+/* El camino de la clave tecleada, que Mike decidió conservar: sin cuenta y
+ * sin sesión, contra la misma `/licencias/activar` de siempre. */
+$('b-tengo-clave').onclick = () => {
+  $('clave-lic').value = ''; $('err-clave-lic').textContent = '';
+  ver('v-clave-licencia'); $('clave-lic').focus();
+};
+$('b-mejor-cuenta').onclick = () => { $('err-correo').textContent = ''; ver('v-correo'); $('correo').focus(); };
+$('b-clave-lic').onclick = async () => {
+  $('err-clave-lic').textContent = '';
+  const v = $('clave-lic').value.trim().toUpperCase();
+  if (!v) { $('err-clave-lic').textContent = 'Escribe la clave.'; return; }
+  $('b-clave-lic').disabled = true;
+  try {
+    const r = await pedir('/licencias/activar', { clave: v, huella: HUELLA, version: VERSION || undefined });
+    lista(r, null);
+  } catch (e) {
+    $('err-clave-lic').textContent =
+      e.cual === 'sin_pago' ? `Esa licencia no está al corriente${e.detalle?.paga_hasta ? ` (pagada hasta ${diaLegible(e.detalle.paga_hasta)})` : ''}.`
+      : e.cual === 'suspendida' ? 'Esa licencia está suspendida.'
+      : e.cual === 'sin_lugares' ? `Esa licencia permite ${e.detalle?.lugares} equipo(s) a la vez y ya están ocupados.`
+      : e.message;
+  } finally { $('b-clave-lic').disabled = false; }
+};
+$('clave-lic').onkeydown = (e) => { if (e.key === 'Enter') $('b-clave-lic').click(); };
 
 $('b-correo').onclick = () => {
   $('err-correo').textContent = '';
