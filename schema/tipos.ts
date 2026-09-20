@@ -13,7 +13,26 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.33.0 (LAS 29 PUERTAS DEL MISMO MODELO:
+ * Versión del contrato: 0.34.0 (DOS CÓDIGOS, Y NO SE MEZCLAN. Mike,
+ * 20-sep: «una cosa es el código de ítem (pieza física en obra) y otra
+ * diferente el código de producto de catálogo. Así es como lo vamos a
+ * ordenar. Porque más adelante, en quote necesito ir generando un catálogo
+ * con códigos de producto. Y cada ítem es un código de producto y puede
+ * haber varios ítems del mismo modelo».
+ *   · `quell_elements.code` es el código de la PIEZA —PT-01, PT-02—, único
+ *     dentro de la obra, y lo pone quell101: sugerido por tipo o tecleado.
+ *   · `items.clave` es el código de PRODUCTO, el del modelo en el catálogo.
+ *     Veintinueve puertas iguales son veintinueve piezas y UN producto.
+ * Así, un producto de quote101 con cantidad 10 llega a quell101 como diez
+ * piezas por ubicar —lo que ya hace `/obras/:id/sin-ubicar`—, cada una con
+ * su código de obra. `POST /orgs/:o/obras/:id/items` DEJA de unificarlos:
+ * ya no copia uno al otro ni pregunta cuál gana (eso era el 0.28.0, hecho
+ * con el entendimiento anterior de que eran el mismo dato con dos
+ * nombres), `clave` en el cuerpo se acepta y se ignora, y el 409
+ * `codigo_en_uso` desaparece de ese camino porque ligar ya no escribe
+ * códigos. Unificarlos le ponía a un producto el folio de una de sus
+ * piezas, y al ligar la segunda el producto cambiaba de código). Antes:
+ * 0.33.0 (LAS 29 PUERTAS DEL MISMO MODELO:
  * `GET /orgs/:o/proyectos/:id/agrupables` agrupa por la FAMILIA del nombre
  * —lo que queda al quitarle el número de la pieza— y ya no por nombre
  * idéntico. Mike, 20-sep, con la pantalla enfrente: «el código sí es
@@ -381,7 +400,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.33.0';
+export const VERSION_CONTRATO = '0.34.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

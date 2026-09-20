@@ -254,10 +254,12 @@ describe('los cinco campos del ítem, en la obra (§105)', () => {
 
   it('el detalle de la pieza trae código, nombre, tipo y DESCRIPCIÓN', async () => {
     const det = await q('mike', `/elements/${pieza_}`);
-    /* El código de la pieza lo propone la obra (MW-…, PT-…) y al ligarla se
-     * copia al ítem, que no lo traía: por eso los dos dicen lo mismo. */
-    expect(det.element.code, 'el código').toBeTruthy();
-    expect((await o('mike', `/items/${conTodo}`)).data.clave, 'y el ítem quedó con el mismo').toBe(det.element.code);
+    /* El código de la PIEZA lo propone la obra (MW-…, PT-…) y es suyo. El
+     * del PRODUCTO es otro campo y otra cosa —el del modelo en el
+     * catálogo—, y ligar ya no copia uno al otro: Mike lo ordenó así el
+     * 20-sep. */
+    expect(det.element.code, 'el código de la pieza').toBeTruthy();
+    expect((await o('mike', `/items/${conTodo}`)).data.clave ?? '', 'y el del producto no se lo robó').toBeFalsy();
     expect(det.element.name, 'el nombre').toBeTruthy();
     expect(det.element.type, 'el tipo').toBeTruthy();
     /* La descripción vivía sólo en dash101. Ahora viaja de ida: es el campo

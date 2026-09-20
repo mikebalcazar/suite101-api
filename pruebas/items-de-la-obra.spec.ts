@@ -341,11 +341,19 @@ describe('emparejar a mano', () => {
     expect(r.data.ligados).toBe(1);
   });
 
-  it('el CÓDIGO se copia al lado que no lo traía, sin preguntar', async () => {
-    /* Eso no es decidir: es llenar un hueco. El ítem no tenía clave y la
-     * pieza sí, así que la clave es la de la pieza. */
+  it('el código de la PIEZA no se le pega al producto', async () => {
+    /* Mike, 20-sep: «una cosa es el código de ítem (pieza física en obra) y
+     * otra diferente el código de producto de catálogo».
+     *
+     * Hasta el 0.28.0 esto copiaba el de la pieza al ítem, porque yo
+     * entendía que eran el mismo dato con dos nombres. No lo son: CAB-01
+     * nombra una cabecera en un plano, y `items.clave` va a ser el código
+     * del MODELO en el catálogo de quote101. Copiar uno al otro le ponía a
+     * un producto el folio de una de sus piezas. */
     const it = await o('mike', `/items/${unaSola}`);
-    expect(it.data.clave).toBe('CAB-01');
+    expect(it.data.clave ?? '', 'el ítem sigue sin código de producto').toBeFalsy();
+    const det = await q('mike', `/elements/${(await o('mike', `/obras/${obra2}/items`)).data.parejas[0]?.element_id ?? ''}`).catch(() => null);
+    void det;
   });
 
   it('y el NOMBRE no se toca si nadie lo escoge: cada lado tiene el suyo', async () => {
@@ -357,10 +365,10 @@ describe('emparejar a mano', () => {
     expect(it.data.descripcion).toBe('Con capitoneado');
   });
 
-  it('cuando los dos traen código y difieren, gana el que se pida', async () => {
-    /* El código es la identidad de UNA pieza, así que este caso es el de un
-     * ítem de cantidad 1: una cabecera, una pieza en el plano, dos códigos
-     * tecleados y alguien que escoge cuál queda. */
+  it('cuando los dos traen código, cada uno se queda con el suyo', async () => {
+    /* Son dos códigos distintos —el de la pieza y el del producto—, así que
+     * no hay nada que decidir: no se pregunta cuál gana, y ninguno se
+     * mueve. La pantalla ya no tiene por qué ofrecer esa elección. */
     const eZ = await piezaEn('Tocador del vestidor', 'TOC-09');
     const tocador = (await o('mike', '/items', { method: 'POST', json: {
       negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto2,
@@ -368,25 +376,12 @@ describe('emparejar a mano', () => {
     } })).data.id;
     await o('mike', `/items/${tocador}`, { method: 'PATCH', app: 'quell101', json: { clave: 'TC-1' } });
 
-    const sinDecir = await o('mike', `/obras/${obra2}/items`, {
-      method: 'POST', json: { ligar: [{ element_id: eZ, item_id: tocador }] },
+    const r = await o('mike', `/obras/${obra2}/items`, {
+      method: 'POST', json: { ligar: [{ element_id: eZ, item_id: tocador, clave: 'quell' }] },
     });
-    expect(sinDecir.estado, JSON.stringify(sinDecir)).toBe(200);
-    // Sin `clave`, no se toca ninguno: inventarle un ganador a dos códigos
-    // que alguien tecleó a propósito es justo lo que no se hace solo.
-    expect((await o('mike', `/items/${tocador}`)).data.clave).toBe('TC-1');
-
-    const eZ2 = await piezaEn('Tocador gemelo', 'TOC-10');
-    const otroTocador = (await o('mike', '/items', { method: 'POST', json: {
-      negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto2,
-      nombre: 'Tocador gemelo', monto: 12_000_00, cantidad: 1, estado: 'vendido',
-    } })).data.id;
-    await o('mike', `/items/${otroTocador}`, { method: 'PATCH', app: 'quell101', json: { clave: 'TC-2' } });
-    const conQuell = await o('mike', `/obras/${obra2}/items`, {
-      method: 'POST', json: { ligar: [{ element_id: eZ2, item_id: otroTocador, clave: 'quell' }] },
-    });
-    expect(conQuell.estado, JSON.stringify(conQuell)).toBe(200);
-    expect((await o('mike', `/items/${otroTocador}`)).data.clave, 'gana el del plano').toBe('TOC-10');
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect((await o('mike', `/items/${tocador}`)).data.clave, 'el producto conserva el suyo').toBe('TC-1');
+    expect((await q('mike', `/elements/${eZ}`)).element.code, 'y la pieza el suyo').toBe('TOC-09');
   });
 
   it('un CONCEPTO de varias piezas no toma el código de ninguna, ni les pone el suyo', async () => {
@@ -443,32 +438,26 @@ describe('emparejar a mano', () => {
     expect(det.element.name, 'y el plano conserva el que ya decía').toBe('Clóset de blancos');
   });
 
-  it('un código que ya trae otra pieza se rechaza diciendo cuál', async () => {
-    /* El código es único dentro de la obra y lo impide la base. Sin este
-     * mensaje el choque sale como falla interna, y quien lo ve no sabe con
-     * qué chocó ni qué hacer.
-     *
-     * El caso es real: el ítem trae CAB-01 en dash, la pieza trae otro, y
-     * alguien pide que gane el de dash. Pero CAB-01 ya es de otra pieza de
-     * esa obra. */
+  it('ya no hay choque de códigos al ligar, porque ligar no escribe códigos', async () => {
+    /* Esta prueba afirmaba un 409 `codigo_en_uso`: existía porque ligar
+     * copiaba el código de un lado al otro y podía chocar con otra pieza de
+     * la obra. Desde que son dos códigos distintos, ligar no escribe
+     * ninguno y ese choque no puede ocurrir por aquí. El índice único de la
+     * obra sigue vivo para cuando alguien teclea un código en quell101, que
+     * es donde se ponen. */
     const eF = await piezaEn('Repisa', 'REP-01');
     const otro = (await o('mike', '/items', { method: 'POST', json: {
       negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto2,
       nombre: 'Repisa larga', monto: 4_000_00, cantidad: 1, estado: 'vendido',
     } })).data.id;
-    const marca = await o('mike', `/items/${otro}`, { method: 'PATCH', app: 'quell101', json: { clave: 'CAB-01' } });
-    expect(marca.estado, JSON.stringify(marca)).toBe(200);
+    await o('mike', `/items/${otro}`, { method: 'PATCH', app: 'quell101', json: { clave: 'CAB-01' } });
 
     const r = await o('mike', `/obras/${obra2}/items`, {
       method: 'POST', json: { ligar: [{ element_id: eF, item_id: otro, clave: 'dash' }] },
     });
-    expect(r.estado, JSON.stringify(r)).toBe(409);
-    expect(r.error).toBe('codigo_en_uso');
-    expect(r.detalle.pieza, 'y dice con cuál chocó').toBe('Mueble de cabecera');
-
-    // Y no se quedó ligada a medias: el rechazo deja todo como estaba.
-    const prop = await o('mike', `/obras/${obra2}/items`);
-    expect(prop.data.nuevos.map((n: any) => n.element_id), 'la pieza sigue suelta').toContain(eF);
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect((await q('mike', `/elements/${eF}`)).element.code, 'la pieza no cambió de código').toBe('REP-01');
+    expect((await o('mike', `/items/${otro}`)).data.clave, 'ni el producto').toBe('CAB-01');
   });
 });
 

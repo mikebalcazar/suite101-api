@@ -2215,14 +2215,7 @@ export class OrgDB extends DurableObject<Env> {
 
     const usado = new Map<string, number>();   // item_id → piezas que ya le cuelgan
     const crecer = new Map<string, number>();  // item_id → en cuántas piezas crece el concepto
-    const codigos = new Map<string, string>(); // element_id → código que le va a quedar
     const nombres = new Map<string, { que: 'item' | 'pieza'; valor: string }>();
-    /* Los códigos que van a existir en la obra al terminar, para que dos
-     * piezas del mismo envío no acaben con el mismo. */
-    const codigoDe = new Map<string, string>();
-    for (const e of this.sql.exec(`SELECT id, code FROM quell_elements WHERE project_id = ?`, obra_id).toArray() as Fila[]) {
-      codigoDe.set(String(e.id), String(e.code ?? ''));
-    }
 
     for (const par of ligar) {
       const pz = pieza(par.element_id)!;
@@ -2275,42 +2268,30 @@ export class OrgDB extends DurableObject<Env> {
        *     `clave`. Sin `clave` no se toca ninguno: inventarle un ganador a
        *     dos códigos que alguien tecleó a propósito es justo lo que no se
        *     hace solo. */
-      /* UN CONCEPTO DE VARIAS PIEZAS NO TIENE UN CÓDIGO.
+      /* LOS DOS CÓDIGOS SON DOS COSAS, Y NO SE MEZCLAN.
        *
-       * Desde que se pueden agrupar (§98), un ítem puede ser «21 puertas
-       * iguales». Copiarle su código a las 21 piezas les pondría el mismo a
-       * todas, y la base lo impide con razón: dentro de una obra el código
-       * nombra UNA pieza del plano. Con `cantidad` mayor que uno, cada lado
-       * se queda con el suyo y no se pregunta nada: no hay una identidad
-       * que unificar, hay veintiuna. */
-      const variasPiezas = Math.trunc(Number(it.cantidad ?? 1)) > 1;
-      const claveItem = variasPiezas ? '' : String(it.clave ?? '').trim();
-      const clavePieza = String(pz.code ?? '').trim();
-      const claveFinal =
-        claveItem && clavePieza && claveItem !== clavePieza
-          ? (par.clave === 'dash' ? claveItem : par.clave === 'quell' ? clavePieza : '')
-          : (claveItem || clavePieza);
-
-      if (claveFinal && claveFinal !== clavePieza) {
-        /* El código es único dentro de la obra y lo impide la base. Si ya lo
-         * trae otra pieza se dice CUÁL: sin eso, el choque sale como falla
-         * interna y quien lo ve no sabe con qué chocó ni qué hacer. */
-        for (const [eid, cod] of codigoDe) {
-          if (eid !== par.element_id && cod === claveFinal) {
-            const otra = this.sql.exec(`SELECT name FROM quell_elements WHERE id = ?`, eid).toArray()[0] as Fila | undefined;
-            return {
-              error: 'codigo_en_uso',
-              detalle: { clave: claveFinal, pieza_id: eid, pieza: otra?.name ?? '',
-                         motivo: 'otra pieza del plano ya tiene ese código, y dentro de una obra el código es único' },
-            };
-          }
-        }
-        codigoDe.set(par.element_id, claveFinal);
-        codigos.set(par.element_id, claveFinal);
-      }
-      if (!variasPiezas && claveFinal && claveFinal !== claveItem) {
-        nombres.set(`clave:${par.item_id}`, { que: 'item', valor: claveFinal });
-      }
+       * Mike lo ordenó el 20-sep, y es la palabra final sobre esto: «una
+       * cosa es el código de ítem (pieza física en obra) y otra diferente
+       * el código de producto de catálogo. (…) Cada ítem es un código de
+       * producto y puede haber varios ítems del mismo modelo».
+       *
+       *   · `quell_elements.code` es el CÓDIGO DE LA PIEZA: PT-01, PT-02.
+       *     Nombra una puerta en un plano, y es único dentro de la obra.
+       *   · `items.clave` es el CÓDIGO DE PRODUCTO: el del modelo en el
+       *     catálogo. Veintinueve puertas iguales son veintinueve piezas y
+       *     UN producto.
+       *
+       * Hasta el 0.28.0 esto los unificaba —copiaba uno al otro y hasta
+       * preguntaba cuál ganaba—, porque yo entendía que eran el mismo dato
+       * con dos nombres. No lo son, y unificarlos le ponía a un producto el
+       * folio de una de sus piezas: al ligar la segunda, el producto
+       * cambiaba de código, y el de la primera quedaba escrito en un plano
+       * que ya nadie podía relacionar con nada.
+       *
+       * Así que aquí ya no se toca ninguno de los dos. `clave` en el cuerpo
+       * se acepta y se ignora, para no tronarle a una pantalla vieja que
+       * todavía la mande. */
+      void par.clave;
 
       /* El nombre: LOS DOS LADOS LO TIENEN, y unificarlo es una decisión, no
        * un hueco que llenar.
@@ -2338,7 +2319,6 @@ export class OrgDB extends DurableObject<Env> {
       this.sql.exec(`UPDATE quell_elements SET item_id = ? WHERE id = ?`, par.item_id, par.element_id);
       ligados++;
     }
-    for (const [eid, cod] of codigos) this.sql.exec(`UPDATE quell_elements SET code = ? WHERE id = ?`, cod, eid);
     for (const [llave, v] of nombres) {
       const id = llave.split(':')[1];
       if (llave.startsWith('clave:')) this.actualizar('items', id, { clave: v.valor } as unknown as Fila);
