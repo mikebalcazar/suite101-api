@@ -273,7 +273,11 @@ export function montarOrdenes(rutas: App): void {
 
   rutas.get('/:o/fiscal/pendientes', async (c) => {
     if (!puedeFiscal(c)) return err(c, 'sin_permiso', 403);
-    return ok(c, { filas: await stub(c).pendientesDeFactura(c.req.query('negocio_id') || null) });
+    /* `?tipo=ingreso` o `?tipo=egreso` para ver un lado solo. Sin el
+     * parámetro vienen los dos, que es como la pantalla los pinta. */
+    const tipo = c.req.query('tipo');
+    if (tipo && tipo !== 'ingreso' && tipo !== 'egreso') return err(c, 'tipo_desconocido', 400, { tipo });
+    return ok(c, { filas: await stub(c).pendientesDeFactura(c.req.query('negocio_id') || null, tipo || null) });
   });
 
   rutas.get('/:o/fiscal/cfdi', async (c) => {

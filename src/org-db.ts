@@ -24,6 +24,7 @@ import ordenes from '../migrations/org/0008_ordenes.sql';
 import fiscal from '../migrations/org/0009_fiscal.sql';
 import obras from '../migrations/org/0010_obras.sql';
 import cantidad from '../migrations/org/0011_cantidad.sql';
+import facturaEsperada from '../migrations/org/0012_factura_esperada.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { atender as atenderRoster, type DatosEmpresaRoster, type SesionRoster } from './roster/motor.js';
 import { invitarClienteEnSuite } from './clientes';
@@ -43,7 +44,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada];
 
 /** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
  *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
@@ -149,7 +150,7 @@ export interface ApiOrgDB {
    * salen las cifras de toda la empresa. */
   ivaDelMes(desde: string, hasta: string, negocio_id?: string | null): Promise<{ desde: string; hasta: string; trasladado: number; acreditable: number; retenciones: number; a_enterar: number; facturas: { emitidas: number; recibidas: number; canceladas: number } }>;
   facturadoVsReal(desde: string, hasta: string, negocio_id?: string | null): Promise<{ desde: string; hasta: string; ingresos: { total: number; facturado: number; fuera: number }; egresos: { total: number; facturado: number; fuera: number } }>;
-  pendientesDeFactura(negocio_id?: string | null): Promise<Fila[]>;
+  pendientesDeFactura(negocio_id?: string | null, tipo?: string | null): Promise<Fila[]>;
   listaCfdi(args: { desde?: string; hasta?: string; tipo?: string; estado?: string; negocio_id?: string | null }): Promise<Fila[]>;
 
   /* El cliente es uno solo en las tres apps: avisar del parecido y juntar
@@ -1390,16 +1391,25 @@ export class OrgDB extends DurableObject<Env> {
       this.sql.exec(
         `INSERT INTO movimientos (id, negocio_id, tipo, monto, fecha, cuenta_id, proyecto_id,
           contraparte_tipo, contraparte_id, contraparte_nombre, descripcion, categoria, creado_por, creado_at,
-          facturado, subtotal, iva, tasa_iva)
-         VALUES (?,?,'egreso',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          facturado, requiere_factura, subtotal, iva, tasa_iva)
+         VALUES (?,?,'egreso',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         mov_id, orden.negocio_id, Number(orden.monto), fecha, args.cuenta_id, orden.proyecto_id ?? null,
         orden.proveedor_id ? 'proveedor' : 'otro', orden.proveedor_id ?? null, orden.proveedor_nombre ?? null,
         `${orden.folio} · ${orden.concepto}`, 'orden_de_compra', args.quien_usuario_id, t,
         /* `facturado` arranca en 0 aunque la orden diga «con factura»: la
          * marca dice que YA LLEGÓ el CFDI, no que se espera. La factura casi
          * siempre llega después, y es justo lo que persigue la lista de
-         * pendientes de factura. */
-        0, Number(orden.subtotal ?? 0), Number(orden.iva ?? 0), Number(orden.tasa_iva ?? 0),
+         * pendientes de factura.
+         *
+         * `requiere_factura` es la otra mitad, y es la que dice que se
+         * espera. Antes del contrato 0.25.0 esa espera se leía de
+         * `ordenes.con_factura` con un JOIN, así que aquí no había nada que
+         * escribir; ahora vive en el movimiento —para que un INGRESO, que no
+         * tiene orden de compra, también pueda estar pendiente—, y hay que
+         * copiarla al pagar o el pago nuevo nace fuera de la lista. Es
+         * exactamente lo que atrapó la prueba 20 al subir la migración. */
+        0, Number(orden.con_factura ?? 0) ? 1 : 0,
+        Number(orden.subtotal ?? 0), Number(orden.iva ?? 0), Number(orden.tasa_iva ?? 0),
       );
       this.sql.exec(
         `UPDATE ordenes SET estado = 'pagada', movimiento_id = ?, pagada_at = ?, pagada_por = ?, actualizado_at = ? WHERE id = ?`,
@@ -1671,14 +1681,29 @@ export class OrgDB extends DurableObject<Env> {
 
   /** Pagos que se hicieron esperando factura y cuyo CFDI todavía no llega. Es
    *  la lista que hay que perseguir cada mes. */
-  pendientesDeFactura(negocio_id?: string | null): Fila[] {
-    const base = `SELECT m.*, o.folio AS orden_folio, o.proveedor_nombre AS orden_proveedor
-             FROM movimientos m
-             JOIN ordenes o ON o.movimiento_id = m.id
-             WHERE o.con_factura = 1 AND m.facturado = 0`;
-    return (negocio_id
-      ? this.sql.exec(`${base} AND m.negocio_id = ? ORDER BY m.fecha`, negocio_id)
-      : this.sql.exec(`${base} ORDER BY m.fecha`)
+  /** Lo que falta facturar, de los dos lados.
+   *
+   *  Hasta el 20-sep esto empezaba con un `JOIN ordenes`, porque la espera de
+   *  la factura vivía en la orden de compra (`con_factura`). Consecuencia: un
+   *  INGRESO no podía salir aquí jamás —no tiene orden de compra—, y a Mike
+   *  le faltaba justo eso: la lista de lo que cobró y todavía no facturó.
+   *
+   *  Ahora la espera vive en el movimiento (`requiere_factura`, migración
+   *  0012) y la orden es nada más un dato de adorno cuando existe: por eso el
+   *  JOIN es LEFT. La 0012 le puso la espera a los pagos de órdenes que hoy
+   *  están pendientes, así que la lista de egresos no cambia de contenido. */
+  pendientesDeFactura(negocio_id?: string | null, tipo?: string | null): Fila[] {
+    const donde: string[] = ['m.requiere_factura = 1', 'm.facturado = 0'];
+    const args: SqlStorageValue[] = [];
+    if (negocio_id) { donde.push('m.negocio_id = ?'); args.push(negocio_id); }
+    if (tipo) { donde.push('m.tipo = ?'); args.push(tipo); }
+    return this.sql.exec(
+      `SELECT m.*, o.folio AS orden_folio, o.proveedor_nombre AS orden_proveedor
+         FROM movimientos m
+         LEFT JOIN ordenes o ON o.movimiento_id = m.id
+        WHERE ${donde.join(' AND ')}
+        ORDER BY m.fecha`,
+      ...args,
     ).toArray() as Fila[];
   }
 

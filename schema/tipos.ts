@@ -13,7 +13,17 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.24.3 (una lista que YA pregunta por un proyecto o
+ * Versión del contrato: 0.25.0 (un INGRESO también puede estar pendiente de
+ * facturar. `movimientos.requiere_factura` (migración 0012) dice que se
+ * espera una factura; `facturado` dice que ya llegó. Son cosas distintas y
+ * ninguna escribe a la otra: pendiente es la conjunción. Antes la espera
+ * salía de `ordenes.con_factura`, así que `GET /orgs/:o/fiscal/pendientes`
+ * empezaba con un JOIN contra `ordenes` y un ingreso —que no tiene orden de
+ * compra— no podía salir ahí nunca. Ahora el JOIN es LEFT, la ruta acepta
+ * `?tipo=ingreso|egreso`, y la 0012 le pone la espera a los pagos de órdenes
+ * que hoy están pendientes para que esa lista no cambie de contenido. La
+ * factura se cuelga con la tabla `archivos` de siempre, sin columna nueva).
+ * Antes: 0.24.3 (una lista que YA pregunta por un proyecto o
  * por un cliente no se acota sola al negocio de quien pregunta. El relleno
  * de «un negocio a la vez» sigue en pie para las listas de toda la empresa,
  * que es donde sirve; pero un proyecto es de un solo negocio, así que con
@@ -232,7 +242,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.24.3';
+export const VERSION_CONTRATO = '0.25.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

@@ -147,9 +147,15 @@ export const DEFS: Record<Tabla, Def> = {
        * arrastra el mismo error de coma flotante. */
       facturado: 'bool', subtotal: 'dinero', iva: 'dinero', tasa_iva: 'entero', retenciones: 'dinero',
       uuid_cfdi: 'texto', fecha_cfdi: 'texto', forma_pago: 'texto',
+      /* 0012 · que se ESPERA factura. No es lo mismo que `facturado`: una es
+       * la decisión de quien captura, la otra es el hecho de que ya llegó.
+       * Pendiente de facturar es la conjunción, y ninguna escribe a la otra.
+       * Antes la espera salía de `ordenes.con_factura`, y por eso un ingreso
+       * —que no tiene orden de compra— no podía estar pendiente nunca. */
+      requiere_factura: 'bool',
     },
     requeridos: ['negocio_id', 'tipo', 'monto', 'fecha', 'cuenta_id'],
-    filtros: ['negocio_id', 'proyecto_id', 'item_id', 'cuenta_id', 'tipo', 'facturado'],
+    filtros: ['negocio_id', 'proyecto_id', 'item_id', 'cuenta_id', 'tipo', 'facturado', 'requiere_factura'],
     orden: 'fecha',
     fecha: 'fecha',
   },
