@@ -94,7 +94,7 @@ const precioVenta = async () => Number((await o('mike', `/proyectos/${proyecto}`
 beforeAll(async () => {
   const c = await pedir('mike', '/auth/codigo', { method: 'POST', json: { correo: CORREO }, app: '' });
   await pedir('mike', '/auth/entrar', { method: 'POST', json: { correo: CORREO, codigo: c.data.codigo_prueba }, app: '' });
-  const alta = await pedir('mike', '/admin/orgs', { method: 'POST', json: { id: ORG, nombre: 'Agrupar ítems', apps: { dash: true, quell: true } }, app: '' });
+  const alta = await pedir('mike', '/admin/orgs', { method: 'POST', json: { id: ORG, nombre: 'Agrupar ítems', apps: { dash: true, quell: true, nest: true } }, app: '' });
   expect(alta.estado, JSON.stringify(alta)).toBe(201);
 
   negocio = (await o('mike', '/negocios', { method: 'POST', json: { nombre: 'Taller' } })).data.id;
@@ -596,5 +596,145 @@ describe('la partida y el orden (§102)', () => {
     });
     expect(r.estado).toBe(404);
     expect((await o('mike', `/items/${tres}`)).data.partida, 'no se acomodó ni el primero').toBe('Baño');
+  });
+});
+
+describe('separar: deshacer el grupo (§113)', () => {
+  /* Mike, 20-sep, con HOLCIM enfrente: «ya se hizo un desastre con todos los
+   * cambios y ahora no puedo separar los ítems para agruparlos en otro
+   * producto. O mejor sepárame todos los ítems de puertas otra vez». */
+  let a = '', b = '', producto = '';
+
+  beforeAll(async () => {
+    a = await puerta('Mampara', 6_000_00);
+    b = await puerta('Mampara', 6_000_00);
+    producto = (await o('mike', `/proyectos/${proyecto}/agrupar`, {
+      method: 'POST', json: { items: [a, b], nombre: 'Mampara modelo único' },
+    })).data.producto.id;
+  });
+
+  it('un ítem sale del grupo y conserva su precio', async () => {
+    const antes = await precioVenta();
+    const r = await o('mike', `/items/${a}/separar`, { method: 'POST' });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.salio_de).toBe(producto);
+    expect(r.data.item.producto_id).toBeNull();
+    expect(r.data.item.monto, 'salirse no lo vuelve gratis').toBe(6_000_00);
+    expect(r.data.reconstruidos, 'no había nada fusionado que devolver').toHaveLength(0);
+    expect(await precioVenta()).toBe(antes);
+  });
+
+  it('separar el producto entero saca a los que queden, de un golpe', async () => {
+    const antes = await precioVenta();
+    const r = await o('mike', `/proyectos/${proyecto}/separar`, { method: 'POST', json: { producto_id: producto } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.separados).toBe(1);
+    expect((await o('mike', `/items/${b}`)).data.producto_id).toBeNull();
+    expect(await precioVenta()).toBe(antes);
+  });
+
+  it('un producto sin piezas en la obra: 404', async () => {
+    const r = await o('mike', `/proyectos/${proyecto}/separar`, { method: 'POST', json: { producto_id: producto } });
+    expect(r.estado).toBe(404);
+  });
+});
+
+describe('rescatar un renglón FUSIONADO por el contrato 0.30.0 (§113)', () => {
+  /* Aquel «juntar los iguales» BORRABA los renglones que absorbía y dejaba
+   * uno con `cantidad = 29`. Mike alcanzó a usarlo antes de que lo
+   * cambiáramos, y por eso no puede separar sus puertas: no hay 29 ítems que
+   * sacar de un grupo, hay uno solo que la lista de productos no puede
+   * partir.
+   *
+   * Se puede deshacer porque aquella versión dejó escrito en
+   * `refs.agrupados` qué se había tragado. Aquí se arma ese estado exacto
+   * —un renglón gordo, sus piezas en el plano y la anotación— y se mide el
+   * rescate. Es la prueba más importante de este archivo: si el dinero se
+   * moviera al rescatar, lo que se rompe es el precio de una obra.
+   *
+   * Las anotaciones se escriben con `X-App: nest101`, que es la única que
+   * puede tocar `refs` (src/permisos.ts). No es un truco de la prueba: es
+   * cómo se ve un renglón fusionado de verdad. */
+  const ID2 = '01M30FUSIONADO000000000002';
+  const ID3 = '01M30FUSIONADO000000000003';
+  let gordo = '', e1 = '', e2 = '', e3 = '', c1 = '', c2 = '', c3 = '';
+
+  beforeAll(async () => {
+    // El renglón que sobrevivió a la fusión: tres piezas en uno.
+    gordo = await puerta('Portón', 3 * 9_000_00, { cantidad: 3 });
+    e1 = await pieza('Portón norte', gordo);
+    e2 = await pieza('Portón sur', gordo);
+    e3 = await pieza('Portón poniente', gordo);
+    // Los códigos los pone quell101 por tipo; se leen, no se suponen.
+    const codigo = async (eid: string) => String((await q('mike', `/elements/${eid}`)).element.code);
+    [c1, c2, c3] = [await codigo(e1), await codigo(e2), await codigo(e3)];
+    expect(new Set([c1, c2, c3]).size, 'tres códigos distintos').toBe(3);
+    // El renglón se quedó con el código de una de sus piezas, como pasaba.
+    await o('mike', `/items/${gordo}`, { method: 'PATCH', app: 'quell101', json: { clave: c1 } });
+    // Y la anotación que dejó la fusión.
+    const r = await o('mike', `/items/${gordo}`, { method: 'PATCH', app: 'nest101', json: { refs: {
+      agrupados: [
+        { id: ID2, clave: c2, nombre: 'Portón 02', cantidad: 1, monto: 9_000_00, agrupado_at: '2026-09-19T10:00:00Z', agrupado_por: 'u1' },
+        { id: ID3, clave: c3, nombre: 'Portón 03', cantidad: 1, monto: 9_000_00, agrupado_at: '2026-09-19T10:00:00Z', agrupado_por: 'u1' },
+      ],
+    } } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+  });
+
+  it('devuelve los renglones borrados, con su id, su código y su importe', async () => {
+    const antes = await precioVenta();
+    const r = await o('mike', `/items/${gordo}/separar`, { method: 'POST' });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.reconstruidos).toHaveLength(2);
+
+    for (const [id, clave, nombre] of [[ID2, c2, 'Portón 02'], [ID3, c3, 'Portón 03']] as const) {
+      const it = (await o('mike', `/items/${id}`)).data;
+      expect(it, `${id} volvió`).toBeTruthy();
+      expect(it.clave, 'con su código de obra').toBe(clave);
+      expect(it.nombre).toBe(nombre);
+      expect(it.cantidad).toBe(1);
+      expect(it.monto).toBe(9_000_00);
+      expect(it.producto_id, 'y suelto, listo para agruparse en otro').toBeNull();
+    }
+
+    /* EL DINERO NO SE MOVIÓ. Es lo único que no se puede equivocar: lo que
+     * se le restó al gordo es lo que se les puso a los dos. */
+    const ya = (await o('mike', `/items/${gordo}`)).data;
+    expect(ya.cantidad, 'el que sobrevivió vuelve a ser una pieza').toBe(1);
+    expect(ya.monto).toBe(9_000_00);
+    expect(await precioVenta(), 'el precio de venta de la obra es el mismo').toBe(antes);
+    expect(r.data.venta_antes).toBe(r.data.venta_despues);
+  });
+
+  it('y cada pieza del plano se fue con su renglón, buscándola por código', async () => {
+    expect((await q('mike', `/elements/${e2}`)).element.item_id).toBe(ID2);
+    expect((await q('mike', `/elements/${e3}`)).element.item_id).toBe(ID3);
+    expect((await q('mike', `/elements/${e1}`)).element.item_id, 'la del que sobrevivió no se mueve').toBe(gordo);
+  });
+
+  it('separar dos veces no duplica nada', async () => {
+    const antes = await precioVenta();
+    const r = await o('mike', `/items/${gordo}/separar`, { method: 'POST' });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.reconstruidos, 'ya no hay nada anotado que devolver').toHaveLength(0);
+    expect((await o('mike', `/items/${gordo}`)).data.cantidad).toBe(1);
+    expect(await precioVenta()).toBe(antes);
+  });
+
+  it('si la anotación ya no cuadra con el renglón, NO se escribe nada', async () => {
+    /* Alguien le bajó la cantidad al renglón gordo después de juntarlo:
+     * devolver lo anotado lo dejaría en cero piezas. Más vale no separar que
+     * separar cambiando el precio de una obra. */
+    const otro = await puerta('Reja', 5_000_00, { cantidad: 1 });
+    await o('mike', `/items/${otro}`, { method: 'PATCH', app: 'nest101', json: { refs: {
+      agrupados: [{ id: '01M30FUSIONADO000000000009', clave: 'RJ-99', nombre: 'Reja 02', cantidad: 4, monto: 20_000_00 }],
+    } } });
+    const antes = await precioVenta();
+    const r = await o('mike', `/items/${otro}/separar`, { method: 'POST' });
+    expect(r.estado).toBe(409);
+    expect(r.error).toBe('no_cuadra');
+    expect((await o('mike', `/items/${otro}`)).data.cantidad, 'intacto').toBe(1);
+    expect((await o('mike', '/items/01M30FUSIONADO000000000009')).estado, 'no nació nada').toBe(404);
+    expect(await precioVenta()).toBe(antes);
   });
 });
