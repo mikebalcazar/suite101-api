@@ -13,7 +13,12 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.21.2 (`GET /orgs/:o/ordenes` y
+ * Versión del contrato: 0.21.3 (lo fiscal también acepta `?negocio_id=`:
+ * `/fiscal/iva`, `/fiscal/cuadre`, `/fiscal/pendientes` y `/fiscal/cfdi`. El
+ * RFC vive en el negocio, así que un IVA del mes que sume dos negocios no es
+ * el IVA de ninguno de los dos —y es el número con el que se entera al SAT—.
+ * Sin el parámetro salen las cifras de toda la empresa, como antes).
+ * Antes: 0.21.2 (`GET /orgs/:o/ordenes` y
  * `/orgs/:o/ordenes/buzon` aceptan `?negocio_id=`, y con él la lista Y SUS
  * TOTALES son de ese negocio. dash101 trabaja con un negocio activo a la
  * vez; sin el filtro, el buzón mezclaba los negocios de la empresa y el
@@ -164,7 +169,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.21.2';
+export const VERSION_CONTRATO = '0.21.3';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

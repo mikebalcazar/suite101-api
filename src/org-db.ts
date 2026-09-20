@@ -142,10 +142,13 @@ export interface ApiOrgDB {
   ligarCfdi(args: { cfdi_id: string; movimiento_id: string; monto_aplicado?: number }): Promise<{ ok: true; cfdi: Fila; movimiento: Fila; aplicado_total: number } | { error: string; detalle?: unknown }>;
   cancelarCfdi(id: string): Promise<Fila | { error: string }>;
   marcarFacturado(args: Record<string, unknown>): Promise<Fila | { error: string; detalle?: unknown }>;
-  ivaDelMes(desde: string, hasta: string): Promise<{ desde: string; hasta: string; trasladado: number; acreditable: number; retenciones: number; a_enterar: number; facturas: { emitidas: number; recibidas: number; canceladas: number } }>;
-  facturadoVsReal(desde: string, hasta: string): Promise<{ desde: string; hasta: string; ingresos: { total: number; facturado: number; fuera: number }; egresos: { total: number; facturado: number; fuera: number } }>;
-  pendientesDeFactura(): Promise<Fila[]>;
-  listaCfdi(args: { desde?: string; hasta?: string; tipo?: string; estado?: string }): Promise<Fila[]>;
+  /* Todas llevan `negocio_id` opcional: el RFC vive en el negocio, así que
+   * un IVA del mes que mezcle dos negocios no es el IVA de nadie. Sin él,
+   * salen las cifras de toda la empresa. */
+  ivaDelMes(desde: string, hasta: string, negocio_id?: string | null): Promise<{ desde: string; hasta: string; trasladado: number; acreditable: number; retenciones: number; a_enterar: number; facturas: { emitidas: number; recibidas: number; canceladas: number } }>;
+  facturadoVsReal(desde: string, hasta: string, negocio_id?: string | null): Promise<{ desde: string; hasta: string; ingresos: { total: number; facturado: number; fuera: number }; egresos: { total: number; facturado: number; fuera: number } }>;
+  pendientesDeFactura(negocio_id?: string | null): Promise<Fila[]>;
+  listaCfdi(args: { desde?: string; hasta?: string; tipo?: string; estado?: string; negocio_id?: string | null }): Promise<Fila[]>;
 
   fetch(req: Request): Promise<Response>;
 }
@@ -1585,19 +1588,23 @@ export class OrgDB extends DurableObject<Env> {
    *  acreditas tú. Es una simplificación —aquí no se separa retención de IVA
    *  de retención de ISR— y está dicha a propósito, porque el número vale lo
    *  que valga lo capturado. */
-  ivaDelMes(desde: string, hasta: string): {
+  ivaDelMes(desde: string, hasta: string, negocio_id?: string | null): {
     desde: string; hasta: string;
     trasladado: number; acreditable: number; retenciones: number; a_enterar: number;
     facturas: { emitidas: number; recibidas: number; canceladas: number };
   } {
     const d = String(desde).slice(0, 10), h = String(hasta).slice(0, 10);
+    // El RFC vive en el negocio: un IVA que sume dos negocios no es el IVA
+    // de ninguno de los dos, y es el número con el que se entera al SAT.
+    const deNegocio = negocio_id ? ' AND negocio_id = ?' : '';
+    const conNeg = (...args: SqlStorageValue[]) => (negocio_id ? [...args, negocio_id] : args);
     const suma = (tipo: string) => this.sql
       .exec(`SELECT COALESCE(SUM(iva),0) AS iva, COALESCE(SUM(retenciones),0) AS ret, COUNT(*) AS n
-             FROM cfdi WHERE estado = 'vigente' AND tipo = ? AND fecha >= ? AND fecha <= ?`, tipo, d, h)
+             FROM cfdi WHERE estado = 'vigente' AND tipo = ? AND fecha >= ? AND fecha <= ?${deNegocio}`, ...conNeg(tipo, d, h))
       .one() as { iva: number; ret: number; n: number };
     const ing = suma('ingreso'), egr = suma('egreso');
     const canceladas = (this.sql
-      .exec(`SELECT COUNT(*) AS n FROM cfdi WHERE estado = 'cancelada' AND fecha >= ? AND fecha <= ?`, d, h)
+      .exec(`SELECT COUNT(*) AS n FROM cfdi WHERE estado = 'cancelada' AND fecha >= ? AND fecha <= ?${deNegocio}`, ...conNeg(d, h))
       .one() as { n: number }).n;
     const acreditable = egr.iva - egr.ret;
     return {
@@ -1609,17 +1616,19 @@ export class OrgDB extends DurableObject<Env> {
   }
 
   /** Lo facturado contra lo real. La diferencia es lo que anda fuera. */
-  facturadoVsReal(desde: string, hasta: string): {
+  facturadoVsReal(desde: string, hasta: string, negocio_id?: string | null): {
     desde: string; hasta: string;
     ingresos: { total: number; facturado: number; fuera: number };
     egresos: { total: number; facturado: number; fuera: number };
   } {
     const d = String(desde).slice(0, 10), h = String(hasta).slice(0, 10);
+    const deNegocio = negocio_id ? ' AND negocio_id = ?' : '';
     const lado = (tipo: string) => {
+      const args: SqlStorageValue[] = negocio_id ? [tipo, d, h, negocio_id] : [tipo, d, h];
       const r = this.sql
         .exec(`SELECT COALESCE(SUM(monto),0) AS total,
                       COALESCE(SUM(CASE WHEN facturado = 1 THEN monto ELSE 0 END),0) AS fact
-               FROM movimientos WHERE tipo = ? AND fecha >= ? AND fecha <= ?`, tipo, d, h)
+               FROM movimientos WHERE tipo = ? AND fecha >= ? AND fecha <= ?${deNegocio}`, ...args)
         .one() as { total: number; fact: number };
       return { total: r.total, facturado: r.fact, fuera: r.total - r.fact };
     };
@@ -1628,24 +1637,26 @@ export class OrgDB extends DurableObject<Env> {
 
   /** Pagos que se hicieron esperando factura y cuyo CFDI todavía no llega. Es
    *  la lista que hay que perseguir cada mes. */
-  pendientesDeFactura(): Fila[] {
-    return this.sql
-      .exec(`SELECT m.*, o.folio AS orden_folio, o.proveedor_nombre AS orden_proveedor
+  pendientesDeFactura(negocio_id?: string | null): Fila[] {
+    const base = `SELECT m.*, o.folio AS orden_folio, o.proveedor_nombre AS orden_proveedor
              FROM movimientos m
              JOIN ordenes o ON o.movimiento_id = m.id
-             WHERE o.con_factura = 1 AND m.facturado = 0
-             ORDER BY m.fecha`)
-      .toArray() as Fila[];
+             WHERE o.con_factura = 1 AND m.facturado = 0`;
+    return (negocio_id
+      ? this.sql.exec(`${base} AND m.negocio_id = ? ORDER BY m.fecha`, negocio_id)
+      : this.sql.exec(`${base} ORDER BY m.fecha`)
+    ).toArray() as Fila[];
   }
 
   /** Las facturas de un rango, para la pantalla y para el reporte. */
-  listaCfdi(args: { desde?: string; hasta?: string; tipo?: string; estado?: string }): Fila[] {
+  listaCfdi(args: { desde?: string; hasta?: string; tipo?: string; estado?: string; negocio_id?: string | null }): Fila[] {
     const donde: string[] = [];
     const vals: SqlStorageValue[] = [];
     if (args.desde) { donde.push('fecha >= ?'); vals.push(String(args.desde).slice(0, 10)); }
     if (args.hasta) { donde.push('fecha <= ?'); vals.push(String(args.hasta).slice(0, 10)); }
     if (args.tipo) { donde.push('tipo = ?'); vals.push(args.tipo); }
     if (args.estado) { donde.push('estado = ?'); vals.push(args.estado); }
+    if (args.negocio_id) { donde.push('negocio_id = ?'); vals.push(args.negocio_id); }
     const filtro = donde.length ? ` WHERE ${donde.join(' AND ')}` : '';
     return this.leerInternas('cfdi', this.sql.exec(`SELECT * FROM cfdi${filtro} ORDER BY fecha DESC, creado_at DESC`, ...vals).toArray() as Fila[]);
   }
