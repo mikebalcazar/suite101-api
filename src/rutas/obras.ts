@@ -94,17 +94,35 @@ export function montarObras(rutas: App): void {
     if (!esDeLaCasa(c)) return err(c, 'sin_permiso', 403, { motivo: 'las obras son de la empresa' });
     const r = await stub(c).itemsDeLaObra(c.req.param('id'));
     if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 409, r.detalle);
-    return ok(c, { obra: r.obra, parejas: r.parejas, nuevos: r.nuevos, sueltos: r.sueltos });
+    return ok(c, { obra: r.obra, parejas: r.parejas, nuevos: r.nuevos, sueltos: r.sueltos, candidatos: r.candidatos });
   });
 
-  /** POST /orgs/:o/obras/:id/items {ligar:[{element_id,item_id}], crear:[element_id]}
-   *  — aplicar lo que se aceptó de la propuesta. Lo que no venga, no se toca.
+  /** POST /orgs/:o/obras/:id/items
+   *  {ligar:[{element_id,item_id,clave?,nombre?}], crear:[element_id]}
+   *  — aplicar lo que se aceptó. Lo que no venga, no se toca.
+   *
+   *  `ligar` no tiene por qué venir de la propuesta: quien decide escoge a
+   *  mano cuál ítem es cuál, de la lista de `candidatos`. El servidor revisa
+   *  el cupo aquí, porque desde que empareja una persona ya nadie más lleva
+   *  la cuenta.
+   *
+   *  `clave` dice qué código gana cuando los dos lados traen uno distinto.
+   *  El código ES la identidad —decisión de Mike, 20-sep: «lo que va a ser
+   *  lo mismo es el código de ítem»— y queda igual en los dos lados. Cuando
+   *  sólo un lado lo trae, se copia sin preguntar: eso es llenar un hueco,
+   *  no decidir.
+   *
+   *  `nombre` es aparte y opcional: el descriptivo vive en el detalle de
+   *  cada app, así que por omisión cada lado conserva el suyo.
    *
    *  Lo hace quien puede ligar, no cualquiera: esto le cuelga el dinero de un
    *  ítem a una pieza del plano, y de ahí sale lo que se le cobra al cliente. */
   rutas.post('/:o/obras/:id/items', async (c) => {
     if (!puedeLigar(c)) return err(c, 'sin_permiso', 403, { motivo: 'juntar los ítems de la obra con los del proyecto lo hace quien dirige la empresa' });
-    type Plan = { ligar?: Array<{ element_id: string; item_id: string }>; crear?: string[] };
+    type Plan = {
+      ligar?: Array<{ element_id: string; item_id: string; clave?: 'quell' | 'dash'; nombre?: 'quell' | 'dash' }>;
+      crear?: string[];
+    };
     const b = await c.req.json<Plan>().catch(() => ({}) as Plan);
     if (!Array.isArray(b.ligar ?? []) || !Array.isArray(b.crear ?? [])) return err(c, 'datos_invalidos', 400, { motivo: '`ligar` y `crear` son listas' });
     const r = await stub(c).fusionarItemsDeLaObra(
@@ -113,7 +131,7 @@ export function montarObras(rutas: App): void {
       { usuario_id: c.get('quien').usuario_id },
     );
     if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 409, r.detalle);
-    return ok(c, { obra: r.obra, ligados: r.ligados, creados: r.creados });
+    return ok(c, { obra: r.obra, ligados: r.ligados, creados: r.creados, renombrados: r.renombrados });
   });
 
   /** POST /orgs/:o/obras/:id/ligar {proyecto_id} — son la misma casa. */

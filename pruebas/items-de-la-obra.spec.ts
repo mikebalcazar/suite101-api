@@ -272,3 +272,220 @@ describe('el precio deja huella en la bitácora de la obra', () => {
     expect(luego.data.monto).toBe(antes.data.monto);
   });
 });
+
+/* ─────────────── emparejar A MANO, y el código como identidad ───────────────
+ *
+ * Mike, 20-sep, después de ver la primera versión: «necesito una opción de
+ * hacer match de los que ya existen. Que pueda escoger de la lista qué ítem
+ * corresponde al de quell». Y luego, precisando qué es lo que de verdad los
+ * hace uno: «lo que va a ser lo mismo es el código de ítem, ej. CAR-01,
+ * PT-09, porque el nombre descriptivo viene en el detalle de dash y en el
+ * detalle de quell».
+ *
+ * Esto cambia quién lleva la cuenta. Mientras el parecido proponía, el cupo
+ * venía respetado de fábrica; desde que empareja una persona, el servidor es
+ * el único que sabe cuántas piezas caben.
+ */
+
+describe('emparejar a mano', () => {
+  let obra2 = '', plano2 = '', proyecto2 = '', unaSola = '', dosPiezas = '';
+
+  beforeAll(async () => {
+    proyecto2 = (await o('mike', '/proyectos', { method: 'POST', json: { negocio_id: negocio, cliente_id: cliente, nombre: 'Casa a mano' } })).data.id;
+    obra2 = (await q('mike', '/projects', { method: 'POST', json: { name: 'Casa a mano (obra)', client: 'Familia' } })).id;
+    await o('mike', `/obras/${obra2}/ligar`, { method: 'POST', json: { proyecto_id: proyecto2 } });
+
+    const fd = new FormData();
+    fd.append('name', 'Planta'); fd.append('file_name', 'p.pdf'); fd.append('width', '1000'); fd.append('height', '800');
+    fd.append('image', new File([PNG], 'plan.png', { type: 'image/png' }));
+    plano2 = (await q('mike', `/projects/${obra2}/plans`, { method: 'POST', body: fd })).id;
+
+    unaSola = (await o('mike', '/items', { method: 'POST', json: {
+      negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto2,
+      nombre: 'Cabecera de nogal', descripcion: 'Con capitoneado', monto: 30_000_00, cantidad: 1, estado: 'vendido',
+    } })).data.id;
+    dosPiezas = (await o('mike', '/items', { method: 'POST', json: {
+      negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto2,
+      nombre: 'Buró', monto: 16_000_00, cantidad: 2, estado: 'vendido',
+    } })).data.id;
+  }, 60000);
+
+  const piezaEn = async (name: string, code?: string) => {
+    const r = await q('mike', `/plans/${plano2}/elements`, {
+      method: 'POST', json: { op_id: crypto.randomUUID(), name, type: 'Mueble', x: 0.5, y: 0.5, ...(code ? { code } : {}) },
+    });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    return r.id as string;
+  };
+
+  it('la propuesta trae TODOS los candidatos con su cupo, no sólo lo que adivinó', async () => {
+    /* Sin esta lista la pantalla sólo puede aceptar o rechazar. Con ella,
+     * quien decide escoge de un desplegable. */
+    const eA = await piezaEn('Mueble de cabecera', 'CAB-01');
+    const r = await o('mike', `/obras/${obra2}/items`);
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    const porId = Object.fromEntries(r.data.candidatos.map((c: any) => [c.id, c]));
+    expect(porId[unaSola].cupo, 'la cabecera admite una').toBe(1);
+    expect(porId[dosPiezas].cupo, 'el buró admite dos').toBe(2);
+    // Y no la emparejó con nada: ni el código ni el nombre coinciden.
+    expect(r.data.nuevos.map((n: any) => n.element_id)).toContain(eA);
+  });
+
+  it('se liga a mano el ítem que uno escoge, aunque el parecido no lo hubiera propuesto', async () => {
+    const prop = await o('mike', `/obras/${obra2}/items`);
+    const pieza = prop.data.nuevos.find((n: any) => n.pieza === 'Mueble de cabecera');
+    const r = await o('mike', `/obras/${obra2}/items`, {
+      method: 'POST', json: { ligar: [{ element_id: pieza.element_id, item_id: unaSola }] },
+    });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.ligados).toBe(1);
+  });
+
+  it('el CÓDIGO se copia al lado que no lo traía, sin preguntar', async () => {
+    /* Eso no es decidir: es llenar un hueco. El ítem no tenía clave y la
+     * pieza sí, así que la clave es la de la pieza. */
+    const it = await o('mike', `/items/${unaSola}`);
+    expect(it.data.clave).toBe('CAB-01');
+  });
+
+  it('y el NOMBRE no se toca si nadie lo escoge: cada lado tiene el suyo', async () => {
+    const it = await o('mike', `/items/${unaSola}`);
+    expect(it.data.nombre, 'el ítem conserva el suyo').toBe('Cabecera de nogal');
+    const det = await q('mike', `/elements/${(await o('mike', `/obras/${obra2}/items`)).data.candidatos && ''}`).catch(() => null);
+    void det;
+    // La descripción vive SÓLO en dash101: quell no tiene ese campo.
+    expect(it.data.descripcion).toBe('Con capitoneado');
+  });
+
+  it('cuando los dos traen código y difieren, gana el que se pida', async () => {
+    const eB = await piezaEn('Buró izquierdo', 'BUR-09');
+    await o('mike', `/items/${dosPiezas}`, { method: 'PATCH', app: 'quell101', json: { clave: 'BR-1' } });
+
+    const sinDecir = await o('mike', `/obras/${obra2}/items`, {
+      method: 'POST', json: { ligar: [{ element_id: eB, item_id: dosPiezas }] },
+    });
+    expect(sinDecir.estado, JSON.stringify(sinDecir)).toBe(200);
+    // Sin `clave`, no se toca ninguno: inventarle un ganador a dos códigos
+    // que alguien tecleó a propósito es justo lo que no se hace solo.
+    expect((await o('mike', `/items/${dosPiezas}`)).data.clave).toBe('BR-1');
+
+    const eC = await piezaEn('Buró derecho', 'BUR-10');
+    const conQuell = await o('mike', `/obras/${obra2}/items`, {
+      method: 'POST', json: { ligar: [{ element_id: eC, item_id: dosPiezas, clave: 'quell' }] },
+    });
+    expect(conQuell.estado, JSON.stringify(conQuell)).toBe(200);
+    expect((await o('mike', `/items/${dosPiezas}`)).data.clave, 'gana el del plano').toBe('BUR-10');
+  });
+
+  it('el cupo se revisa AL APLICAR: el tercer buró ya no cabe', async () => {
+    /* Es lo que se rompe al dejar que una persona empareje: se puede escoger
+     * tres veces el mismo ítem sin querer, y entonces «cuánto falta por
+     * fabricar» tendría tres respuestas ciertas. */
+    const eD = await piezaEn('Buró de más');
+    const r = await o('mike', `/obras/${obra2}/items`, {
+      method: 'POST', json: { ligar: [{ element_id: eD, item_id: dosPiezas }] },
+    });
+    expect(r.estado).toBe(409);
+    expect(r.error).toBe('sin_cupo');
+    expect(r.detalle.cantidad).toBe(2);
+  });
+
+  it('el nombre que se escoge queda EN LOS DOS LADOS', async () => {
+    const eE = await piezaEn('Clóset de blancos', 'CLO-01');
+    const clo = (await o('mike', '/items', { method: 'POST', json: {
+      negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto2,
+      nombre: 'Closet pasillo', monto: 22_000_00, cantidad: 1, estado: 'vendido',
+    } })).data.id;
+
+    const r = await o('mike', `/obras/${obra2}/items`, {
+      method: 'POST', json: { ligar: [{ element_id: eE, item_id: clo, nombre: 'quell' }] },
+    });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.renombrados).toBe(1);
+    expect((await o('mike', `/items/${clo}`)).data.nombre, 'el ítem toma el del plano').toBe('Clóset de blancos');
+    const det = await q('mike', `/elements/${eE}`);
+    expect(det.element.name, 'y el plano conserva el que ya decía').toBe('Clóset de blancos');
+  });
+
+  it('un código que ya trae otra pieza se rechaza diciendo cuál', async () => {
+    /* El código es único dentro de la obra y lo impide la base. Sin este
+     * mensaje el choque sale como falla interna, y quien lo ve no sabe con
+     * qué chocó ni qué hacer.
+     *
+     * El caso es real: el ítem trae CAB-01 en dash, la pieza trae otro, y
+     * alguien pide que gane el de dash. Pero CAB-01 ya es de otra pieza de
+     * esa obra. */
+    const eF = await piezaEn('Repisa', 'REP-01');
+    const otro = (await o('mike', '/items', { method: 'POST', json: {
+      negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto2,
+      nombre: 'Repisa larga', monto: 4_000_00, cantidad: 1, estado: 'vendido',
+    } })).data.id;
+    const marca = await o('mike', `/items/${otro}`, { method: 'PATCH', app: 'quell101', json: { clave: 'CAB-01' } });
+    expect(marca.estado, JSON.stringify(marca)).toBe(200);
+
+    const r = await o('mike', `/obras/${obra2}/items`, {
+      method: 'POST', json: { ligar: [{ element_id: eF, item_id: otro, clave: 'dash' }] },
+    });
+    expect(r.estado, JSON.stringify(r)).toBe(409);
+    expect(r.error).toBe('codigo_en_uso');
+    expect(r.detalle.pieza, 'y dice con cuál chocó').toBe('Mueble de cabecera');
+
+    // Y no se quedó ligada a medias: el rechazo deja todo como estaba.
+    const prop = await o('mike', `/obras/${obra2}/items`);
+    expect(prop.data.nuevos.map((n: any) => n.element_id), 'la pieza sigue suelta').toContain(eF);
+  });
+});
+
+describe('un rechazo no deja nada a medias', () => {
+  /* La razón de que esto tenga su propio bloque: la primera versión escribía
+   * la liga y DESPUÉS revisaba el código. Cuando el código chocaba, contestaba
+   * 409 y la pieza se quedaba ligada de todos modos. El 409 decía «no se
+   * hizo» y sí se había hecho la mitad, que es peor que fallar entero.
+   */
+  let obra3 = '', plano3 = '', proyecto3 = '', unico = '';
+
+  beforeAll(async () => {
+    proyecto3 = (await o('mike', '/proyectos', { method: 'POST', json: { negocio_id: negocio, cliente_id: cliente, nombre: 'Casa entera' } })).data.id;
+    obra3 = (await q('mike', '/projects', { method: 'POST', json: { name: 'Casa entera (obra)', client: 'Familia' } })).id;
+    await o('mike', `/obras/${obra3}/ligar`, { method: 'POST', json: { proyecto_id: proyecto3 } });
+    const fd = new FormData();
+    fd.append('name', 'Planta'); fd.append('file_name', 'p.pdf'); fd.append('width', '1000'); fd.append('height', '800');
+    fd.append('image', new File([PNG], 'plan.png', { type: 'image/png' }));
+    plano3 = (await q('mike', `/projects/${obra3}/plans`, { method: 'POST', body: fd })).id;
+    unico = (await o('mike', '/items', { method: 'POST', json: {
+      negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto3,
+      nombre: 'Mesa', monto: 12_000_00, cantidad: 1, estado: 'vendido',
+    } })).data.id;
+  }, 60000);
+
+  const pz = async (name: string) => (await q('mike', `/plans/${plano3}/elements`, {
+    method: 'POST', json: { op_id: crypto.randomUUID(), name, type: 'Mueble', x: 0.2, y: 0.2 },
+  })).id as string;
+
+  it('dos piezas al mismo ítem de cantidad 1, en el MISMO envío: no pasa ninguna', async () => {
+    /* Contra la base las dos pasarían —cada una ve cero ligadas— y el ítem
+     * acabaría con dos piezas. La cuenta hay que llevarla dentro del envío. */
+    const a = await pz('Mesa comedor');
+    const b = await pz('Mesa auxiliar');
+    const r = await o('mike', `/obras/${obra3}/items`, {
+      method: 'POST', json: { ligar: [{ element_id: a, item_id: unico }, { element_id: b, item_id: unico }] },
+    });
+    expect(r.estado, JSON.stringify(r)).toBe(409);
+    expect(r.error).toBe('sin_cupo');
+
+    const prop = await o('mike', `/obras/${obra3}/items`);
+    const sueltas = prop.data.nuevos.map((n: any) => n.element_id);
+    expect(sueltas, 'la primera tampoco se ligó').toContain(a);
+    expect(sueltas, 'ni la segunda').toContain(b);
+  });
+
+  it('y una sola sí pasa', async () => {
+    const prop = await o('mike', `/obras/${obra3}/items`);
+    const a = prop.data.nuevos[0].element_id;
+    const r = await o('mike', `/obras/${obra3}/items`, {
+      method: 'POST', json: { ligar: [{ element_id: a, item_id: unico }] },
+    });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.ligados).toBe(1);
+  });
+});

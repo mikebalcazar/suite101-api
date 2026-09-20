@@ -327,6 +327,31 @@ rutas.get('/:o/clientes/parecidos', async (c) => {
   return ok(c, { parecidos: filas });
 });
 
+/** GET /orgs/:o/clientes/:id/estado-de-cuenta — qué se le vendió, qué pagó y
+ *  qué debe. Global y por proyecto.
+ *
+ *  Mike, 20-sep: «necesito poder ver por cliente su estado de cuenta general.
+ *  Saldo global, y por proyecto, y poder exportarlo en un PDF para enviar
+ *  reportes».
+ *
+ *  No es `/peek`: aquél es lo que el cliente ve de sí mismo, y sus pagos
+ *  salen de un JOIN contra proyectos —un anticipo suelto ahí no aparece—.
+ *  Aquí todo sale de una sola lista de cobros y los totales se suman de ella,
+ *  así el saldo global es por construcción la suma de lo que se enseña.
+ *
+ *  Lo abre quien es de la empresa. Un cliente no: él ve lo suyo por /peek,
+ *  que recorta lo que enseña; esto trae la cuenta completa. */
+rutas.get('/:o/clientes/:id/estado-de-cuenta', async (c) => {
+  const permiso = puedeLeer(c, 'clientes');
+  if (permiso) return permiso;
+  if (c.get('quien').clase !== 'miembro') {
+    return err(c, 'sin_permiso', 403, { motivo: 'el estado de cuenta completo es de la empresa; un cliente abre el suyo por peek101' });
+  }
+  const r = await stub(c).estadoDeCuenta(c.req.param('id'));
+  if (!r) return err(c, 'no_encontrado', 404, { que: 'cliente', id: c.req.param('id') });
+  return ok(c, r);
+});
+
 /** POST /orgs/:o/clientes/:id/fusionar {se_va_id} — los dos son el mismo.
  *
  *  `:id` es el que se queda; `se_va_id` desaparece y le deja todo: proyectos,

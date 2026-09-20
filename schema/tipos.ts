@@ -13,7 +13,33 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.27.0 (la RAYA: lo que se le paga a la gente, y su
+ * Versión del contrato: 0.29.0 (el ESTADO DE CUENTA de un cliente:
+ * `GET /orgs/:o/clientes/:id/estado-de-cuenta` contesta qué se le vendió,
+ * qué pagó y qué debe, global y por proyecto, con los cobros de cada uno.
+ * No es `/peek`: aquél es lo que el cliente ve de sí mismo y sus pagos
+ * salen de un JOIN contra proyectos, así que un anticipo suelto no aparece
+ * —en un documento que se manda, ese hueco es la diferencia entre cuadrar y
+ * no—. Todo sale de UNA sola lista de cobros y los totales se suman de
+ * ella, así el saldo global es por construcción la suma de los renglones
+ * que se enseñan. Lo abre quien es de la empresa; un cliente ve lo suyo por
+ * peek101, recortado. Encargo de Mike del 20-sep). Antes:
+ * 0.28.0 (emparejar los ítems A MANO, y el CÓDIGO como
+ * identidad. `GET /orgs/:o/obras/:id/items` agrega `candidatos`: todos los
+ * ítems que todavía admiten una pieza, con su cupo, para que la pantalla
+ * ofrezca un desplegable en vez de sólo aceptar o rechazar lo que el
+ * parecido adivinó. `POST` acepta en cada `ligar` un `clave` —qué código
+ * gana cuando los dos lados traen uno distinto— y un `nombre` opcional.
+ * El código queda IGUAL EN LOS DOS LADOS: es lo que nombra a la misma pieza
+ * en las dos apps (Mike, 20-sep: «lo que va a ser lo mismo es el código de
+ * ítem, ej. CAR-01, PT-09, porque el nombre descriptivo viene en el detalle
+ * de dash y en el detalle de quell»). Cuando sólo un lado trae código se
+ * copia sin preguntar; cuando los dos traen y difieren, sin `clave` no se
+ * toca ninguno. El nombre NO se unifica solo, y si se escoge queda en los
+ * dos lados. El cupo se revisa AL APLICAR y no sólo al proponer, porque
+ * emparejando a mano se puede escoger tres veces el mismo ítem de cantidad
+ * 1; 409 `sin_cupo`. Y 409 `codigo_en_uso` cuando el código que ganaría ya
+ * lo trae otra pieza de esa obra, con cuál es). Antes:
+ * 0.27.0 (la RAYA: lo que se le paga a la gente, y su
  * recibo. `/orgs/:o/nomina/*` con las tablas `rayas` y `raya_pagos`
  * (migración 0014). Un corte nace en borrador, se corrige, y al pagarlo deja
  * UN EGRESO POR PERSONA de una sola vez —no uno global: el estado de cuenta
@@ -271,7 +297,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.27.0';
+export const VERSION_CONTRATO = '0.29.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
