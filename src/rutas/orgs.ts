@@ -431,32 +431,83 @@ rutas.get('/:o/proyectos/:id/agrupables', async (c) => {
   return ok(c, { proyecto: r.proyecto, grupos: r.grupos });
 });
 
-/** POST /orgs/:o/proyectos/:id/agrupar {queda_id, se_van[], nombre?} — que
- *  sean uno solo.
+/** POST /orgs/:o/proyectos/:id/agrupar {items[], nombre?, codigo?, precio?} —
+ *  que sean el mismo producto del catálogo.
  *
- *  No se puede deshacer: los renglones que se van se borran una vez que su
- *  historia —piezas del plano, movimientos, partidas y avances— ya se mudó
- *  al que se queda. Por eso lo hace quien dirige la empresa, igual que
- *  fusionar dos clientes.
+ *  ANTES esto FUSIONABA: los renglones que se iban se borraban y no había
+ *  vuelta atrás. Ya no. Mike, 20-sep: «debe poder moverse de grupo de
+ *  producto un ítem ya agrupado», y un renglón borrado no se puede mover.
+ *  Escogió con botones que el grupo de producto reemplace a la fusión.
  *
- *  El precio de venta del proyecto no se mueve: `monto` es el importe de la
- *  línea y el del concepto es la suma. */
+ *  Ahora escribe un producto y le apunta las piezas. Cada pieza sigue
+ *  existiendo, con su código de obra, su lugar en el plano y su bitácora;
+ *  lo que se comparte es el modelo y su precio. Se deshace sacando la pieza
+ *  del grupo, que es lo que antes no se podía.
+ *
+ *  Como ya no destruye nada, deja de estar reservado a quien dirige la
+ *  empresa: lo hace cualquier miembro, igual que capturar un ítem.
+ *
+ *  El precio de venta del proyecto SÍ se puede mover, porque las piezas
+ *  heredan el precio del producto. Por eso devuelve el antes y el después:
+ *  la pantalla lo enseña y quien agrupó ve lo que hizo. */
 rutas.post('/:o/proyectos/:id/agrupar', async (c) => {
   const quien = c.get('quien');
-  if (quien.clase !== 'miembro' || (quien.rol !== 'owner' && quien.rol !== 'admin' && quien.rol !== 'socio')) {
-    return err(c, 'sin_permiso', 403, { motivo: 'juntar ítems en un concepto no se puede deshacer: lo hace quien dirige la empresa' });
-  }
-  type Cuerpo = { queda_id?: string; se_van?: string[]; nombre?: string };
+  if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'agrupar ítems lo hace quien es de la empresa' });
+  type Cuerpo = { items?: string[]; nombre?: string; codigo?: string; precio?: number };
   const b = await c.req.json<Cuerpo>().catch(() => ({}) as Cuerpo);
-  if (!b.queda_id) return err(c, 'datos_invalidos', 400, { falta: 'queda_id' });
-  if (!Array.isArray(b.se_van)) return err(c, 'datos_invalidos', 400, { motivo: '`se_van` es una lista de ids' });
+  if (!Array.isArray(b.items)) return err(c, 'datos_invalidos', 400, { motivo: '`items` es la lista de ids que son el mismo producto' });
   const r = await stub(c).agruparItems(
     c.req.param('id'),
-    { queda_id: b.queda_id, se_van: b.se_van, nombre: b.nombre },
+    { items: b.items, nombre: b.nombre, codigo: b.codigo, precio: b.precio },
     { usuario_id: quien.usuario_id },
   );
   if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : r.error === 'datos_invalidos' ? 400 : 409, r.detalle);
-  return ok(c, { item: r.item, absorbidos: r.absorbidos, movidos: r.movidos });
+  return ok(c, { producto: r.producto, items: r.items, venta_antes: r.venta_antes, venta_despues: r.venta_despues });
+});
+
+/* ────────── el producto de cada ítem: escogerlo y cambiarlo (§111) ──────────
+ *
+ * Mike, 20-sep: «todos los ítems, aparte del tipo de ítem, deberían tener un
+ * dropdown para seleccionar qué producto es, o nuevo si el ítem es su mismo
+ * producto único. A lo mejor un ítem pasó de ser modelo A a modelo B y sólo
+ * se cambia de grupo. El dropdown debe tener 1) los ítems que son únicos en
+ * el proyecto 2) los productos que ya tienen varios ítems agrupados».
+ */
+
+/** GET /orgs/:o/proyectos/:id/productos — lo que va en ese dropdown: los
+ *  productos que ya se usan en la obra y los ítems que todavía son su
+ *  propio producto único. No toca nada. */
+rutas.get('/:o/proyectos/:id/productos', async (c) => {
+  const permiso = puedeLeer(c, 'items');
+  if (permiso) return permiso;
+  const r = await stub(c).productosDelProyecto(c.req.param('id'));
+  if ('error' in r) return err(c, r.error, 404, r.detalle);
+  return ok(c, { proyecto: r.proyecto, productos: r.productos, unicos: r.unicos });
+});
+
+/** POST /orgs/:o/items/:id/producto {producto_id|desde_item|solo} — cambiar
+ *  de grupo.
+ *
+ *  Al entrar a un producto, el ítem HEREDA SU PRECIO: Mike lo pidió con
+ *  todas sus letras, «el ítem adquiere en automático ese costo». Eso mueve
+ *  el precio de venta del proyecto, así que la respuesta trae el antes y el
+ *  después para que la pantalla lo diga y nadie se entere por el total del
+ *  mes. Al salirse (`solo`) el precio NO se le quita: la pieza se queda con
+ *  el que ya tenía. */
+rutas.post('/:o/items/:id/producto', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'cambiar un ítem de producto lo hace quien es de la empresa' });
+  type Cuerpo = { producto_id?: string; desde_item?: string; solo?: boolean };
+  const b = await c.req.json<Cuerpo>().catch(() => ({}) as Cuerpo);
+  const r = await stub(c).asignarProducto(
+    c.req.param('id'),
+    { producto_id: b.producto_id, desde_item: b.desde_item, solo: b.solo },
+    { usuario_id: quien.usuario_id },
+  );
+  if ('error' in r) {
+    return err(c, r.error, r.error === 'no_encontrado' ? 404 : r.error === 'datos_invalidos' ? 400 : r.error === 'sin_permiso' ? 403 : 409, r.detalle);
+  }
+  return ok(c, { item: r.item, producto: r.producto, venta_antes: r.venta_antes, venta_despues: r.venta_despues });
 });
 
 /** POST /orgs/:o/proyectos/:id/acomodar {items:[{id, partida?, orden?}]} — la

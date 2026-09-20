@@ -9,11 +9,42 @@
  *   1. El dinero es INTEGER en centavos. $150,000.00 es 15000000. Nunca un
  *      flotante: SQLite no tiene decimal y sumar flotantes pierde centavos.
  *      Se formatea con Fira Sans, cifras tabulares (identidad Taller 101).
- *   2. Se dice ítem, no producto. Lo que se cobra puede ser una cocina, una
- *      visita o un servicio.
+ *   2. Ítem y producto son DOS COSAS, y desde el 0.35.0 son dos tablas. Un
+ *      ítem es la pieza que se cobra y se sigue en obra —puede ser una
+ *      cocina, una visita o un servicio—; un producto es el modelo del
+ *      catálogo del que salen varias piezas iguales. Esta regla decía «se
+ *      dice ítem, no producto» y era correcta mientras no existía el
+ *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.34.0 (DOS CÓDIGOS, Y NO SE MEZCLAN. Mike,
+ * Versión del contrato: 0.35.0 (EL PRODUCTO DEL CATÁLOGO, Y AGRUPAR DEJA DE
+ * FUSIONAR. Mike, 20-sep: «cuando un ítem se asigna a un grupo de ítems que
+ * son del mismo producto, el ítem adquiere en automático ese costo. También
+ * debe poder moverse de grupo de producto un ítem ya agrupado. Todos los
+ * ítems deberían tener un dropdown para seleccionar qué producto es, o nuevo
+ * si el ítem es su mismo producto único».
+ *   · Tabla `productos`, del NEGOCIO: código de catálogo (único dentro de la
+ *     empresa cuando lo tiene), nombre, descripción, tipo y `precio` POR
+ *     PIEZA en centavos. Es donde va a vivir el catálogo de quote101.
+ *   · `items.producto_id`: NULL = el ítem es su propio producto único, que
+ *     es como nacen todos. Entrar a un producto le pone `monto` = precio ×
+ *     cantidad y `clave` = el código del producto si lo tiene.
+ *   · `POST /orgs/:o/proyectos/:id/agrupar` YA NO BORRA RENGLONES. Antes
+ *     fusionaba —21 puertas se volvían un renglón de 21 y los otros 20 se
+ *     borraban—, y un renglón borrado no se puede mover de grupo, que es
+ *     justo lo que Mike pidió. Ahora escribe el producto y le apunta las
+ *     piezas; el cuerpo es {items[], nombre?, codigo?, precio?} en vez de
+ *     {queda_id, se_van[]}. Como ya no destruye, dejó de estar reservado a
+ *     quien dirige la empresa. Y los estados ya no tienen que coincidir:
+ *     cada pieza conserva el suyo.
+ *   · `GET /orgs/:o/proyectos/:id/productos` son las opciones del dropdown:
+ *     los productos que se usan en la obra y los ítems que todavía son su
+ *     propio producto único.
+ *   · `POST /orgs/:o/items/:id/producto` {producto_id|desde_item|solo}
+ *     cambia de grupo, y devuelve el precio de venta del proyecto antes y
+ *     después, porque heredar el costo lo mueve. Salirse NO le quita el
+ *     precio a la pieza. `producto_id` no se escribe por PATCH: iría el
+ *     apuntador sin el precio). Antes: 0.34.0 (DOS CÓDIGOS, Y NO SE MEZCLAN. Mike,
  * 20-sep: «una cosa es el código de ítem (pieza física en obra) y otra
  * diferente el código de producto de catálogo. Así es como lo vamos a
  * ordenar. Porque más adelante, en quote necesito ir generando un catálogo
@@ -400,7 +431,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.34.0';
+export const VERSION_CONTRATO = '0.35.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -790,12 +821,40 @@ export const ETAPAS: Array<{ n: Etapa; nombre: string; termina: string; quien: s
 /** En la etapa 4 nace la clave del ítem ('M07'). */
 export const ETAPA_CLAVE: Etapa = 4;
 
+/** El modelo del catálogo (0017). Es de la EMPRESA, no del proyecto: el
+ *  mismo «Puerta modelo A» se cotiza en tres obras. Varios ítems —piezas
+ *  físicas, cada una con su código de obra en quell— apuntan al mismo
+ *  producto, y de él heredan el precio.
+ *
+ *  Mike, 20-sep: «una cosa es el código de ítem (pieza física en obra) y
+ *  otra diferente el código de producto de catálogo. Cada ítem es un código
+ *  de producto y puede haber varios ítems del mismo modelo». */
+export interface Producto {
+  id: string;
+  negocio_id: string;
+  /** El del catálogo. Único dentro de la empresa cuando no está vacío;
+   *  vacío mientras nadie lo cataloga, que es como nace al agrupar. */
+  codigo: string;
+  nombre: string;
+  descripcion: string | null;
+  tipo: 'mueble' | 'servicio' | 'visita' | 'otro';
+  /** centavos, POR PIEZA. El `monto` de un ítem suyo es esto × su cantidad. */
+  precio: number;
+  moneda: Moneda;
+  creado_at: string;
+  creado_por: string;
+  actualizado_at: string | null;
+}
+
 export interface Item {
   id: string;
   negocio_id: string;
   proyecto_id: string | null; // NULL mientras solo está cotizado
   cliente_id: string;
   clave: string | null;
+  /** A qué producto del catálogo pertenece (0017). NULL = el ítem es su
+   *  propio producto único, que es como nacen todos. */
+  producto_id: string | null;
   nombre: string;
   descripcion: string | null;
   tipo: 'mueble' | 'servicio' | 'visita' | 'otro';
@@ -934,6 +993,7 @@ export const TABLAS = [
   'estaciones',
   'cotizaciones',
   'proyectos',
+  'productos',
   'items',
   'partidas',
   'avances',

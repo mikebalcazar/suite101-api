@@ -67,6 +67,12 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
   // Las escribe la ruta POST /orgs/:o/conciliaciones, no el CRUD genérico:
   // aquí está para que quede dicho de quién son, y para el 403 con la lista.
   conciliaciones: { dash101: ['negocio_id', 'corte_at', 'hecha_por'] },
+  /* El catálogo (0017). Lo escribe dash101 hoy; quote101 entra cuando arme
+   * el catálogo de verdad, que es para lo que Mike lo pidió. `precio` sí
+   * está en la lista: cambiarle el precio a un producto es una decisión de
+   * quien cotiza, no un caché. Lo que NO se escribe por aquí es a quién
+   * pertenece cada pieza; eso es `items.producto_id`, abajo. */
+  productos: { dash101: ['codigo', 'nombre', 'descripcion', 'tipo', 'precio', 'moneda', 'negocio_id'] },
   conciliacion_cuentas: { dash101: ['conciliacion_id', 'cuenta_id', 'saldo_registrado', 'saldo_real', 'diferencia', 'movimiento_id'] },
 };
 
@@ -79,7 +85,13 @@ export const CACHES: Partial<Record<Tabla, readonly string[]>> = {
    * `cancelado_motivo` la ruta de cancelar. Ninguna app los manda: de
    * `aprobado_at` depende que un descartado no se lea como una venta
    * cancelada. */
-  items: ['etapa', 'etapa_at', 'etapa_por', 'aprobado_at', 'cancelado_at', 'cancelado_motivo'],
+  /* `producto_id` no es un caché sino un apuntador, pero se rechaza por la
+   * misma razón y por eso vive aquí: entrar a un producto le HEREDA EL
+   * PRECIO al ítem (Mike, 20-sep: «adquiere en automático ese costo»), y un
+   * PATCH suelto lo dejaría apuntando a un modelo de $9,500 con su precio
+   * viejo de $12,000 y el proyecto sumando mal. Se cambia por
+   * POST /items/:id/producto, que hace las dos cosas juntas. */
+  items: ['etapa', 'etapa_at', 'etapa_por', 'aprobado_at', 'cancelado_at', 'cancelado_motivo', 'producto_id'],
 };
 
 /* Campos que pone la API sola y que nadie manda de fuera. */
