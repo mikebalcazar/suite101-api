@@ -26,6 +26,7 @@ import obras from '../migrations/org/0010_obras.sql';
 import cantidad from '../migrations/org/0011_cantidad.sql';
 import facturaEsperada from '../migrations/org/0012_factura_esperada.sql';
 import bitacoraPrecio from '../migrations/org/0013_bitacora_precio.sql';
+import raya from '../migrations/org/0014_raya.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { atender as atenderRoster, type DatosEmpresaRoster, type SesionRoster } from './roster/motor.js';
 import { invitarClienteEnSuite } from './clientes';
@@ -45,7 +46,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya];
 
 /** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
  *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
@@ -131,6 +132,8 @@ export interface ApiOrgDB {
   personalDeUsuario(usuario_id: string): Promise<Fila | null>;
   asegurarPersonal(args: { usuario_id: string; nombre: string; correo?: string | null }): Promise<Fila>;
   esContador(usuario_id: string): Promise<boolean>;
+  esDeNominas(usuario_id: string): Promise<boolean>;
+  marcarNominas(args: { personal_id: string; valor: boolean; quien_usuario_id: string; quien_nombre?: string | null }): Promise<Fila | null>;
   marcarContador(args: { personal_id: string; valor: boolean; quien_usuario_id: string; quien_nombre?: string | null }): Promise<Fila | null>;
   crearOrden(args: Record<string, unknown>): Promise<Fila | { error: string; detalle?: unknown }>;
   misOrdenes(usuario_id: string, negocio_id?: string | null): Promise<Fila[]>;
@@ -165,6 +168,24 @@ export interface ApiOrgDB {
   sinUbicar(obra_id: string): Promise<{ obra: Fila; items: Fila[] } | { error: string; detalle?: unknown }>;
   ligarObra(obra_id: string, proyecto_id: string): Promise<{ ok: true; obra: Fila } | { error: string; detalle?: unknown }>;
   itemsDeLaObra(obra_id: string): Promise<{ obra: Fila; parejas: Fila[]; nuevos: Fila[]; sueltos: Fila[] } | { error: string; detalle?: unknown }>;
+  rayas(negocio_id: string): Promise<Fila[]>;
+  raya(id: string): Promise<{ raya: Fila; pagos: Fila[] } | null>;
+  crearRaya(
+    datos: { negocio_id: string; periodo_inicio: string; periodo_fin: string; nota?: string;
+             pagos?: Array<{ personal_id: string; concepto?: string; sueldo?: number; extras?: number; descuentos?: number; nota?: string }> },
+    contexto: { usuario_id: string },
+  ): Promise<{ ok: true; raya: Fila; pagos: Fila[] } | { error: string; detalle?: unknown }>;
+  editarRaya(
+    id: string,
+    datos: { periodo_inicio?: string; periodo_fin?: string; nota?: string;
+             pagos?: Array<{ personal_id: string; concepto?: string; sueldo?: number; extras?: number; descuentos?: number; nota?: string }> },
+  ): Promise<{ ok: true; raya: Fila; pagos: Fila[] } | { error: string; detalle?: unknown }>;
+  pagarRaya(
+    id: string,
+    args: { cuenta_id: string; fecha?: string; quien_usuario_id: string },
+  ): Promise<{ ok: true; raya: Fila; pagos: Fila[] } | { error: string; detalle?: unknown }>;
+  cancelarRaya(id: string): Promise<{ ok: true; raya: Fila; pagos: Fila[] } | { error: string; detalle?: unknown }>;
+  recibido(pago_id: string, recibido: boolean): Promise<{ ok: true; pago: Fila } | { error: string; detalle?: unknown }>;
   fusionarItemsDeLaObra(
     obra_id: string,
     plan: { ligar?: Array<{ element_id: string; item_id: string }>; crear?: string[] },
@@ -1212,6 +1233,36 @@ export class OrgDB extends DurableObject<Env> {
     return !!f && f.es_contador === 1;
   }
 
+  /** ¿Puede ver y mover la raya?
+   *
+   *  Etiqueta aparte de `es_contador`, y no es purismo: pagarle a un
+   *  proveedor y saber cuánto gana cada quien son dos cosas distintas, y la
+   *  segunda es la que nadie quiere que ande suelta en la oficina. */
+  esDeNominas(usuario_id: string): boolean {
+    const f = this.sql
+      .exec(`SELECT es_nominas FROM personal WHERE usuario_id = ? LIMIT 1`, usuario_id)
+      .toArray()[0] as { es_nominas: number } | undefined;
+    return !!f && f.es_nominas === 1;
+  }
+
+  /** Enciende o apaga la etiqueta de nóminas y lo deja apuntado, en la misma
+   *  bitácora que la de contador: quién pudo ver los sueldos y desde cuándo
+   *  es parte de la misma historia. */
+  marcarNominas(args: { personal_id: string; valor: boolean; quien_usuario_id: string; quien_nombre?: string | null }): Fila | null {
+    const persona = this.sql.exec(`SELECT id, nombre FROM personal WHERE id = ?`, args.personal_id).toArray()[0] as Fila | undefined;
+    if (!persona) return null;
+    this.sql.exec(`UPDATE personal SET es_nominas = ? WHERE id = ?`, args.valor ? 1 : 0, args.personal_id);
+    this.apuntarOrden({
+      orden_id: null,
+      que: 'nominas',
+      quien_usuario_id: args.quien_usuario_id,
+      quien_nombre: args.quien_nombre ?? null,
+      sobre_personal_id: args.personal_id,
+      nota: args.valor ? `${persona.nombre} ya puede ver y pagar la raya` : `${persona.nombre} ya no puede ver la raya`,
+    });
+    return this.obtener('personal', args.personal_id);
+  }
+
   /** Enciende o apaga la etiqueta de contador y lo deja apuntado. Quién puede
    *  llamarla lo decide el Worker (sólo el dueño). */
   marcarContador(args: { personal_id: string; valor: boolean; quien_usuario_id: string; quien_nombre?: string | null }): Fila | null {
@@ -2117,6 +2168,230 @@ export class OrgDB extends DurableObject<Env> {
     if (!obra) return { error: 'no_encontrado', detalle: { que: 'obra', id: obra_id } };
     this.sql.exec(`UPDATE quell_projects SET proyecto_id = NULL WHERE id = ?`, obra_id);
     return { ok: true, obra: this.obras().find((o) => o.id === obra_id)! };
+  }
+
+  /* ─────────────── la raya: lo que se le paga a la gente (§96) ───────────────
+   *
+   * Mike escogió el alcance con todas sus letras: pagos de raya y recibos.
+   * No hay cálculo de IMSS ni de ISR ni CFDI de nómina, y eso es una
+   * decisión, no una omisión: una retención mal calculada se descubre en una
+   * auditoría, meses después y con multa. Aquí se apunta lo que de verdad se
+   * pagó, sale de una cuenta de verdad, y queda un recibo.
+   */
+
+  /** Los cortes de un negocio, con cuánta gente trae cada uno. */
+  rayas(negocio_id: string): Fila[] {
+    return this.sql
+      .exec(
+        `SELECT r.*, (SELECT COUNT(*) FROM raya_pagos p WHERE p.raya_id = r.id) AS personas,
+                c.nombre AS cuenta_nombre
+         FROM rayas r LEFT JOIN cuentas c ON c.id = r.cuenta_id
+         WHERE r.negocio_id = ? ORDER BY r.periodo_fin DESC, r.creado_at DESC`,
+        negocio_id,
+      )
+      .toArray() as Fila[];
+  }
+
+  /** Un corte con sus renglones. */
+  raya(id: string): { raya: Fila; pagos: Fila[] } | null {
+    const raya = this.sql.exec(`SELECT * FROM rayas WHERE id = ?`, id).toArray()[0] as Fila | undefined;
+    if (!raya) return null;
+    const pagos = this.sql
+      .exec(`SELECT * FROM raya_pagos WHERE raya_id = ? ORDER BY nombre`, id)
+      .toArray() as Fila[];
+    return { raya, pagos };
+  }
+
+  /** Lo que suma un renglón, y lo que suma el corte. LO CALCULA EL SERVIDOR.
+   *
+   *  Es la misma regla que `precio_venta` y por el mismo motivo: si el total
+   *  viniera de la pantalla, dos personas capturando a la vez mandarían dos
+   *  totales distintos y los dos se creerían. */
+  private netoDe(p: { sueldo?: unknown; extras?: unknown; descuentos?: unknown }): number {
+    const n = (v: unknown) => Math.round(Number(v ?? 0)) || 0;
+    return n(p.sueldo) + n(p.extras) - n(p.descuentos);
+  }
+
+  private recalcularRaya(raya_id: string): void {
+    const total = Number(
+      (this.sql.exec(`SELECT COALESCE(SUM(neto),0) AS t FROM raya_pagos WHERE raya_id = ?`, raya_id).toArray()[0] as Fila).t,
+    );
+    this.sql.exec(`UPDATE rayas SET total = ?, actualizado_at = ? WHERE id = ?`, total, ahora(), raya_id);
+  }
+
+  /** Abrir un corte con su gente. Nace en BORRADOR: nada sale de la cuenta
+   *  hasta que alguien diga «pagar». */
+  crearRaya(
+    datos: { negocio_id: string; periodo_inicio: string; periodo_fin: string; nota?: string;
+             pagos?: Array<{ personal_id: string; concepto?: string; sueldo?: number; extras?: number; descuentos?: number; nota?: string }> },
+    contexto: { usuario_id: string },
+  ): { ok: true; raya: Fila; pagos: Fila[] } | { error: string; detalle?: unknown } {
+    if (!this.obtener('negocios', datos.negocio_id)) {
+      return { error: 'no_encontrado', detalle: { que: 'negocio', id: datos.negocio_id } };
+    }
+    if (!datos.periodo_inicio || !datos.periodo_fin) return { error: 'datos_invalidos', detalle: { falta: 'periodo' } };
+    if (datos.periodo_fin < datos.periodo_inicio) {
+      return { error: 'datos_invalidos', detalle: { motivo: 'el periodo termina antes de empezar' } };
+    }
+    const id = ulid();
+    const t = ahora();
+    this.sql.exec(
+      `INSERT INTO rayas (id, negocio_id, periodo_inicio, periodo_fin, estado, total, nota, creado_por, creado_at)
+       VALUES (?,?,?,?,'borrador',0,?,?,?)`,
+      id, datos.negocio_id, datos.periodo_inicio, datos.periodo_fin, datos.nota ?? '', contexto.usuario_id, t,
+    );
+    const r = this.ponerPagos(id, datos.pagos ?? []);
+    if ('error' in r) {
+      this.sql.exec(`DELETE FROM rayas WHERE id = ?`, id);
+      return r;
+    }
+    return { ok: true, ...this.raya(id)! };
+  }
+
+  /** Poner los renglones de un corte, REEMPLAZANDO los que tuviera.
+   *
+   *  Reemplazar y no ir sumando es lo que hace que guardar dos veces no
+   *  duplique a nadie: el defecto que Mike vivió con los ítems del proyecto
+   *  el 20-sep. */
+  private ponerPagos(
+    raya_id: string,
+    pagos: Array<{ personal_id: string; concepto?: string; sueldo?: number; extras?: number; descuentos?: number; nota?: string }>,
+  ): { ok: true } | { error: string; detalle?: unknown } {
+    const vistos = new Set<string>();
+    for (const p of pagos) {
+      if (!p.personal_id) return { error: 'datos_invalidos', detalle: { falta: 'personal_id' } };
+      if (vistos.has(p.personal_id)) {
+        return { error: 'datos_invalidos', detalle: { que: 'persona repetida', personal_id: p.personal_id, motivo: 'una persona viene dos veces en el mismo corte' } };
+      }
+      vistos.add(p.personal_id);
+      const quien = this.obtener('personal', p.personal_id);
+      if (!quien) return { error: 'no_encontrado', detalle: { que: 'persona', id: p.personal_id } };
+      const neto = this.netoDe(p);
+      if (neto < 0) {
+        return { error: 'datos_invalidos', detalle: { que: 'neto negativo', persona: quien.nombre, motivo: 'los descuentos se comen el sueldo: ese renglón le debería dinero a la empresa' } };
+      }
+    }
+    this.sql.exec(`DELETE FROM raya_pagos WHERE raya_id = ?`, raya_id);
+    for (const p of pagos) {
+      const quien = this.obtener('personal', p.personal_id)!;
+      this.sql.exec(
+        `INSERT INTO raya_pagos (id, raya_id, personal_id, nombre, concepto, sueldo, extras, descuentos, neto, nota, creado_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        ulid(), raya_id, p.personal_id, String(quien.nombre), p.concepto ?? 'Sueldo',
+        Math.round(Number(p.sueldo ?? 0)) || 0, Math.round(Number(p.extras ?? 0)) || 0,
+        Math.round(Number(p.descuentos ?? 0)) || 0, this.netoDe(p), p.nota ?? '', ahora(),
+      );
+    }
+    this.recalcularRaya(raya_id);
+    return { ok: true };
+  }
+
+  /** Corregir un corte. SÓLO en borrador: una raya pagada ya movió dinero, y
+   *  cambiarle las cifras dejaría el recibo diciendo una cosa y el banco
+   *  otra. Para corregir un pago hecho se corrige SU MOVIMIENTO, que desde
+   *  el 20-sep se puede desde la lista de movimientos. */
+  editarRaya(
+    id: string,
+    datos: { periodo_inicio?: string; periodo_fin?: string; nota?: string;
+             pagos?: Array<{ personal_id: string; concepto?: string; sueldo?: number; extras?: number; descuentos?: number; nota?: string }> },
+  ): { ok: true; raya: Fila; pagos: Fila[] } | { error: string; detalle?: unknown } {
+    const actual = this.sql.exec(`SELECT * FROM rayas WHERE id = ?`, id).toArray()[0] as Fila | undefined;
+    if (!actual) return { error: 'no_encontrado', detalle: { que: 'raya', id } };
+    if (actual.estado !== 'borrador') {
+      return { error: 'ya_pagada', detalle: { estado: actual.estado, motivo: 'una raya que ya movió dinero no se reescribe; corrige el movimiento de esa persona' } };
+    }
+    const inicio = datos.periodo_inicio ?? String(actual.periodo_inicio);
+    const fin = datos.periodo_fin ?? String(actual.periodo_fin);
+    if (fin < inicio) return { error: 'datos_invalidos', detalle: { motivo: 'el periodo termina antes de empezar' } };
+    this.sql.exec(
+      `UPDATE rayas SET periodo_inicio = ?, periodo_fin = ?, nota = ?, actualizado_at = ? WHERE id = ?`,
+      inicio, fin, datos.nota ?? String(actual.nota ?? ''), ahora(), id,
+    );
+    if (datos.pagos) {
+      const r = this.ponerPagos(id, datos.pagos);
+      if ('error' in r) return r;
+    }
+    return { ok: true, ...this.raya(id)! };
+  }
+
+  /** Pagar el corte: un egreso POR PERSONA, de una sola vez.
+   *
+   *  Uno por persona y no uno global: el estado de cuenta tiene que decir a
+   *  quién se le pagó. Con un egreso por el total, conciliar contra el banco
+   *  es adivinar, y corregirle el monto a uno obliga a tocar el pago de
+   *  todos.
+   *
+   *  Va todo o no va nada. Un corte pagado a medias —tres personas con su
+   *  movimiento y dos sin él— es el peor estado posible: el total no cuadra
+   *  con la cuenta y no hay forma de saber a quién le falta sin revisar
+   *  renglón por renglón. */
+  pagarRaya(
+    id: string,
+    args: { cuenta_id: string; fecha?: string; quien_usuario_id: string },
+  ): { ok: true; raya: Fila; pagos: Fila[] } | { error: string; detalle?: unknown } {
+    const raya = this.sql.exec(`SELECT * FROM rayas WHERE id = ?`, id).toArray()[0] as Fila | undefined;
+    if (!raya) return { error: 'no_encontrado', detalle: { que: 'raya', id } };
+    if (raya.estado === 'pagada') return { error: 'ya_pagada', detalle: { motivo: 'este corte ya se pagó' } };
+    if (raya.estado === 'cancelada') return { error: 'cancelada', detalle: { motivo: 'este corte está cancelado' } };
+
+    const cuenta = this.obtener('cuentas', args.cuenta_id);
+    if (!cuenta) return { error: 'no_encontrado', detalle: { que: 'cuenta', id: args.cuenta_id } };
+    if (cuenta.negocio_id !== raya.negocio_id) {
+      return { error: 'datos_invalidos', detalle: { motivo: 'esa cuenta es de otro negocio' } };
+    }
+    const pagos = this.sql.exec(`SELECT * FROM raya_pagos WHERE raya_id = ?`, id).toArray() as Fila[];
+    if (!pagos.length) return { error: 'datos_invalidos', detalle: { motivo: 'este corte no tiene a nadie' } };
+
+    const fecha = args.fecha || ahora().slice(0, 10);
+    const t = ahora();
+    for (const p of pagos) {
+      const mov_id = ulid();
+      this.sql.exec(
+        `INSERT INTO movimientos (id, negocio_id, tipo, monto, fecha, cuenta_id,
+           contraparte_tipo, contraparte_id, contraparte_nombre, descripcion, categoria, creado_por, creado_at,
+           facturado, requiere_factura)
+         VALUES (?,?,'egreso',?,?,?,'personal',?,?,?,'raya',?,?,0,0)`,
+        mov_id, raya.negocio_id, Number(p.neto), fecha, args.cuenta_id,
+        p.personal_id, p.nombre,
+        `Raya ${raya.periodo_inicio} a ${raya.periodo_fin} · ${p.concepto}`,
+        args.quien_usuario_id, t,
+      );
+      /* `requiere_factura` en 0 a propósito: una raya no lleva factura de
+       * proveedor. Si naciera en 1, cada semana le caerían renglones a la
+       * lista de «falta la factura» que nunca van a llegar, y esa lista
+       * dejaría de leerse. */
+      this.sql.exec(`UPDATE raya_pagos SET movimiento_id = ? WHERE id = ?`, mov_id, String(p.id));
+    }
+    this.sql.exec(
+      `UPDATE rayas SET estado = 'pagada', cuenta_id = ?, pagada_at = ?, pagada_por = ?, actualizado_at = ? WHERE id = ?`,
+      args.cuenta_id, t, args.quien_usuario_id, t, id,
+    );
+    this.recalcularRaya(id);
+    this.avisar({ t: 'raya.pagada', id }, 'dinero');
+    return { ok: true, ...this.raya(id)! };
+  }
+
+  /** Cancelar un corte que todavía no se paga. Uno pagado NO se cancela: ese
+   *  dinero ya salió, y borrarlo de aquí no lo regresa a la cuenta. Lo que se
+   *  corrige es el movimiento. */
+  cancelarRaya(id: string): { ok: true; raya: Fila; pagos: Fila[] } | { error: string; detalle?: unknown } {
+    const raya = this.sql.exec(`SELECT estado FROM rayas WHERE id = ?`, id).toArray()[0] as Fila | undefined;
+    if (!raya) return { error: 'no_encontrado', detalle: { que: 'raya', id } };
+    if (raya.estado === 'pagada') {
+      return { error: 'ya_pagada', detalle: { motivo: 'ese dinero ya salió de la cuenta; cancelar el corte no lo regresa. Corrige o borra los movimientos.' } };
+    }
+    this.sql.exec(`UPDATE rayas SET estado = 'cancelada', actualizado_at = ? WHERE id = ?`, ahora(), id);
+    return { ok: true, ...this.raya(id)! };
+  }
+
+  /** Firmó de recibido. Es el recibo, y por eso se puede QUITAR: se marca por
+   *  error más seguido de lo que uno cree, y un recibo firmado que nadie
+   *  firmó es justo lo que no sirve de nada en una aclaración. */
+  recibido(pago_id: string, recibido: boolean): { ok: true; pago: Fila } | { error: string; detalle?: unknown } {
+    const pago = this.sql.exec(`SELECT * FROM raya_pagos WHERE id = ?`, pago_id).toArray()[0] as Fila | undefined;
+    if (!pago) return { error: 'no_encontrado', detalle: { que: 'pago', id: pago_id } };
+    this.sql.exec(`UPDATE raya_pagos SET recibido_at = ? WHERE id = ?`, recibido ? ahora() : null, pago_id);
+    return { ok: true, pago: this.sql.exec(`SELECT * FROM raya_pagos WHERE id = ?`, pago_id).toArray()[0] as Fila };
   }
 
   /* ─────────────── pool para autocompletar (§7) ─────────────── */
