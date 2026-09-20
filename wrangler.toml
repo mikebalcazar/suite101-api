@@ -45,6 +45,16 @@ ENTORNO = "produccion"
 API_VERSION = "0.21.0"
 CORREO_REMITENTE = "Suite 101 <acceso@envios.taller101.mx>"
 CORREO_SUPERADMIN = "mike@forespot.com"
+# A donde se pide dejar de recibir AVISOS (la bienvenida, el estado de una
+# orden). Va en la cabecera List-Unsubscribe. Mike la dio el 20-sep: es un
+# buzon que alguien lee, y por eso se puede poner. Una salida que nadie
+# procesa es una promesa falsa en una cabecera, y de esas vive la carpeta de
+# basura.
+#
+# NO sale en el correo del codigo de acceso, y eso lo decide el codigo, no
+# esta variable: darle "darse de baja" a tu propio codigo de entrada es
+# ofrecerle a alguien que se deje fuera de su cuenta.
+CORREO_BAJA = "info@forespot.com"
 # Origenes con permiso de CORS. La cookie va con SameSite=None, asi que aqui no
 # puede haber un comodin: el navegador tira la respuesta si se contesta * con
 # credenciales.
@@ -96,6 +106,9 @@ ENTORNO = "staging"
 API_VERSION = "0.21.0"
 CORREO_REMITENTE = "Suite 101 <acceso@envios.taller101.mx>"
 CORREO_SUPERADMIN = "mike@forespot.com"
+# La misma de produccion: en staging el correo no sale (salvo con
+# CORREO_DE_VERDAD=1), pero si algun dia se prende a mano, que salga bien.
+CORREO_BAJA = "info@forespot.com"
 ORIGENES = "*"
 URL_PUBLICA = "https://suite101-api-staging.mike-929.workers.dev"
 URL_PANEL_DIRECTOR = "https://workshop101-staging.mike-929.workers.dev"
