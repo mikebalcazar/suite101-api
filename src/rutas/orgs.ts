@@ -30,6 +30,21 @@ const TABLAS_DINERO: Tabla[] = ['movimientos', 'cuentas', 'opex', 'cotizaciones'
 
 const stub = (c: Ctx): ApiOrgDB => c.env.ORG.get(c.env.ORG.idFromName(c.get('org_id'))) as unknown as ApiOrgDB;
 
+/** Cuánto es lo más que una lista devuelve de una vez, cuando se pide con
+ *  `?limite=`. Sin parámetro se quedan las 500 de siempre: ninguna pantalla
+ *  que ya funciona cambia de comportamiento. */
+const TOPE_MAXIMO = 5000;
+
+/** Lee `?limite=`. Lo que no sea un entero positivo se ignora —vale más
+ *  contestar el tope de siempre que un 400 por un parámetro de adorno—, y lo
+ *  que se pase de TOPE_MAXIMO se recorta ahí. */
+function topeDe(v: string | undefined): number | undefined {
+  if (v === undefined || v === '') return undefined;
+  const n = Number(v);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) return undefined;
+  return Math.min(n, TOPE_MAXIMO);
+}
+
 /** Los paneles de control: no aparecen en `orgs.apps` ni en `miembros.apps`. */
 const PANELES: ReadonlySet<App> = new Set<App>(['master101', 'workshop101', 'suite101']);
 
@@ -571,12 +586,27 @@ rutas.get('/:o/:tabla', async (c) => {
     filtros.negocio_id = quien.negocios[0];
   }
 
+  /* El tope. Toda lista viene topada, y `total` dice cuántas hay de verdad:
+   * quien lo ignore se lleva una respuesta 200 con menos renglones y ninguna
+   * seña de que faltan. Eso ya costó un defecto —dash101 pedía los ítems de
+   * un proyecto sin filtrar, los cancelados viejos llenaban las 500 y los
+   * vivos recientes se caían de la vista: la pantalla decía «sin ítems»
+   * mientras el precio de venta, que la API suma en la base, seguía en su
+   * cifra correcta—.
+   *
+   * Desde 0.24.2 se puede pedir más con `?limite=`, hasta TOPE_MAXIMO. No se
+   * quita el tope: una lista sin techo es una manera de tumbar el Durable
+   * Object desde una pantalla. Lo que se quita es la obligación de adivinar
+   * que faltaban filas. */
+  const limite = topeDe(filtros.limite);
+  delete filtros.limite;
+
   const r = await stub(c).listar(tabla as Tabla, filtros, {
     usuario_id: quien.usuario_id,
     clase: quien.clase,
     ref_id: quien.ref_id,
     ve_dinero: quien.ve_dinero,
-  });
+  }, limite);
   return ok(c, { total: r.total, filas: r.filas.map((f) => podar(quien, tabla as Tabla, f)) });
 });
 
