@@ -195,9 +195,12 @@ export interface ApiOrgDB {
   recibido(pago_id: string, recibido: boolean): Promise<{ ok: true; pago: Fila } | { error: string; detalle?: unknown }>;
   fusionarItemsDeLaObra(
     obra_id: string,
-    plan: { ligar?: Array<{ element_id: string; item_id: string; clave?: 'quell' | 'dash'; nombre?: 'quell' | 'dash' }>; crear?: string[] },
+    plan: {
+      ligar?: Array<{ element_id: string; item_id: string; clave?: 'quell' | 'dash'; nombre?: 'quell' | 'dash'; sumar?: boolean }>;
+      crear?: Array<string | { element_id: string; monto?: number; descripcion?: string; nombre?: string }>;
+    },
     contexto: { usuario_id: string },
-  ): Promise<{ ok: true; ligados: number; creados: number; renombrados: number; obra: Fila } | { error: string; detalle?: unknown }>;
+  ): Promise<{ ok: true; ligados: number; creados: number; renombrados: number; sumados: number; obra: Fila } | { error: string; detalle?: unknown }>;
   desligarObra(obra_id: string): Promise<{ ok: true; obra: Fila } | { error: string; detalle?: unknown }>;
 
   /* Varios ítems iguales, un solo concepto (§98). */
@@ -2109,18 +2112,32 @@ export class OrgDB extends DurableObject<Env> {
    *  `ligar` cuelga una pieza del plano de un ítem que ya existe. `crear` le
    *  hace un ítem nuevo a una pieza que no tenía.
    *
-   *  El ítem nuevo nace **cotizado y en cero**, y las dos cosas son a
-   *  propósito. Una pieza del plano no trae precio: nadie se lo ha puesto.
-   *  Nacer «vendido» en cero metería una venta de cero pesos en el precio
-   *  del proyecto —`precio_venta` suma los vendidos— y dejaría la proyección
-   *  diciendo una cifra que nadie tecleó. Cotizado sale en la lista de
-   *  dash101 para ponerle precio, y no mueve un solo peso hasta que alguien
-   *  lo decide. */
+   *  SIN PRECIO, el ítem nuevo nace **cotizado y en cero**, y las dos cosas
+   *  son a propósito. Una pieza del plano no trae precio: nadie se lo ha
+   *  puesto. Nacer «vendido» en cero metería una venta de cero pesos en el
+   *  precio del proyecto —`precio_venta` suma los vendidos— y dejaría la
+   *  proyección diciendo una cifra que nadie tecleó.
+   *
+   *  CON PRECIO nace vendido, y eso también es a propósito. Mike, 20-sep:
+   *  «debería poder de ahí mismo agregar un ítem nuevo con precio y
+   *  descripción para que ya se sume». Quien teclea un precio en esa
+   *  pantalla está diciendo cuánto vale, no proponiéndolo; obligarlo a ir al
+   *  proyecto a marcarlo vendido es un segundo paso que sólo sirve para
+   *  olvidarse.
+   *
+   *  Y `sumar` es la tercera puerta: «o agregarlo al conteo de un concepto
+   *  ya existente, una puerta más a las 14 ya existentes del mismo modelo».
+   *  Sube en uno la cantidad del ítem y le agrega el precio de UNA pieza.
+   *  Eso mueve dinero, así que no pasa nunca solo: sin `sumar`, una pieza de
+   *  más sigue siendo 409 `sin_cupo`. */
   fusionarItemsDeLaObra(
     obra_id: string,
-    plan: { ligar?: Array<{ element_id: string; item_id: string; clave?: 'quell' | 'dash'; nombre?: 'quell' | 'dash' }>; crear?: string[] },
+    plan: {
+      ligar?: Array<{ element_id: string; item_id: string; clave?: 'quell' | 'dash'; nombre?: 'quell' | 'dash'; sumar?: boolean }>;
+      crear?: Array<string | { element_id: string; monto?: number; descripcion?: string; nombre?: string }>;
+    },
     contexto: { usuario_id: string },
-  ): { ok: true; ligados: number; creados: number; renombrados: number; obra: Fila } | { error: string; detalle?: unknown } {
+  ): { ok: true; ligados: number; creados: number; renombrados: number; sumados: number; obra: Fila } | { error: string; detalle?: unknown } {
     const obra = this.sql.exec(`SELECT * FROM quell_projects WHERE id = ?`, obra_id).toArray()[0] as Fila | undefined;
     if (!obra) return { error: 'no_encontrado', detalle: { que: 'obra', id: obra_id } };
     if (!obra.proyecto_id) return { error: 'sin_liga', detalle: { motivo: 'esta obra todavía no está ligada a un proyecto de dash101' } };
@@ -2147,6 +2164,7 @@ export class OrgDB extends DurableObject<Env> {
     });
 
     const usado = new Map<string, number>();   // item_id → piezas que ya le cuelgan
+    const crecer = new Map<string, number>();  // item_id → en cuántas piezas crece el concepto
     const codigos = new Map<string, string>(); // element_id → código que le va a quedar
     const nombres = new Map<string, { que: 'item' | 'pieza'; valor: string }>();
     /* Los códigos que van a existir en la obra al terminar, para que dos
@@ -2174,12 +2192,20 @@ export class OrgDB extends DurableObject<Env> {
         (this.sql.exec(`SELECT COUNT(*) AS n FROM quell_elements WHERE item_id = ?`, par.item_id).toArray()[0] as Fila).n,
       );
       const ya = yaEnBase + (usado.get(String(par.item_id)) ?? 0);
-      if (ya >= Number(it.cantidad ?? 1)) {
-        return {
-          error: 'sin_cupo',
-          detalle: { item_id: par.item_id, item: it.nombre, cantidad: Number(it.cantidad ?? 1), ubicados: ya,
-                     motivo: 'ese ítem ya tiene en el plano todas las piezas que dice su cantidad' },
-        };
+      const cabe = Number(it.cantidad ?? 1) + (crecer.get(String(par.item_id)) ?? 0);
+      if (ya >= cabe) {
+        /* O crece el concepto, o se rechaza. Crecer mueve dinero —una
+         * puerta más vale una puerta más—, así que sólo pasa si alguien lo
+         * pidió con todas sus letras. */
+        if (!par.sumar) {
+          return {
+            error: 'sin_cupo',
+            detalle: { item_id: par.item_id, item: it.nombre, cantidad: Number(it.cantidad ?? 1), ubicados: ya,
+                       motivo: 'ese ítem ya tiene en el plano todas las piezas que dice su cantidad',
+                       se_puede: 'mandar `sumar: true` en esa pareja para que el concepto pase a una pieza más, con su precio' },
+          };
+        }
+        crecer.set(String(par.item_id), (crecer.get(String(par.item_id)) ?? 0) + 1);
       }
       usado.set(String(par.item_id), (usado.get(String(par.item_id)) ?? 0) + 1);
 
@@ -2270,18 +2296,52 @@ export class OrgDB extends DurableObject<Env> {
       else { this.sql.exec(`UPDATE quell_elements SET name = ? WHERE id = ?`, v.valor, id); renombrados++; }
     }
 
+    /* Los conceptos que crecen: una pieza más, y el precio de una pieza más.
+     *
+     * El precio de la pieza sale de dividir el importe de la línea entre su
+     * cantidad, que es exacto porque la multiplicación se hizo en centavos
+     * enteros. Si la división no es entera se redondea, y el precio por
+     * pieza queda con centavos de diferencia: es preferible a inventarle un
+     * precio a la pieza nueva, y se corrige tecleando el importe del
+     * concepto, que es donde vive la cifra que se cobra. */
+    let sumados = 0;
+    for (const [item_id, cuantas] of crecer) {
+      const it = this.sql.exec(`SELECT monto, cantidad FROM items WHERE id = ?`, item_id).toArray()[0] as Fila;
+      const cantidadAntes = Math.max(1, Math.trunc(Number(it.cantidad ?? 1)));
+      const porPieza = Math.round(Number(it.monto ?? 0) / cantidadAntes);
+      const antes = Number(it.monto ?? 0);
+      this.sql.exec(
+        `UPDATE items SET cantidad = ?, monto = ?, actualizado_at = ? WHERE id = ?`,
+        cantidadAntes + cuantas, antes + porPieza * cuantas, ahora(), item_id,
+      );
+      /* El precio del concepto cambió, así que deja huella en la bitácora de
+       * sus piezas, igual que cuando lo cambian a mano en dash101. */
+      if (porPieza) this.huellaDePrecio(item_id, antes);
+      sumados += cuantas;
+    }
+
     let creados = 0;
-    for (const eid of plan.crear ?? []) {
+    for (const nueva of plan.crear ?? []) {
+      const pide = typeof nueva === 'string' ? { element_id: nueva } : nueva;
+      const eid = pide.element_id;
       const pz = pieza(eid);
       if (!pz) return { error: 'no_encontrado', detalle: { que: 'pieza', id: eid, motivo: 'esa pieza no es de esta obra' } };
       if (pz.item_id) continue;
+      /* Con precio nace vendido; sin precio, cotizado y en cero. Un importe
+       * negativo no es un precio, y en centavos enteros: la pantalla
+       * convierte, aquí no se adivina. */
+      const monto = Number.isFinite(Number(pide.monto)) && Number(pide.monto) > 0 ? Math.trunc(Number(pide.monto)) : 0;
+      if (pide.monto !== undefined && !Number.isInteger(Number(pide.monto))) {
+        return { error: 'dinero_no_entero', detalle: { element_id: eid, monto: pide.monto, motivo: 'el dinero va en centavos enteros' } };
+      }
       const item = this.crear(
         'items',
         {
           negocio_id: proyecto.negocio_id, proyecto_id, cliente_id: proyecto.cliente_id,
-          clave: pz.code ?? '', nombre: pz.name ?? 'Pieza del plano', tipo: pz.type ?? '',
-          monto: 0, cantidad: 1, estado: 'cotizado',
-          descripcion: 'Traído del plano de la obra. Falta ponerle precio.',
+          clave: pz.code ?? '', nombre: String(pide.nombre ?? '').trim() || pz.name || 'Pieza del plano', tipo: pz.type ?? '',
+          monto, cantidad: 1, estado: monto > 0 ? 'vendido' : 'cotizado',
+          descripcion: String(pide.descripcion ?? '').trim() ||
+            (monto > 0 ? 'Traído del plano de la obra.' : 'Traído del plano de la obra. Falta ponerle precio.'),
           origen: { de: 'quell', element_id: pz.id, obra_id },
         } as unknown as Fila,
         { app: 'quell101', usuario_id: contexto.usuario_id },
@@ -2290,7 +2350,8 @@ export class OrgDB extends DurableObject<Env> {
       creados++;
     }
 
-    return { ok: true, ligados, creados, renombrados, obra: this.obras().find((o) => o.id === obra_id)! };
+    if (sumados || creados) this.recalcularProyecto(proyecto_id);
+    return { ok: true, ligados, creados, renombrados, sumados, obra: this.obras().find((o) => o.id === obra_id)! };
   }
 
   /** El precio de un ítem cambió: se cuenta en la bitácora de cada pieza del

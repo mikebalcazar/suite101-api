@@ -115,13 +115,25 @@ export function montarObras(rutas: App): void {
    *  `nombre` es aparte y opcional: el descriptivo vive en el detalle de
    *  cada app, así que por omisión cada lado conserva el suyo.
    *
+   *  `crear` admite el id de la pieza a secas —nace cotizado y en cero, como
+   *  siempre— o `{element_id, monto, descripcion, nombre}`: con precio nace
+   *  VENDIDO y ya se suma al proyecto. Mike, 20-sep: «debería poder de ahí
+   *  mismo agregar un ítem nuevo con precio y descripción para que ya se
+   *  sume». El monto va en centavos enteros.
+   *
+   *  `sumar: true` en una pareja es la otra mitad de eso mismo: «o agregarlo
+   *  al conteo de un concepto ya existente, una puerta más a las 14». Sube
+   *  la cantidad del ítem en uno y le agrega el precio de una pieza. Sin
+   *  `sumar`, una pieza de más sigue siendo 409 `sin_cupo`: crecer mueve
+   *  dinero y no pasa sin que alguien lo pida.
+   *
    *  Lo hace quien puede ligar, no cualquiera: esto le cuelga el dinero de un
    *  ítem a una pieza del plano, y de ahí sale lo que se le cobra al cliente. */
   rutas.post('/:o/obras/:id/items', async (c) => {
     if (!puedeLigar(c)) return err(c, 'sin_permiso', 403, { motivo: 'juntar los ítems de la obra con los del proyecto lo hace quien dirige la empresa' });
     type Plan = {
-      ligar?: Array<{ element_id: string; item_id: string; clave?: 'quell' | 'dash'; nombre?: 'quell' | 'dash' }>;
-      crear?: string[];
+      ligar?: Array<{ element_id: string; item_id: string; clave?: 'quell' | 'dash'; nombre?: 'quell' | 'dash'; sumar?: boolean }>;
+      crear?: Array<string | { element_id: string; monto?: number; descripcion?: string; nombre?: string }>;
     };
     const b = await c.req.json<Plan>().catch(() => ({}) as Plan);
     if (!Array.isArray(b.ligar ?? []) || !Array.isArray(b.crear ?? [])) return err(c, 'datos_invalidos', 400, { motivo: '`ligar` y `crear` son listas' });
@@ -130,8 +142,8 @@ export function montarObras(rutas: App): void {
       { ligar: b.ligar ?? [], crear: b.crear ?? [] },
       { usuario_id: c.get('quien').usuario_id },
     );
-    if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 409, r.detalle);
-    return ok(c, { obra: r.obra, ligados: r.ligados, creados: r.creados, renombrados: r.renombrados });
+    if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : r.error === 'dinero_no_entero' ? 400 : 409, r.detalle);
+    return ok(c, { obra: r.obra, ligados: r.ligados, creados: r.creados, renombrados: r.renombrados, sumados: r.sumados });
   });
 
   /** POST /orgs/:o/obras/:id/ligar {proyecto_id} — son la misma casa. */

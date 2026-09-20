@@ -31,7 +31,15 @@
  * `items.partida` y `items.orden`, con `POST .../acomodar` para mandarlos en
  * un solo envío: la partida es el capítulo de la cotización —Cocina,
  * Recámaras—, que NO es la tabla `partidas`, la de los compromisos con
- * proveedores. Encargos de Mike del 20-sep). Antes:
+ * proveedores. Y desde el plano (`POST /orgs/:o/obras/:id/items`) se puede
+ * cerrar el renglón en un paso: `crear` acepta `{element_id, monto,
+ * descripcion, nombre}` y con precio el ítem nace VENDIDO —sin precio sigue
+ * naciendo cotizado y en cero—, y `ligar` acepta `sumar: true`, que en vez
+ * de 409 `sin_cupo` sube en uno la cantidad del concepto y le agrega el
+ * precio de una pieza, dejando huella del cambio de precio en la bitácora
+ * («una puerta más a las 14 ya existentes del mismo modelo»). Sin `sumar`
+ * el 409 se mantiene: crecer mueve dinero. Encargos de Mike del 20-sep).
+ * Antes:
  * 0.29.0 (el ESTADO DE CUENTA de un cliente:
  * `GET /orgs/:o/clientes/:id/estado-de-cuenta` contesta qué se le vendió,
  * qué pagó y qué debe, global y por proyecto, con los cobros de cada uno.
