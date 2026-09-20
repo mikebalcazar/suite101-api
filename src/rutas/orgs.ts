@@ -278,6 +278,50 @@ rutas.post('/:o/clientes/invitar', async (c) => {
   return r.ok ? ok(c, r.data, 201) : err(c, r.error, r.estado, r.detalle);
 });
 
+/* ─────────────── el cliente es uno solo en las tres apps (0.23.0) ───────────────
+ *
+ * Mike, 20-sep: «cuando creas un nuevo cliente en quote101, es lo mismo que
+ * cuando haces uno en quell101 o en dash. […] Si por cualquier cosa se crean
+ * en 2 apps diferentes con un nombre diferente, debería haber manera de
+ * ligarlo y fusionar los 2 clientes en uno mismo. Y si se quiere crear un
+ * cliente con el nombre ya existente, preguntar si no te estás refiriendo a X
+ * cliente.»
+ *
+ * Vivir en la misma tabla ya vivían: `clientes` es de la empresa, no de una
+ * app. Lo que faltaba es avisar del parecido ANTES de crear y juntar los dos
+ * que ya se crearon. Las dos rutas van antes del CRUD genérico o `/:o/:tabla`
+ * se tragaría `clientes/parecidos` como si fuera una tabla llamada así. */
+
+/** GET /orgs/:o/clientes/parecidos?nombre=&negocio_id= — «¿no te refieres a…?»
+ *
+ *  La regla vive en el servidor, y por eso la contesta la API y no cada
+ *  pantalla: tres apps con tres ideas de qué se parece a qué es tener tres
+ *  reglas, y la que falle va a ser justo la que nadie probó. */
+rutas.get('/:o/clientes/parecidos', async (c) => {
+  const permiso = puedeLeer(c, 'clientes');
+  if (permiso) return permiso;
+  const nombre = c.req.query('nombre') || '';
+  const filas = await stub(c).clientesParecidos(nombre, c.req.query('negocio_id') || null);
+  return ok(c, { parecidos: filas });
+});
+
+/** POST /orgs/:o/clientes/:id/fusionar {se_va_id} — los dos son el mismo.
+ *
+ *  `:id` es el que se queda; `se_va_id` desaparece y le deja todo: proyectos,
+ *  ítems, cotizaciones, movimientos, y los datos que al que se queda le
+ *  falten. Es irreversible, así que la hace quien dirige la empresa. */
+rutas.post('/:o/clientes/:id/fusionar', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro' || (quien.rol !== 'owner' && quien.rol !== 'admin')) {
+    return err(c, 'sin_permiso', 403, { motivo: 'fusionar dos clientes no se puede deshacer: lo hacen el dueño y la administración' });
+  }
+  const b = await c.req.json<{ se_va_id?: string }>().catch(() => ({}) as { se_va_id?: string });
+  if (!b.se_va_id) return err(c, 'datos_invalidos', 400, { falta: 'se_va_id' });
+  const r = await stub(c).fusionarClientes(c.req.param('id'), b.se_va_id);
+  if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 400, r.detalle);
+  return ok(c, { cliente: r.cliente, movidos: r.movidos });
+});
+
 /* ─────────────── quell101: la bitácora de obra, dentro de la empresa (0.16.0) ───────────────
  *
  * Desde el 19-sep quell101 no tiene base propia: sus tablas viven en el
