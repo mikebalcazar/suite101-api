@@ -205,3 +205,11 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   `DELETE /admin/orgs/:o` (superadmin; en producción no existe, contesta 403).
 - El token de Actions de este repositorio sigue en `write`, comprobado hoy
   leyendo `/actions/permissions/workflow`, no supuesto.
+- **Pendiente con fecha: la cubeta `roster101-central-docs` de R2.** Quedó de
+  la mudanza de roster101. El Worker y la base D1 de `roster101-central` ya no
+  existen (medido el 20-sep contra la cuenta de Cloudflare); esa cubeta sigue
+  ahí y **ningún Worker la tiene ligada** —`t101-portal` no declara R2—, así
+  que no sirve a nada, sólo guarda los documentos viejos. Mike decidió el
+  20-sep dejarla **un mes más como respaldo**: hacia mediados de octubre hay
+  que recordárselo para que la borre él. Ojo: **`bitacora-obra-files` NO se
+  toca**, ésa sí la usa el Worker de quell101 para servir sus instaladores.
