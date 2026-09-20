@@ -303,6 +303,34 @@ describe('19 · órdenes de compra (los casos del encargo)', () => {
     expect(mias.data.filas[0].negocio_id).toBe(otro);
   });
 
+  it('el comprobante del pago viaja con la orden, para quien la pidió', async () => {
+    /* La cotización cuelga de la orden y el comprobante cuelga del
+     * movimiento. Quien pidió la compra necesita los dos —el segundo es con
+     * el que le reclama al proveedor— y no tiene por qué saber que viven en
+     * tablas distintas. */
+    const o1 = await o('ana', '/ordenes', { method: 'POST', json: {
+      negocio_id: negocio, proveedor_nombre: 'Papeles SA', concepto: 'Con comprobante', monto: 200_00,
+    } });
+    const subir = async (tabla: string, id: string, nombre: string) => {
+      const forma = new FormData();
+      forma.set('archivo', new File(['x'], nombre, { type: 'image/png' }));
+      forma.set('de_tabla', tabla);
+      forma.set('de_id', id);
+      const r = await pedir('ana', `/orgs/${ORG}/archivos`, { method: 'POST', body: forma });
+      expect(r.estado, JSON.stringify(r)).toBe(201);
+      return r.data.id as string;
+    };
+    await subir('ordenes', o1.data.id, 'cotizacion.png');
+
+    const pago = await o('beto', `/ordenes/${o1.data.id}/pagar`, { method: 'POST', json: { cuenta_id: cuenta } });
+    expect(pago.estado).toBe(200);
+    await subir('movimientos', pago.data.movimiento.id, 'comprobante.png');
+
+    const vista = await o('ana', `/ordenes/${o1.data.id}`);
+    const nombres = vista.data.archivos.map((a: any) => `${a.de}:${a.nombre}`).sort();
+    expect(nombres).toEqual(['orden:cotizacion.png', 'pago:comprobante.png']);
+  });
+
   it('lo fiscal también se pide por negocio: el RFC vive en el negocio', async () => {
     /* Un IVA del mes que sume dos negocios no es el IVA de ninguno de los
      * dos, y es el número con el que se entera al SAT. */

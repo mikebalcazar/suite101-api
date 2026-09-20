@@ -1303,13 +1303,26 @@ export class OrgDB extends DurableObject<Env> {
   }
 
   /** Una orden con toda su historia y sus archivos. */
+  /** Una orden con su historia y sus papeles.
+   *
+   *  Los papeles son DOS montones y los dos importan: la cotización, que
+   *  cuelga de la orden, y el comprobante del pago, que cuelga del
+   *  movimiento —ahí lo sube quien paga—. Quien pidió la compra necesita el
+   *  segundo para reclamarle al proveedor, así que salen juntos, cada uno
+   *  diciendo de dónde viene en `de`. Buscarlos por separado obligaría a la
+   *  pantalla a saber que el comprobante vive colgado de otra tabla. */
   verOrden(id: string): { orden: Fila; eventos: Fila[]; archivos: Fila[] } | null {
     const orden = this.leerInterna('ordenes', id);
     if (!orden) return null;
+    const papeles = (tabla: string, de_id: string, de: 'orden' | 'pago') =>
+      (this.sql.exec(`SELECT * FROM archivos WHERE de_tabla = ? AND de_id = ? ORDER BY creado_at`, tabla, de_id)
+        .toArray() as Fila[]).map((f) => ({ ...f, de }));
+    const archivos = papeles('ordenes', id, 'orden');
+    if (orden.movimiento_id) archivos.push(...papeles('movimientos', String(orden.movimiento_id), 'pago'));
     return {
       orden,
       eventos: this.sql.exec(`SELECT * FROM orden_eventos WHERE orden_id = ? ORDER BY ts`, id).toArray() as Fila[],
-      archivos: this.sql.exec(`SELECT * FROM archivos WHERE de_tabla = 'ordenes' AND de_id = ? ORDER BY creado_at`, id).toArray() as Fila[],
+      archivos,
     };
   }
 
