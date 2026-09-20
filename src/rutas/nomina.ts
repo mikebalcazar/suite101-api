@@ -140,6 +140,41 @@ export function montarNomina(rutas: App): void {
     return ok(c, { gente: filas.map((p) => ({ id: p.id, nombre: p.nombre, puesto: p.puesto ?? '' })) });
   });
 
+  /** GET /orgs/:o/nomina/trabajadores — los EXPEDIENTES de roster101.
+   *
+   *  Mike, 20-sep: «en la sección de raya de dash debo poder escoger a quién
+   *  se le paga de la lista de los trabajadores en roster101, no en la de
+   *  dash».
+   *
+   *  Son dos listas distintas y las dos hacen falta: el expediente es quién
+   *  es la persona —lo llena roster101 y lo llena ella misma desde su
+   *  celular—, y `personal` es a quién le toca algo en la suite. La raya
+   *  pagaba contra la corta, y en una empresa que lleva expedientes la corta
+   *  está vacía: parecía que no había a quién pagarle.
+   *
+   *  Cada renglón dice si esa persona ya tiene su lugar en `personal`
+   *  (`personal_id`), para que la pantalla no ofrezca dos veces al mismo. */
+  rutas.get('/:o/nomina/trabajadores', async (c) => {
+    if (!(await puedeNomina(c))) return err(c, 'sin_permiso', 403, { motivo: 'la raya la ve quien la lleva' });
+    return ok(c, { trabajadores: await stub(c).trabajadoresDeRoster() });
+  });
+
+  /** POST /orgs/:o/nomina/gente/de-roster {roster_id} — escoger a alguien
+   *  del expediente para poder pagarle.
+   *
+   *  Le abre su renglón en `personal` LIGADO al expediente, o devuelve el
+   *  que ya tenía. Ligado y no copiado: sin la liga, escoger dos veces al
+   *  mismo abriría dos renglones y la raya le pagaría doble sin que nada se
+   *  viera raro. */
+  rutas.post('/:o/nomina/gente/de-roster', async (c) => {
+    if (!(await puedeNomina(c))) return err(c, 'sin_permiso', 403, { motivo: 'la raya la lleva quien tiene el permiso' });
+    const b = await c.req.json<{ roster_id?: string }>().catch(() => ({}) as { roster_id?: string });
+    if (!b.roster_id) return err(c, 'datos_invalidos', 400, { falta: 'roster_id' });
+    const r = await stub(c).personaDeRoster(b.roster_id, { usuario_id: c.get('quien').usuario_id });
+    if ('error' in r) return err(c, r.error, 404, r.detalle);
+    return ok(c, { persona: { id: r.persona.id, nombre: r.persona.nombre, puesto: r.persona.puesto ?? '' }, nueva: r.nueva }, r.nueva ? 201 : 200);
+  });
+
   /** POST /orgs/:o/nomina/gente {nombre, puesto?} — dar de alta a alguien
    *  para poder pagarle.
    *

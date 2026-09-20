@@ -74,7 +74,7 @@ const saldoDe = async (cuenta_id: string) => {
 
 beforeAll(async () => {
   await entrar('mike', CORREO);
-  const alta = await pedir('mike', '/admin/orgs', { method: 'POST', json: { id: ORG, nombre: 'Raya', apps: { dash: true } }, app: '' });
+  const alta = await pedir('mike', '/admin/orgs', { method: 'POST', json: { id: ORG, nombre: 'Raya', apps: { dash: true, roster: true } }, app: '' });
   expect(alta.estado, JSON.stringify(alta)).toBe(201);
   for (const [apodo, g] of Object.entries(GENTE)) {
     await pedir('mike', `/admin/orgs/${ORG}/miembros`, { method: 'POST', json: { correo: g.correo, rol: g.rol, nombre: g.nombre, apps: ['dash'] }, app: '' });
@@ -296,5 +296,77 @@ describe('el recibo', () => {
     expect(r.estado, JSON.stringify(r)).toBe(200);
     expect(r.data.raya.estado).toBe('cancelada');
     expect(await saldoDe(cuenta), 'no se movió un peso').toBe(antes);
+  });
+});
+
+describe('a quién se le paga sale de los expedientes de roster101 (§107)', () => {
+  /* Mike, 20-sep: «en la sección de raya de dash debo poder escoger a quién
+   * se le paga de la lista de los trabajadores en roster101, no en la de
+   * dash. Y de agregar las personas a las que se les realiza el pago».
+   *
+   * LO QUE ESTAS PRUEBAS CUIDAN:
+   *
+   *   · que la lista larga —los expedientes— llegue completa, con el nombre
+   *     armado. Es la que la pantalla ofrece;
+   *   · que escoger a alguien DOS VECES no le abra dos renglones. Sin la
+   *     liga por `expediente_ref`, la raya le pagaría doble al mismo y nada
+   *     se vería raro: dos nombres iguales en un corte parecen dos personas;
+   *   · que el alta a mano siga existiendo. Una empresa que paga sin llevar
+   *     expedientes no se puede quedar sin poder pagar.
+   */
+  const correoTrabajador = 'trabajador-raya@ejemplo.mx';
+  let rosterId = '';
+
+  beforeAll(async () => {
+    /* El trabajador se da de alta por SU puerta, como en la vida real: su
+     * correo y su código, sin cuenta en la suite. */
+    const c = await pedir('juan', `/roster/${ORG}/api/codigo`, { method: 'POST', json: { email: correoTrabajador }, app: 'roster101' });
+    expect(c.estado, JSON.stringify(c)).toBe(200);
+    const e = await pedir('juan', `/roster/${ORG}/api/entrar`, { method: 'POST', json: { email: correoTrabajador, codigo: c.codigo_prueba }, app: 'roster101' });
+    expect(e.estado, JSON.stringify(e)).toBe(200);
+    /* Se queda así, EN BORRADOR y sin nombre, que es como está la mayoría el
+     * día que hay que pagarles: el trabajador entró con su correo y todavía
+     * no llena su ficha. Guardarla completa exige CURP, NSS y CLABE
+     * válidos, y quien arma la raya no los va a teclear para poder pagar. */
+  });
+
+  it('la lista de expedientes llega, y quien no tiene nombre sale con su correo', async () => {
+    const r = await o('mike', '/nomina/trabajadores');
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    const juan = r.data.trabajadores.find((x: any) => x.correo === correoTrabajador);
+    expect(juan, `salió: ${JSON.stringify(r.data.trabajadores)}`).toBeTruthy();
+    /* Sin nombre todavía, sale con su correo: hay que poder distinguirlo
+     * para escogerlo, y un renglón vacío en una lista de gente no sirve. */
+    expect(juan.nombre).toBe(correoTrabajador);
+    expect(juan.personal_id, 'todavía no tiene renglón en la lista corta').toBeFalsy();
+    rosterId = juan.id;
+  });
+
+  it('escogerlo le abre su lugar para poder pagarle', async () => {
+    const r = await o('mike', '/nomina/gente/de-roster', { method: 'POST', json: { roster_id: rosterId } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    expect(r.data.nueva).toBe(true);
+    expect(r.data.persona.nombre).toBe(correoTrabajador);
+    expect((await o('mike', '/nomina/gente')).data.gente.map((g: any) => g.id)).toContain(r.data.persona.id);
+  });
+
+  it('y escogerlo otra vez NO lo duplica', async () => {
+    /* Dos renglones del mismo nombre en un corte parecen dos personas, y la
+     * raya le pagaría dos veces sin que nada se viera raro. */
+    const antes = (await o('mike', '/nomina/gente')).data.gente.length;
+    const r = await o('mike', '/nomina/gente/de-roster', { method: 'POST', json: { roster_id: rosterId } });
+    expect(r.estado).toBe(200);
+    expect(r.data.nueva).toBe(false);
+    expect((await o('mike', '/nomina/gente')).data.gente.length).toBe(antes);
+    expect((await o('mike', '/nomina/trabajadores')).data.trabajadores.find((x: any) => x.id === rosterId).personal_id).toBe(r.data.persona.id);
+  });
+
+  it('un expediente que no existe: 404', async () => {
+    expect((await o('mike', '/nomina/gente/de-roster', { method: 'POST', json: { roster_id: 'no-existe' } })).estado).toBe(404);
+  });
+
+  it('y el alta a mano sigue ahí, para quien no lleva expedientes', async () => {
+    const r = await o('mike', '/nomina/gente', { method: 'POST', json: { nombre: 'Ayudante de fuera', puesto: 'Ayudante' } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
   });
 });
