@@ -33,10 +33,18 @@ acceso: darle «darse de baja» a tu propio código de entrada es ofrecerle a
 alguien que se deje fuera de su cuenta.
 
 Y sale **sólo si hay una dirección de verdad configurada** en la variable
-`CORREO_BAJA`. Hoy no está puesta, así que la cabecera no se manda. Es a
-propósito: una salida que nadie procesa es una promesa falsa en una cabecera, y
-de ésas vive la carpeta de basura. En cuanto haya un buzón que alguien lea, se
-pone en `wrangler.toml` y queda; es una línea.
+`CORREO_BAJA`. Desde el 20-sep está puesta en `info@forespot.com`, que Mike
+confirmó que es un buzón que alguien lee. Eso es la condición, no un detalle:
+una salida que nadie procesa es una promesa falsa en una cabecera, y de ésas
+vive la carpeta de basura.
+
+Si algún día ese buzón deja de atenderse, lo correcto es **quitar la
+variable**, no dejarla puesta. Sin ella el código omite la cabecera solo.
+
+Y porque su ausencia no rompe nada —el Worker arranca igual y los correos
+salen igual, nada más sin la cabecera—, `pruebas/config-correo.py` revisa en
+la puerta de despliegue que siga puesta en los dos entornos. Una pérdida muda
+necesita una prueba que grite.
 
 **No se le manda correo a direcciones inventadas.** Desde el 16-sep el correo
 sólo sale en producción. Cada prueba que entraba con un `@ejemplo.mx` era un
