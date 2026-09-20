@@ -13,7 +13,16 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.24.2 (una lista se puede pedir más larga con
+ * Versión del contrato: 0.24.3 (una lista que YA pregunta por un proyecto o
+ * por un cliente no se acota sola al negocio de quien pregunta. El relleno
+ * de «un negocio a la vez» sigue en pie para las listas de toda la empresa,
+ * que es donde sirve; pero un proyecto es de un solo negocio, así que con
+ * `proyecto_id` puesto el negocio ya quedó decidido y rellenarlo con otro no
+ * acota: deja la lista VACÍA, con 200 y sin una sola seña. Ése era el
+ * defecto que Mike reportó cuatro veces: «Sin ítems» en pantalla con el
+ * precio de venta correcto al lado, y antes de eso los ítems duplicándose al
+ * guardar, porque la lista de vivos volvía vacía y todo parecía nuevo).
+ * Antes: 0.24.2 (una lista se puede pedir más larga con
  * `?limite=`, hasta 5,000 filas. Sin el parámetro nada cambia: siguen siendo
  * 500. Existe porque el tope no avisaba y `total` —que sí venía desde
  * siempre— nadie lo miraba: dash101 pedía los ítems de un proyecto sin
@@ -223,7 +232,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.24.2';
+export const VERSION_CONTRATO = '0.24.3';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

@@ -30,6 +30,12 @@ const TABLAS_DINERO: Tabla[] = ['movimientos', 'cuentas', 'opex', 'cotizaciones'
 
 const stub = (c: Ctx): ApiOrgDB => c.env.ORG.get(c.env.ORG.idFromName(c.get('org_id'))) as unknown as ApiOrgDB;
 
+/** Filtros que ya amarran la lista a un solo negocio, porque la fila a la
+ *  que apuntan pertenece a uno y nada más. Con cualquiera de ellos puesto,
+ *  NO se rellena `negocio_id` con el del que pregunta: el negocio ya quedó
+ *  decidido, y ponerle otro deja la lista vacía sin decir por qué. */
+const LLAVES_DE_UN_NEGOCIO = ['proyecto_id', 'cliente_id'] as const;
+
 /** Cuánto es lo más que una lista devuelve de una vez, cuando se pide con
  *  `?limite=`. Sin parámetro se quedan las 500 de siempre: ninguna pantalla
  *  que ya funciona cambia de comportamiento. */
@@ -582,7 +588,31 @@ rutas.get('/:o/:tabla', async (c) => {
   // como manera de abrir la lista de precios desde cualquier otra app.
   if (tabla === 'ajustes') filtros.app = c.get('app');
   const quien = c.get('quien');
-  if (quien.negocios.length && !filtros.negocio_id && DEFS[tabla as Tabla].filtros.includes('negocio_id')) {
+  /* «Un negocio a la vez»: a quien tiene negocios asignados y no dijo de
+   * cuál, se le contesta el primero. Sirve para las listas de toda la
+   * empresa —el buzón, los movimientos, lo fiscal—, donde mezclar dos
+   * negocios da cifras que no son de ninguno de los dos.
+   *
+   * PERO NO CUANDO YA SE PREGUNTÓ POR ALGO QUE ES DE UN SOLO NEGOCIO. Un
+   * proyecto pertenece a un negocio y nada más; un cliente también. Si
+   * alguien pide «los ítems del proyecto X», el negocio ya quedó decidido
+   * por X, y rellenarlo con otro no acota: contesta de más o —lo que pasó—
+   * contesta VACÍO.
+   *
+   * Eso es lo que Mike reportó cuatro veces el 20-sep. El detalle de un
+   * proyecto se abre con `GET /proyectos/:id`, que no filtra por negocio, y
+   * su pantalla pedía los ítems sin decir el negocio. Con el proyecto en el
+   * segundo negocio de la empresa, la lista salía en cero: 200, `filas: []`,
+   * ni error ni seña. Se veía «Sin ítems» con el precio de venta correcto al
+   * lado —ése lo suma el servidor con un SUM, sin pasar por aquí—.
+   *
+   * Y explica el defecto desde el principio: al guardar, dash101 pide los
+   * ítems vivos del proyecto para saber cuáles ya existen. Si esa lista
+   * vuelve vacía, TODOS los renglones de la pantalla parecen nuevos y se
+   * crean otra vez. «Los duplica» y «no hay manera de borrar ítems». */
+  const yaEsDeUnNegocio = LLAVES_DE_UN_NEGOCIO.some((k) => filtros[k]);
+  if (quien.negocios.length && !filtros.negocio_id && !yaEsDeUnNegocio
+      && DEFS[tabla as Tabla].filtros.includes('negocio_id')) {
     filtros.negocio_id = quien.negocios[0];
   }
 
