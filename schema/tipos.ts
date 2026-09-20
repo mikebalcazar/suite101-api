@@ -13,7 +13,16 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.24.1 (`POST /orgs/:o/items/exportar` acepta
+ * Versión del contrato: 0.24.2 (una lista se puede pedir más larga con
+ * `?limite=`, hasta 5,000 filas. Sin el parámetro nada cambia: siguen siendo
+ * 500. Existe porque el tope no avisaba y `total` —que sí venía desde
+ * siempre— nadie lo miraba: dash101 pedía los ítems de un proyecto sin
+ * filtrar el estado, los cancelados viejos llenaban las 500 y los vivos
+ * recientes se caían de la vista. La pantalla decía «sin ítems» y el precio
+ * de venta seguía en su cifra, que era la correcta: ese lo suma la API en la
+ * base, no la pantalla. Quien liste para decidir «esto ya existe» tiene que
+ * comparar `total` contra las filas que le llegaron). Antes:
+ * 0.24.1 (`POST /orgs/:o/items/exportar` acepta
  * `cantidad` por línea. quote101 cotiza «× 20» desde siempre —su total ya
  * viene multiplicado— y ese 20 no cruzaba a la suite: se exportaba un
  * renglón de 20 puertas que valía por una sola pieza, y en quell101 había
@@ -214,7 +223,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.24.1';
+export const VERSION_CONTRATO = '0.24.2';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
