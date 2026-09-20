@@ -74,9 +74,15 @@ export const DEFS: Record<Tabla, Def> = {
        * /orgs/:o/ordenes/contadores, que exige ser dueño; por eso NO está en
        * ESCRITORES.personal, o cualquiera con dash101 se marcaría solo. */
       es_contador: 'bool',
+      /* 0014 · quién ve y mueve la RAYA. No se reusa `es_contador`: pagarle a
+       * un proveedor y saber cuánto gana cada quien son dos cosas, y la
+       * segunda es la que nadie quiere que ande suelta. Se enciende sólo por
+       * POST /orgs/:o/nomina/encargados, que exige ser dueño; por eso NO está
+       * en ESCRITORES.personal. */
+      es_nominas: 'bool',
     },
     requeridos: ['nombre'],
-    filtros: ['activo', 'usuario_id', 'es_contador'],
+    filtros: ['activo', 'usuario_id', 'es_contador', 'es_nominas'],
     orden: 'nombre_norm',
   },
   estaciones: {

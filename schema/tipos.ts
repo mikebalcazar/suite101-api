@@ -13,7 +13,23 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.26.0 (los ítems de una obra y los de su proyecto
+ * Versión del contrato: 0.27.0 (la RAYA: lo que se le paga a la gente, y su
+ * recibo. `/orgs/:o/nomina/*` con las tablas `rayas` y `raya_pagos`
+ * (migración 0014). Un corte nace en borrador, se corrige, y al pagarlo deja
+ * UN EGRESO POR PERSONA de una sola vez —no uno global: el estado de cuenta
+ * tiene que decir a quién se le pagó—. Pagada NO se reescribe ni se cancela:
+ * ese dinero ya salió, y lo que se corrige es el movimiento. El neto y el
+ * total los calcula el servidor, como `precio_venta`. El nombre se congela
+ * en el renglón, porque un recibo dice a quién se le pagó ESE DÍA. Alcance
+ * escogido por Mike el 20-sep: pagos y recibos, NO nómina calculada —sin
+ * IMSS, sin ISR, sin CFDI de nómina—, porque una retención mal calculada se
+ * descubre en una auditoría y con multa. El permiso es `personal.es_nominas`,
+ * aparte de `es_contador` —pagarle a un proveedor y saber cuánto gana cada
+ * quien son dos cosas—, lo reparte sólo el dueño y queda apuntado en
+ * `orden_eventos`, que gana la clase 'nominas'. `POST /nomina/gente` da de
+ * alta a quien no está en roster101, sin abrirle `personal` a dash101 en el
+ * CRUD). Antes:
+ * 0.26.0 (los ítems de una obra y los de su proyecto
  * son la misma lista de piezas: `GET /orgs/:o/obras/:id/items` PROPONE cómo
  * emparejarlas —por código primero, que es único en la obra, y por nombre
  * después— sin tocar nada, y `POST` con `{ligar, crear}` aplica lo que se
@@ -255,7 +271,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.26.0';
+export const VERSION_CONTRATO = '0.27.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -827,6 +843,12 @@ export const TABLAS_INTERNAS = [
    * se atienden por /orgs/:o/ordenes/* y /orgs/:o/fiscal/*, donde el permiso
    * se resuelve renglón por renglón. */
   'ordenes', 'orden_eventos', 'cfdi', 'cfdi_movimientos',
+  /* La raya (0014). Tampoco sale por el CRUD genérico, y por una razón más
+   * dura que la de las órdenes: lo que gana cada quien no lo ve cualquiera
+   * con dash101 abierto. El permiso es `personal.es_nominas` y se revisa en
+   * cada ruta de /orgs/:o/nomina/*; el CRUD genérico entregaría la tabla
+   * entera a quien pueda leer la empresa. */
+  'rayas', 'raya_pagos',
 ] as const;
 
 /* ─────────────── lo que devuelven las rutas con nombre ─────────────── */
@@ -878,7 +900,10 @@ export type Aviso =
   | { t: 'item.cambio'; id: string }
   | { t: 'movimiento.nuevo'; id: string; proyecto_id: string | null }
   | { t: 'proyecto.cache'; id: string; precio_venta: number; cobrado: number; avance: number }
-  | { t: 'conciliacion.nueva'; id: string; negocio_id: string; diferencia_total: number };
+  | { t: 'conciliacion.nueva'; id: string; negocio_id: string; diferencia_total: number }
+  /* 0.27.0 · se pagó una raya. Va al canal del dinero porque son N egresos
+   * de golpe: una pantalla de saldos abierta tiene que enterarse. */
+  | { t: 'raya.pagada'; id: string };
 
 /* ─────────────── ayudas de formato (identidad Taller 101) ─────────────── */
 
