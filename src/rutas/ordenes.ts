@@ -262,25 +262,25 @@ export function montarOrdenes(rutas: App): void {
   rutas.get('/:o/fiscal/iva', async (c) => {
     if (!puedeFiscal(c)) return err(c, 'sin_permiso', 403);
     const { desde, hasta } = rango(c);
-    return ok(c, await stub(c).ivaDelMes(desde, hasta));
+    return ok(c, await stub(c).ivaDelMes(desde, hasta, c.req.query('negocio_id') || null));
   });
 
   rutas.get('/:o/fiscal/cuadre', async (c) => {
     if (!puedeFiscal(c)) return err(c, 'sin_permiso', 403);
     const { desde, hasta } = rango(c);
-    return ok(c, await stub(c).facturadoVsReal(desde, hasta));
+    return ok(c, await stub(c).facturadoVsReal(desde, hasta, c.req.query('negocio_id') || null));
   });
 
   rutas.get('/:o/fiscal/pendientes', async (c) => {
     if (!puedeFiscal(c)) return err(c, 'sin_permiso', 403);
-    return ok(c, { filas: await stub(c).pendientesDeFactura() });
+    return ok(c, { filas: await stub(c).pendientesDeFactura(c.req.query('negocio_id') || null) });
   });
 
   rutas.get('/:o/fiscal/cfdi', async (c) => {
     if (!puedeFiscal(c)) return err(c, 'sin_permiso', 403);
     const q = c.req.query();
     const { desde, hasta } = rango(c);
-    return ok(c, { filas: await stub(c).listaCfdi({ desde, hasta, tipo: q.tipo, estado: q.estado }) });
+    return ok(c, { filas: await stub(c).listaCfdi({ desde, hasta, tipo: q.tipo, estado: q.estado, negocio_id: q.negocio_id || null }) });
   });
 
   rutas.post('/:o/fiscal/cfdi', async (c) => {

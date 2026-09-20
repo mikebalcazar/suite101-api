@@ -303,6 +303,30 @@ describe('19 · órdenes de compra (los casos del encargo)', () => {
     expect(mias.data.filas[0].negocio_id).toBe(otro);
   });
 
+  it('lo fiscal también se pide por negocio: el RFC vive en el negocio', async () => {
+    /* Un IVA del mes que sume dos negocios no es el IVA de ninguno de los
+     * dos, y es el número con el que se entera al SAT. */
+    const otro = (await o('mike', '/negocios', { method: 'POST', json: { nombre: 'Fiscal aparte' } })).data.id;
+    const hoy = dia(0);
+    const uuid = `PRUEBA-NEG-${Date.now()}`;
+    const c = await o('mike', '/fiscal/cfdi', { method: 'POST', json: {
+      negocio_id: otro, uuid, tipo: 'ingreso', subtotal: 1_000_00, iva: 160_00, total: 1_160_00, fecha: hoy,
+    } });
+    expect(c.estado).toBe(201);
+
+    const suyo = await o('mike', `/fiscal/iva?desde=${hoy}&hasta=${hoy}&negocio_id=${otro}`);
+    expect(suyo.data.trasladado, 'sólo el IVA de ese negocio').toBe(160_00);
+    const todo = await o('mike', `/fiscal/iva?desde=${hoy}&hasta=${hoy}`);
+    expect(todo.data.trasladado, 'sin filtro, el de la empresa entera').toBeGreaterThanOrEqual(160_00);
+
+    const lista = await o('mike', `/fiscal/cfdi?desde=${hoy}&hasta=${hoy}&negocio_id=${otro}`);
+    expect(lista.data.filas.length).toBe(1);
+    expect(lista.data.filas[0].uuid).toBe(uuid);
+
+    const cuadre = await o('mike', `/fiscal/cuadre?desde=${hoy}&hasta=${hoy}&negocio_id=${otro}`);
+    expect(cuadre.data.egresos.total, 'ese negocio no tiene egresos').toBe(0);
+  });
+
   it('quien abre como dueño sin ser miembro se puede marcar a sí mismo', async () => {
     // El superadmin no está en la lista de miembros de la empresa, pero sí
     // pasó la puerta de dueño de ESTA empresa. Sin esto, una empresa recién
