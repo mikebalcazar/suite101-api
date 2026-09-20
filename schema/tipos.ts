@@ -13,7 +13,13 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.21.3 (lo fiscal también acepta `?negocio_id=`:
+ * Versión del contrato: 0.21.4 (`GET /orgs/:o/ordenes/:id` devuelve también
+ * los archivos del pago —el comprobante, que cuelga del movimiento— junto
+ * con los de la orden, y cada uno dice de dónde viene en `de`: `orden` o
+ * `pago`. Quien pidió la compra necesita el comprobante para reclamarle al
+ * proveedor, y sin esto tendría que ir a buscarlo a otra tabla que no le
+ * toca. Lo pidió Mike el 20-sep al encargar supply101).
+ * Antes: 0.21.3 (lo fiscal también acepta `?negocio_id=`:
  * `/fiscal/iva`, `/fiscal/cuadre`, `/fiscal/pendientes` y `/fiscal/cfdi`. El
  * RFC vive en el negocio, así que un IVA del mes que sume dos negocios no es
  * el IVA de ninguno de los dos —y es el número con el que se entera al SAT—.
@@ -169,7 +175,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.21.3';
+export const VERSION_CONTRATO = '0.21.4';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
