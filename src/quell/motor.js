@@ -744,8 +744,8 @@ export async function atender(req, env, url, path) {
       // todos y fotos de todos. No es del contratista.
       if (!isStaff(user)) return err('El reporte lo saca el supervisor.', 403);
       const { results: logs } = await env.DB.prepare(
-        `SELECT l.*, u.name AS user_name, u.role AS user_role, e.code AS element_code, e.name AS element_name, e.type AS element_type, e.resp AS element_resp, e.x, e.y, e.plan_id, pl.name AS plan_name, pl.file_name AS plan_file, pl.image_key, pl.width AS plan_w, pl.height AS plan_h
-         FROM quell_log_entries l JOIN quell_users u ON u.id = l.user_id JOIN quell_elements e ON e.id = l.element_id JOIN quell_plans pl ON pl.id = e.plan_id
+        `SELECT l.*, COALESCE(u.name, 'Suite 101') AS user_name, COALESCE(u.role, 'sys') AS user_role, e.code AS element_code, e.name AS element_name, e.type AS element_type, e.resp AS element_resp, e.x, e.y, e.plan_id, pl.name AS plan_name, pl.file_name AS plan_file, pl.image_key, pl.width AS plan_w, pl.height AS plan_h
+         FROM quell_log_entries l LEFT JOIN quell_users u ON u.id = l.user_id JOIN quell_elements e ON e.id = l.element_id JOIN quell_plans pl ON pl.id = e.plan_id
          WHERE pl.project_id = ? ORDER BY l.created_at`
       ).bind(pid).all();
       const { results: punch } = await env.DB.prepare(
@@ -850,7 +850,11 @@ export async function atender(req, env, url, path) {
       }
       // Un ítem suyo lo ve completo (decisión 5): los pendientes de todos los
       // contratistas del mueble, la bitácora, las fotos, la fase y las etapas.
-      const { results: log } = await env.DB.prepare(`SELECT l.*, u.name AS user_name, u.role AS user_role FROM quell_log_entries l JOIN quell_users u ON u.id = l.user_id WHERE l.element_id = ? ORDER BY l.created_at`).bind(eid).all();
+      /* LEFT JOIN, y no JOIN: desde la migración 0013 una entrada puede no
+         * tener persona —la escribió el sistema cuando cambió el precio en
+         * dash101—. Con un JOIN normal esas entradas DESAPARECÍAN de la
+         * bitácora sin que nada fallara, que es la peor forma de perderlas. */
+      const { results: log } = await env.DB.prepare(`SELECT l.*, COALESCE(u.name, 'Suite 101') AS user_name, COALESCE(u.role, 'sys') AS user_role FROM quell_log_entries l LEFT JOIN quell_users u ON u.id = l.user_id WHERE l.element_id = ? ORDER BY l.created_at`).bind(eid).all();
       const qp = env.DB.prepare(`SELECT k.*, u.name AS created_by_name, a.name AS assignee_name, a.company AS assignee_company
          FROM quell_punch_items k LEFT JOIN quell_users u ON u.id = k.created_by LEFT JOIN quell_users a ON a.id = k.assignee_id
          WHERE k.element_id = ?

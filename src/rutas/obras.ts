@@ -82,6 +82,40 @@ export function montarObras(rutas: App): void {
     return ok(c, { obra: r.obra, items: r.items });
   });
 
+  /** GET /orgs/:o/obras/:id/items — la PROPUESTA de fusión, sin tocar nada.
+   *
+   *  Qué piezas del plano se emparejarían con qué ítems vendidos, a cuáles
+   *  habría que crearles ítem, y qué ítems se quedan sin pieza. Se contesta
+   *  por separado para que la pantalla pueda enseñarlo y que una persona
+   *  diga que sí antes de escribir: emparejar por parecido acierta casi
+   *  siempre, y la vez que se equivoca le cuelga el dinero de una pieza a
+   *  otra. */
+  rutas.get('/:o/obras/:id/items', async (c) => {
+    if (!esDeLaCasa(c)) return err(c, 'sin_permiso', 403, { motivo: 'las obras son de la empresa' });
+    const r = await stub(c).itemsDeLaObra(c.req.param('id'));
+    if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 409, r.detalle);
+    return ok(c, { obra: r.obra, parejas: r.parejas, nuevos: r.nuevos, sueltos: r.sueltos });
+  });
+
+  /** POST /orgs/:o/obras/:id/items {ligar:[{element_id,item_id}], crear:[element_id]}
+   *  — aplicar lo que se aceptó de la propuesta. Lo que no venga, no se toca.
+   *
+   *  Lo hace quien puede ligar, no cualquiera: esto le cuelga el dinero de un
+   *  ítem a una pieza del plano, y de ahí sale lo que se le cobra al cliente. */
+  rutas.post('/:o/obras/:id/items', async (c) => {
+    if (!puedeLigar(c)) return err(c, 'sin_permiso', 403, { motivo: 'juntar los ítems de la obra con los del proyecto lo hace quien dirige la empresa' });
+    type Plan = { ligar?: Array<{ element_id: string; item_id: string }>; crear?: string[] };
+    const b = await c.req.json<Plan>().catch(() => ({}) as Plan);
+    if (!Array.isArray(b.ligar ?? []) || !Array.isArray(b.crear ?? [])) return err(c, 'datos_invalidos', 400, { motivo: '`ligar` y `crear` son listas' });
+    const r = await stub(c).fusionarItemsDeLaObra(
+      c.req.param('id'),
+      { ligar: b.ligar ?? [], crear: b.crear ?? [] },
+      { usuario_id: c.get('quien').usuario_id },
+    );
+    if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 409, r.detalle);
+    return ok(c, { obra: r.obra, ligados: r.ligados, creados: r.creados });
+  });
+
   /** POST /orgs/:o/obras/:id/ligar {proyecto_id} — son la misma casa. */
   rutas.post('/:o/obras/:id/ligar', async (c) => {
     if (!puedeLigar(c)) return err(c, 'sin_permiso', 403, { motivo: 'ligar una obra con un proyecto lo hace quien dirige la empresa' });

@@ -13,7 +13,20 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.25.0 (un INGRESO también puede estar pendiente de
+ * Versión del contrato: 0.26.0 (los ítems de una obra y los de su proyecto
+ * son la misma lista de piezas: `GET /orgs/:o/obras/:id/items` PROPONE cómo
+ * emparejarlas —por código primero, que es único en la obra, y por nombre
+ * después— sin tocar nada, y `POST` con `{ligar, crear}` aplica lo que se
+ * aceptó. Se hace en dos pasos porque emparejar por parecido acierta casi
+ * siempre y la vez que falla le cuelga el dinero de una pieza a otra. Un
+ * ítem traído del plano nace COTIZADO y en cero: nacer «vendido» en cero
+ * metería una venta que nadie tecleó en `precio_venta`. Y el precio de un
+ * ítem deja huella en la bitácora de cada pieza que lo cumple:
+ * `quell_log_entries` gana `kind='precio'` y admite `user_id` NULL
+ * —«lo escribió el sistema»— con la migración 0013, porque atribuirle a una
+ * persona de la obra un cambio hecho en dash101 es una mentira que se lee
+ * como verdad tres meses después. Encargo de Mike del 20-sep). Antes:
+ * 0.25.0 (un INGRESO también puede estar pendiente de
  * facturar. `movimientos.requiere_factura` (migración 0012) dice que se
  * espera una factura; `facturado` dice que ya llegó. Son cosas distintas y
  * ninguna escribe a la otra: pendiente es la conjunción. Antes la espera
@@ -242,7 +255,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.25.0';
+export const VERSION_CONTRATO = '0.26.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
