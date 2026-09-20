@@ -118,6 +118,12 @@ export interface ApiOrgDB {
   }): Promise<Fila | null>;
   pool(): Promise<Pool>;
   peek(cliente_id: string): Promise<Peek | null>;
+  estadoDeCuenta(cliente_id: string): Promise<{
+    cliente: Fila;
+    proyectos: Fila[];
+    otros_pagos: Fila[];
+    totales: { vendido: number; cobrado: number; saldo: number; sin_proyecto: number };
+  } | null>;
   conectados(): Promise<number>;
   /** Puerta de servicio: solo la usa POST /admin/importar (fase 2). */
   importar(args: { filas: Record<string, Fila[]>; seco: boolean }): Promise<Importacion>;
@@ -2537,6 +2543,84 @@ export class OrgDB extends DurableObject<Env> {
       proveedores: q(`SELECT id, nombre, nombre_norm, correo, telefono FROM proveedores ORDER BY nombre_norm`),
       personal: q(`SELECT id, nombre, nombre_norm, correo, puesto FROM personal WHERE activo = 1 ORDER BY nombre_norm`),
     } as Pool;
+  }
+
+  /* ─────────────── el estado de cuenta de un cliente (§0.29.0) ───────────────
+   *
+   * Mike, 20-sep: «necesito poder ver por cliente su estado de cuenta
+   * general. Saldo global, y por proyecto».
+   *
+   * NO ES `peek`. Aquél es lo que el cliente ve de sí mismo en su portal, y
+   * sus pagos salen de un JOIN contra `proyectos`: un cobro que no cuelga de
+   * ningún proyecto —un anticipo antes de abrirlo, un pago suelto— ahí no
+   * aparece. Para mirar por encima está bien; para un estado de cuenta que
+   * alguien va a mandar, ese hueco es justo la diferencia entre cuadrar y no.
+   *
+   * TODO SALE DE UNA SOLA LISTA DE PAGOS, y los totales se suman de ella. Es
+   * la misma regla que `peek` aprendió a golpes el 7-sep: si el total y la
+   * tabla salen de dos consultas, un día se contradicen y las dos se ven
+   * ciertas. Aquí el saldo global es, por construcción, la suma de los
+   * renglones que se están enseñando. */
+  estadoDeCuenta(cliente_id: string): {
+    cliente: Fila;
+    proyectos: Fila[];
+    otros_pagos: Fila[];
+    totales: { vendido: number; cobrado: number; saldo: number; sin_proyecto: number };
+  } | null {
+    const cliente = this.sql
+      .exec(`SELECT id, nombre, rfc, correo, telefono, negocio_id FROM clientes WHERE id = ?`, cliente_id)
+      .toArray()[0] as Fila | undefined;
+    if (!cliente) return null;
+
+    const proyectos = this.sql
+      .exec(
+        `SELECT id, nombre, estado, fecha_inicio, fecha_cierre, precio_venta, negocio_id
+         FROM proyectos WHERE cliente_id = ? ORDER BY COALESCE(fecha_inicio, creado_at)`,
+        cliente_id,
+      )
+      .toArray() as Fila[];
+    const suyos = new Set(proyectos.map((p) => String(p.id)));
+
+    /* Todos los cobros de este cliente: los que cuelgan de uno de SUS
+     * proyectos, y los que traen su nombre como contraparte aunque no
+     * cuelguen de ninguno. La `OR` es lo que tapa el hueco de `peek`. */
+    const pagos = this.sql
+      .exec(
+        `SELECT m.id, m.fecha, m.monto, m.proyecto_id, m.descripcion, m.facturado, m.uuid_cfdi,
+                m.cuenta_id, c.nombre AS cuenta_nombre
+         FROM movimientos m
+         LEFT JOIN proyectos p ON p.id = m.proyecto_id
+         LEFT JOIN cuentas c ON c.id = m.cuenta_id
+         WHERE m.tipo = 'ingreso' AND (m.contraparte_id = ? OR p.cliente_id = ?)
+         ORDER BY m.fecha, m.creado_at`,
+        cliente_id, cliente_id,
+      )
+      .toArray() as Fila[];
+
+    const porProyecto = new Map<string, Fila[]>();
+    const otros_pagos: Fila[] = [];
+    for (const g of pagos) {
+      const pid = g.proyecto_id ? String(g.proyecto_id) : '';
+      if (pid && suyos.has(pid)) (porProyecto.get(pid) ?? porProyecto.set(pid, []).get(pid)!).push(g);
+      else otros_pagos.push(g);
+    }
+
+    const conSaldo = proyectos.map((p) => {
+      const suyosPagos = porProyecto.get(String(p.id)) ?? [];
+      const cobrado = suyosPagos.reduce((t, g) => t + Number(g.monto || 0), 0);
+      return {
+        ...p,
+        cobrado,
+        saldo: Number(p.precio_venta || 0) - cobrado,
+        pagos: suyosPagos,
+      };
+    });
+
+    const vendido = proyectos.reduce((t, p) => t + Number(p.precio_venta || 0), 0);
+    const sin_proyecto = otros_pagos.reduce((t, g) => t + Number(g.monto || 0), 0);
+    const cobrado = conSaldo.reduce((t, p) => t + Number(p.cobrado), 0) + sin_proyecto;
+
+    return { cliente, proyectos: conSaldo, otros_pagos, totales: { vendido, cobrado, saldo: vendido - cobrado, sin_proyecto } };
   }
 
   /* ─────────────── /peek — lo del cliente, ya sumado ───────────────
