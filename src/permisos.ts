@@ -18,7 +18,14 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
   items: {
     cotizador101: ['nombre', 'descripcion', 'tipo', 'monto', 'cantidad', 'moneda', 'estado', 'proyecto_id', 'cliente_id', 'negocio_id', 'origen'],
     dash101: ['nombre', 'descripcion', 'tipo', 'monto', 'cantidad', 'moneda', 'estado', 'proyecto_id', 'cliente_id', 'negocio_id', 'fecha_entrega', 'partida', 'orden'],
-    quell101: ['etapa', 'etapa_at', 'etapa_por', 'clave', 'asignados'], // etapa solo vía /etapa
+    /* `estado` lo gana quell101 el 20-sep, por encargo de Mike: «se debe
+     * poder cancelar algún ítem ya sea desde quell o desde dash, y se
+     * refleja en los 2». Se usa por POST /items/:id/aprobar y
+     * /items/:id/cancelar, que son las que ponen las fechas del alcance;
+     * pasa por esta lista porque quién puede escribir qué campo se decide
+     * en un solo lugar, y una ruta con su propia regla es la que se olvida
+     * de actualizarse. */
+    quell101: ['etapa', 'etapa_at', 'etapa_por', 'clave', 'asignados', 'estado'], // etapa solo vía /etapa
     roster101: ['asignados'],
     nest101: ['refs'],
   },
@@ -68,7 +75,11 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
 export const CACHES: Partial<Record<Tabla, readonly string[]>> = {
   proyectos: ['precio_venta', 'cobrado', 'pagado_prov', 'compromiso', 'avance'],
   partidas: ['monto_pagado', 'estado'],
-  items: ['etapa', 'etapa_at', 'etapa_por'],
+  /* `aprobado_at` y `cancelado_at` los pone la API al cambiar el estado, y
+   * `cancelado_motivo` la ruta de cancelar. Ninguna app los manda: de
+   * `aprobado_at` depende que un descartado no se lea como una venta
+   * cancelada. */
+  items: ['etapa', 'etapa_at', 'etapa_por', 'aprobado_at', 'cancelado_at', 'cancelado_motivo'],
 };
 
 /* Campos que pone la API sola y que nadie manda de fuera. */

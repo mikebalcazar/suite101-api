@@ -28,6 +28,7 @@ import facturaEsperada from '../migrations/org/0012_factura_esperada.sql';
 import bitacoraPrecio from '../migrations/org/0013_bitacora_precio.sql';
 import raya from '../migrations/org/0014_raya.sql';
 import partidaOrden from '../migrations/org/0015_partida_orden.sql';
+import alcance from '../migrations/org/0016_alcance_item.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { atender as atenderRoster, type DatosEmpresaRoster, type SesionRoster } from './roster/motor.js';
 import { invitarClienteEnSuite } from './clientes';
@@ -47,7 +48,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance];
 
 /** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
  *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
@@ -214,6 +215,14 @@ export interface ApiOrgDB {
     proyecto_id: string,
     items: Array<{ id: string; partida?: string; orden?: number }>,
   ): Promise<{ ok: true; acomodados: number } | { error: string; detalle?: unknown }>;
+
+  /* Aprobar y cancelar un ítem (§106). */
+  aprobarItem(id: string, contexto: { usuario_id: string }): Promise<{ ok: true; item: Fila; era: string } | { error: string; detalle?: unknown }>;
+  cancelarItem(
+    id: string,
+    args: { motivo?: string },
+    contexto: { usuario_id: string },
+  ): Promise<{ ok: true; item: Fila; alcance: 'cancelado' | 'descartado' } | { error: string; detalle?: unknown }>;
 
   fetch(req: Request): Promise<Response>;
 }
@@ -512,6 +521,13 @@ export class OrgDB extends DurableObject<Env> {
       fila.id = `${contexto.app}:${fila.clave}`;
       fila.actualizado_at = ahora();
     }
+    /* Un ítem que nace VENDIDO nace aprobado. `aprobado_at` es lo único que
+     * distingue después un cancelado —estuvo aprobado— de un descartado
+     * —nunca lo estuvo—, que es la regla que puso Mike el 20-sep, y si no se
+     * escribe en el momento ya no hay de dónde sacarla. */
+    if (tabla === 'items' && String(fila.estado ?? 'cotizado') === 'vendido' && !fila.aprobado_at) {
+      fila.aprobado_at = ahora();
+    }
     if (def.cols.creado_at) fila.creado_at = ahora();
     if (def.cols.ts && !fila.ts) fila.ts = ahora();
     if (def.cols.creado_por) fila.creado_por = contexto.usuario_id;
@@ -551,6 +567,26 @@ export class OrgDB extends DurableObject<Env> {
     if (def.cols.nombre_norm && datos.nombre !== undefined && datos.nombre_norm === undefined) {
       cols.push('nombre_norm');
       datos.nombre_norm = normalizar(datos.nombre);
+    }
+    /* Las dos fechas del alcance, puestas AQUÍ y no en la ruta: por el CRUD
+     * genérico también se cambia el estado —la pantalla del proyecto cancela
+     * un renglón al quitarlo—, y una regla que sólo vive en una ruta es una
+     * regla que la otra puerta no cumple.
+     *
+     * `aprobado_at` se pone la primera vez que el ítem queda vendido y ya no
+     * se borra: que un ítem se cancele no borra que estuvo aprobado, y eso
+     * es justo lo que hay que recordar. */
+    if (tabla === 'items' && datos.estado !== undefined) {
+      const antes = this.sql.exec(`SELECT estado, aprobado_at FROM items WHERE id = ?`, id).toArray()[0] as Fila | undefined;
+      const nuevo = String(datos.estado);
+      if (nuevo === 'vendido' && !antes?.aprobado_at && datos.aprobado_at === undefined) {
+        cols.push('aprobado_at');
+        datos.aprobado_at = ahora();
+      }
+      if (nuevo === 'cancelado' && String(antes?.estado ?? '') !== 'cancelado' && datos.cancelado_at === undefined) {
+        cols.push('cancelado_at');
+        datos.cancelado_at = ahora();
+      }
     }
     if (def.cols.actualizado_at) {
       cols.push('actualizado_at');
@@ -2602,6 +2638,75 @@ export class OrgDB extends DurableObject<Env> {
     return { ok: true, item: this.obtener('items', String(queda.id))!, absorbidos: otros.length, movidos };
   }
 
+
+
+  /* ─────────────── aprobar y cancelar un ítem (§106) ───────────────
+   *
+   * Mike, 20-sep: «se debe poder cancelar algún ítem ya sea desde quell o
+   * desde dash, y se refleja en los 2», y «para que un ítem se considere
+   * cancelado tiene que haber estado aprobado primero y luego cancelado».
+   *
+   * Se refleja en los dos lados sin hacer nada extra, y por eso estas dos
+   * rutas viven aquí y no en cada app: el ítem es UNO en la base de la
+   * empresa, y la pieza del plano cuelga de él. Lo que cada pantalla decide
+   * es cómo lo enseña.
+   *
+   * La regla de Mike no es un candado, es una CLASIFICACIÓN: cancelar lo que
+   * nunca estuvo aprobado sí se puede —es decirle que no a un
+   * requerimiento—, pero eso no es un cancelado, es un descartado, y sale en
+   * otra lista. Quien lo decide es `aprobado_at`, y por eso nadie más que la
+   * API la escribe. Si fuera un candado, borrar un proyecto —que cancela
+   * todos sus ítems, aprobados o no— se trabaría en el primer cotizado.
+   */
+
+  /** Aprobar: el requerimiento pasa a estar dentro del alcance y, desde ese
+   *  momento, suma en el proyecto. Reactivar un cancelado también pasa por
+   *  aquí: se le limpia la fecha de cancelación y conserva la de aprobación,
+   *  porque estuvo aprobado y eso no se borra. */
+  aprobarItem(id: string, contexto: { usuario_id: string }): { ok: true; item: Fila; era: string } | { error: string; detalle?: unknown } {
+    const item = this.obtener('items', id);
+    if (!item) return { error: 'no_encontrado', detalle: { que: 'item', id } };
+    const era = String(item.estado ?? 'cotizado');
+    if (era === 'vendido') return { ok: true, item, era };
+
+    this.sql.exec(
+      `UPDATE items SET estado = 'vendido', aprobado_at = COALESCE(aprobado_at, ?), cancelado_at = NULL,
+              cancelado_motivo = NULL, actualizado_at = ? WHERE id = ?`,
+      ahora(), ahora(), id,
+    );
+    void contexto;
+    if (item.proyecto_id) this.recalcularProyecto(String(item.proyecto_id));
+    this.avisar({ t: 'item.cambio', id }, 'todos');
+    return { ok: true, item: this.obtener('items', id)!, era };
+  }
+
+  /** Cancelar. `motivo` es opcional pero se guarda: tres meses después, «por
+   *  qué se cayó esto» no tiene otra respuesta.
+   *
+   *  Devuelve `alcance` ya resuelto —'cancelado' o 'descartado'— para que la
+   *  pantalla diga la palabra correcta sin volver a aplicar la regla. */
+  cancelarItem(
+    id: string,
+    args: { motivo?: string },
+    contexto: { usuario_id: string },
+  ): { ok: true; item: Fila; alcance: 'cancelado' | 'descartado' } | { error: string; detalle?: unknown } {
+    const item = this.obtener('items', id);
+    if (!item) return { error: 'no_encontrado', detalle: { que: 'item', id } };
+
+    if (String(item.estado) !== 'cancelado') {
+      this.sql.exec(
+        `UPDATE items SET estado = 'cancelado', cancelado_at = ?, cancelado_motivo = ?, actualizado_at = ? WHERE id = ?`,
+        ahora(), String(args.motivo ?? '').trim() || null, ahora(), id,
+      );
+    } else if (args.motivo) {
+      this.sql.exec(`UPDATE items SET cancelado_motivo = ?, actualizado_at = ? WHERE id = ?`, String(args.motivo).trim(), ahora(), id);
+    }
+    void contexto;
+    if (item.proyecto_id) this.recalcularProyecto(String(item.proyecto_id));
+    this.avisar({ t: 'item.cambio', id }, 'todos');
+    const ya = this.obtener('items', id)!;
+    return { ok: true, item: ya, alcance: ya.aprobado_at ? 'cancelado' : 'descartado' };
+  }
 
   /* ─────────────── la partida y el orden de los ítems (§102) ───────────────
    *

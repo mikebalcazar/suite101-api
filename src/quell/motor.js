@@ -218,7 +218,30 @@ async function esSuyo(env, user, elementId) {
 // el plano. Ni fase, ni pendientes, ni bitácora, ni fotos (decisión 4). El
 // recorte pasa aquí, antes de salir del Worker, no al pintar.
 const soloUbicacion = (e) => ({ id: e.id, plan_id: e.plan_id, project_id: e.project_id ?? null, code: e.code, name: e.name, type: e.type, x: e.x, y: e.y, ajeno: true,
-  n_pend: 0, n_proc: 0, n_total: 0, n_etapas: 0, n_log: 0 });
+  n_pend: 0, n_proc: 0, n_total: 0, n_etapas: 0, n_log: 0, alcance: e.alcance ?? 'dentro' });
+
+/* EN QUÉ PARTE DEL ALCANCE ESTÁ LA PIEZA, que es el del ítem del que cuelga.
+ *
+ * Mike, 20-sep-2026: «hay ítems nuevos no aprobados e ítems cancelados. Para
+ * que un ítem se considere cancelado tiene que haber estado aprobado primero
+ * y luego cancelado. (…) Los no aprobados NO APARECEN en quell al menos que
+ * veas la vista de ítems fuera de alcance.»
+ *
+ * La regla misma vive en `schema/tipos.ts` (`alcanceDeItem`), que es el
+ * archivo que las tres apps copian. Aquí se repite en cuatro líneas porque
+ * este motor es JavaScript suelto y no importa el contrato; para que las dos
+ * copias no se separen, `pruebas/alcance.spec.ts` las compara caso por caso.
+ *
+ * Una pieza SIN ítem va dentro: es trabajo de la obra que nadie cotizó, y
+ * esconderla del plano por no tener renglón en dash sería borrarla de la
+ * obra por una razón de contabilidad. */
+const ALCANCE_SQL = `CASE
+    WHEN it.id IS NULL THEN 'dentro'
+    WHEN it.estado = 'cancelado' AND it.aprobado_at IS NOT NULL THEN 'cancelado'
+    WHEN it.estado = 'cancelado' THEN 'descartado'
+    WHEN it.estado = 'vendido' THEN 'dentro'
+    ELSE 'no_aprobado'
+  END AS alcance`;
 
 async function canAccessProject(env, user, projectId) {
   if (isStaff(user)) return true;
@@ -539,9 +562,11 @@ export async function atender(req, env, url, path) {
       // en la obra. El recorte pasa aquí, no al pintar.
       if (esCli(user)) {
         const { results: crudos } = await env.DB.prepare(
-          `SELECT e.id, e.plan_id, e.project_id, e.code, e.name, e.type, e.x, e.y,
+          `SELECT e.id, e.plan_id, e.project_id, e.code, e.name, e.type, e.x, e.y, ${ALCANCE_SQL},
              (SELECT COUNT(*) FROM quell_dudas d WHERE d.element_id = e.id AND d.para = 'cliente' AND d.estado = 'abierta') AS definir
-           FROM quell_elements e JOIN quell_plans p ON p.id = e.plan_id WHERE p.project_id = ? ORDER BY e.code`).bind(pid).all();
+           FROM quell_elements e JOIN quell_plans p ON p.id = e.plan_id
+                LEFT JOIN items it ON it.id = e.item_id
+           WHERE p.project_id = ? ORDER BY e.code`).bind(pid).all();
         const elements = crudos.map((e) => ({ ...soloUbicacion(e), definir: e.definir }));
         const abiertas = await env.DB.prepare(`SELECT COUNT(*) AS n FROM quell_dudas WHERE project_id = ? AND para = 'cliente' AND estado = 'abierta'`).bind(pid).first();
         return json({ project: { id: project.id, name: project.name, client: project.client, status: project.status }, plans, elements, members: [],
@@ -564,8 +589,10 @@ export async function atender(req, env, url, path) {
                (SELECT COUNT(*) FROM quell_element_etapas ee JOIN quell_etapas t ON t.clave=ee.etapa AND t.activa=1 WHERE ee.element_id=e.id) AS n_etapas,
                0 AS n_log,
                (EXISTS (SELECT 1 FROM quell_element_contratistas ec WHERE ec.element_id=e.id AND ec.user_id=?)
-                OR EXISTS (SELECT 1 FROM quell_punch_items k WHERE k.element_id=e.id AND k.assignee_id=?)) AS suyo
+                OR EXISTS (SELECT 1 FROM quell_punch_items k WHERE k.element_id=e.id AND k.assignee_id=?)) AS suyo,
+               ${ALCANCE_SQL}
              FROM quell_elements e JOIN quell_plans p ON p.id = e.plan_id
+                  LEFT JOIN items it ON it.id = e.item_id
              WHERE p.project_id = ?
              ORDER BY e.code`
           ).bind(user.id, user.id, pid).all()
@@ -575,8 +602,11 @@ export async function atender(req, env, url, path) {
                (SELECT COUNT(*) FROM quell_punch_items k WHERE k.element_id=e.id AND k.status='proc') AS n_proc,
                (SELECT COUNT(*) FROM quell_punch_items k WHERE k.element_id=e.id) AS n_total,
                (SELECT COUNT(*) FROM quell_element_etapas ee JOIN quell_etapas t ON t.clave=ee.etapa AND t.activa=1 WHERE ee.element_id=e.id) AS n_etapas,
-               (SELECT COUNT(*) FROM quell_log_entries l WHERE l.element_id=e.id) AS n_log
-             FROM quell_elements e JOIN quell_plans p ON p.id = e.plan_id WHERE p.project_id = ? ORDER BY e.code`
+               (SELECT COUNT(*) FROM quell_log_entries l WHERE l.element_id=e.id) AS n_log,
+               ${ALCANCE_SQL}
+             FROM quell_elements e JOIN quell_plans p ON p.id = e.plan_id
+                  LEFT JOIN items it ON it.id = e.item_id
+             WHERE p.project_id = ? ORDER BY e.code`
           ).bind(pid).all();
       const mios = mio ? crudos.filter((e) => e.suyo).map((e) => e.id) : null;
       const elements = mio ? crudos.map((e) => (e.suyo ? { ...e, suyo: undefined } : soloUbicacion(e))) : crudos;
@@ -830,7 +860,17 @@ export async function atender(req, env, url, path) {
     if (!pid || !(await canAccessProject(env, user, pid))) return err('sin acceso', 403);
     if (!seg[2] && m === 'GET') {
       const mio = soloLoSuyo(await rolEnObra(env, user, pid));
-      const element = await env.DB.prepare(`SELECT e.*, pl.name AS plan_name FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id WHERE e.id = ?`).bind(eid).first();
+      /* El detalle trae además el alcance y la DESCRIPCIÓN del ítem. Mike,
+       * 20-sep: «todos los ítems se deben identificar con código, nombre,
+       * precio, descripción y tipo; así ayuda a organizar entre quell y dash
+       * y quote». La descripción vivía sólo en dash; aquí viaja de ida, de
+       * sólo lectura. El precio NO: enseñarlo en la obra se lo enseña también
+       * al contratista, y eso lo decide Mike, no este archivo. */
+      const element = await env.DB.prepare(
+        `SELECT e.*, pl.name AS plan_name, ${ALCANCE_SQL}, it.descripcion AS item_descripcion
+         FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id
+              LEFT JOIN items it ON it.id = e.item_id
+         WHERE e.id = ?`).bind(eid).first();
       if (!element) return err('no encontrado', 404);
       // El cliente: el ítem para ubicarse y sus puntos por definir, y nada más
       // (decisión 4). Ni fase, ni pendientes, ni bitácora, ni responsable.
