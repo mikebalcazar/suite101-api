@@ -233,3 +233,25 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   llegó ahí). Y el PRECIO del ítem en quell lo ven **sólo el dueño, la
   administración y los socios** —lo escogió él con botones el 20-sep—,
   recortado en el servidor y no al pintar.
+- **El producto del catálogo, y agrupar dejó de fusionar (20-sep, contrato
+  0.35.0).** Mike: «cuando un ítem se asigna a un grupo de ítems que son del
+  mismo producto, el ítem adquiere en automático ese costo. También debe
+  poder moverse de grupo de producto un ítem ya agrupado». Le pregunté con
+  botones si el grupo de producto reemplazaba a «Juntar los iguales» —que
+  fusionaba y borraba renglones— o convivía con él, y **escogió que lo
+  reemplace**. Así quedó: tabla `productos` a nivel NEGOCIO (ahí va a vivir
+  el catálogo de quote101; el mismo modelo se cotiza en tres obras) e
+  `items.producto_id`, que en NULL quiere decir «este ítem es su propio
+  producto único». Entrar a un producto le pone al ítem `monto` = precio ×
+  cantidad y `clave` = el código del producto si lo tiene; el NOMBRE no se
+  hereda —«Puerta 07» es como se llama esa pieza en el plano—. Salirse NO le
+  quita el precio. `producto_id` no se escribe por PATCH (está en `CACHES`):
+  iría el apuntador sin el precio. Las dos rutas devuelven el precio de venta
+  del proyecto antes y después, porque heredar el costo lo mueve y la
+  pantalla tiene que decirlo. El muro del 20-sep a las 23:00 cuenta por qué
+  el diseño anterior estaba mal.
+- **Pendiente en dash101, no urgente: `ProductoProyecto` se llama mal.** En
+  esa app los renglones del proyecto se llaman `productos` desde la época de
+  Firestore y NO son los productos del catálogo; ahora conviven los dos
+  nombres. Son 55 usos en 6 archivos. Quedó señalado en el PR #66 y como
+  tarea aparte; no se metió en ese cambio para no arriesgarlo.
