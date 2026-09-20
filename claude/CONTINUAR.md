@@ -222,3 +222,14 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   `pruebas/config-correo.py` la vigila en la puerta de despliegue. El detalle
   completo, y los tres registros de DNS que siguen siendo de Mike, están en
   `CORREO.md`.
+- **Los dos códigos del ítem, y quién ve el precio en la obra (20-sep).**
+  Mike lo ordenó con todas sus letras: `quell_elements.code` es el código de
+  la PIEZA física en la obra —PT-01, único dentro de la obra, lo pone
+  quell101— e `items.clave` es el código de PRODUCTO, el del modelo en el
+  catálogo que quote101 va a llevar. Cada ítem es un código de producto y
+  puede haber varios ítems del mismo modelo. NO se unifican: ligar una pieza
+  a un ítem ya no copia ninguno de los dos (eso era el contrato 0.28.0, hecho
+  con el entendimiento anterior; el muro del 20-sep a las 21:20 cuenta cómo se
+  llegó ahí). Y el PRECIO del ítem en quell lo ven **sólo el dueño, la
+  administración y los socios** —lo escogió él con botones el 20-sep—,
+  recortado en el servidor y no al pintar.
