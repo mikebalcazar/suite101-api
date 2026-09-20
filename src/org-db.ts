@@ -29,6 +29,7 @@ import bitacoraPrecio from '../migrations/org/0013_bitacora_precio.sql';
 import raya from '../migrations/org/0014_raya.sql';
 import partidaOrden from '../migrations/org/0015_partida_orden.sql';
 import alcance from '../migrations/org/0016_alcance_item.sql';
+import productos from '../migrations/org/0017_productos.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { atender as atenderRoster, type DatosEmpresaRoster, type SesionRoster } from './roster/motor.js';
 import { invitarClienteEnSuite } from './clientes';
@@ -49,7 +50,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos];
 
 /** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
  *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
@@ -208,13 +209,22 @@ export interface ApiOrgDB {
   ): Promise<{ ok: true; ligados: number; creados: number; renombrados: number; sumados: number; obra: Fila } | { error: string; detalle?: unknown }>;
   desligarObra(obra_id: string): Promise<{ ok: true; obra: Fila } | { error: string; detalle?: unknown }>;
 
-  /* Varios ítems iguales, un solo concepto (§98). */
+  /* Varios ítems del mismo producto (§98, rehecho en §111: agrupar ya no
+   * fusiona renglones, los apunta a un producto del catálogo). */
   gruposDeItems(proyecto_id: string): Promise<{ proyecto: Fila; grupos: Fila[] } | { error: string; detalle?: unknown }>;
   agruparItems(
     proyecto_id: string,
-    args: { queda_id: string; se_van: string[]; nombre?: string },
+    args: { items: string[]; nombre?: string; codigo?: string; precio?: number },
     contexto: { usuario_id: string },
-  ): Promise<{ ok: true; item: Fila; absorbidos: number; movidos: Record<string, number> } | { error: string; detalle?: unknown }>;
+  ): Promise<{ ok: true; producto: Fila; items: Fila[]; venta_antes: number; venta_despues: number } | { error: string; detalle?: unknown }>;
+  productosDelProyecto(
+    proyecto_id: string,
+  ): Promise<{ proyecto: Fila; productos: Fila[]; unicos: Fila[] } | { error: string; detalle?: unknown }>;
+  asignarProducto(
+    item_id: string,
+    args: { producto_id?: string; desde_item?: string; solo?: boolean },
+    contexto: { usuario_id: string },
+  ): Promise<{ ok: true; item: Fila; producto: Fila | null; venta_antes: number; venta_despues: number } | { error: string; detalle?: unknown }>;
   acomodarItems(
     proyecto_id: string,
     items: Array<{ id: string; partida?: string; orden?: number }>,
@@ -2482,7 +2492,8 @@ export class OrgDB extends DurableObject<Env> {
     if (!proyecto) return { error: 'no_encontrado', detalle: { que: 'proyecto', id: proyecto_id } };
 
     const items = this.sql
-      .exec(`SELECT * FROM items WHERE proyecto_id = ? AND estado <> 'cancelado' ORDER BY creado_at`, proyecto_id)
+      .exec(`SELECT * FROM items WHERE proyecto_id = ? AND estado <> 'cancelado' AND producto_id IS NULL
+              ORDER BY creado_at`, proyecto_id)
       .toArray() as Fila[];
 
     const ubicadosDe = (item_id: string) =>
@@ -2535,135 +2546,286 @@ export class OrgDB extends DurableObject<Env> {
     return { proyecto, grupos };
   }
 
-  /** Juntarlos. `queda_id` es el renglón que se queda con todo; los de
-   *  `se_van` desaparecen y le dejan sus piezas del plano, sus movimientos,
-   *  sus partidas y sus avances.
+  /** El nombre que se le propone a un producto nacido de una pieza: «Puerta
+   *  07» → «Puerta». Se le quita el número al nombre TAL COMO SE ESCRIBIÓ,
+   *  no a la versión normalizada: ésa va sin acentos —sirve para comparar,
+   *  no para leerse— y proponer «Puerta de recamara» sería devolver el
+   *  nombre peor escrito de los dos. Es editable. */
+  private nombreDeFamilia(crudo: unknown): string {
+    const s = String(crudo ?? '');
+    return s.replace(/[\s\-#_.]*\b\d{1,3}\s*$/, '').trim() || s;
+  }
+
+  /** Crear el producto y meterle las piezas. ANTES esto FUSIONABA —los
+   *  renglones que se iban se borraban— y por eso se llama igual: es la
+   *  misma intención de quien la usa, «estas son el mismo producto».
    *
-   *  DOS PASADAS, como al emparejar: se revisa todo y sólo si todo cuadra se
-   *  escribe. Un rechazo a la mitad dejaría medio concepto juntado y el
-   *  precio del proyecto contando dos veces lo mismo.
+   *  Ya no borra nada. Mike, 20-sep: «debe poder moverse de grupo de
+   *  producto un ítem ya agrupado». Un renglón borrado no se puede mover de
+   *  grupo, así que agrupar tenía que dejar de destruir. Se lo pregunté con
+   *  botones y escogió que el grupo de producto reemplace a la fusión.
    *
-   *  Lo que se hereda, y por qué cada cosa:
+   *  Lo que cambia para quien lo usa: en dash sigue viendo UN renglón por
+   *  producto —que era el problema original, no tener 21 puertas idénticas
+   *  enlistadas— pero ahora ese renglón se abre y enseña sus piezas, y cada
+   *  pieza conserva su código de obra, su ubicación en el plano y su
+   *  bitácora. Antes eso se perdía.
    *
-   *   · `cantidad` y `monto`: la suma. El total no se mueve (ver arriba).
-   *   · `etapa`: la del MÁS ATRASADO. Un concepto no va más adelantado que
-   *     su pieza más atrasada; tomar la mayor diría que ya están las 21
-   *     cuando faltan 6.
-   *   · `fecha_entrega`: la más próxima de las que traigan. Es la que hay
-   *     que perseguir; la lejana no urge y la lista de entregas ordena por
-   *     esa columna.
-   *   · `clave`: se conserva sólo si TODOS traían la misma. Un código nombra
-   *     una pieza —CAR-01, PT-09—, y dejarle PT-01 a un concepto de 21
-   *     puertas nombra a una y esconde veinte. El código de cada pieza sigue
-   *     en su plano, que es donde se lee.
-   *   · `asignados`: la unión. Quitarle el trabajo a alguien por acomodar
-   *     una lista es perder un dato que nadie va a notar que se perdió.
-   *   · `refs.agrupados`: qué renglones se juntaron, con su clave y su
-   *     importe. El renglón se borra; lo que decía, no.
+   *  DOS PASADAS: se revisa todo y sólo si todo cuadra se escribe. Una
+   *  mitad agrupada con la otra mitad no, y el precio del proyecto contando
+   *  dos precios distintos para el mismo modelo, es peor que no agrupar.
    *
-   *  Es irreversible: por eso la ruta la reserva a quien dirige la empresa. */
+   *  El PRECIO del producto: el que manden, y si no, el de la pieza más
+   *  cara del grupo. No el promedio: un promedio inventa un número que
+   *  nadie cotizó. La pantalla lo propone y quien decide lo cambia. */
   agruparItems(
     proyecto_id: string,
-    args: { queda_id: string; se_van: string[]; nombre?: string },
+    args: { items: string[]; nombre?: string; codigo?: string; precio?: number },
     contexto: { usuario_id: string },
-  ): { ok: true; item: Fila; absorbidos: number; movidos: Record<string, number> } | { error: string; detalle?: unknown } {
+  ): { ok: true; producto: Fila; items: Fila[]; venta_antes: number; venta_despues: number } | { error: string; detalle?: unknown } {
     const proyecto = this.obtener('proyectos', proyecto_id);
     if (!proyecto) return { error: 'no_encontrado', detalle: { que: 'proyecto', id: proyecto_id } };
 
-    const seVan = [...new Set((args.se_van ?? []).filter((id) => id && id !== args.queda_id))];
-    if (!args.queda_id) return { error: 'datos_invalidos', detalle: { falta: 'queda_id' } };
-    if (!seVan.length) return { error: 'datos_invalidos', detalle: { motivo: 'hay que decir cuáles se juntan con él' } };
-
-    const traer = (id: string) =>
-      this.sql.exec(`SELECT * FROM items WHERE id = ? AND proyecto_id = ?`, id, proyecto_id).toArray()[0] as Fila | undefined;
-
-    const queda = traer(args.queda_id);
-    if (!queda) return { error: 'no_encontrado', detalle: { que: 'item', id: args.queda_id, motivo: 'ese ítem no es de este proyecto' } };
-
-    const otros: Fila[] = [];
-    for (const id of seVan) {
-      const it = traer(id);
-      if (!it) return { error: 'no_encontrado', detalle: { que: 'item', id, motivo: 'ese ítem no es de este proyecto' } };
-      /* Estado y moneda tienen que coincidir, y no es formalismo: juntar un
-       * cotizado con un vendido vendería el cotizado sin que nadie lo
-       * decida, y sumar pesos con dólares da un número que no es dinero. */
-      if (String(it.estado) !== String(queda.estado)) {
-        return { error: 'estado_distinto', detalle: { id, estado: it.estado, esperado: queda.estado,
-                 motivo: 'sólo se juntan ítems en el mismo estado: juntar un cotizado con un vendido lo vendería sin que nadie lo decida' } };
-      }
-      if (String(it.moneda ?? 'MXN') !== String(queda.moneda ?? 'MXN')) {
-        return { error: 'moneda_distinta', detalle: { id, moneda: it.moneda, esperado: queda.moneda } };
-      }
-      otros.push(it);
+    const ids = [...new Set((args.items ?? []).filter(Boolean).map(String))];
+    if (ids.length < 2) {
+      return { error: 'datos_invalidos', detalle: { motivo: 'un producto de grupo necesita al menos dos piezas; para una sola, el ítem ya es su propio producto único' } };
     }
 
-    const todos = [queda, ...otros];
+    const piezas: Fila[] = [];
+    for (const id of ids) {
+      const it = this.sql.exec(`SELECT * FROM items WHERE id = ? AND proyecto_id = ?`, id, proyecto_id).toArray()[0] as Fila | undefined;
+      if (!it) return { error: 'no_encontrado', detalle: { que: 'item', id, motivo: 'ese ítem no es de este proyecto' } };
+      /* La moneda tiene que coincidir: un producto con un precio en pesos y
+       * piezas en dólares no tiene precio, tiene dos. El ESTADO ya no
+       * importa —eso era de la fusión, donde juntar un cotizado con un
+       * vendido vendía el cotizado—: aquí cada pieza conserva el suyo. */
+      if (String(it.moneda ?? 'MXN') !== String(piezas[0]?.moneda ?? it.moneda ?? 'MXN')) {
+        return { error: 'moneda_distinta', detalle: { id, moneda: it.moneda, esperado: piezas[0]?.moneda } };
+      }
+      piezas.push(it);
+    }
+
     const cant = (it: Fila) => Math.max(1, Math.trunc(Number(it.cantidad ?? 1)));
+    const porPieza = (it: Fila) => Math.round(Number(it.monto ?? 0) / cant(it));
+    const precio = args.precio === undefined || args.precio === null
+      ? Math.max(...piezas.map(porPieza))
+      : Math.round(Number(args.precio));
+    if (!Number.isFinite(precio) || precio < 0) return { error: 'datos_invalidos', detalle: { campo: 'precio' } };
+
+    /* El código del producto se hereda sólo si TODAS las piezas traían el
+     * mismo: ahí no hay duda de cuál es el del modelo. Si traen códigos
+     * distintos —PT-01, PT-02…— ésos son códigos de PIEZA y el producto
+     * nace sin código, para que quien arme el catálogo le ponga el suyo. */
+    const claves = [...new Set(piezas.map((it) => String(it.clave ?? '').trim()))];
+    const codigo = String(args.codigo ?? (claves.length === 1 ? claves[0] : '')).trim();
+    if (codigo && this.sql.exec(
+      `SELECT id FROM productos WHERE negocio_id = ? AND codigo = ?`, String(proyecto.negocio_id), codigo,
+    ).toArray().length) {
+      return { error: 'codigo_en_uso', detalle: { codigo, motivo: 'ya hay otro producto con ese código de catálogo en esta empresa' } };
+    }
 
     /* ── ya cuadró todo: ahora se escribe ── */
 
-    const cuantos = (sql: string, ...a: SqlStorageValue[]) => Number((this.sql.exec(sql, ...a).toArray()[0] as Fila).n);
-    const movidos = { piezas: 0, movimientos: 0, partidas: 0, avances: 0 };
-    for (const it of otros) {
-      const id = String(it.id);
-      movidos.piezas += cuantos(`SELECT COUNT(*) AS n FROM quell_elements WHERE item_id = ?`, id);
-      movidos.movimientos += cuantos(`SELECT COUNT(*) AS n FROM movimientos WHERE item_id = ?`, id);
-      movidos.partidas += cuantos(`SELECT COUNT(*) AS n FROM partidas WHERE item_id = ?`, id);
-      movidos.avances += cuantos(`SELECT COUNT(*) AS n FROM avances WHERE item_id = ?`, id);
-      this.sql.exec(`UPDATE quell_elements SET item_id = ? WHERE item_id = ?`, queda.id, id);
-      this.sql.exec(`UPDATE movimientos SET item_id = ? WHERE item_id = ?`, queda.id, id);
-      this.sql.exec(`UPDATE partidas SET item_id = ? WHERE item_id = ?`, queda.id, id);
-      this.sql.exec(`UPDATE avances SET item_id = ? WHERE item_id = ?`, queda.id, id);
-    }
-
-    const atrasado = todos.reduce((a, b) => (Number(b.etapa ?? 0) < Number(a.etapa ?? 0) ? b : a), todos[0]);
-    const fechas = todos.map((it) => String(it.fecha_entrega ?? '')).filter(Boolean).sort();
-    const claves = [...new Set(todos.map((it) => String(it.clave ?? '').trim()))];
-    const asignados = [
-      ...new Set(todos.flatMap((it) => {
-        try { const v = JSON.parse(String(it.asignados ?? '[]')); return Array.isArray(v) ? v.map(String) : []; } catch { return []; }
-      })),
-    ];
-    const descripcion = todos.map((it) => String(it.descripcion ?? '').trim()).find(Boolean) ?? '';
-
-    let refs: Record<string, unknown> = {};
-    try { const v = JSON.parse(String(queda.refs ?? '{}')); if (v && typeof v === 'object' && !Array.isArray(v)) refs = v as Record<string, unknown>; } catch { refs = {}; }
-    const antes = Array.isArray(refs.agrupados) ? (refs.agrupados as unknown[]) : [];
-    refs.agrupados = [
-      ...antes,
-      ...otros.map((it) => ({
-        id: it.id, clave: it.clave ?? null, nombre: it.nombre, cantidad: cant(it), monto: Number(it.monto ?? 0),
-        agrupado_at: ahora(), agrupado_por: contexto.usuario_id,
-      })),
-    ];
-
+    const venta_antes = Number((this.obtener('proyectos', proyecto_id) as Fila).precio_venta ?? 0);
+    const id = ulid();
+    const nombre = String(args.nombre ?? '').trim() || this.nombreDeFamilia(piezas[0].nombre);
+    const descripcion = piezas.map((it) => String(it.descripcion ?? '').trim()).find(Boolean) ?? null;
     this.sql.exec(
-      `UPDATE items SET nombre = ?, descripcion = ?, clave = ?, cantidad = ?, monto = ?, etapa = ?, etapa_at = ?, etapa_por = ?,
-              fecha_entrega = ?, asignados = ?, refs = ?, actualizado_at = ? WHERE id = ?`,
-      String(args.nombre?.trim() || queda.nombre),
-      descripcion,
-      claves.length === 1 ? claves[0] : '',
-      todos.reduce((s, it) => s + cant(it), 0),
-      todos.reduce((s, it) => s + Number(it.monto ?? 0), 0),
-      Number(atrasado.etapa ?? 0),
-      (atrasado.etapa_at as string | null) ?? null,
-      (atrasado.etapa_por as string | null) ?? null,
-      fechas[0] ?? null,
-      JSON.stringify(asignados),
-      JSON.stringify(refs),
-      ahora(),
-      queda.id,
+      `INSERT INTO productos (id, negocio_id, codigo, nombre, descripcion, tipo, precio, moneda, creado_at, creado_por)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      id, String(proyecto.negocio_id), codigo, nombre, descripcion,
+      String(piezas[0].tipo ?? 'mueble'), precio, String(piezas[0].moneda ?? 'MXN'), ahora(), contexto.usuario_id,
     );
 
-    /* Se borran al final, cuando ya no cuelga nada de ellos. El CRUD no deja
-     * borrar un ítem —`items_nunca_se_borran`, y con razón: un ítem suelto
-     * se lleva su historia—; aquí no se pierde nada porque la historia ya se
-     * mudó al que se queda, renglón por renglón, contada arriba. */
-    for (const it of otros) this.sql.exec(`DELETE FROM items WHERE id = ?`, it.id);
+    for (const it of piezas) this.meterEnProducto(it, this.obtener('productos', id)!);
 
     this.recalcularProyecto(proyecto_id);
-    this.avisar({ t: 'item.cambio', id: String(queda.id) }, 'todos');
-    return { ok: true, item: this.obtener('items', String(queda.id))!, absorbidos: otros.length, movidos };
+    this.avisar({ t: 'item.cambio', id: String(piezas[0].id) }, 'todos');
+    return {
+      ok: true,
+      producto: this.obtener('productos', id)!,
+      items: piezas.map((it) => this.obtener('items', String(it.id))!),
+      venta_antes,
+      venta_despues: Number((this.obtener('proyectos', proyecto_id) as Fila).precio_venta ?? 0),
+    };
+  }
+
+  /** Meter una pieza en un producto. Lo que hereda, y por qué sólo eso:
+   *
+   *   · `monto` = precio del producto × su cantidad. Mike lo pidió con todas
+   *     sus letras: «el ítem adquiere en automático ese costo». Mueve el
+   *     precio de venta del proyecto, y por eso quien llama enseña el
+   *     cambio ANTES de aplicarlo.
+   *   · `clave` = el código del producto, y SÓLO si el producto tiene uno.
+   *     `items.clave` es el código de producto —decisión de Mike del
+   *     20-sep—, así que tiene que decir el del suyo. Si el producto todavía
+   *     no tiene código, la pieza se queda con el que traía: borrárselo
+   *     sería perder un dato a cambio de nada.
+   *
+   *  El NOMBRE no se hereda. «Puerta 07» es cómo se llama esa pieza en el
+   *  plano y en la bitácora de obra; pisarlo con «Puerta modelo A» deja 21
+   *  renglones idénticos que ya no se distinguen entre sí. El nombre del
+   *  producto se lee del producto. */
+  private meterEnProducto(item: Fila, producto: Fila): void {
+    const cantidad = Math.max(1, Math.trunc(Number(item.cantidad ?? 1)));
+    const codigo = String(producto.codigo ?? '').trim();
+    this.sql.exec(
+      `UPDATE items SET producto_id = ?, monto = ?, clave = ?, actualizado_at = ? WHERE id = ?`,
+      producto.id, Number(producto.precio ?? 0) * cantidad,
+      codigo || (item.clave ?? null), ahora(), item.id,
+    );
+  }
+
+  /* ──────────── el producto de cada ítem: escogerlo y cambiarlo (§111) ────────────
+   *
+   * Mike, 20-sep: «todos los ítems, aparte del tipo de ítem, deberían tener
+   * un dropdown para seleccionar qué producto es, o nuevo si el ítem es su
+   * mismo producto único. A lo mejor un ítem pasó de ser modelo A a modelo B
+   * y sólo se cambia de grupo. El dropdown debe tener 1) los ítems que son
+   * únicos en el proyecto 2) los productos que ya tienen varios ítems
+   * agrupados en el proyecto».
+   *
+   * Las dos listas son la misma cosa vista en dos momentos: un ítem único ES
+   * un producto que todavía no se ha escrito, y escogerlo desde otro ítem es
+   * lo que lo escribe. Por eso `asignarProducto` acepta las dos y devuelve
+   * siempre un producto.
+   */
+
+  /** Las opciones del dropdown, para un proyecto. No toca nada. */
+  productosDelProyecto(proyecto_id: string): { proyecto: Fila; productos: Fila[]; unicos: Fila[] } | { error: string; detalle?: unknown } {
+    const proyecto = this.obtener('proyectos', proyecto_id);
+    if (!proyecto) return { error: 'no_encontrado', detalle: { que: 'proyecto', id: proyecto_id } };
+
+    /* Los productos QUE SE USAN EN ESTE PROYECTO, no todo el catálogo de la
+     * empresa: el dropdown es para decir «esta puerta es de las de esta
+     * obra», y una lista con los cuatrocientos productos históricos no se
+     * puede leer. El catálogo completo es de quote101, cuando exista. */
+    const productos = this.sql.exec(
+      `SELECT pr.*, COUNT(it.id) AS items, COALESCE(SUM(MAX(it.cantidad,1)),0) AS piezas
+         FROM productos pr JOIN items it ON it.producto_id = pr.id
+        WHERE it.proyecto_id = ?
+        GROUP BY pr.id
+        ORDER BY items DESC, pr.nombre`,
+      proyecto_id,
+    ).toArray() as Fila[];
+
+    /* Y los ítems que todavía no son de ningún producto: cada uno es su
+     * propio producto único, y escoger uno de ellos es decir «somos el
+     * mismo modelo», que es lo que crea el producto. Los cancelados no
+     * salen: no se agrupa con algo que ya se cayó. */
+    const unicos = (this.sql.exec(
+      `SELECT id, clave, nombre, descripcion, tipo, monto, cantidad, moneda, estado
+         FROM items
+        WHERE proyecto_id = ? AND producto_id IS NULL AND estado <> 'cancelado'
+        ORDER BY partida, orden, creado_at`,
+      proyecto_id,
+    ).toArray() as Fila[]).map((it) => ({
+      ...it,
+      precio_pieza: Math.round(Number(it.monto ?? 0) / Math.max(1, Math.trunc(Number(it.cantidad ?? 1)))),
+    })) as Fila[];
+
+    return { proyecto, productos, unicos };
+  }
+
+  /** Cambiar de grupo. Tres formas de decirlo, y todas acaban igual:
+   *
+   *   · `{ producto_id }`  — entra a un producto que ya existe;
+   *   · `{ desde_item }`   — «es el mismo modelo que aquél»: se escribe el
+   *                          producto a partir de ese otro ítem y entran los
+   *                          dos. Es el caso 1) del dropdown de Mike;
+   *   · `{ solo: true }`   — se sale: vuelve a ser su propio producto único.
+   *
+   *  Devuelve el precio de venta del proyecto antes y después, porque
+   *  heredar el costo lo mueve y quien lo movió tiene que verlo. */
+  asignarProducto(
+    item_id: string,
+    args: { producto_id?: string; desde_item?: string; solo?: boolean },
+    contexto: { usuario_id: string },
+  ): { ok: true; item: Fila; producto: Fila | null; venta_antes: number; venta_despues: number } | { error: string; detalle?: unknown } {
+    const item = this.obtener('items', item_id);
+    if (!item) return { error: 'no_encontrado', detalle: { que: 'item', id: item_id } };
+    const proyecto_id = item.proyecto_id ? String(item.proyecto_id) : '';
+    const venta_antes = proyecto_id ? Number((this.obtener('proyectos', proyecto_id) as Fila | null)?.precio_venta ?? 0) : 0;
+
+    const cierra = (producto: Fila | null) => {
+      if (proyecto_id) this.recalcularProyecto(proyecto_id);
+      this.avisar({ t: 'item.cambio', id: item_id }, 'todos');
+      return {
+        ok: true as const,
+        item: this.obtener('items', item_id)!,
+        producto,
+        venta_antes,
+        venta_despues: proyecto_id ? Number((this.obtener('proyectos', proyecto_id) as Fila | null)?.precio_venta ?? 0) : 0,
+      };
+    };
+
+    /* Salirse. El precio NO se le quita: la pieza se queda con el que tiene,
+     * que es el que se cotizó y el que ya está sumado. Salirse de un grupo
+     * es dejar de seguir a un modelo, no volverse gratis. */
+    if (args.solo) {
+      this.sql.exec(`UPDATE items SET producto_id = NULL, actualizado_at = ? WHERE id = ?`, ahora(), item_id);
+      return cierra(null);
+    }
+
+    if (args.producto_id) {
+      const producto = this.obtener('productos', args.producto_id);
+      if (!producto) return { error: 'no_encontrado', detalle: { que: 'producto', id: args.producto_id } };
+      if (String(producto.negocio_id) !== String(item.negocio_id)) {
+        return { error: 'sin_permiso', detalle: { motivo: 'ese producto es de otra empresa' } };
+      }
+      if (String(producto.moneda ?? 'MXN') !== String(item.moneda ?? 'MXN')) {
+        return { error: 'moneda_distinta', detalle: { moneda: item.moneda, esperado: producto.moneda } };
+      }
+      this.meterEnProducto(item, producto);
+      return cierra(this.obtener('productos', String(producto.id)));
+    }
+
+    if (args.desde_item) {
+      if (String(args.desde_item) === item_id) {
+        return { error: 'datos_invalidos', detalle: { motivo: 'un ítem no se agrupa consigo mismo; para eso ya es su propio producto único' } };
+      }
+      const otro = this.obtener('items', String(args.desde_item));
+      if (!otro) return { error: 'no_encontrado', detalle: { que: 'item', id: args.desde_item } };
+      if (String(otro.negocio_id) !== String(item.negocio_id)) {
+        return { error: 'sin_permiso', detalle: { motivo: 'ese ítem es de otra empresa' } };
+      }
+      if (String(otro.moneda ?? 'MXN') !== String(item.moneda ?? 'MXN')) {
+        return { error: 'moneda_distinta', detalle: { moneda: item.moneda, esperado: otro.moneda } };
+      }
+      /* Si aquél YA es de un producto, esto es entrar a ese producto, no
+       * escribir uno nuevo. Pasa cuando el dropdown se pidió hace rato y
+       * mientras tanto alguien agrupó: sin esto se escribiría un producto
+       * duplicado con el mismo modelo adentro. */
+      if (otro.producto_id) {
+        const producto = this.obtener('productos', String(otro.producto_id))!;
+        this.meterEnProducto(item, producto);
+        return cierra(producto);
+      }
+      const cantOtro = Math.max(1, Math.trunc(Number(otro.cantidad ?? 1)));
+      const clave = String(otro.clave ?? '').trim();
+      /* El código de aquél sólo pasa a ser el del producto si no lo tiene ya
+       * otro producto de la empresa. Si choca, el producto nace sin código:
+       * vale más un producto sin catalogar que un 409 en la cara de alguien
+       * que sólo quería decir «éstas dos son iguales». */
+      const chocado = clave
+        ? this.sql.exec(`SELECT id FROM productos WHERE negocio_id = ? AND codigo = ?`, String(item.negocio_id), clave).toArray().length > 0
+        : false;
+      const id = ulid();
+      this.sql.exec(
+        `INSERT INTO productos (id, negocio_id, codigo, nombre, descripcion, tipo, precio, moneda, creado_at, creado_por)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        id, String(item.negocio_id), chocado ? '' : clave,
+        this.nombreDeFamilia(otro.nombre), (otro.descripcion as string | null) ?? null,
+        String(otro.tipo ?? 'mueble'), Math.round(Number(otro.monto ?? 0) / cantOtro),
+        String(otro.moneda ?? 'MXN'), ahora(), contexto.usuario_id,
+      );
+      const producto = this.obtener('productos', id)!;
+      this.meterEnProducto(otro, producto);
+      this.meterEnProducto(item, producto);
+      return cierra(producto);
+    }
+
+    return { error: 'datos_invalidos', detalle: { motivo: 'hay que decir a qué producto: `producto_id`, `desde_item` o `solo`' } };
   }
 
 

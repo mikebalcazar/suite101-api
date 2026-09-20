@@ -113,6 +113,18 @@ export const DEFS: Record<Tabla, Def> = {
     orden: 'creado_at',
     fecha: 'fecha_inicio',
   },
+  /* 0017 · el catálogo de la empresa. Un producto, muchos ítems: «Puerta
+   * modelo A» una vez, y las 21 puertas del plano apuntándole. El código de
+   * aquí es el de CATÁLOGO; el de la pieza vive en quell_elements.code. */
+  productos: {
+    cols: {
+      ...IDENT, negocio_id: 'texto', codigo: 'texto', nombre: 'texto', descripcion: 'texto',
+      tipo: 'texto', precio: 'dinero', moneda: 'texto', creado_por: 'texto', actualizado_at: 'texto',
+    },
+    requeridos: ['negocio_id', 'nombre'],
+    filtros: ['negocio_id', 'codigo', 'tipo'],
+    orden: 'nombre',
+  },
   items: {
     cols: {
       ...IDENT, negocio_id: 'texto', proyecto_id: 'texto', cliente_id: 'texto', clave: 'texto', nombre: 'texto',
@@ -131,9 +143,15 @@ export const DEFS: Record<Tabla, Def> = {
        * `aprobado_at` podría hacer pasar por venta cancelada algo que nadie
        * aprobó nunca. */
       aprobado_at: 'texto', cancelado_at: 'texto', cancelado_motivo: 'texto',
+      /* 0017 · a qué modelo del catálogo pertenece esta pieza. NULL = es su
+       * propio producto único. No se escribe por el CRUD: entra y sale de un
+       * producto por POST /items/:id/producto, que es quien le hereda el
+       * precio (ver CACHES en src/permisos.ts). Un PATCH suelto lo dejaría
+       * apuntando a un modelo de $9,500 con su precio viejo de $12,000. */
+      producto_id: 'texto',
     },
     requeridos: ['negocio_id', 'cliente_id', 'nombre'],
-    filtros: ['negocio_id', 'proyecto_id', 'cliente_id', 'estado', 'etapa', 'partida'],
+    filtros: ['negocio_id', 'proyecto_id', 'cliente_id', 'estado', 'etapa', 'partida', 'producto_id'],
     orden: 'creado_at',
     fecha: 'fecha_entrega',
   },

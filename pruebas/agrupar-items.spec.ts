@@ -1,4 +1,4 @@
-/* Varios ítems iguales, un solo concepto · contrato 0.30.0
+/* Varios ítems del mismo producto · contrato 0.35.0
  *
  * Encargo de Mike del 20-sep-2026: «necesito poder agrupar varios ítems en un
  * solo concepto. Son varias puertas iguales en diferente ubicación —quell las
@@ -6,20 +6,33 @@
  * mismo, "una puerta de X*X de tal acabado", y no tiene caso tener 21 ítems
  * idénticos enlistados en dash».
  *
+ * Y esa misma tarde, lo que cambió CÓMO se hace: «cuando un ítem se asigna a
+ * un grupo de ítems que son del mismo producto, el ítem adquiere en
+ * automático ese costo. También debe poder moverse de grupo de producto un
+ * ítem ya agrupado».
+ *
+ * AGRUPAR YA NO FUSIONA. La primera versión de esto borraba los renglones
+ * que se juntaban y dejaba uno solo con `cantidad = 21`. Un renglón borrado
+ * no se puede mover de grupo, así que contradecía de frente lo segundo que
+ * pidió. Le pregunté con botones y escogió que el grupo de producto
+ * reemplace a la fusión: ahora hay una tabla `productos` y cada pieza le
+ * apunta.
+ *
  * LO QUE DE VERDAD APORTAN ESTAS PRUEBAS:
  *
- *   · que juntar NO MUEVA EL PRECIO DE VENTA del proyecto. Es la única
- *     manera de que acomodar la lista sea acomodar la lista y no un cambio
- *     de precio disfrazado. Si esta prueba se pone roja, lo que se rompió no
- *     es una pantalla: es una cifra que alguien le mandó a un cliente;
- *   · que las PIEZAS DEL PLANO no se pierdan. Las 21 puertas siguen siendo
- *     21 en quell101, con su ubicación y su bitácora; lo que se junta es el
- *     renglón que se cobra. Si al juntar se cayera una pieza, el que está en
- *     obra dejaría de ver un mueble que sí existe;
- *   · que no se pierda un COBRO ni un AVANCE. El renglón que se va se borra,
- *     y antes de borrarse su historia tiene que estar del otro lado;
- *   · que no se junten dos estados distintos. Juntar un cotizado con un
- *     vendido vendería el cotizado sin que nadie lo decida;
+ *   · que NINGÚN RENGLÓN SE BORRE al agrupar. Es lo que hace posible sacar
+ *     una pieza del grupo, que es lo que Mike pidió y lo que la versión
+ *     anterior hacía imposible;
+ *   · que HEREDAR EL PRECIO mueva el precio de venta del proyecto y que la
+ *     respuesta diga cuánto, antes y después. Es la única regla de esto con
+ *     consecuencia en dinero: si se rompe, lo que se rompió no es una
+ *     pantalla, es una cifra que alguien le mandó a un cliente;
+ *   · que las PIEZAS DEL PLANO sigan colgadas de SU renglón, no de uno solo.
+ *     Ésa es la diferencia entre agrupar y fusionar, y es lo que deja que en
+ *     obra se vea cuál puerta va adelantada;
+ *   · que el COBRO y el AVANCE se queden con la pieza que los tuvo;
+ *   · que el código de CATÁLOGO y el de PIEZA no se pisen —la corrección de
+ *     Mike del 20-sep—;
  *   · que un rechazo no deje nada a medias, que es la lección del 20-sep.
  */
 
@@ -129,8 +142,8 @@ describe('la propuesta', () => {
   });
 });
 
-describe('juntarlos', () => {
-  let p1 = '', p2 = '', p3 = '', e1 = '', e2 = '';
+describe('agruparlas escribe un producto y NO borra ningún renglón', () => {
+  let p1 = '', p2 = '', p3 = '', e1 = '', e2 = '', producto = '';
 
   beforeAll(async () => {
     p1 = await puerta('Puerta de clóset', 5_000_00);
@@ -138,7 +151,7 @@ describe('juntarlos', () => {
     p3 = await puerta('Puerta de clóset', 5_000_00);
     e1 = await pieza('Clóset recámara 1', p1);
     e2 = await pieza('Clóset recámara 2', p2);
-    // Un cobro y un avance colgados del que se va: no se pueden perder.
+    // Un cobro y un avance colgados de una de ellas: tienen que seguir suyos.
     await o('mike', '/movimientos', { method: 'POST', json: {
       negocio_id: negocio, tipo: 'ingreso', monto: 2_000_00, fecha: '2026-09-01',
       cuenta_id: cuenta, proyecto_id: proyecto, item_id: p2, descripcion: 'Anticipo de la segunda',
@@ -146,52 +159,217 @@ describe('juntarlos', () => {
     await o('mike', `/items/${p2}/etapa`, { method: 'POST', json: { etapa: 3, nota: 'en fabricación' } });
   });
 
-  it('el PRECIO DE VENTA del proyecto no se mueve', async () => {
+  it('el PRECIO DE VENTA no se mueve si el producto cuesta lo que ya costaban', async () => {
     const antes = await precioVenta();
     const r = await o('mike', `/proyectos/${proyecto}/agrupar`, {
-      method: 'POST', json: { queda_id: p1, se_van: [p2, p3], nombre: 'Puerta de clóset 0.80 × 2.40, nogal' },
+      method: 'POST', json: { items: [p1, p2, p3], nombre: 'Puerta de clóset 0.80 × 2.40, nogal' },
     });
     expect(r.estado, JSON.stringify(r)).toBe(200);
+    producto = r.data.producto.id;
+    expect(r.data.producto.precio, 'el precio del modelo es el de la pieza').toBe(5_000_00);
     expect(await precioVenta(), 'la suma es la misma').toBe(antes);
+    expect(r.data.venta_antes).toBe(antes);
+    expect(r.data.venta_despues).toBe(antes);
   });
 
-  it('queda UN renglón, con la cantidad y el importe sumados', async () => {
-    const it = (await o('mike', `/items/${p1}`)).data;
-    expect(it.cantidad).toBe(3);
-    expect(it.monto).toBe(15_000_00);
-    expect(it.nombre).toBe('Puerta de clóset 0.80 × 2.40, nogal');
-    expect((await o('mike', `/items/${p2}`)).estado, 'el que se fue ya no está').toBe(404);
-    expect((await o('mike', `/items/${p3}`)).estado).toBe(404);
+  it('LOS TRES RENGLONES SIGUEN AHÍ, apuntando al mismo producto', async () => {
+    /* Esto es lo que cambió el 20-sep y es el corazón de todo: antes
+     * quedaba UN renglón de tres piezas y los otros dos se borraban. Mike
+     * pidió poder mover de grupo un ítem ya agrupado, y un renglón borrado
+     * no se puede mover. */
+    for (const id of [p1, p2, p3]) {
+      const it = (await o('mike', `/items/${id}`)).data;
+      expect(it, `${id} sigue existiendo`).toBeTruthy();
+      expect(it.producto_id).toBe(producto);
+      expect(it.cantidad, 'cada renglón sigue siendo UNA pieza').toBe(1);
+      expect(it.monto, 'y hereda el precio del producto').toBe(5_000_00);
+    }
   });
 
-  it('las piezas del plano siguen ahí, ahora colgadas del concepto', async () => {
-    for (const eid of [e1, e2]) {
+  it('cada pieza conserva su nombre: el del modelo se lee del producto', async () => {
+    /* Pisar «Puerta de clóset» con «Puerta de clóset 0.80 × 2.40, nogal» en
+     * los tres renglones deja tres líneas idénticas que ya no se distinguen
+     * entre sí, y en obra hay que saber cuál es cuál. */
+    expect((await o('mike', `/items/${p1}`)).data.nombre).toBe('Puerta de clóset');
+    const pr = (await o('mike', `/productos/${producto}`)).data;
+    expect(pr.nombre).toBe('Puerta de clóset 0.80 × 2.40, nogal');
+  });
+
+  it('las piezas del plano no se movieron de dueño', async () => {
+    /* Cada una sigue colgada de SU renglón, no de uno solo: es la
+     * diferencia entre agrupar y fusionar. Con la fusión, las dos acababan
+     * apuntando al único renglón que sobrevivía. */
+    for (const [eid, dueño] of [[e1, p1], [e2, p2]] as const) {
       const det = await q('mike', `/elements/${eid}`);
       expect(det.element, 'la pieza no se borró').toBeTruthy();
+      expect(det.element.item_id, 'y sigue siendo de su renglón').toBe(dueño);
     }
+    /* Y ninguno de los dos admite otra pieza: cada renglón es UNA puerta y
+     * ya la tiene. Ésa es la lectura de que no se acumularon en uno. */
     const prop = await o('mike', `/obras/${obra}/items`);
-    const cand = prop.data.candidatos.find((c: any) => c.id === p1);
-    expect(cand.ubicados, 'las dos cuelgan del concepto').toBe(2);
-    expect(cand.cupo, 'y todavía cabe la tercera').toBe(1);
+    for (const id of [p1, p2]) {
+      expect(prop.data.candidatos.some((c: any) => c.id === id), `${id} ya está lleno`).toBe(false);
+    }
+    expect(prop.data.candidatos.some((c: any) => c.id === p3), 'la tercera sí espera la suya').toBe(true);
   });
 
-  it('no se pierde el cobro ni el avance del que se fue', async () => {
-    const movs = await o('mike', `/movimientos?item_id=${p1}`);
-    expect(movs.data.filas.length, 'el anticipo se mudó').toBe(1);
+  it('el cobro y el avance se quedan en la pieza que los tuvo', async () => {
+    /* Con la fusión había que mudarlos al renglón que se quedaba. Ya no hay
+     * a dónde mudarlos: el renglón que los tenía sigue vivo, y que sigan
+     * siendo suyos es lo que permite saber qué puerta va adelantada. */
+    const movs = await o('mike', `/movimientos?item_id=${p2}`);
+    expect(movs.data.filas.length).toBe(1);
     expect(movs.data.filas[0].descripcion).toBe('Anticipo de la segunda');
-    const av = await o('mike', `/avances?item_id=${p1}`);
-    expect(av.data.filas.length, 'y el avance también').toBeGreaterThan(0);
+    expect((await o('mike', `/items/${p2}`)).data.etapa, 'la segunda va en fabricación').toBe(3);
+    expect((await o('mike', `/items/${p1}`)).data.etapa, 'y la primera no, aunque sean el mismo modelo').toBe(0);
   });
 
-  it('la etapa queda la del MÁS ATRASADO', async () => {
-    /* Un concepto no va más adelantado que su pieza más atrasada: decir que
-     * las tres van en fabricación porque una lo está es decir que ya están
-     * tres cuando falta trabajo de dos. */
-    expect((await o('mike', `/items/${p1}`)).data.etapa).toBe(0);
+  it('y ya no se vuelven a proponer: están agrupadas', async () => {
+    const grupos = (await o('mike', `/proyectos/${proyecto}/agrupables`)).data.grupos;
+    const otra = grupos.find((x: any) => x.items.some((i: any) => [p1, p2, p3].includes(i.id)));
+    expect(otra).toBeFalsy();
   });
 });
 
-describe('lo que no se junta', () => {
+describe('heredar el precio: lo que Mike pidió con todas sus letras', () => {
+  /* «Cuando un ítem se asigna a un grupo de ítems que son del mismo
+   * producto, el ítem adquiere en automático ese costo.»
+   *
+   * Es la regla con consecuencia en dinero de todo esto, y por eso tiene su
+   * propia prueba: mover una pieza de grupo CAMBIA el precio de venta del
+   * proyecto, y la respuesta tiene que decir cuánto. */
+  let cara = '', barata = '', modeloCaro = '';
+
+  beforeAll(async () => {
+    cara = await puerta('Ventanal', 30_000_00);
+    const otra = await puerta('Ventanal', 30_000_00);
+    barata = await puerta('Ventanal chico', 12_000_00);
+    const r = await o('mike', `/proyectos/${proyecto}/agrupar`, { method: 'POST', json: { items: [cara, otra] } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    modeloCaro = r.data.producto.id;
+  });
+
+  it('entrar a un producto le pone su precio, y el proyecto lo refleja', async () => {
+    const antes = await precioVenta();
+    const r = await o('mike', `/items/${barata}/producto`, { method: 'POST', json: { producto_id: modeloCaro } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.item.monto, 'de 12 mil a 30 mil').toBe(30_000_00);
+    expect(r.data.venta_antes).toBe(antes);
+    expect(r.data.venta_despues).toBe(antes + 18_000_00);
+    expect(await precioVenta()).toBe(antes + 18_000_00);
+  });
+
+  it('con cantidad, el precio es POR PIEZA', async () => {
+    /* `productos.precio` es de una; `items.monto` es de la línea. Un
+     * renglón de 4 piezas del modelo de 30 mil son 120 mil, no 30. */
+    const cuatro = await puerta('Ventanal', 1_00, { cantidad: 4 });
+    const r = await o('mike', `/items/${cuatro}/producto`, { method: 'POST', json: { producto_id: modeloCaro } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.item.monto).toBe(4 * 30_000_00);
+  });
+
+  it('salirse NO le quita el precio: se queda con el que ya tenía', async () => {
+    /* Salirse de un grupo es dejar de seguir a un modelo, no volverse
+     * gratis. Si al salir se fuera a cero, sacar una pieza del grupo
+     * equivocado tiraría el precio de venta sin que nadie lo pidiera. */
+    const antes = await precioVenta();
+    const r = await o('mike', `/items/${barata}/producto`, { method: 'POST', json: { solo: true } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.producto).toBeNull();
+    expect(r.data.item.producto_id).toBeNull();
+    expect(r.data.item.monto, 'conserva los 30 mil que heredó').toBe(30_000_00);
+    expect(await precioVenta(), 'y el proyecto no se mueve').toBe(antes);
+  });
+});
+
+describe('el dropdown del producto, y cambiarse de grupo (§111)', () => {
+  /* Mike, 20-sep: «todos los ítems, aparte del tipo de ítem, deberían tener
+   * un dropdown para seleccionar qué producto es, o nuevo si el ítem es su
+   * mismo producto único. El dropdown debe tener 1) los ítems que son
+   * únicos en el proyecto 2) los productos que ya tienen varios ítems
+   * agrupados en el proyecto». */
+  let solo1 = '', solo2 = '', modeloA = '', modeloB = '';
+
+  beforeAll(async () => {
+    solo1 = await puerta('Librero de estudio', 22_000_00);
+    solo2 = await puerta('Recibidor', 7_000_00);
+    const a1 = await puerta('Cabecera', 9_000_00);
+    const a2 = await puerta('Cabecera', 9_000_00);
+    modeloA = (await o('mike', `/proyectos/${proyecto}/agrupar`, {
+      method: 'POST', json: { items: [a1, a2], nombre: 'Cabecera modelo A' },
+    })).data.producto.id;
+    const b1 = await puerta('Buró', 4_500_00);
+    const b2 = await puerta('Buró', 4_500_00);
+    modeloB = (await o('mike', `/proyectos/${proyecto}/agrupar`, {
+      method: 'POST', json: { items: [b1, b2], nombre: 'Buró modelo B' },
+    })).data.producto.id;
+  });
+
+  it('trae las dos listas: los productos de la obra y los ítems todavía únicos', async () => {
+    const r = await o('mike', `/proyectos/${proyecto}/productos`);
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    const ids = r.data.productos.map((p: any) => p.id);
+    expect(ids).toContain(modeloA);
+    expect(ids).toContain(modeloB);
+    const a = r.data.productos.find((p: any) => p.id === modeloA);
+    expect(a.items, 'dice cuántas piezas trae, que es lo que se lee al escoger').toBe(2);
+    expect(a.nombre).toBe('Cabecera modelo A');
+
+    const unicos = r.data.unicos.map((i: any) => i.id);
+    expect(unicos).toContain(solo1);
+    expect(unicos).toContain(solo2);
+    expect(unicos, 'los que ya están en un producto no salen como únicos').not.toContain(
+      r.data.productos.find((p: any) => p.id === modeloA).id,
+    );
+    const u = r.data.unicos.find((i: any) => i.id === solo1);
+    expect(u.precio_pieza, 'y cada único trae su precio por pieza').toBe(22_000_00);
+  });
+
+  it('pasar de modelo A a modelo B es una sola llamada, y el ítem no deja de existir', async () => {
+    /* «A lo mejor un ítem pasó de ser modelo A a modelo B y sólo se cambia
+     * de grupo». Esto es lo que la fusión hacía imposible. */
+    const deA = (await o('mike', `/items?proyecto_id=${proyecto}&producto_id=${modeloA}`)).data.filas[0].id;
+    const r = await o('mike', `/items/${deA}/producto`, { method: 'POST', json: { producto_id: modeloB } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.item.producto_id).toBe(modeloB);
+    expect(r.data.item.monto, 'y toma el precio del B').toBe(4_500_00);
+    expect((await o('mike', `/items/${deA}`)).estado, 'sigue vivo').toBe(200);
+  });
+
+  it('escoger otro ítem único es decir «somos el mismo modelo»: nace el producto', async () => {
+    /* Es el caso 1) del dropdown: un ítem único ES un producto que todavía
+     * no se ha escrito, y escogerlo desde otro es lo que lo escribe. */
+    const r = await o('mike', `/items/${solo2}/producto`, { method: 'POST', json: { desde_item: solo1 } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.producto.nombre).toBe('Librero de estudio');
+    expect(r.data.producto.precio, 'el precio es el de aquél').toBe(22_000_00);
+    expect(r.data.item.monto, 'y el que escogió lo hereda').toBe(22_000_00);
+    /* Y el que sirvió de modelo también queda adentro: si no, el producto
+     * tendría una sola pieza y la otra se habría quedado fuera de su
+     * propio grupo. */
+    expect((await o('mike', `/items/${solo1}`)).data.producto_id).toBe(r.data.producto.id);
+  });
+
+  it('un ítem no se agrupa consigo mismo: 400', async () => {
+    const r = await o('mike', `/items/${solo1}/producto`, { method: 'POST', json: { desde_item: solo1 } });
+    expect(r.estado).toBe(400);
+  });
+
+  it('sin decir a qué producto: 400', async () => {
+    const r = await o('mike', `/items/${solo1}/producto`, { method: 'POST', json: {} });
+    expect(r.estado).toBe(400);
+  });
+
+  it('el apuntador no se puede escribir por PATCH', async () => {
+    /* Un PATCH suelto lo dejaría apuntando a un modelo de $4,500 con su
+     * precio viejo de $22,000, y el proyecto sumando mal. Se cambia por la
+     * ruta, que hace las dos cosas juntas. */
+    const r = await o('mike', `/items/${solo1}`, { method: 'PATCH', json: { producto_id: modeloB } });
+    expect(r.estado).toBe(403);
+  });
+});
+
+describe('lo que no se agrupa', () => {
   let vendido = '', cotizado = '', deOtro = '';
 
   beforeAll(async () => {
@@ -203,59 +381,69 @@ describe('lo que no se junta', () => {
     } })).data.id;
   });
 
-  it('un cotizado con un vendido: 409, y dice por qué', async () => {
-    const r = await o('mike', `/proyectos/${proyecto}/agrupar`, { method: 'POST', json: { queda_id: vendido, se_van: [cotizado] } });
-    expect(r.estado).toBe(409);
-    expect(r.error).toBe('estado_distinto');
+  it('un cotizado con un vendido SÍ se agrupa: cada uno conserva su estado', async () => {
+    /* Con la fusión esto era un 409 —juntar un cotizado con un vendido lo
+     * habría vendido sin que nadie lo decida—. Ya no aplica: los dos
+     * renglones siguen existiendo con su propio estado; lo único que
+     * comparten es el modelo. Un requerimiento no aprobado del mismo modelo
+     * que una puerta ya vendida es justo lo que Mike va a tener. */
+    const r = await o('mike', `/proyectos/${proyecto}/agrupar`, { method: 'POST', json: { items: [vendido, cotizado] } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect((await o('mike', `/items/${vendido}`)).data.estado).toBe('vendido');
+    expect((await o('mike', `/items/${cotizado}`)).data.estado, 'sigue sin aprobarse').toBe('cotizado');
   });
 
-  it('un ítem de otro proyecto: 404', async () => {
-    const r = await o('mike', `/proyectos/${proyecto}/agrupar`, { method: 'POST', json: { queda_id: vendido, se_van: [deOtro] } });
+  it('un ítem de otro proyecto: 404, y no deja nada a medias', async () => {
+    const suelto = await puerta('Ménsula', 600_00);
+    const r = await o('mike', `/proyectos/${proyecto}/agrupar`, { method: 'POST', json: { items: [suelto, deOtro] } });
     expect(r.estado).toBe(404);
+    /* La lección del 20-sep: se revisa todo y sólo entonces se escribe. */
+    expect((await o('mike', `/items/${suelto}`)).data.producto_id, 'ni el bueno se agrupó').toBeNull();
+    expect((await o('mike', `/items/${deOtro}`)).data.proyecto_id).not.toBe(proyecto);
   });
 
-  it('y el rechazo no deja nada a medias', async () => {
-    /* La lección del 20-sep: un guardado que valida a medio camino miente en
-     * su mensaje de error. Aquí se revisa todo y sólo entonces se escribe. */
-    expect((await o('mike', `/items/${vendido}`)).data.cantidad).toBe(1);
-    expect((await o('mike', `/items/${cotizado}`)).estado, 'el cotizado sigue vivo').toBe(200);
-    expect((await o('mike', `/items/${deOtro}`)).data.proyecto_id, 'y el de la otra casa no se movió').not.toBe(proyecto);
-  });
-
-  it('juntar un ítem consigo mismo no es juntar: 400', async () => {
-    const r = await o('mike', `/proyectos/${proyecto}/agrupar`, { method: 'POST', json: { queda_id: vendido, se_van: [vendido] } });
+  it('un solo ítem no es un grupo: 400', async () => {
+    const suelto = await puerta('Ménsula', 600_00);
+    const r = await o('mike', `/proyectos/${proyecto}/agrupar`, { method: 'POST', json: { items: [suelto] } });
     expect(r.estado).toBe(400);
   });
 });
 
-describe('el código del concepto', () => {
-  it('se conserva si todos traían el mismo, y se limpia si diferían', async () => {
-    /* Un código nombra UNA pieza del plano —la base lo impide dos veces en
-     * la misma obra—. Dejarle PT-01 a un concepto de tres puertas nombra a
-     * una y esconde dos; el código de cada pieza sigue en su plano, que es
-     * donde se lee. */
-    const a = await puerta('Cajonera', 3_000_00);
-    const b = await puerta('Cajonera', 3_000_00);
-    await o('mike', `/items/${a}`, { method: 'PATCH', app: 'quell101', json: { clave: 'CJ-01' } });
-    await o('mike', `/items/${b}`, { method: 'PATCH', app: 'quell101', json: { clave: 'CJ-02' } });
-    const r = await o('mike', `/proyectos/${proyecto}/agrupar`, { method: 'POST', json: { queda_id: a, se_van: [b] } });
-    expect(r.estado, JSON.stringify(r)).toBe(200);
-    expect((await o('mike', `/items/${a}`)).data.clave).toBe('');
-
+describe('el código: el del catálogo y el de la pieza son dos', () => {
+  it('si todas traían el mismo, ése es el del producto', async () => {
     const c = await puerta('Banca', 2_000_00);
     const d = await puerta('Banca', 2_000_00);
     await o('mike', `/items/${c}`, { method: 'PATCH', app: 'quell101', json: { clave: 'BA-01' } });
     await o('mike', `/items/${d}`, { method: 'PATCH', app: 'quell101', json: { clave: 'BA-01' } });
-    expect((await o('mike', `/proyectos/${proyecto}/agrupar`, { method: 'POST', json: { queda_id: c, se_van: [d] } })).estado).toBe(200);
-    expect((await o('mike', `/items/${c}`)).data.clave).toBe('BA-01');
+    const r = await o('mike', `/proyectos/${proyecto}/agrupar`, { method: 'POST', json: { items: [c, d] } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.producto.codigo).toBe('BA-01');
+    expect((await o('mike', `/items/${c}`)).data.clave, 'y las piezas dicen el del producto').toBe('BA-01');
   });
 
-  it('y queda escrito qué renglones se juntaron', async () => {
-    /* El renglón se borra; lo que decía, no. Sin esto, «¿por qué este
-     * concepto dice 3 y yo capturé tres cosas?» no tiene respuesta. */
-    const it = (await o('mike', '/items?proyecto_id=' + proyecto)).data.filas.find((i: any) => i.nombre === 'Banca');
-    expect(Array.isArray(it.refs.agrupados)).toBe(true);
-    expect(it.refs.agrupados[0].clave).toBe('BA-01');
+  it('si diferían, el producto nace SIN código para que lo cataloguen', async () => {
+    /* PT-01 y PT-02 son códigos de PIEZA. Ponerle uno de ellos al modelo
+     * nombraría a una y escondería la otra. Es la corrección de Mike del
+     * 20-sep: «una cosa es el código de ítem (pieza física en obra) y otra
+     * diferente el código de producto de catálogo». */
+    const a = await puerta('Cajonera', 3_000_00);
+    const b = await puerta('Cajonera', 3_000_00);
+    await o('mike', `/items/${a}`, { method: 'PATCH', app: 'quell101', json: { clave: 'CJ-01' } });
+    await o('mike', `/items/${b}`, { method: 'PATCH', app: 'quell101', json: { clave: 'CJ-02' } });
+    const r = await o('mike', `/proyectos/${proyecto}/agrupar`, { method: 'POST', json: { items: [a, b] } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.producto.codigo).toBe('');
+    /* Y la pieza NO pierde el suyo: el producto no tiene con qué pisarlo, y
+     * borrárselo sería perder un dato a cambio de nada. */
+    expect((await o('mike', `/items/${a}`)).data.clave).toBe('CJ-01');
+  });
+
+  it('dos productos con el mismo código de catálogo: 409', async () => {
+    const a = await puerta('Tarima', 800_00);
+    const b = await puerta('Tarima', 800_00);
+    const r = await o('mike', `/proyectos/${proyecto}/agrupar`, { method: 'POST', json: { items: [a, b], codigo: 'BA-01' } });
+    expect(r.estado).toBe(409);
+    expect(r.error).toBe('codigo_en_uso');
   });
 });
 
@@ -269,12 +457,11 @@ describe('las 29 puertas del mismo modelo (§108)', () => {
    * IDÉNTICO, y una pieza traída del plano se llama «Puerta 01» —con su
    * número, así se dibuja en obra—. Así nunca iba a encontrar dos iguales.
    *
-   * Y su segunda idea es la que ya sostiene todo esto: «un ítem/código
-   * puede tener varias instancias que se comportan como ítems
-   * independientes pero derivados del ítem modelo». Eso es exactamente un
-   * concepto con `cantidad` y sus piezas en el plano: el modelo es el
-   * renglón que se cobra, las instancias son las piezas, cada una con su
-   * código y su bitácora.
+   * Y su segunda idea —«un ítem/código puede tener varias instancias que se
+   * comportan como ítems independientes pero derivados del ítem modelo»— es
+   * ahora literal: el ítem modelo es el PRODUCTO y las instancias son los
+   * ítems. El día que lo escribí lo resolví con `cantidad` en un solo
+   * renglón, que era la lectura pobre de lo mismo.
    */
   let deLaObra: string[] = [];
 
@@ -295,8 +482,6 @@ describe('las 29 puertas del mismo modelo (§108)', () => {
     expect(g, 'las encontró').toBeTruthy();
     expect(g.renglones).toBe(5);
     expect(g.nombre, 'y propone el nombre de la familia, no el de una pieza').toBe('Puerta');
-    /* Y enseña qué nombres trae adentro: es lo que deja ver que se está
-     * juntando lo correcto antes de aplicar. */
     expect(g.nombres).toContain('Puerta 01');
     expect(g.nombres).toContain('Puerta 05');
   });
@@ -311,19 +496,33 @@ describe('las 29 puertas del mismo modelo (§108)', () => {
     expect(juntos, 'no se proponen juntas').toBeFalsy();
   });
 
-  it('juntarlas deja UN concepto de cinco piezas y sin código', async () => {
+  it('agruparlas deja UN producto y CINCO piezas, cada una con su código', async () => {
     /* «¿Que cuando es un grupo, lo que viene en vez de código es un
-     * nombre?» — sí: el código nombra una pieza del plano, y el concepto
-     * son cinco. Cada pieza conserva el suyo. */
+     * nombre?» — el producto lleva nombre y su propio código de catálogo;
+     * cada pieza conserva el de obra. Y ahora las cinco siguen siendo
+     * cinco renglones, que es lo que permite mover una sola de grupo. */
     const r = await o('mike', `/proyectos/${proyecto}/agrupar`, {
-      method: 'POST',
-      json: { queda_id: deLaObra[0], se_van: deLaObra.slice(1), nombre: 'Puerta modelo A, 0.90 × 2.40' },
+      method: 'POST', json: { items: deLaObra, nombre: 'Puerta modelo A, 0.90 × 2.40', precio: 8_500_00 },
     });
     expect(r.estado, JSON.stringify(r)).toBe(200);
-    const it = (await o('mike', `/items/${deLaObra[0]}`)).data;
-    expect(it.cantidad).toBe(5);
-    expect(it.clave, 'sin código: el concepto son cinco piezas').toBe('');
-    expect(it.nombre).toBe('Puerta modelo A, 0.90 × 2.40');
+    expect(r.data.producto.nombre).toBe('Puerta modelo A, 0.90 × 2.40');
+    expect(r.data.producto.codigo, 'sin código de catálogo: los cinco traían el suyo').toBe('');
+    expect(r.data.items).toHaveLength(5);
+    for (let i = 0; i < 5; i++) {
+      const it = (await o('mike', `/items/${deLaObra[i]}`)).data;
+      expect(it.producto_id).toBe(r.data.producto.id);
+      expect(it.clave, 'cada pieza conserva su código de obra').toBe(`PP-0${i + 1}`);
+      expect(it.monto, 'y todas toman el precio del modelo').toBe(8_500_00);
+    }
+  });
+
+  it('y sacar UNA del grupo no toca a las otras cuatro', async () => {
+    const r = await o('mike', `/items/${deLaObra[2]}/producto`, { method: 'POST', json: { solo: true } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect((await o('mike', `/items/${deLaObra[2]}`)).data.producto_id).toBeNull();
+    for (const id of [deLaObra[0], deLaObra[1], deLaObra[3], deLaObra[4]]) {
+      expect((await o('mike', `/items/${id}`)).data.producto_id, `${id} sigue en el modelo`).toBeTruthy();
+    }
   });
 });
 

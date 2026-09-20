@@ -111,7 +111,28 @@ describe('el esquema del OrgDB', () => {
     }
   });
 
-  it('no queda ni un «producto» en el esquema: se dice ítem', () => {
-    expect(sinNotas.toLowerCase()).not.toMatch(/producto/);
+  /* Esta prueba decía «no queda ni un producto en el esquema: se dice ítem»,
+   * y tenía razón hasta el 20-sep-2026. Ese día Mike separó las dos cosas:
+   *
+   *   «una cosa es el código de ítem (pieza física en obra) y otra diferente
+   *    el código de producto de catálogo. Cada ítem es un código de producto
+   *    y puede haber varios ítems del mismo modelo.»
+   *
+   * O sea que «producto» sí es una palabra del esquema, y es la de OTRA
+   * tabla. Dejar la prueba anterior habría sido dejar en pie el
+   * entendimiento que él acababa de corregir, que es exactamente la lección
+   * del muro del 20-sep a las 21:20.
+   *
+   * Lo que sí hay que cuidar es que no se vuelvan a mezclar, y eso es lo que
+   * mide ahora: un ítem apunta a su producto con `producto_id` y nada más.
+   * Una columna llamada `producto` a secas —dentro de items o de donde sea—
+   * sería el nombre del modelo copiado a la pieza, que es el regreso de la
+   * confusión por la puerta de atrás. */
+  it('ítem y producto son dos cosas, y no se mezclan', () => {
+    expect(delSql.productos).toEqual(expect.arrayContaining(['codigo', 'nombre', 'precio']));
+    expect(delSql.items).toContain('producto_id');
+    expect(sinNotas).not.toMatch(/\bproducto\s+TEXT\b/);
+    // El código del CATÁLOGO vive en el producto; el de la PIEZA, en el plano.
+    expect(delSql.quell_elements).toContain('code');
   });
 });
