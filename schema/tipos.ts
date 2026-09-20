@@ -30,7 +30,9 @@
  * de quell101 devuelve `alcance` en cada pieza del plano, para que la obra
  * pueda esconder lo que está fuera; una pieza sin ítem va dentro. Y
  * `quell101` gana permiso de escribir `items.estado`, que es lo que esas dos
- * rutas mueven). Antes:
+ * rutas mueven. Y cada ítem viaja con `alcance` YA CALCULADO —no es
+ * columna: se calcula al salir y no se puede escribir desde fuera—, para
+ * que ninguna pantalla vuelva a deducirlo de dos campos). Antes:
  * 0.30.0 (VARIOS ÍTEMS IGUALES, UN SOLO CONCEPTO, y la
  * PARTIDA del ítem. `GET /orgs/:o/proyectos/:id/agrupables` propone qué
  * renglones son el mismo producto capturado varias veces —mismo nombre,
