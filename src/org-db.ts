@@ -22,6 +22,7 @@ import quell from '../migrations/org/0006_quell.sql';
 import roster from '../migrations/org/0007_roster.sql';
 import ordenes from '../migrations/org/0008_ordenes.sql';
 import fiscal from '../migrations/org/0009_fiscal.sql';
+import obras from '../migrations/org/0010_obras.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { atender as atenderRoster, type DatosEmpresaRoster, type SesionRoster } from './roster/motor.js';
 import { invitarClienteEnSuite } from './clientes';
@@ -41,7 +42,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras];
 
 /** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
  *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
@@ -149,6 +150,12 @@ export interface ApiOrgDB {
   facturadoVsReal(desde: string, hasta: string, negocio_id?: string | null): Promise<{ desde: string; hasta: string; ingresos: { total: number; facturado: number; fuera: number }; egresos: { total: number; facturado: number; fuera: number } }>;
   pendientesDeFactura(negocio_id?: string | null): Promise<Fila[]>;
   listaCfdi(args: { desde?: string; hasta?: string; tipo?: string; estado?: string; negocio_id?: string | null }): Promise<Fila[]>;
+
+  /* La obra de quell101 ligada al proyecto de dash101 (0010). */
+  obras(args?: { sueltas?: boolean }): Promise<Fila[]>;
+  obraDeProyecto(proyecto_id: string): Promise<Fila | null>;
+  ligarObra(obra_id: string, proyecto_id: string): Promise<{ ok: true; obra: Fila } | { error: string; detalle?: unknown }>;
+  desligarObra(obra_id: string): Promise<{ ok: true; obra: Fila } | { error: string; detalle?: unknown }>;
 
   fetch(req: Request): Promise<Response>;
 }
@@ -1672,6 +1679,71 @@ export class OrgDB extends DurableObject<Env> {
     if (args.negocio_id) { donde.push('negocio_id = ?'); vals.push(args.negocio_id); }
     const filtro = donde.length ? ` WHERE ${donde.join(' AND ')}` : '';
     return this.leerInternas('cfdi', this.sql.exec(`SELECT * FROM cfdi${filtro} ORDER BY fecha DESC, creado_at DESC`, ...vals).toArray() as Fila[]);
+  }
+
+  /* ─────────────── obras de quell101 y proyectos de dash101 (0010) ───────────────
+   * Mike, 20-sep: la obra que se abre en quell101 y el proyecto que se abre
+   * en dash101 son la misma casa. Aquí está la liga: listarlas, ponerla y
+   * quitarla. Lo que se devuelve va con los nombres de la suite —`nombre`,
+   * `cliente`, `estado`— y no con los de quell101 —`name`, `client`,
+   * `status`—: una pantalla de dash101 no tiene por qué aprenderse las
+   * columnas de otra app para enseñar una lista.
+   */
+
+  /** Las obras, con su proyecto si lo tienen. `sueltas` deja sólo las que no
+   *  están ligadas, que es lo que dash101 ofrece al crear un proyecto. */
+  obras(args: { sueltas?: boolean } = {}): Fila[] {
+    const filtro = args.sueltas ? ' WHERE o.proyecto_id IS NULL' : '';
+    return this.sql
+      .exec(
+        `SELECT o.id, o.name AS nombre, o.client AS cliente, o.status AS estado,
+                o.created_at AS creado_at, o.proyecto_id,
+                p.nombre AS proyecto_nombre, p.negocio_id AS proyecto_negocio_id,
+                (SELECT COUNT(*) FROM quell_plans pl WHERE pl.project_id = o.id) AS planos,
+                (SELECT COUNT(*) FROM quell_elements e WHERE e.project_id = o.id) AS ubicados
+         FROM quell_projects o LEFT JOIN proyectos p ON p.id = o.proyecto_id${filtro}
+         ORDER BY o.status, o.name`,
+      )
+      .toArray() as Fila[];
+  }
+
+  /** La obra ligada a un proyecto, si la hay. La pantalla del proyecto la
+   *  enseña para poder abrir el plano desde ahí. */
+  obraDeProyecto(proyecto_id: string): Fila | null {
+    return (this.obras().find((o) => o.proyecto_id === proyecto_id) as Fila) ?? null;
+  }
+
+  /** Poner la liga. Se niega si cualquiera de los dos lados ya está ligado a
+   *  OTRO: una obra con dos proyectos, o un proyecto con dos obras, deja «el
+   *  avance del proyecto» con dos respuestas ciertas al mismo tiempo. Ligar
+   *  lo que ya estaba ligado igual no es un error: contesta lo mismo. */
+  ligarObra(obra_id: string, proyecto_id: string): { ok: true; obra: Fila } | { error: string; detalle?: unknown } {
+    const obra = this.sql.exec(`SELECT * FROM quell_projects WHERE id = ?`, obra_id).toArray()[0] as Fila | undefined;
+    if (!obra) return { error: 'no_encontrado', detalle: { que: 'obra', id: obra_id } };
+    const proyecto = this.sql.exec(`SELECT id FROM proyectos WHERE id = ?`, proyecto_id).toArray()[0] as Fila | undefined;
+    if (!proyecto) return { error: 'no_encontrado', detalle: { que: 'proyecto', id: proyecto_id } };
+
+    if (obra.proyecto_id && obra.proyecto_id !== proyecto_id) {
+      return { error: 'ya_ligada', detalle: { que: 'obra', obra_id, proyecto_id: obra.proyecto_id, motivo: 'esa obra ya está ligada a otro proyecto' } };
+    }
+    const otra = this.sql
+      .exec(`SELECT id FROM quell_projects WHERE proyecto_id = ? AND id <> ?`, proyecto_id, obra_id)
+      .toArray()[0] as Fila | undefined;
+    if (otra) {
+      return { error: 'ya_ligada', detalle: { que: 'proyecto', proyecto_id, obra_id: otra.id, motivo: 'ese proyecto ya está ligado a otra obra' } };
+    }
+
+    this.sql.exec(`UPDATE quell_projects SET proyecto_id = ? WHERE id = ?`, proyecto_id, obra_id);
+    return { ok: true, obra: this.obras().find((o) => o.id === obra_id)! };
+  }
+
+  /** Quitar la liga. No borra nada de ninguno de los dos lados: los deja
+   *  sueltos, cada uno con lo suyo. */
+  desligarObra(obra_id: string): { ok: true; obra: Fila } | { error: string; detalle?: unknown } {
+    const obra = this.sql.exec(`SELECT id FROM quell_projects WHERE id = ?`, obra_id).toArray()[0] as Fila | undefined;
+    if (!obra) return { error: 'no_encontrado', detalle: { que: 'obra', id: obra_id } };
+    this.sql.exec(`UPDATE quell_projects SET proyecto_id = NULL WHERE id = ?`, obra_id);
+    return { ok: true, obra: this.obras().find((o) => o.id === obra_id)! };
   }
 
   /* ─────────────── pool para autocompletar (§7) ─────────────── */

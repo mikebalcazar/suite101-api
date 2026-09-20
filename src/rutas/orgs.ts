@@ -18,6 +18,7 @@ import { invitarClienteEnSuite } from '../clientes';
 import { crearUsuario } from '../maestro';
 import { guardarPin, normalizaCorreo, pinAceptable, ulid } from '../lib';
 import { montarOrdenes } from './ordenes';
+import { montarObras } from './obras';
 import { err, ok, type Ctx, type Quien, type Vars } from '../http';
 import type { Env } from '../entorno';
 import { APPS, LLAVE_APP, type App, type Tabla } from '../../schema/tipos';
@@ -508,6 +509,7 @@ rutas.get('/:o/conciliaciones/estadistica', async (c) => {
  * del CRUD genérico: si fueran después, `/:o/:tabla` se tragaría
  * `/:o/ordenes` como si «ordenes» fuera el nombre de una tabla. */
 montarOrdenes(rutas);
+montarObras(rutas);
 
 rutas.get('/:o/:tabla', async (c) => {
   const tabla = c.req.param('tabla')!;

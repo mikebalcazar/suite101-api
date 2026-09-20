@@ -13,7 +13,19 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.21.4 (`GET /orgs/:o/ordenes/:id` devuelve también
+ * Versión del contrato: 0.22.0 (la obra de quell101 y el proyecto de dash101
+ * son la misma casa: `quell_projects.proyecto_id` (migración 0010 del OrgDB)
+ * y las rutas `/orgs/:o/obras` —con `?sueltas=1`, las que todavía no tienen
+ * proyecto—, `/orgs/:o/obras/de-proyecto/:id` y
+ * `POST|DELETE /orgs/:o/obras/:id/ligar`. Hasta hoy la misma casa se
+ * capturaba dos veces, una en cada app, y ninguna sabía de la otra. La
+ * columna va del lado de quell101 y no en `proyectos`, que sale por el CRUD
+ * genérico: la liga se pone y se quita donde el permiso se revisa. Un índice
+ * único parcial impide que un proyecto tenga dos obras, porque entonces «el
+ * avance del proyecto» tendría dos respuestas ciertas. Si el proyecto se
+ * borra, la obra NO se borra: queda suelta (`ON DELETE SET NULL`), porque
+ * tiene planos, fotos y bitácora de gente que estuvo ahí. Lo pidió Mike el
+ * 20-sep). Antes: 0.21.4 (`GET /orgs/:o/ordenes/:id` devuelve también
  * los archivos del pago —el comprobante, que cuelga del movimiento— junto
  * con los de la orden, y cada uno dice de dónde viene en `de`: `orden` o
  * `pago`. Quien pidió la compra necesita el comprobante para reclamarle al
@@ -175,7 +187,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.21.4';
+export const VERSION_CONTRATO = '0.22.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -745,6 +757,24 @@ export const TABLAS_INTERNAS = [
 ] as const;
 
 /* ─────────────── lo que devuelven las rutas con nombre ─────────────── */
+
+/** GET /orgs/:o/obras — la obra de quell101, dicha con los nombres de la
+ *  suite. `proyecto_id` es la liga con el proyecto de dash101: cuando es
+ *  `null`, la obra existe en quell101 y nadie le ha puesto precio todavía. */
+export interface Obra {
+  id: string;
+  nombre: string;
+  cliente: string;
+  estado: 'activo' | 'cerrado';
+  creado_at: string;
+  proyecto_id: string | null;
+  proyecto_nombre: string | null;
+  proyecto_negocio_id: string | null;
+  /** cuántos planos tiene cargados */
+  planos: number;
+  /** cuántos ítems están ya ubicados en un plano */
+  ubicados: number;
+}
 
 /** GET /orgs/:o/pool — para autocompletar. Solo identidad. */
 export interface Pool {
