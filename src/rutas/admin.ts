@@ -90,7 +90,7 @@ const nombresDeApps = (o: Org): string[] =>
 async function mandarBienvenida(c: Ctx, o: Org, correo: string, nombre: string | null): Promise<{ enviado: boolean; motivo?: string }> {
   const urlPanel = c.env.URL_PANEL_DIRECTOR || 'https://workshop101.mike-929.workers.dev';
   const msg = correoBienvenida({ empresa: o.nombre, director: nombre, correo, urlPanel, apps: nombresDeApps(o) });
-  const envio = await enviarCorreo(c.env, { para: correo, ...msg });
+  const envio = await enviarCorreo(c.env, { para: correo, ...msg, conBaja: true });
   if (envio.enviado) await marcarBienvenida(c.env, o.id);
   await apuntaAdmin(c.env, { quien: quien(c), org_id: o.id, campo: 'bienvenida', despues: envio.enviado ? `enviada a ${correo}` : `no salió (${envio.motivo}) a ${correo}` });
   return envio;
