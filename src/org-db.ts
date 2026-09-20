@@ -23,6 +23,7 @@ import roster from '../migrations/org/0007_roster.sql';
 import ordenes from '../migrations/org/0008_ordenes.sql';
 import fiscal from '../migrations/org/0009_fiscal.sql';
 import obras from '../migrations/org/0010_obras.sql';
+import cantidad from '../migrations/org/0011_cantidad.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { atender as atenderRoster, type DatosEmpresaRoster, type SesionRoster } from './roster/motor.js';
 import { invitarClienteEnSuite } from './clientes';
@@ -42,7 +43,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad];
 
 /** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
  *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
@@ -159,6 +160,7 @@ export interface ApiOrgDB {
   /* La obra de quell101 ligada al proyecto de dash101 (0010). */
   obras(args?: { sueltas?: boolean }): Promise<Fila[]>;
   obraDeProyecto(proyecto_id: string): Promise<Fila | null>;
+  sinUbicar(obra_id: string): Promise<{ obra: Fila; items: Fila[] } | { error: string; detalle?: unknown }>;
   ligarObra(obra_id: string, proyecto_id: string): Promise<{ ok: true; obra: Fila } | { error: string; detalle?: unknown }>;
   desligarObra(obra_id: string): Promise<{ ok: true; obra: Fila } | { error: string; detalle?: unknown }>;
 
@@ -1804,6 +1806,48 @@ export class OrgDB extends DurableObject<Env> {
    *  enseña para poder abrir el plano desde ahí. */
   obraDeProyecto(proyecto_id: string): Fila | null {
     return (this.obras().find((o) => o.proyecto_id === proyecto_id) as Fila) ?? null;
+  }
+
+  /** Los ítems vendidos de la obra que todavía NO tienen pieza en un plano.
+   *
+   *  Mike, 20-sep: «cuando se genera un nuevo proyecto con su cantidad de
+   *  ítems, en quell […] deben de aparecer en una lista de "ítems sin
+   *  ubicar". Para ir seleccionando y ubicando cada ítem en su lugar.»
+   *
+   *  Con cantidad 20 y tres ya puestas en el plano, faltan 17: la cuenta la
+   *  hace el servidor y no la pantalla, porque dos personas ubicando piezas a
+   *  la vez tendrían dos cuentas distintas y las dos se creerían.
+   *
+   *  Sólo los VENDIDOS: lo que nada más está cotizado no se fabrica todavía,
+   *  y llenaría el plano de piezas que quizá nunca se vendan. */
+  sinUbicar(obra_id: string): { obra: Fila; items: Fila[] } | { error: string; detalle?: unknown } {
+    const obra = this.sql.exec(`SELECT * FROM quell_projects WHERE id = ?`, obra_id).toArray()[0] as Fila | undefined;
+    if (!obra) return { error: 'no_encontrado', detalle: { que: 'obra', id: obra_id } };
+    if (!obra.proyecto_id) {
+      return { error: 'sin_liga', detalle: { motivo: 'esta obra todavía no está ligada a un proyecto de dash101' } };
+    }
+    const items = this.sql
+      .exec(
+        `SELECT i.id, i.nombre, i.descripcion, i.clave, i.tipo, i.monto, i.cantidad, i.fecha_entrega,
+                (SELECT COUNT(*) FROM quell_elements e WHERE e.item_id = i.id) AS ubicados
+         FROM items i
+         WHERE i.proyecto_id = ? AND i.estado = 'vendido'
+         ORDER BY i.creado_at`,
+        String(obra.proyecto_id),
+      )
+      .toArray() as Fila[];
+    return {
+      obra,
+      items: items
+        .map((i) => ({
+          ...i,
+          faltan: Math.max(0, Number(i.cantidad ?? 1) - Number(i.ubicados ?? 0)),
+          // El precio por pieza, para que la pantalla no divida mal: `monto`
+          // es el importe de la línea completa.
+          monto_unitario: Number(i.cantidad ?? 1) > 0 ? Math.round(Number(i.monto) / Number(i.cantidad ?? 1)) : Number(i.monto),
+        }))
+        .filter((i) => i.faltan > 0),
+    };
   }
 
   /** Poner la liga. Se niega si cualquiera de los dos lados ya está ligado a

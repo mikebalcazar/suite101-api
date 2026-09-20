@@ -28,6 +28,9 @@ const GENTE = {
   tin: { correo: 'tin-obra@ejemplo.mx', nombre: 'Tin Taller', rol: 'staff' },
 };
 
+/** Un PNG de un pixel: lo mínimo para subir un plano. */
+const PNG = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0));
+
 const galletas: Record<string, string> = {};
 
 async function pedir(quien: string, ruta: string, o: RequestInit & { app?: string; json?: unknown } = {}) {
@@ -194,5 +197,131 @@ describe('borrar el proyecto no se lleva la obra', () => {
     expect(obra.proyecto_id, 'y quedó suelta').toBe(null);
     // quell101 la sigue abriendo igual
     expect((await q('mike', `/projects/${obraTres}`)).estado).toBe(200);
+  });
+});
+
+/* ─────────────── la cantidad y los «ítems sin ubicar» (0.24.0) ───────────────
+ *
+ * Mike, 20-sep: «a veces son 20 puertas del mismo acabado y precio […] Y
+ * cuando se genera un nuevo proyecto con su cantidad de ítems, en quell […]
+ * deben de aparecer en una lista de "ítems sin ubicar". Para ir seleccionando
+ * y ubicando cada ítem en su lugar.»
+ *
+ * Lo que de verdad aportan:
+ *
+ *   · que la cuenta de cuántas faltan la haga EL SERVIDOR. Dos personas
+ *     ubicando piezas a la vez, cada una con su cuenta, es un plano con 21
+ *     puertas de un ítem de 20;
+ *   · que una pieza no se pueda colgar del ítem de OTRA casa;
+ *   · que `monto` siga siendo el importe de la línea, y por tanto que
+ *     `precio_venta` no se mueva al poner cantidades.
+ */
+
+describe('la cantidad y los ítems sin ubicar', () => {
+  let obra = '', proyecto = '', plano = '', puertas = '', barra = '';
+
+  it('un ítem de 20 puertas: el precio de venta es el importe de la línea, no ×20', async () => {
+    obra = (await q('mike', '/projects', { method: 'POST', json: { name: 'Casa Tres (obra)', client: 'Familia Uno' } })).id;
+    proyecto = (await o('mike', '/proyectos', { method: 'POST', json: { negocio_id: negocio, cliente_id: cliente, nombre: 'Casa Tres' } })).data.id;
+    expect((await o('mike', `/obras/${obra}/ligar`, { method: 'POST', json: { proyecto_id: proyecto } })).estado).toBe(200);
+
+    // 20 puertas a $1,500.00 cada una = $30,000.00 de línea.
+    const r = await o('mike', '/items', { method: 'POST', json: {
+      negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto,
+      nombre: 'Puerta de clóset', monto: 30_000_00, cantidad: 20, estado: 'vendido',
+    } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    puertas = r.data.id;
+    expect(r.data.cantidad).toBe(20);
+    expect(r.data.monto).toBe(30_000_00);
+
+    const p = await o('mike', `/proyectos/${proyecto}`);
+    expect(p.data.precio_venta, 'la suma es del importe, no del importe por la cantidad').toBe(30_000_00);
+  });
+
+  it('lo que ya existía vale 1 sin que nadie lo diga', async () => {
+    const r = await o('mike', '/items', { method: 'POST', json: {
+      negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto,
+      nombre: 'Barra de cocina', monto: 12_000_00, estado: 'vendido',
+    } });
+    barra = r.data.id;
+    expect(r.data.cantidad).toBe(1);
+  });
+
+  it('sin ubicar: las 20 puertas y la barra, con el precio por pieza', async () => {
+    const r = await o('mike', `/obras/${obra}/sin-ubicar`);
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    const porNombre = Object.fromEntries(r.data.items.map((i: any) => [i.nombre, i]));
+    expect(porNombre['Puerta de clóset'].faltan).toBe(20);
+    expect(porNombre['Puerta de clóset'].ubicados).toBe(0);
+    expect(porNombre['Puerta de clóset'].monto_unitario, 'el precio de UNA puerta').toBe(1_500_00);
+    expect(porNombre['Barra de cocina'].faltan).toBe(1);
+  });
+
+  it('lo que sólo está cotizado no llena el plano', async () => {
+    const cotizado = await o('mike', '/items', { method: 'POST', json: {
+      negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto,
+      nombre: 'Librero que quizá', monto: 9_000_00, cantidad: 3,
+    } });
+    expect(cotizado.data.estado).toBe('cotizado');
+    const r = await o('mike', `/obras/${obra}/sin-ubicar`);
+    expect(r.data.items.map((i: any) => i.nombre)).not.toContain('Librero que quizá');
+  });
+
+  it('al ubicar una puerta, faltan 19 — y la cuenta la hace el servidor', async () => {
+    const fd = new FormData();
+    fd.append('name', 'Planta'); fd.append('file_name', 'p.pdf'); fd.append('width', '1000'); fd.append('height', '800');
+    fd.append('image', new File([PNG], 'plan.png', { type: 'image/png' }));
+    const pl = await q('mike', `/projects/${obra}/plans`, { method: 'POST', body: fd });
+    expect(pl.estado, JSON.stringify(pl)).toBe(200);
+    plano = pl.id;
+
+    const puesta = await q('mike', `/plans/${plano}/elements`, { method: 'POST', json: {
+      op_id: crypto.randomUUID(), name: 'Puerta 1', type: 'Puerta', x: 0.4, y: 0.6, item_id: puertas,
+    } });
+    expect(puesta.estado, JSON.stringify(puesta)).toBe(200);
+    expect(puesta.item_id).toBe(puertas);
+
+    const r = await o('mike', `/obras/${obra}/sin-ubicar`);
+    const puerta = r.data.items.find((i: any) => i.id === puertas);
+    expect(puerta.ubicados).toBe(1);
+    expect(puerta.faltan).toBe(19);
+  });
+
+  it('una pieza no se cuelga del ítem de otra casa', async () => {
+    // `obraDos` quedó ligada a `casaUno` en las pruebas de arriba; sus ítems
+    // no son de esta obra.
+    const ajeno = await o('mike', '/items', { method: 'POST', json: {
+      negocio_id: negocio, cliente_id: cliente, proyecto_id: casaUno,
+      nombre: 'Mueble de otra casa', monto: 1_000_00, estado: 'vendido',
+    } });
+    const r = await q('mike', `/plans/${plano}/elements`, { method: 'POST', json: {
+      op_id: crypto.randomUUID(), name: 'Intruso', type: 'Otro', x: 0.1, y: 0.1, item_id: ajeno.data.id,
+    } });
+    expect(r.estado).toBe(400);
+  });
+
+  it('cuando ya no falta ninguna, el ítem sale de la lista y no se puede poner otra', async () => {
+    const soloUna = await o('mike', '/items', { method: 'POST', json: {
+      negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto,
+      nombre: 'Cabecera', monto: 5_000_00, cantidad: 1, estado: 'vendido',
+    } });
+    const id = soloUna.data.id;
+    const poner = () => q('mike', `/plans/${plano}/elements`, { method: 'POST', json: {
+      op_id: crypto.randomUUID(), name: 'Cabecera', type: 'Otro', x: 0.2, y: 0.2, item_id: id,
+    } });
+    expect((await poner()).estado).toBe(200);
+    const otra = await poner();
+    expect(otra.estado, 'la segunda ya no cabe').toBe(409);
+
+    const r = await o('mike', `/obras/${obra}/sin-ubicar`);
+    expect(r.data.items.map((i: any) => i.id)).not.toContain(id);
+  });
+
+  it('una obra sin proyecto ligado lo dice, en vez de contestar una lista vacía', async () => {
+    const suelta = (await q('mike', '/projects', { method: 'POST', json: { name: 'Obra suelta', client: '' } })).id;
+    const r = await o('mike', `/obras/${suelta}/sin-ubicar`);
+    expect(r.estado).toBe(409);
+    expect(r.error).toBe('sin_liga');
   });
 });
