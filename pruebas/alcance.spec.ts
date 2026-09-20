@@ -212,6 +212,28 @@ describe('las dos copias de la regla dicen lo mismo', () => {
   });
 });
 
+describe('el alcance viaja calculado', () => {
+  it('cada ítem lo trae, sin que la pantalla tenga que deducirlo', async () => {
+    /* Si cada app aplicara la regla por su cuenta habría tantas reglas como
+     * apps. Así la dice el servidor una vez y las tres la leen. */
+    const it = await item('Zapatera', 4_000_00, 'cotizado');
+    expect((await o('mike', `/items/${it}`)).data.alcance).toBe('no_aprobado');
+    await o('mike', `/items/${it}/aprobar`, { method: 'POST' });
+    expect((await o('mike', `/items/${it}`)).data.alcance).toBe('dentro');
+    const lista = await o('mike', `/items?proyecto_id=${proyecto}`);
+    expect(lista.data.filas.find((f: any) => f.id === it).alcance, 'y también en la lista').toBe('dentro');
+  });
+
+  it('no se puede escribir desde fuera: no es columna, es cuenta', async () => {
+    const it = await item('Banco', 900_00, 'cotizado');
+    const r = await o('mike', `/items/${it}`, { method: 'PATCH', json: { alcance: 'dentro' } });
+    /* El CRUD ignora lo que no es columna, así que no truena; lo que importa
+     * es que el alcance siga diciendo la verdad. */
+    expect((await o('mike', `/items/${it}`)).data.alcance).toBe('no_aprobado');
+    void r;
+  });
+});
+
 describe('una pieza sin ítem sigue dentro', () => {
   it('no se esconde del plano por no tener renglón en dash', async () => {
     /* Es trabajo de la obra que nadie cotizó. Esconderlo por una razón de

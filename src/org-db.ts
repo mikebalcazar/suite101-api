@@ -36,6 +36,7 @@ import { secretoDe } from './maestro';
 import type { Quien } from './http';
 import { DEFS, type Def, type Tipo } from './tablas';
 import { ahora, normalizar, ulid } from './lib';
+import { alcanceDeItem } from '../schema/tipos';
 import { TABLAS, type Aviso, type Etapa, type Peek, type Pool, type Tabla } from '../schema/tipos';
 import type { Env } from './entorno';
 
@@ -367,6 +368,16 @@ export class OrgDB extends DurableObject<Env> {
       } else if (t === 'bool') out[k] = !!v;
       else out[k] = v;
     }
+    /* EL ALCANCE VIAJA CALCULADO, no como dos columnas para que cada
+     * pantalla lo deduzca.
+     *
+     * Mike, 20-sep: «para que un ítem se considere cancelado tiene que haber
+     * estado aprobado primero». La regla sale de `estado` y `aprobado_at`, y
+     * si cada app la aplica por su cuenta hay tantas reglas como apps —y la
+     * que se quede atrás va a ser la que nadie mire—. Así la dice el
+     * servidor una vez y las tres la leen. No es columna: no se guarda, se
+     * calcula al salir, y por eso no se puede escribir desde fuera. */
+    if (tabla === 'items') out.alcance = alcanceDeItem(out as { estado?: string; aprobado_at?: string | null });
     return out;
   }
 
