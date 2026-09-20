@@ -175,7 +175,7 @@ rutas.post('/:o/items/:id/etapa', async (c) => {
 
 rutas.post('/:o/items/exportar', async (c) => {
   const app = c.get('app');
-  const permiso = revisarEscritura('items', app, ['nombre', 'monto', 'estado', 'origen']);
+  const permiso = revisarEscritura('items', app, ['nombre', 'monto', 'cantidad', 'estado', 'origen']);
   if (!permiso.ok) return err(c, permiso.error, 403, permiso.detalle);
 
   const cuerpo = await c.req.json<{ cotizacion_id?: string; lineas?: Array<Record<string, unknown>>; negocio_id?: string; cliente_id?: string }>().catch(() => ({}) as never);
