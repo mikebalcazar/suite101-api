@@ -170,7 +170,9 @@ describe('4 · el ítem, su etapa y el aviso por WebSocket', () => {
         cotizacion_id: 'COT-1',
         negocio_id: ids.negocio,
         cliente_id: ids.cliente,
-        lineas: [{ nombre: 'Cocina', monto: 15000000 }, { nombre: 'Clóset', monto: 5000000 }],
+        // La segunda con cantidad: quote101 cotiza «× 20» desde siempre y su
+        // total ya viene multiplicado. Lo que se mide es que ese 20 cruce.
+        lineas: [{ nombre: 'Cocina', monto: 15000000 }, { nombre: 'Clóset', monto: 5000000, cantidad: 20 }],
       }),
     });
     expect(ex.estado).toBe(201);
@@ -180,6 +182,11 @@ describe('4 · el ítem, su etapa y el aviso por WebSocket', () => {
     // $150,000.00 se guardó como 15000000 y sigue siendo un entero
     expect(ex.data.filas[0].monto).toBe(15000000);
     expect(Number.isInteger(ex.data.filas[0].monto)).toBe(true);
+    // La cantidad cruza; la que no la dice vale 1, que es lo que siempre quiso
+    // decir un renglón sin cantidad.
+    expect(ex.data.filas[0].cantidad).toBe(1);
+    expect(ex.data.filas[1].cantidad).toBe(20);
+    expect(ex.data.filas[1].monto, 'y el monto sigue siendo el de la línea').toBe(5000000);
     ids.item = ex.data.filas[0].id;
     ids.item2 = ex.data.filas[1].id;
 

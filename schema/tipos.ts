@@ -13,7 +13,12 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.24.0 (la cantidad del ítem y los «ítems sin
+ * Versión del contrato: 0.24.1 (`POST /orgs/:o/items/exportar` acepta
+ * `cantidad` por línea. quote101 cotiza «× 20» desde siempre —su total ya
+ * viene multiplicado— y ese 20 no cruzaba a la suite: se exportaba un
+ * renglón de 20 puertas que valía por una sola pieza, y en quell101 había
+ * una sola que ubicar. Sin `cantidad`, 1, como todo lo demás). Antes:
+ * 0.24.0 (la cantidad del ítem y los «ítems sin
  * ubicar»: `items.cantidad` (migración 0011, por omisión 1) dice cuántas
  * piezas iguales son —«20 puertas del mismo acabado y precio»—, y
  * `quell_elements.item_id` dice qué pieza del plano cumple cuál ítem
@@ -209,7 +214,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.24.0';
+export const VERSION_CONTRATO = '0.24.1';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

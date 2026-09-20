@@ -817,6 +817,13 @@ export class OrgDB extends DurableObject<Env> {
             descripcion: l.descripcion ?? null,
             tipo: l.tipo ?? 'mueble',
             monto: l.monto ?? 0,
+            /* La cantidad que trae la cotización (0011). quote101 ya cotiza
+             * «× 20» desde siempre —`m.qty`— y su total ya viene
+             * multiplicado; lo que faltaba era que ese 20 cruzara a la suite,
+             * para que en dash101 se vea y para que en quell101 haya 20
+             * piezas que ubicar en el plano. Sin él se exportaba un renglón
+             * de 20 puertas que valía por una sola pieza. */
+            cantidad: Number.isFinite(Number(l.cantidad)) && Number(l.cantidad) > 0 ? Math.trunc(Number(l.cantidad)) : 1,
             moneda: l.moneda ?? 'MXN',
             estado: 'cotizado',
             origen: { app: 'cotizador101', cotizacion_id: args.cotizacion_id, linea: i + 1 },
