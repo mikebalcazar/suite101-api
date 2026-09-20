@@ -280,6 +280,29 @@ describe('19 · órdenes de compra (los casos del encargo)', () => {
     expect((await o('ana', '/ordenes/buzon')).estado).toBe(403);
   });
 
+  it('el buzón y mis órdenes se pueden pedir de un solo negocio', async () => {
+    /* dash101 trabaja con un negocio activo a la vez. Sin este filtro, el
+     * buzón mezcla los negocios de la empresa y —peor— sus TOTALES suman
+     * dinero de otro lado sin decirlo. */
+    const otro = (await o('mike', '/negocios', { method: 'POST', json: { nombre: 'Otro taller' } })).data.id;
+    const ajena = await o('ana', '/ordenes', { method: 'POST', json: {
+      negocio_id: otro, proveedor_nombre: 'Otra', concepto: 'De otro negocio', monto: 700_00,
+    } });
+    expect(ajena.estado).toBe(201);
+
+    const todo = await o('beto', '/ordenes/buzon');
+    const soloOtro = await o('beto', `/ordenes/buzon?negocio_id=${otro}`);
+    expect(soloOtro.data.filas.length, 'sólo la del otro negocio').toBe(1);
+    expect(soloOtro.data.filas[0].id).toBe(ajena.data.id);
+    expect(soloOtro.data.total, 'y el total es el de esa sola').toBe(700_00);
+    expect(todo.data.filas.length, 'sin filtro salen todas').toBeGreaterThan(1);
+    expect(todo.data.total).toBeGreaterThan(soloOtro.data.total);
+
+    const mias = await o('ana', `/ordenes?negocio_id=${otro}`);
+    expect(mias.data.filas.length).toBe(1);
+    expect(mias.data.filas[0].negocio_id).toBe(otro);
+  });
+
   it('quien abre como dueño sin ser miembro se puede marcar a sí mismo', async () => {
     // El superadmin no está en la lista de miembros de la empresa, pero sí
     // pasó la puerta de dueño de ESTA empresa. Sin esto, una empresa recién
