@@ -259,6 +259,74 @@ describe('el código del concepto', () => {
   });
 });
 
+describe('las 29 puertas del mismo modelo (§108)', () => {
+  /* Mike, 20-sep, con la pantalla enfrente: «en juntar iguales no funciona
+   * como debería. El código sí es diferente por ítem (PT-01, PT-02, PT-03)
+   * pero el concepto se puede agrupar porque todas son el mismo modelo de
+   * puerta».
+   *
+   * Tenía razón y el defecto era de la propuesta: agrupaba por nombre
+   * IDÉNTICO, y una pieza traída del plano se llama «Puerta 01» —con su
+   * número, así se dibuja en obra—. Así nunca iba a encontrar dos iguales.
+   *
+   * Y su segunda idea es la que ya sostiene todo esto: «un ítem/código
+   * puede tener varias instancias que se comportan como ítems
+   * independientes pero derivados del ítem modelo». Eso es exactamente un
+   * concepto con `cantidad` y sus piezas en el plano: el modelo es el
+   * renglón que se cobra, las instancias son las piezas, cada una con su
+   * código y su bitácora.
+   */
+  let deLaObra: string[] = [];
+
+  beforeAll(async () => {
+    /* Cinco puertas como salen del plano: nombre con número, código propio,
+     * sin precio todavía. */
+    deLaObra = [];
+    for (let i = 1; i <= 5; i++) {
+      const id = await puerta(`Puerta ${String(i).padStart(2, '0')}`, 0, { estado: 'cotizado' });
+      await o('mike', `/items/${id}`, { method: 'PATCH', app: 'quell101', json: { clave: `PP-${String(i).padStart(2, '0')}` } });
+      deLaObra.push(id);
+    }
+  });
+
+  it('ahora sí las propone: la familia del nombre, sin el número', async () => {
+    const g = (await o('mike', `/proyectos/${proyecto}/agrupables`)).data.grupos
+      .find((x: any) => x.items.some((i: any) => i.id === deLaObra[0]));
+    expect(g, 'las encontró').toBeTruthy();
+    expect(g.renglones).toBe(5);
+    expect(g.nombre, 'y propone el nombre de la familia, no el de una pieza').toBe('Puerta');
+    /* Y enseña qué nombres trae adentro: es lo que deja ver que se está
+     * juntando lo correcto antes de aplicar. */
+    expect(g.nombres).toContain('Puerta 01');
+    expect(g.nombres).toContain('Puerta 05');
+  });
+
+  it('el número de la MEDIDA no se toca: eso sí es el producto', async () => {
+    /* «Puerta 0.90» y «Puerta 1.20» no son la misma puerta. Se quita un
+     * entero corto del final —un folio—, no un decimal. */
+    const a = await puerta('Tablón 0.90', 1_000_00, { estado: 'cotizado' });
+    const b = await puerta('Tablón 1.20', 1_000_00, { estado: 'cotizado' });
+    const grupos = (await o('mike', `/proyectos/${proyecto}/agrupables`)).data.grupos;
+    const juntos = grupos.find((x: any) => x.items.some((i: any) => i.id === a) && x.items.some((i: any) => i.id === b));
+    expect(juntos, 'no se proponen juntas').toBeFalsy();
+  });
+
+  it('juntarlas deja UN concepto de cinco piezas y sin código', async () => {
+    /* «¿Que cuando es un grupo, lo que viene en vez de código es un
+     * nombre?» — sí: el código nombra una pieza del plano, y el concepto
+     * son cinco. Cada pieza conserva el suyo. */
+    const r = await o('mike', `/proyectos/${proyecto}/agrupar`, {
+      method: 'POST',
+      json: { queda_id: deLaObra[0], se_van: deLaObra.slice(1), nombre: 'Puerta modelo A, 0.90 × 2.40' },
+    });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    const it = (await o('mike', `/items/${deLaObra[0]}`)).data;
+    expect(it.cantidad).toBe(5);
+    expect(it.clave, 'sin código: el concepto son cinco piezas').toBe('');
+    expect(it.nombre).toBe('Puerta modelo A, 0.90 × 2.40');
+  });
+});
+
 describe('la partida y el orden (§102)', () => {
   /* Mike, 20-sep: «quiero también poder ordenar los ítems y agrupar por
    * partidas. Incluso podría ser por pestañas (como folders) para cambiar

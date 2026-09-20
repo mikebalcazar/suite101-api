@@ -2476,6 +2476,27 @@ export class OrgDB extends DurableObject<Env> {
    *
    *  Propone; no junta. Quien decide escoge, porque el parecido de un nombre
    *  no es la última palabra —la lección de emparejar los ítems, 20-sep—. */
+  /** La FAMILIA de un nombre: lo que queda al quitarle el número de la
+   *  pieza. «Puerta 01», «Puerta 02» y «Puerta 29» son todas «puerta».
+   *
+   *  Hace falta porque el nombre de una pieza traída del plano trae su
+   *  número —así se dibuja en obra—, y agrupar por nombre idéntico no
+   *  encontraba nunca las 29 puertas del mismo modelo. Mike lo reportó con
+   *  la pantalla enfrente el 20-sep: «el código sí es diferente por ítem
+   *  (PT-01, PT-02…) pero el concepto se puede agrupar porque todas son el
+   *  mismo modelo de puerta».
+   *
+   *  Se quita UN número del final, con su separador si lo trae. No se
+   *  quitan los números de en medio ni los que son medida: «Puerta 0.90»
+   *  conserva su 0.90 —ahí el número ES el producto— y «Repisa 60» pierde
+   *  el 60, que es el riesgo conocido de esto. Por eso propone y no junta:
+   *  quien decide ve los nombres de adentro antes de aplicar. */
+  private familiaDe(nombre: unknown): string {
+    const n = normalizar(nombre);
+    // Sólo enteros cortos al final: un «0.90» o un «120x60» no es un folio.
+    return n.replace(/[\s\-#_.]*\b\d{1,3}\s*$/, '').trim() || n;
+  }
+
   gruposDeItems(proyecto_id: string): { proyecto: Fila; grupos: Fila[] } | { error: string; detalle?: unknown } {
     const proyecto = this.obtener('proyectos', proyecto_id);
     if (!proyecto) return { error: 'no_encontrado', detalle: { que: 'proyecto', id: proyecto_id } };
@@ -2491,7 +2512,7 @@ export class OrgDB extends DurableObject<Env> {
     for (const it of items) {
       const cant = Math.max(1, Math.trunc(Number(it.cantidad ?? 1)));
       const pieza = Math.round(Number(it.monto ?? 0) / cant);
-      const llave = [normalizar(it.nombre), String(it.tipo ?? ''), String(it.estado), String(it.moneda ?? 'MXN'), pieza].join('|');
+      const llave = [this.familiaDe(it.nombre), String(it.tipo ?? ''), String(it.estado), String(it.moneda ?? 'MXN'), pieza].join('|');
       const ya = por.get(llave);
       if (ya) ya.push(it);
       else por.set(llave, [it]);
@@ -2501,8 +2522,21 @@ export class OrgDB extends DurableObject<Env> {
       .filter((g) => g.length > 1)
       .map((g) => {
         const cant = (it: Fila) => Math.max(1, Math.trunc(Number(it.cantidad ?? 1)));
+        /* El nombre que se propone para el concepto es el de la FAMILIA con
+         * la primera letra en grande —«Puerta»—, no el del primer renglón
+         * («Puerta 01»), que le dejaría al concepto el número de una de sus
+         * piezas. Es editable: quien decide le pone el nombre bueno. */
+        /* Se le quita el número al nombre TAL COMO SE ESCRIBIÓ, no a la
+         * versión normalizada: ésa va sin acentos —sirve para comparar, no
+         * para leerse— y proponer «Puerta de recamara» sería devolver el
+         * nombre peor escrito de los dos. */
+        const crudo = String(g[0].nombre ?? '');
+        const propuesto = crudo.replace(/[\s\-#_.]*\b\d{1,3}\s*$/, '').trim() || crudo;
         return {
-          nombre: g[0].nombre,
+          nombre: propuesto,
+          /* Y los nombres que trae adentro, para que se vea qué se está
+           * juntando antes de juntarlo. */
+          nombres: [...new Set(g.map((it) => String(it.nombre)))],
           tipo: g[0].tipo,
           estado: g[0].estado,
           moneda: g[0].moneda ?? 'MXN',
