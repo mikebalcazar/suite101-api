@@ -151,6 +151,11 @@ export interface ApiOrgDB {
   pendientesDeFactura(negocio_id?: string | null): Promise<Fila[]>;
   listaCfdi(args: { desde?: string; hasta?: string; tipo?: string; estado?: string; negocio_id?: string | null }): Promise<Fila[]>;
 
+  /* El cliente es uno solo en las tres apps: avisar del parecido y juntar
+   * los dos que ya se crearon. */
+  clientesParecidos(nombre: string, negocio_id?: string | null): Promise<Fila[]>;
+  fusionarClientes(queda_id: string, se_va_id: string): Promise<{ ok: true; cliente: Fila; movidos: Record<string, number> } | { error: string; detalle?: unknown }>;
+
   /* La obra de quell101 ligada al proyecto de dash101 (0010). */
   obras(args?: { sueltas?: boolean }): Promise<Fila[]>;
   obraDeProyecto(proyecto_id: string): Promise<Fila | null>;
@@ -1679,6 +1684,94 @@ export class OrgDB extends DurableObject<Env> {
     if (args.negocio_id) { donde.push('negocio_id = ?'); vals.push(args.negocio_id); }
     const filtro = donde.length ? ` WHERE ${donde.join(' AND ')}` : '';
     return this.leerInternas('cfdi', this.sql.exec(`SELECT * FROM cfdi${filtro} ORDER BY fecha DESC, creado_at DESC`, ...vals).toArray() as Fila[]);
+  }
+
+  /* ─────────────── el cliente es uno solo en las tres apps ───────────────
+   * Mike, 20-sep: «cuando creas un nuevo cliente en quote101, es lo mismo que
+   * cuando haces uno en quell101 o en dash. El cliente es el mismo en los 3 y
+   * debe aparecer en la base de datos de las 3 apps. Si por cualquier cosa se
+   * crean en 2 apps diferentes con un nombre diferente, debería haber manera
+   * de ligarlo y fusionar los 2 clientes en uno mismo para mejor control. Y si
+   * se quiere crear un cliente con el nombre ya existente, preguntar si no te
+   * estás refiriendo a X cliente.»
+   *
+   * Vivir en la misma tabla ya vivían —`clientes` es de la empresa, no de una
+   * app—. Lo que faltaba son estas dos: avisar del parecido ANTES de crear, y
+   * juntar los dos que ya se crearon.
+   */
+
+  /** Los clientes que se parecen a un nombre. La regla se escribe UNA vez y
+   *  aquí: mismo nombre normalizado, o uno contenido en el otro («Muebles
+   *  Luna» y «Muebles Luna SA de CV»). Menos de tres letras no compara: con
+   *  dos, media lista se parece a todo. */
+  clientesParecidos(nombre: string, negocio_id?: string | null): Fila[] {
+    const n = normalizar(nombre);
+    if (n.length < 3) return [];
+    const filas = this.sql
+      .exec(
+        `SELECT * FROM clientes${negocio_id ? ' WHERE negocio_id = ?' : ''} ORDER BY nombre_norm`,
+        ...(negocio_id ? [negocio_id] : []),
+      )
+      .toArray() as Fila[];
+    return filas.filter((c) => {
+      const o = normalizar(c.nombre_norm || c.nombre);
+      return o === n || (o.length >= 3 && (o.includes(n) || n.includes(o)));
+    });
+  }
+
+  /** Juntar dos clientes en uno. `queda_id` es el que se queda con todo;
+   *  `se_va_id` desaparece.
+   *
+   *  Todo o nada, y por eso vive aquí adentro: si se movieran los proyectos y
+   *  fallara al mover los ítems, quedaría un cliente con la mitad de su
+   *  historia colgando de un renglón borrado. Un solo hilo por empresa, así
+   *  que no hay carreras.
+   *
+   *  Lo que el que se queda NO tenga —correo, teléfono, RFC, notas, el acceso
+   *  al portal— se lo lleva del que se va. Fusionar no puede perder datos: el
+   *  que se va casi siempre es el que se capturó en la otra app, y a veces es
+   *  el único que trae el correo. */
+  fusionarClientes(queda_id: string, se_va_id: string): { ok: true; cliente: Fila; movidos: Record<string, number> } | { error: string; detalle?: unknown } {
+    if (queda_id === se_va_id) return { error: 'datos_invalidos', detalle: { motivo: 'son el mismo cliente' } };
+    const queda = this.sql.exec(`SELECT * FROM clientes WHERE id = ?`, queda_id).toArray()[0] as Fila | undefined;
+    if (!queda) return { error: 'no_encontrado', detalle: { que: 'el cliente que se queda', id: queda_id } };
+    const seVa = this.sql.exec(`SELECT * FROM clientes WHERE id = ?`, se_va_id).toArray()[0] as Fila | undefined;
+    if (!seVa) return { error: 'no_encontrado', detalle: { que: 'el cliente que se fusiona', id: se_va_id } };
+
+    const cuantos = (sql: string, ...args: SqlStorageValue[]) =>
+      Number((this.sql.exec(sql, ...args).toArray()[0] as Fila).n);
+
+    const movidos = {
+      proyectos: cuantos(`SELECT COUNT(*) AS n FROM proyectos WHERE cliente_id = ?`, se_va_id),
+      items: cuantos(`SELECT COUNT(*) AS n FROM items WHERE cliente_id = ?`, se_va_id),
+      cotizaciones: cuantos(`SELECT COUNT(*) AS n FROM cotizaciones WHERE cliente_id = ?`, se_va_id),
+      movimientos: cuantos(
+        `SELECT COUNT(*) AS n FROM movimientos WHERE contraparte_tipo = 'cliente' AND contraparte_id = ?`, se_va_id),
+    };
+
+    this.sql.exec(`UPDATE proyectos SET cliente_id = ? WHERE cliente_id = ?`, queda_id, se_va_id);
+    this.sql.exec(`UPDATE items SET cliente_id = ? WHERE cliente_id = ?`, queda_id, se_va_id);
+    this.sql.exec(`UPDATE cotizaciones SET cliente_id = ? WHERE cliente_id = ?`, queda_id, se_va_id);
+    this.sql.exec(
+      `UPDATE movimientos SET contraparte_id = ?, contraparte_nombre = ? WHERE contraparte_tipo = 'cliente' AND contraparte_id = ?`,
+      queda_id, String(queda.nombre), se_va_id,
+    );
+
+    /* Lo que le falte al que se queda se lo lleva del que se va. `usuario_id`
+     * también: si el acceso al portal estaba del otro lado, fusionar no puede
+     * dejar al cliente sin poder entrar a ver su estado de cuenta. */
+    const hereda: Record<string, unknown> = {};
+    for (const campo of ['correo', 'telefono', 'rfc', 'notas', 'usuario_id']) {
+      if (!queda[campo] && seVa[campo]) hereda[campo] = seVa[campo];
+    }
+    if (!queda.portal_activo && seVa.portal_activo) hereda.portal_activo = 1;
+    if (Object.keys(hereda).length) {
+      const sets = Object.keys(hereda).map((k) => `${k} = ?`).join(', ');
+      this.sql.exec(`UPDATE clientes SET ${sets} WHERE id = ?`, ...(Object.values(hereda) as SqlStorageValue[]), queda_id);
+    }
+
+    this.sql.exec(`DELETE FROM clientes WHERE id = ?`, se_va_id);
+    return { ok: true, cliente: this.obtener('clientes', queda_id) as Fila, movidos };
   }
 
   /* ─────────────── obras de quell101 y proyectos de dash101 (0010) ───────────────

@@ -13,7 +13,17 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.22.0 (la obra de quell101 y el proyecto de dash101
+ * Versión del contrato: 0.23.0 (el cliente es uno solo en las tres apps:
+ * `GET /orgs/:o/clientes/parecidos?nombre=&negocio_id=` contesta «¿no te
+ * refieres a…?» con la regla escrita UNA vez y en el servidor —mismo nombre
+ * normalizado, o uno contenido en el otro, y menos de tres letras no
+ * compara—, y `POST /orgs/:o/clientes/:id/fusionar {se_va_id}` junta los dos
+ * que ya se crearon: el que se va le deja al que se queda sus proyectos,
+ * ítems, cotizaciones y movimientos, más los datos que al que se queda le
+ * falten —correo, teléfono, RFC, notas y el acceso al portal—, y después
+ * desaparece. Todo o nada, adentro del objeto. Fusionar no se deshace, así
+ * que la hacen el dueño y la administración. Lo pidió Mike el 20-sep). Antes:
+ * 0.22.0 (la obra de quell101 y el proyecto de dash101
  * son la misma casa: `quell_projects.proyecto_id` (migración 0010 del OrgDB)
  * y las rutas `/orgs/:o/obras` —con `?sueltas=1`, las que todavía no tienen
  * proyecto—, `/orgs/:o/obras/de-proyecto/:id` y
@@ -187,7 +197,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.22.0';
+export const VERSION_CONTRATO = '0.23.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
