@@ -214,9 +214,9 @@ export interface ApiOrgDB {
   gruposDeItems(proyecto_id: string): Promise<{ proyecto: Fila; grupos: Fila[] } | { error: string; detalle?: unknown }>;
   agruparItems(
     proyecto_id: string,
-    args: { items: string[]; nombre?: string; codigo?: string; precio?: number },
+    args: { items: string[]; nombre?: string; codigo?: string; precio?: number; producto_id?: string },
     contexto: { usuario_id: string },
-  ): Promise<{ ok: true; producto: Fila; items: Fila[]; venta_antes: number; venta_despues: number } | { error: string; detalle?: unknown }>;
+  ): Promise<{ ok: true; producto: Fila; items: Fila[]; nuevo: boolean; venta_antes: number; venta_despues: number } | { error: string; detalle?: unknown }>;
   productosDelProyecto(
     proyecto_id: string,
   ): Promise<{ proyecto: Fila; productos: Fila[]; unicos: Fila[] } | { error: string; detalle?: unknown }>;
@@ -2589,9 +2589,9 @@ export class OrgDB extends DurableObject<Env> {
    *  nadie cotizó. La pantalla lo propone y quien decide lo cambia. */
   agruparItems(
     proyecto_id: string,
-    args: { items: string[]; nombre?: string; codigo?: string; precio?: number },
+    args: { items: string[]; nombre?: string; codigo?: string; precio?: number; producto_id?: string },
     contexto: { usuario_id: string },
-  ): { ok: true; producto: Fila; items: Fila[]; venta_antes: number; venta_despues: number } | { error: string; detalle?: unknown } {
+  ): { ok: true; producto: Fila; items: Fila[]; nuevo: boolean; venta_antes: number; venta_despues: number } | { error: string; detalle?: unknown } {
     const proyecto = this.obtener('proyectos', proyecto_id);
     if (!proyecto) return { error: 'no_encontrado', detalle: { que: 'proyecto', id: proyecto_id } };
 
@@ -2612,6 +2612,41 @@ export class OrgDB extends DurableObject<Env> {
         return { error: 'moneda_distinta', detalle: { id, moneda: it.moneda, esperado: piezas[0]?.moneda } };
       }
       piezas.push(it);
+    }
+
+    /* Mike, 20-sep, con la pantalla de juntar enfrente: «donde dice nombre
+     * del modelo debería poderse hacer uno nuevo, o seleccionar agregar a
+     * alguno ya existente. Recuerda que al asignarlo a un producto
+     * existente, adopta en automático el precio del producto al que se
+     * agrupa».
+     *
+     * Ese caso sale por aquí y se va derecho a `meterEnProducto`, que es
+     * quien hereda el precio. No se escribe producto nuevo, y el nombre y
+     * el precio que vengan en el cuerpo SE IGNORAN: el modelo ya existe y
+     * sus datos son los suyos. Cambiarle el precio a un producto desde la
+     * pantalla de juntar movería el importe de piezas de OTRAS obras sin
+     * que nadie lo pidiera. */
+    if (args.producto_id) {
+      const producto = this.obtener('productos', args.producto_id);
+      if (!producto) return { error: 'no_encontrado', detalle: { que: 'producto', id: args.producto_id } };
+      if (String(producto.negocio_id) !== String(proyecto.negocio_id)) {
+        return { error: 'sin_permiso', detalle: { motivo: 'ese producto es de otra empresa' } };
+      }
+      if (String(producto.moneda ?? 'MXN') !== String(piezas[0].moneda ?? 'MXN')) {
+        return { error: 'moneda_distinta', detalle: { moneda: piezas[0].moneda, esperado: producto.moneda } };
+      }
+      const antes = Number((this.obtener('proyectos', proyecto_id) as Fila).precio_venta ?? 0);
+      for (const it of piezas) this.meterEnProducto(it, producto);
+      this.recalcularProyecto(proyecto_id);
+      this.avisar({ t: 'item.cambio', id: String(piezas[0].id) }, 'todos');
+      return {
+        ok: true,
+        producto: this.obtener('productos', String(producto.id))!,
+        items: piezas.map((it) => this.obtener('items', String(it.id))!),
+        nuevo: false,
+        venta_antes: antes,
+        venta_despues: Number((this.obtener('proyectos', proyecto_id) as Fila).precio_venta ?? 0),
+      };
     }
 
     const cant = (it: Fila) => Math.max(1, Math.trunc(Number(it.cantidad ?? 1)));
@@ -2654,6 +2689,7 @@ export class OrgDB extends DurableObject<Env> {
       ok: true,
       producto: this.obtener('productos', id)!,
       items: piezas.map((it) => this.obtener('items', String(it.id))!),
+      nuevo: true,
       venta_antes,
       venta_despues: Number((this.obtener('proyectos', proyecto_id) as Fila).precio_venta ?? 0),
     };

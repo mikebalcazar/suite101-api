@@ -738,3 +738,66 @@ describe('rescatar un renglón FUSIONADO por el contrato 0.30.0 (§113)', () => 
     expect(await precioVenta()).toBe(antes);
   });
 });
+
+describe('agrupar a un producto QUE YA EXISTE (§114)', () => {
+  /* Mike, 20-sep, con la pantalla de juntar enfrente: «donde dice nombre del
+   * modelo debería poderse hacer uno nuevo, o seleccionar agregar a alguno ya
+   * existente. Recuerda que al asignarlo a un producto existente, adopta en
+   * automático el precio del producto al que se agrupa».
+   *
+   * Es su caso de HOLCIM tal cual: 25 puertas traídas del plano a $0 y dos ya
+   * cotizadas a $2,850. Meter las 25 al modelo de las dos les pone $2,850 a
+   * cada una, y eso SUBE el precio de venta de la obra. Que lo suba está
+   * bien —es lo que pidió—; lo que no puede pasar es que suba sin decirlo. */
+  let modelo = '', precio = 0;
+
+  beforeAll(async () => {
+    const a = await puerta('Domo', 2_850_00);
+    const b = await puerta('Domo', 2_850_00);
+    const r = await o('mike', `/proyectos/${proyecto}/agrupar`, { method: 'POST', json: { items: [a, b], nombre: 'Domo modelo A' } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    modelo = r.data.producto.id;
+    precio = r.data.producto.precio;
+    expect(r.data.nuevo, 'ése sí nació aquí').toBe(true);
+  });
+
+  it('las piezas sin precio adoptan el del modelo, y la venta sube lo que debe', async () => {
+    const sinPrecio = [await puerta('Domo', 0, { estado: 'vendido' }), await puerta('Domo', 0, { estado: 'vendido' })];
+    const antes = await precioVenta();
+    const r = await o('mike', `/proyectos/${proyecto}/agrupar`, {
+      method: 'POST', json: { items: sinPrecio, producto_id: modelo },
+    });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.nuevo, 'no se escribió un producto nuevo').toBe(false);
+    expect(r.data.producto.id).toBe(modelo);
+    for (const id of sinPrecio) expect((await o('mike', `/items/${id}`)).data.monto).toBe(precio);
+    expect(r.data.venta_antes).toBe(antes);
+    expect(r.data.venta_despues, 'dos piezas a 2,850 más').toBe(antes + 2 * precio);
+    expect(await precioVenta()).toBe(antes + 2 * precio);
+  });
+
+  it('el nombre y el precio que manden se IGNORAN: el modelo ya tiene los suyos', async () => {
+    /* Dejar que la pantalla de juntar le cambie el precio a un producto
+     * movería el importe de sus piezas en OTRAS obras sin que nadie lo
+     * pidiera. Para cambiarle el precio a un modelo está su propia edición. */
+    const otra = await puerta('Domo', 0, { estado: 'vendido' });
+    const r = await o('mike', `/proyectos/${proyecto}/agrupar`, {
+      method: 'POST', json: { items: [otra, await puerta('Domo', 0, { estado: 'vendido' })],
+                              producto_id: modelo, nombre: 'Otro nombre', precio: 99_00 },
+    });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.producto.nombre).toBe('Domo modelo A');
+    expect(r.data.producto.precio).toBe(precio);
+    expect((await o('mike', `/items/${otra}`)).data.monto, 'la pieza tomó el del modelo, no el del cuerpo').toBe(precio);
+  });
+
+  it('un producto que no existe: 404, y nada se agrupa', async () => {
+    const x = await puerta('Tragaluz', 1_000_00);
+    const y = await puerta('Tragaluz', 1_000_00);
+    const r = await o('mike', `/proyectos/${proyecto}/agrupar`, {
+      method: 'POST', json: { items: [x, y], producto_id: '01NOEXISTE0000000000000000' },
+    });
+    expect(r.estado).toBe(404);
+    expect((await o('mike', `/items/${x}`)).data.producto_id).toBeNull();
+  });
+});

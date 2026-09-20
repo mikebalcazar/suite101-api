@@ -447,22 +447,33 @@ rutas.get('/:o/proyectos/:id/agrupables', async (c) => {
  *  Como ya no destruye nada, deja de estar reservado a quien dirige la
  *  empresa: lo hace cualquier miembro, igual que capturar un ítem.
  *
+ *  Con `producto_id` las piezas entran a un modelo QUE YA EXISTE en vez de
+ *  escribir uno nuevo, y adoptan su precio. Mike, 20-sep: «donde dice
+ *  nombre del modelo debería poderse hacer uno nuevo, o seleccionar agregar
+ *  a alguno ya existente. Al asignarlo a un producto existente, adopta en
+ *  automático el precio del producto al que se agrupa». En ese camino el
+ *  `nombre` y el `precio` del cuerpo se ignoran: el modelo ya tiene los
+ *  suyos, y cambiárselos desde aquí movería el importe de piezas de OTRAS
+ *  obras sin que nadie lo pidiera.
+ *
  *  El precio de venta del proyecto SÍ se puede mover, porque las piezas
  *  heredan el precio del producto. Por eso devuelve el antes y el después:
  *  la pantalla lo enseña y quien agrupó ve lo que hizo. */
 rutas.post('/:o/proyectos/:id/agrupar', async (c) => {
   const quien = c.get('quien');
   if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'agrupar ítems lo hace quien es de la empresa' });
-  type Cuerpo = { items?: string[]; nombre?: string; codigo?: string; precio?: number };
+  type Cuerpo = { items?: string[]; nombre?: string; codigo?: string; precio?: number; producto_id?: string };
   const b = await c.req.json<Cuerpo>().catch(() => ({}) as Cuerpo);
   if (!Array.isArray(b.items)) return err(c, 'datos_invalidos', 400, { motivo: '`items` es la lista de ids que son el mismo producto' });
   const r = await stub(c).agruparItems(
     c.req.param('id'),
-    { items: b.items, nombre: b.nombre, codigo: b.codigo, precio: b.precio },
+    { items: b.items, nombre: b.nombre, codigo: b.codigo, precio: b.precio, producto_id: b.producto_id },
     { usuario_id: quien.usuario_id },
   );
-  if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : r.error === 'datos_invalidos' ? 400 : 409, r.detalle);
-  return ok(c, { producto: r.producto, items: r.items, venta_antes: r.venta_antes, venta_despues: r.venta_despues });
+  if ('error' in r) {
+    return err(c, r.error, r.error === 'no_encontrado' ? 404 : r.error === 'datos_invalidos' ? 400 : r.error === 'sin_permiso' ? 403 : 409, r.detalle);
+  }
+  return ok(c, { producto: r.producto, items: r.items, nuevo: r.nuevo, venta_antes: r.venta_antes, venta_despues: r.venta_despues });
 });
 
 /* ────────── el producto de cada ítem: escogerlo y cambiarlo (§111) ──────────

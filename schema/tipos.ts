@@ -17,7 +17,19 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.36.0 (SEPARAR, Y RESCATAR LO QUE LA FUSIÓN BORRÓ.
+ * Versión del contrato: 0.37.0 (AGRUPAR A UN PRODUCTO QUE YA EXISTE. Mike,
+ * 20-sep: «donde dice nombre del modelo debería poderse hacer uno nuevo, o
+ * seleccionar agregar a alguno ya existente. Recuerda que al asignarlo a un
+ * producto existente, adopta en automático el precio del producto al que se
+ * agrupa». `POST /orgs/:o/proyectos/:id/agrupar` acepta `producto_id`: las
+ * piezas entran a ese modelo y adoptan su precio, en vez de escribir uno
+ * nuevo. El `nombre` y el `precio` del cuerpo se IGNORAN en ese camino —el
+ * modelo ya tiene los suyos, y cambiárselos desde la pantalla de juntar
+ * movería el importe de sus piezas en otras obras—. La respuesta trae
+ * `nuevo: false` para que la pantalla lo diga. Es el caso de HOLCIM: 25
+ * puertas del plano a $0 que entran al modelo de $2,850 y suben el precio
+ * de venta de la obra; que suba está bien, que suba sin decirlo no).
+ * Antes: 0.36.0 (SEPARAR, Y RESCATAR LO QUE LA FUSIÓN BORRÓ.
  * Mike, 20-sep, con HOLCIM enfrente: «ya se hizo un desastre y ahora no puedo
  * separar los ítems para agruparlos en otro producto. O mejor sepárame todos
  * los ítems de puertas otra vez».
@@ -450,7 +462,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.36.0';
+export const VERSION_CONTRATO = '0.37.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
