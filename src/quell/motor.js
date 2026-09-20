@@ -867,10 +867,26 @@ export async function atender(req, env, url, path) {
        * sólo lectura. El precio NO: enseñarlo en la obra se lo enseña también
        * al contratista, y eso lo decide Mike, no este archivo. */
       const element = await env.DB.prepare(
-        `SELECT e.*, pl.name AS plan_name, ${ALCANCE_SQL}, it.descripcion AS item_descripcion
+        `SELECT e.*, pl.name AS plan_name, ${ALCANCE_SQL}, it.descripcion AS item_descripcion,
+                it.monto AS item_monto, it.cantidad AS item_cantidad
          FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id
               LEFT JOIN items it ON it.id = e.item_id
          WHERE e.id = ?`).bind(eid).first();
+      /* EL PRECIO SE RECORTA AQUÍ, no en la pantalla.
+       *
+       * Mike lo decidió el 20-sep, con botones: en quell el precio del ítem
+       * lo ven «sólo tú y la administración». Así que sale de la consulta
+       * para el dueño, la administración y los socios, y para nadie más se
+       * MANDA —un supervisor o un contratista no reciben el número, no es
+       * que la pantalla se lo esconda—. Esconderlo al pintar deja el dato
+       * viajando, y lo que viaja se lee. */
+      if (element) {
+        const rol = env.SESION?.quien?.rol;
+        if (!(rol === 'owner' || rol === 'admin' || rol === 'socio')) {
+          delete element.item_monto;
+          delete element.item_cantidad;
+        }
+      }
       if (!element) return err('no encontrado', 404);
       // El cliente: el ítem para ubicarse y sus puntos por definir, y nada más
       // (decisión 4). Ni fase, ni pendientes, ni bitácora, ni responsable.
