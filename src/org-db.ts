@@ -25,6 +25,7 @@ import fiscal from '../migrations/org/0009_fiscal.sql';
 import obras from '../migrations/org/0010_obras.sql';
 import cantidad from '../migrations/org/0011_cantidad.sql';
 import facturaEsperada from '../migrations/org/0012_factura_esperada.sql';
+import bitacoraPrecio from '../migrations/org/0013_bitacora_precio.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { atender as atenderRoster, type DatosEmpresaRoster, type SesionRoster } from './roster/motor.js';
 import { invitarClienteEnSuite } from './clientes';
@@ -44,7 +45,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio];
 
 /** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
  *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
@@ -163,6 +164,12 @@ export interface ApiOrgDB {
   obraDeProyecto(proyecto_id: string): Promise<Fila | null>;
   sinUbicar(obra_id: string): Promise<{ obra: Fila; items: Fila[] } | { error: string; detalle?: unknown }>;
   ligarObra(obra_id: string, proyecto_id: string): Promise<{ ok: true; obra: Fila } | { error: string; detalle?: unknown }>;
+  itemsDeLaObra(obra_id: string): Promise<{ obra: Fila; parejas: Fila[]; nuevos: Fila[]; sueltos: Fila[] } | { error: string; detalle?: unknown }>;
+  fusionarItemsDeLaObra(
+    obra_id: string,
+    plan: { ligar?: Array<{ element_id: string; item_id: string }>; crear?: string[] },
+    contexto: { usuario_id: string },
+  ): Promise<{ ok: true; ligados: number; creados: number; obra: Fila } | { error: string; detalle?: unknown }>;
   desligarObra(obra_id: string): Promise<{ ok: true; obra: Fila } | { error: string; detalle?: unknown }>;
 
   fetch(req: Request): Promise<Response>;
@@ -490,6 +497,14 @@ export class OrgDB extends DurableObject<Env> {
     const def = DEFS[tabla];
     const cols = Object.keys(datos).filter((c) => c in def.cols && c !== 'id');
     if (!cols.length) return this.obtener(tabla, id);
+    /* El precio de ANTES, para poder contarlo en la bitácora de la obra. Se
+     * lee aquí y no después porque después ya no existe: un `UPDATE` no deja
+     * copia. Sólo cuando de verdad viene un monto nuevo, para no pagar una
+     * lectura en cada cambio de nombre. */
+    const montoAntes =
+      tabla === 'items' && datos.monto !== undefined
+        ? (this.sql.exec(`SELECT monto FROM items WHERE id = ?`, id).toArray()[0] as Fila | undefined)?.monto
+        : undefined;
     if (def.cols.nombre_norm && datos.nombre !== undefined && datos.nombre_norm === undefined) {
       cols.push('nombre_norm');
       datos.nombre_norm = normalizar(datos.nombre);
@@ -502,6 +517,7 @@ export class OrgDB extends DurableObject<Env> {
     this.sql.exec(`UPDATE ${tabla} SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`, ...valores, id);
 
     this.despuesDeEscribir(tabla, id);
+    if (montoAntes !== undefined) this.huellaDePrecio(id, Number(montoAntes));
     return this.obtener(tabla, id);
   }
 
@@ -1904,6 +1920,194 @@ export class OrgDB extends DurableObject<Env> {
 
     this.sql.exec(`UPDATE quell_projects SET proyecto_id = ? WHERE id = ?`, proyecto_id, obra_id);
     return { ok: true, obra: this.obras().find((o) => o.id === obra_id)! };
+  }
+
+  /* ─────────────── los ítems, uno solo de los dos lados (§91) ───────────────
+   *
+   * Mike, 20-sep: los ítems de una obra en quell101 y los ítems vendidos de
+   * su proyecto en dash101 son la misma lista de piezas contada dos veces.
+   * Ligar la obra con el proyecto (migración 0010) dijo que son la misma
+   * casa; esto dice que son las mismas piezas.
+   *
+   * Se hace en DOS pasos a propósito —primero se propone, luego se aplica—,
+   * que es el mismo modo de las mudanzas de este repositorio. Emparejar
+   * piezas por parecido acierta casi siempre y se equivoca a veces, y una
+   * equivocación aquí le cuelga el dinero de una pieza a otra. Quien decide
+   * mira la propuesta antes de que se escriba nada.
+   */
+
+  /** La propuesta: qué se emparejaría con qué, sin tocar nada.
+   *
+   *  Tres montones, y los tres importan:
+   *
+   *   · `parejas`  — una pieza del plano y un ítem vendido que se parecen
+   *                  tanto que casi seguro son lo mismo. Se emparejan por
+   *                  CÓDIGO primero (el código es único dentro de la obra,
+   *                  así que si coincide no hay duda) y por nombre después.
+   *   · `nuevos`   — piezas del plano sin nada que se les parezca. Se les
+   *                  crearía un ítem.
+   *   · `sueltos`  — ítems vendidos sin pieza en el plano. NO se tocan: son
+   *                  los «ítems sin ubicar», y ubicarlos es poner un punto en
+   *                  un plano, que lo hace una persona mirando el dibujo.
+   *
+   *  Un ítem ya emparejado no vuelve a salir: la propuesta es idempotente y
+   *  aplicarla dos veces no duplica nada. */
+  itemsDeLaObra(obra_id: string): { obra: Fila; parejas: Fila[]; nuevos: Fila[]; sueltos: Fila[] } | { error: string; detalle?: unknown } {
+    const obra = this.sql.exec(`SELECT * FROM quell_projects WHERE id = ?`, obra_id).toArray()[0] as Fila | undefined;
+    if (!obra) return { error: 'no_encontrado', detalle: { que: 'obra', id: obra_id } };
+    if (!obra.proyecto_id) {
+      return { error: 'sin_liga', detalle: { motivo: 'esta obra todavía no está ligada a un proyecto de dash101' } };
+    }
+    const proyecto_id = String(obra.proyecto_id);
+
+    const piezas = this.sql
+      .exec(`SELECT id, code, name, type FROM quell_elements WHERE project_id = ? AND item_id IS NULL ORDER BY code, name`, obra_id)
+      .toArray() as Fila[];
+    const libres = this.sql
+      .exec(
+        `SELECT i.id, i.clave, i.nombre, i.tipo, i.monto, i.cantidad, i.estado
+         FROM items i
+         WHERE i.proyecto_id = ? AND i.estado <> 'cancelado'
+           AND (SELECT COUNT(*) FROM quell_elements e WHERE e.item_id = i.id) < i.cantidad
+         ORDER BY i.creado_at`,
+        proyecto_id,
+      )
+      .toArray() as Fila[];
+
+    /* Cuántas piezas de cada ítem quedan por emparejar. Un ítem de cantidad
+     * 20 con 3 puestas admite 17 más: emparejar de uno en uno sin llevar la
+     * cuenta le colgaría 20 piezas a un ítem de una. */
+    const cupo = new Map<string, number>();
+    for (const i of libres) {
+      const ya = Number(
+        (this.sql.exec(`SELECT COUNT(*) AS n FROM quell_elements WHERE item_id = ?`, String(i.id)).toArray()[0] as Fila).n,
+      );
+      cupo.set(String(i.id), Math.max(0, Number(i.cantidad ?? 1) - ya));
+    }
+
+    const porClave = new Map<string, Fila[]>();
+    const porNombre = new Map<string, Fila[]>();
+    for (const i of libres) {
+      if (i.clave) (porClave.get(String(i.clave)) ?? porClave.set(String(i.clave), []).get(String(i.clave))!).push(i);
+      const n = normalizar(String(i.nombre ?? ''));
+      if (n) (porNombre.get(n) ?? porNombre.set(n, []).get(n)!).push(i);
+    }
+    const conCupo = (lista: Fila[] | undefined) => lista?.find((i) => (cupo.get(String(i.id)) ?? 0) > 0);
+
+    const parejas: Fila[] = [];
+    const nuevos: Fila[] = [];
+    for (const pz of piezas) {
+      const porCodigo = pz.code ? conCupo(porClave.get(String(pz.code))) : undefined;
+      const item = porCodigo ?? conCupo(porNombre.get(normalizar(String(pz.name ?? ''))));
+      if (item) {
+        cupo.set(String(item.id), (cupo.get(String(item.id)) ?? 1) - 1);
+        parejas.push({
+          element_id: pz.id, codigo: pz.code, pieza: pz.name, tipo: pz.type,
+          item_id: item.id, item_clave: item.clave, item_nombre: item.nombre,
+          monto: item.monto, cantidad: item.cantidad, estado: item.estado,
+          // Por qué se emparejaron, para que quien decide no tenga que adivinar.
+          por: porCodigo ? 'codigo' : 'nombre',
+        });
+      } else {
+        nuevos.push({ element_id: pz.id, codigo: pz.code, pieza: pz.name, tipo: pz.type });
+      }
+    }
+    const emparejados = new Set(parejas.map((p) => String(p.item_id)));
+    const sueltos = libres.filter((i) => !emparejados.has(String(i.id)));
+    return { obra, parejas, nuevos, sueltos };
+  }
+
+  /** Aplicar la propuesta. Lo que no venga en el cuerpo NO se toca.
+   *
+   *  `ligar` cuelga una pieza del plano de un ítem que ya existe. `crear` le
+   *  hace un ítem nuevo a una pieza que no tenía.
+   *
+   *  El ítem nuevo nace **cotizado y en cero**, y las dos cosas son a
+   *  propósito. Una pieza del plano no trae precio: nadie se lo ha puesto.
+   *  Nacer «vendido» en cero metería una venta de cero pesos en el precio
+   *  del proyecto —`precio_venta` suma los vendidos— y dejaría la proyección
+   *  diciendo una cifra que nadie tecleó. Cotizado sale en la lista de
+   *  dash101 para ponerle precio, y no mueve un solo peso hasta que alguien
+   *  lo decide. */
+  fusionarItemsDeLaObra(
+    obra_id: string,
+    plan: { ligar?: Array<{ element_id: string; item_id: string }>; crear?: string[] },
+    contexto: { usuario_id: string },
+  ): { ok: true; ligados: number; creados: number; obra: Fila } | { error: string; detalle?: unknown } {
+    const obra = this.sql.exec(`SELECT * FROM quell_projects WHERE id = ?`, obra_id).toArray()[0] as Fila | undefined;
+    if (!obra) return { error: 'no_encontrado', detalle: { que: 'obra', id: obra_id } };
+    if (!obra.proyecto_id) return { error: 'sin_liga', detalle: { motivo: 'esta obra todavía no está ligada a un proyecto de dash101' } };
+    const proyecto_id = String(obra.proyecto_id);
+    const proyecto = this.obtener('proyectos', proyecto_id);
+    if (!proyecto) return { error: 'no_encontrado', detalle: { que: 'proyecto', id: proyecto_id } };
+
+    const pieza = (eid: string) =>
+      this.sql.exec(`SELECT * FROM quell_elements WHERE id = ? AND project_id = ?`, eid, obra_id).toArray()[0] as Fila | undefined;
+
+    let ligados = 0;
+    for (const par of plan.ligar ?? []) {
+      const pz = pieza(par.element_id);
+      if (!pz) return { error: 'no_encontrado', detalle: { que: 'pieza', id: par.element_id, motivo: 'esa pieza no es de esta obra' } };
+      if (pz.item_id) continue; // ya estaba: aplicar dos veces no duplica
+      const it = this.sql
+        .exec(`SELECT id FROM items WHERE id = ? AND proyecto_id = ?`, par.item_id, proyecto_id)
+        .toArray()[0] as Fila | undefined;
+      if (!it) return { error: 'no_encontrado', detalle: { que: 'item', id: par.item_id, motivo: 'ese ítem no es del proyecto de esta obra' } };
+      this.sql.exec(`UPDATE quell_elements SET item_id = ? WHERE id = ?`, par.item_id, par.element_id);
+      ligados++;
+    }
+
+    let creados = 0;
+    for (const eid of plan.crear ?? []) {
+      const pz = pieza(eid);
+      if (!pz) return { error: 'no_encontrado', detalle: { que: 'pieza', id: eid, motivo: 'esa pieza no es de esta obra' } };
+      if (pz.item_id) continue;
+      const item = this.crear(
+        'items',
+        {
+          negocio_id: proyecto.negocio_id, proyecto_id, cliente_id: proyecto.cliente_id,
+          clave: pz.code ?? '', nombre: pz.name ?? 'Pieza del plano', tipo: pz.type ?? '',
+          monto: 0, cantidad: 1, estado: 'cotizado',
+          descripcion: 'Traído del plano de la obra. Falta ponerle precio.',
+          origen: { de: 'quell', element_id: pz.id, obra_id },
+        } as unknown as Fila,
+        { app: 'quell101', usuario_id: contexto.usuario_id },
+      );
+      this.sql.exec(`UPDATE quell_elements SET item_id = ? WHERE id = ?`, String(item.id), eid);
+      creados++;
+    }
+
+    return { ok: true, ligados, creados, obra: this.obras().find((o) => o.id === obra_id)! };
+  }
+
+  /** El precio de un ítem cambió: se cuenta en la bitácora de cada pieza del
+   *  plano que lo cumple.
+   *
+   *  Va sin persona (`user_id` NULL, migración 0013) y con `kind='precio'`.
+   *  No lo escribió alguien de la obra contando lo que hizo: lo escribió el
+   *  sistema al ver que el dinero se movió en dash101. Atribuírselo a una
+   *  persona de la obra sería una mentira que se lee como verdad tres meses
+   *  después, cuando alguien pregunte quién autorizó el cambio.
+   *
+   *  Si el ítem no está en ningún plano, no hay nada que contar y no se
+   *  escribe: una bitácora llena de entradas sin pieza deja de leerse. */
+  private huellaDePrecio(item_id: string, antes: number): void {
+    const item = this.obtener('items', item_id);
+    if (!item) return;
+    const ahora_ = Number(item.monto);
+    if (!Number.isFinite(ahora_) || ahora_ === antes) return;
+    const piezas = this.sql.exec(`SELECT id FROM quell_elements WHERE item_id = ?`, item_id).toArray() as Fila[];
+    if (!piezas.length) return;
+    const pesos = (c: number) => `$${(Math.round(c) / 100).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const texto = `El precio de «${item.nombre}» pasó de ${pesos(antes)} a ${pesos(ahora_)}. Se cambió en dash101.`;
+    for (const pz of piezas) {
+      this.sql.exec(
+        `INSERT INTO quell_log_entries (id, element_id, user_id, kind, text) VALUES (?,?,NULL,'precio',?)`,
+        crypto.randomUUID(),
+        String(pz.id),
+        texto,
+      );
+    }
   }
 
   /** Quitar la liga. No borra nada de ninguno de los dos lados: los deja

@@ -48,14 +48,25 @@ function columnasDelSql(migraciones: string[]): Record<string, string[]> {
     for (const m of limpio.matchAll(/ALTER TABLE (\w+) DROP COLUMN (\w+)/g)) {
       salida[m[1]] = salida[m[1]].filter((c) => c !== m[2]);
     }
+    /* Rehacer una tabla: crear la nueva, copiar, tirar la vieja y renombrar.
+     * Es la única manera que da SQLite de aflojar un NOT NULL o cambiar un
+     * CHECK, y la 0013 la usa. Sin entender estas dos, el lector se quedaba
+     * con la tabla de trabajo —`…_nueva`— como si fuera una tabla de verdad,
+     * y con la vieja aunque ya no exista. */
+    for (const m of limpio.matchAll(/DROP TABLE (?:IF EXISTS )?(\w+)\s*;/g)) delete salida[m[1]];
+    for (const m of limpio.matchAll(/ALTER TABLE (\w+) RENAME TO (\w+)/g)) {
+      salida[m[2]] = salida[m[1]];
+      delete salida[m[1]];
+    }
   }
   /* Y que no se haya quedado ninguna fuera. Este conteo es el que convierte un
    * hueco del lector en una falla: sin él, una forma de CREATE TABLE que el
    * patrón no entienda deja la tabla sin comparar y todo sale verde. */
-  const declaradas = migraciones
-    .map((sql) => sql.replace(/--[^\n]*/g, ''))
-    .join('\n')
-    .match(/CREATE TABLE\b/g)?.length ?? 0;
+  const todo = migraciones.map((sql) => sql.replace(/--[^\n]*/g, '')).join('\n');
+  // Una tabla tirada ya no se compara; el conteo tiene que restarla o la
+  // guardia gritaría por una tabla que a propósito dejó de existir.
+  const tiradas = todo.match(/DROP TABLE\b/g)?.length ?? 0;
+  const declaradas = (todo.match(/CREATE TABLE\b/g)?.length ?? 0) - tiradas;
   if (declaradas !== Object.keys(salida).length) {
     throw new Error(
       `el lector de SQL entendió ${Object.keys(salida).length} de ${declaradas} CREATE TABLE. ` +
