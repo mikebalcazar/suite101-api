@@ -13,7 +13,25 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.30.0 (VARIOS ÍTEMS IGUALES, UN SOLO CONCEPTO, y la
+ * Versión del contrato: 0.31.0 (EL ALCANCE DEL ÍTEM: lo que está dentro, lo
+ * que todavía no está aprobado y lo que ya se canceló. `POST
+ * /orgs/:o/items/:id/aprobar` y `POST /orgs/:o/items/:id/cancelar {motivo?}`,
+ * que abren dash101 y quell101 por igual —«se debe poder cancelar algún ítem
+ * ya sea desde quell o desde dash, y se refleja en los 2», Mike, 20-sep—.
+ * La migración 0016 agrega `items.aprobado_at`, `cancelado_at` y
+ * `cancelado_motivo`, y de la primera sale la regla que él puso con todas
+ * sus letras: «para que un ítem se considere cancelado tiene que haber
+ * estado aprobado primero». Son cuatro casos y los resuelve `alcanceDeItem`,
+ * en este mismo archivo: dentro (vendido), no aprobado (cotizado —el
+ * requerimiento, que tiene precio y NO suma—), cancelado (estuvo aprobado) y
+ * descartado (nunca lo estuvo). No se agrega un estado nuevo a propósito: el
+ * CHECK de `items.estado` obligaría a rehacer la tabla con cuatro tablas
+ * colgando de ella, y «no aprobado» ya existía y se llama cotizado. El motor
+ * de quell101 devuelve `alcance` en cada pieza del plano, para que la obra
+ * pueda esconder lo que está fuera; una pieza sin ítem va dentro. Y
+ * `quell101` gana permiso de escribir `items.estado`, que es lo que esas dos
+ * rutas mueven). Antes:
+ * 0.30.0 (VARIOS ÍTEMS IGUALES, UN SOLO CONCEPTO, y la
  * PARTIDA del ítem. `GET /orgs/:o/proyectos/:id/agrupables` propone qué
  * renglones son el mismo producto capturado varias veces —mismo nombre,
  * tipo, estado, moneda y precio POR PIEZA— y `POST .../agrupar
@@ -324,7 +342,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.30.0';
+export const VERSION_CONTRATO = '0.31.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -957,6 +975,48 @@ export type Aviso =
   /* 0.27.0 · se pagó una raya. Va al canal del dinero porque son N egresos
    * de golpe: una pantalla de saldos abierta tiene que enterarse. */
   | { t: 'raya.pagada'; id: string };
+
+/* ─────────────── el alcance de un ítem (0.31.0) ───────────────
+ *
+ * Mike, 20-sep-2026: «hay ítems nuevos no aprobados e ítems cancelados. Para
+ * que un ítem se considere cancelado TIENE QUE HABER ESTADO APROBADO PRIMERO
+ * y luego cancelado. (…) Los no aprobados, a pesar de que tienen precio y
+ * toda la info, NO SUMAN en dash y NO APARECEN en quell al menos que veas la
+ * vista de ítems fuera de alcance.»
+ *
+ * La regla vive aquí, en el archivo que las tres apps copian tal cual, por lo
+ * mismo de siempre: tres pantallas con tres ideas de qué es un cancelado son
+ * tres reglas, y la que falle va a ser la que nadie probó. Sale de dos datos
+ * y nada más: el estado, y si alguna vez estuvo aprobado.
+ */
+
+export type AlcanceItem = 'dentro' | 'no_aprobado' | 'cancelado' | 'descartado';
+
+/** En qué parte del alcance está un ítem.
+ *
+ *   · `dentro`      — vendido. Suma, se fabrica, sale en el plano.
+ *   · `no_aprobado` — cotizado: tiene precio y todo, pero nadie ha dicho que
+ *                     sí. Es el «nuevo requerimiento» que nace en la obra.
+ *   · `cancelado`   — estuvo aprobado y se canceló.
+ *   · `descartado`  — se quitó SIN haber estado aprobado nunca. No es un
+ *                     cancelado: no se canceló trabajo, se dijo que no a un
+ *                     requerimiento, y meterlo entre los cancelados diría
+ *                     que se echó para atrás una venta que jamás existió.
+ */
+export function alcanceDeItem(item: { estado?: string | null; aprobado_at?: string | null }): AlcanceItem {
+  const estado = String(item.estado ?? 'cotizado');
+  if (estado === 'cancelado') return item.aprobado_at ? 'cancelado' : 'descartado';
+  if (estado === 'vendido') return 'dentro';
+  return 'no_aprobado';
+}
+
+/** Lo que se enseña de cada alcance, en palabras de Mike. */
+export const NOMBRE_ALCANCE: Record<AlcanceItem, string> = {
+  dentro: 'En proceso',
+  no_aprobado: 'No aprobados',
+  cancelado: 'Cancelados',
+  descartado: 'Descartados',
+};
 
 /* ─────────────── ayudas de formato (identidad Taller 101) ─────────────── */
 

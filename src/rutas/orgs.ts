@@ -369,6 +369,45 @@ rutas.post('/:o/clientes/:id/fusionar', async (c) => {
   return ok(c, { cliente: r.cliente, movidos: r.movidos });
 });
 
+/* ─────────────── aprobar y cancelar un ítem (§106) ───────────────
+ *
+ * Mike, 20-sep: «se debe poder cancelar algún ítem ya sea desde quell o
+ * desde dash, y se refleja en los 2», y «para que un ítem se considere
+ * cancelado tiene que haber estado aprobado primero y luego cancelado».
+ *
+ * Las dos rutas las abren dash101 y quell101 por igual —es el mismo ítem en
+ * la misma base—, y el permiso se revisa por campo, contra `estado`, que es
+ * lo que de verdad se está cambiando.
+ */
+
+/** POST /orgs/:o/items/:id/aprobar — el requerimiento entra al alcance y
+ *  desde ahí suma en el proyecto. */
+rutas.post('/:o/items/:id/aprobar', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'aprobar un ítem lo hace quien es de la empresa' });
+  const veredicto = revisarEscritura('items', c.get('app'), ['estado']);
+  if (!veredicto.ok) return err(c, veredicto.error, 403, veredicto.detalle);
+  const r = await stub(c).aprobarItem(c.req.param('id'), { usuario_id: quien.usuario_id });
+  if ('error' in r) return err(c, r.error, 404, r.detalle);
+  return ok(c, { item: r.item, era: r.era });
+});
+
+/** POST /orgs/:o/items/:id/cancelar {motivo?} — se cae del alcance.
+ *
+ *  Contesta `alcance` ya resuelto: 'cancelado' si estuvo aprobado, y
+ *  'descartado' si nunca lo estuvo. La pantalla no vuelve a aplicar la
+ *  regla; la dice. */
+rutas.post('/:o/items/:id/cancelar', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'cancelar un ítem lo hace quien es de la empresa' });
+  const veredicto = revisarEscritura('items', c.get('app'), ['estado']);
+  if (!veredicto.ok) return err(c, veredicto.error, 403, veredicto.detalle);
+  const b = await c.req.json<{ motivo?: string }>().catch(() => ({}) as { motivo?: string });
+  const r = await stub(c).cancelarItem(c.req.param('id'), { motivo: b.motivo }, { usuario_id: quien.usuario_id });
+  if ('error' in r) return err(c, r.error, 404, r.detalle);
+  return ok(c, { item: r.item, alcance: r.alcance });
+});
+
 /* ─────────────── varios ítems iguales, un solo concepto (§98) ───────────────
  *
  * Mike, 20-sep: «necesito poder agrupar varios ítems en un solo concepto.

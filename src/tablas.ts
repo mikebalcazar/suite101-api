@@ -124,6 +124,13 @@ export const DEFS: Record<Tabla, Def> = {
        * que son los compromisos con proveedores; es la palabra de la
        * cotización. La migración 0015 explica por qué conviven. */
       partida: 'texto', orden: 'entero',
+      /* 0016 · el alcance. `aprobado_at` es lo único que distingue después un
+       * CANCELADO —estuvo aprobado y se canceló— de un descartado —nunca lo
+       * estuvo—, que es la regla que puso Mike el 20-sep. Las tres las pone
+       * la API (ver CACHES en src/permisos.ts): una app que pudiera escribir
+       * `aprobado_at` podría hacer pasar por venta cancelada algo que nadie
+       * aprobó nunca. */
+      aprobado_at: 'texto', cancelado_at: 'texto', cancelado_motivo: 'texto',
     },
     requeridos: ['negocio_id', 'cliente_id', 'nombre'],
     filtros: ['negocio_id', 'proyecto_id', 'cliente_id', 'estado', 'etapa', 'partida'],
