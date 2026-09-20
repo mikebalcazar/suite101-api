@@ -13,7 +13,23 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.32.0 (LA RAYA SE ARMA CON LOS EXPEDIENTES DE
+ * Versión del contrato: 0.33.0 (LAS 29 PUERTAS DEL MISMO MODELO:
+ * `GET /orgs/:o/proyectos/:id/agrupables` agrupa por la FAMILIA del nombre
+ * —lo que queda al quitarle el número de la pieza— y ya no por nombre
+ * idéntico. Mike, 20-sep, con la pantalla enfrente: «el código sí es
+ * diferente por ítem (PT-01, PT-02, PT-03) pero el concepto se puede
+ * agrupar porque todas son el mismo modelo de puerta». Una pieza traída
+ * del plano se llama «Puerta 01» —con su número, así se dibuja en obra—,
+ * así que agrupar por nombre idéntico no encontraba nunca dos iguales. Se
+ * quita UN entero corto del final: un «Tablón 0.90» conserva su medida,
+ * porque ahí el número ES el producto. El grupo devuelve `nombres` con lo
+ * que trae adentro, para que se vea qué se va a juntar antes de juntarlo,
+ * y propone el nombre sin el número tal como se escribió. Y su otra idea
+ * —«un ítem/código puede tener varias instancias derivadas del ítem
+ * modelo»— es lo que ya sostiene esto: el concepto con `cantidad` es el
+ * modelo, y las piezas del plano son las instancias, cada una con su
+ * código y su bitácora). Antes:
+ * 0.32.0 (LA RAYA SE ARMA CON LOS EXPEDIENTES DE
  * roster101. `GET /orgs/:o/nomina/trabajadores` lista `roster_trabajadores`
  * —la lista larga: quién es cada quien, la que llena roster101 y llena el
  * propio trabajador— diciendo en cada renglón si ya tiene su lugar en
@@ -365,7 +381,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.32.0';
+export const VERSION_CONTRATO = '0.33.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
