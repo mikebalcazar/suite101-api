@@ -17,7 +17,26 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.35.0 (EL PRODUCTO DEL CATÁLOGO, Y AGRUPAR DEJA DE
+ * Versión del contrato: 0.36.0 (SEPARAR, Y RESCATAR LO QUE LA FUSIÓN BORRÓ.
+ * Mike, 20-sep, con HOLCIM enfrente: «ya se hizo un desastre y ahora no puedo
+ * separar los ítems para agruparlos en otro producto. O mejor sepárame todos
+ * los ítems de puertas otra vez».
+ *   · `POST /orgs/:o/items/:id/separar` saca el ítem de su producto —sin
+ *     quitarle el precio— y, si el renglón viene de la FUSIÓN del 0.30.0,
+ *     devuelve los renglones que aquélla borró: los reconstruye desde
+ *     `refs.agrupados` con su id original, su código de obra, su nombre, su
+ *     cantidad y su importe, y reparte las piezas del plano por CÓDIGO.
+ *   · `POST /orgs/:o/proyectos/:id/separar {producto_id}` hace lo mismo con
+ *     todas las piezas de un producto en una obra, en un solo envío.
+ *   · EL DINERO NO SE MUEVE: lo que se le resta al renglón que sobrevivió es
+ *     lo que se les pone a los reconstruidos. Si no cuadra —porque alguien
+ *     le cambió la cantidad después de juntarlos— contesta 409 `no_cuadra`
+ *     y NO escribe nada.
+ *   · Lo que no vuelve, y se dice: de qué renglón era cada movimiento,
+ *     partida y avance. La fusión los mudó al que se quedaba sin anotar de
+ *     dónde venían, así que se quedan ahí. Y la etapa vuelve siendo la del
+ *     más atrasado, que es con la que se quedó la fusión). Antes:
+ * 0.35.0 (EL PRODUCTO DEL CATÁLOGO, Y AGRUPAR DEJA DE
  * FUSIONAR. Mike, 20-sep: «cuando un ítem se asigna a un grupo de ítems que
  * son del mismo producto, el ítem adquiere en automático ese costo. También
  * debe poder moverse de grupo de producto un ítem ya agrupado. Todos los
@@ -431,7 +450,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.35.0';
+export const VERSION_CONTRATO = '0.36.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

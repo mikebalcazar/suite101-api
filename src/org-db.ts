@@ -225,6 +225,15 @@ export interface ApiOrgDB {
     args: { producto_id?: string; desde_item?: string; solo?: boolean },
     contexto: { usuario_id: string },
   ): Promise<{ ok: true; item: Fila; producto: Fila | null; venta_antes: number; venta_despues: number } | { error: string; detalle?: unknown }>;
+  separarItem(
+    item_id: string,
+    contexto: { usuario_id: string },
+  ): Promise<{ ok: true; item: Fila; salio_de: string | null; reconstruidos: Fila[]; piezas_repartidas: number; venta_antes: number; venta_despues: number } | { error: string; detalle?: unknown }>;
+  separarProducto(
+    proyecto_id: string,
+    producto_id: string,
+    contexto: { usuario_id: string },
+  ): Promise<{ ok: true; separados: number; reconstruidos: number; piezas_repartidas: number; venta_antes: number; venta_despues: number } | { error: string; detalle?: unknown }>;
   acomodarItems(
     proyecto_id: string,
     items: Array<{ id: string; partida?: string; orden?: number }>,
@@ -2826,6 +2835,188 @@ export class OrgDB extends DurableObject<Env> {
     }
 
     return { error: 'datos_invalidos', detalle: { motivo: 'hay que decir a qué producto: `producto_id`, `desde_item` o `solo`' } };
+  }
+
+  /* ─────────────── separar: deshacer el grupo, y rescatar lo fusionado ───────────────
+   *
+   * Mike, 20-sep, con HOLCIM enfrente: «ya se hizo un desastre con todos los
+   * cambios y ahora no puedo separar los ítems para agruparlos en otro
+   * producto. O mejor sepárame todos los ítems de puertas otra vez».
+   *
+   * Son DOS problemas con el mismo remedio, y hay que atender los dos porque
+   * desde afuera se ven igual:
+   *
+   *   1. El ítem está en un producto y sacarlo de uno en uno son 29 clics.
+   *   2. El renglón viene de la FUSIÓN del contrato 0.30.0, que borraba los
+   *      renglones que absorbía. Ahí no hay 29 ítems que sacar: hay uno solo
+   *      con `cantidad = 29`, y la lista de productos no puede partirlo.
+   *
+   *  Lo segundo lo causé yo, y se puede deshacer sólo porque aquella versión
+   *  —con todo lo mal planteada que estaba— dejó escrito en `refs.agrupados`
+   *  qué se había tragado: el id, el código, el nombre, la cantidad y el
+   *  importe de cada renglón. «El renglón se borra; lo que decía, no.» Esa
+   *  línea es la que hoy permite devolverlos.
+   *
+   *  LO QUE SÍ VUELVE
+   *
+   *   · los renglones, con su id original —el ULID quedó libre al borrarse—,
+   *     su código de obra, su nombre, su cantidad y su importe;
+   *   · las piezas del plano, repartidas por CÓDIGO: el elemento cuyo `code`
+   *     es PT-07 se va con el renglón cuya `clave` es PT-07. Es el único
+   *     amarre que quedó, y es bueno, porque el código de la pieza es único
+   *     dentro de la obra.
+   *
+   *  LO QUE NO VUELVE, Y HAY QUE DECIRLO
+   *
+   *   · a qué renglón pertenecía cada MOVIMIENTO, cada PARTIDA y cada AVANCE.
+   *     La fusión los mudó al que se quedaba y no anotó de cuál venían. Se
+   *     quedan donde están, en el renglón que sobrevivió. Nada se pierde;
+   *     queda mal repartido, y eso se acomoda a mano si importa;
+   *   · la ETAPA de cada uno. La fusión se quedó con la del MÁS ATRASADO, así
+   *     que todos vuelven con ésa: decir que uno iba más adelantado sería
+   *     inventarlo, y por ese lado el error es a favor del que mide.
+   *
+   *  EL DINERO NO SE MUEVE. Lo que se le resta al renglón que sobrevivió es
+   *  exactamente lo que se les pone a los reconstruidos, y la suma sale
+   *  igual. Si no cuadrara, no se escribe nada: más vale no separar que
+   *  separar cambiando el precio de venta de una obra. */
+
+  /** Separar UN ítem: sacarlo de su producto y, si es un renglón fusionado,
+   *  devolver los renglones que se tragó. */
+  separarItem(
+    item_id: string,
+    contexto: { usuario_id: string },
+  ): {
+    ok: true; item: Fila; salio_de: string | null; reconstruidos: Fila[];
+    piezas_repartidas: number; venta_antes: number; venta_despues: number;
+  } | { error: string; detalle?: unknown } {
+    /* La fila CRUDA, no `obtener()`. Esa pasa por `afuera()`, que convierte
+     * las columnas json —`refs`, `origen`, `asignados`— en objetos, y aquí
+     * hacen falta como vinieron: `refs` para leer la anotación, y las otras
+     * dos para volver a escribirlas tal cual en los renglones que nacen. Un
+     * objeto no se puede pasar como valor a SQLite. */
+    const item = this.sql.exec(`SELECT * FROM items WHERE id = ?`, item_id).toArray()[0] as Fila | undefined;
+    if (!item) return { error: 'no_encontrado', detalle: { que: 'item', id: item_id } };
+    const proyecto_id = item.proyecto_id ? String(item.proyecto_id) : '';
+    const venta = () => (proyecto_id ? Number((this.obtener('proyectos', proyecto_id) as Fila | null)?.precio_venta ?? 0) : 0);
+    const venta_antes = venta();
+
+    /* Lo que la fusión dejó anotado. Si no trae nada, esto es sólo sacarlo
+     * del producto, que es el caso normal. */
+    let refs: Record<string, unknown> = {};
+    try { const v = JSON.parse(String(item.refs ?? '{}')); if (v && typeof v === 'object' && !Array.isArray(v)) refs = v as Record<string, unknown>; } catch { refs = {}; }
+    type Absorbido = { id?: string; clave?: string | null; nombre?: string; cantidad?: number; monto?: number };
+    const anotados: Absorbido[] = Array.isArray(refs.agrupados) ? (refs.agrupados as Absorbido[]) : [];
+
+    /* Sólo los que de verdad no existen. Separar dos veces no debe duplicar
+     * renglones: la segunda vez no hay nada que devolver. */
+    const porDevolver = anotados.filter((a) => {
+      const id = String(a?.id ?? '').trim();
+      return id && !this.obtener('items', id);
+    });
+
+    /* ── se revisa que cuadre ANTES de escribir ── */
+    const cant = (n: unknown) => Math.max(1, Math.trunc(Number(n ?? 1)));
+    const sumaCant = porDevolver.reduce((s, a) => s + cant(a.cantidad), 0);
+    const sumaMonto = porDevolver.reduce((s, a) => s + Math.round(Number(a.monto ?? 0)), 0);
+    const quedaCant = cant(item.cantidad) - sumaCant;
+    const quedaMonto = Math.round(Number(item.monto ?? 0)) - sumaMonto;
+    if (porDevolver.length && (quedaCant < 1 || quedaMonto < 0)) {
+      return {
+        error: 'no_cuadra',
+        detalle: {
+          motivo: 'devolver los renglones anotados dejaría al que sobrevivió en menos de una pieza o en importe negativo; alguien le cambió la cantidad o el precio después de juntarlos',
+          cantidad_hoy: cant(item.cantidad), cantidad_anotada: sumaCant,
+          monto_hoy: Number(item.monto ?? 0), monto_anotado: sumaMonto,
+        },
+      };
+    }
+
+    /* ── ya cuadró: ahora se escribe ── */
+
+    const salio_de = item.producto_id ? String(item.producto_id) : null;
+    const reconstruidos: Fila[] = [];
+    let piezas_repartidas = 0;
+
+    for (const a of porDevolver) {
+      const id = String(a.id);
+      const clave = String(a.clave ?? '').trim() || null;
+      this.sql.exec(
+        `INSERT INTO items (id, negocio_id, proyecto_id, cliente_id, clave, nombre, descripcion, tipo,
+                            monto, cantidad, moneda, estado, etapa, etapa_at, etapa_por, fecha_entrega,
+                            asignados, origen, refs, partida, orden, aprobado_at, cancelado_at,
+                            cancelado_motivo, producto_id, creado_at, creado_por, actualizado_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,?,?)`,
+        id, item.negocio_id, item.proyecto_id, item.cliente_id, clave,
+        String(a.nombre ?? item.nombre), item.descripcion ?? null, item.tipo,
+        Math.round(Number(a.monto ?? 0)), cant(a.cantidad), item.moneda, item.estado,
+        // La etapa del más atrasado, que es con la que se quedó la fusión.
+        item.etapa, item.etapa_at ?? null, item.etapa_por ?? null, item.fecha_entrega ?? null,
+        item.asignados, item.origen, '{}', item.partida, item.orden,
+        item.aprobado_at ?? null, item.cancelado_at ?? null, item.cancelado_motivo ?? null,
+        // creado_at: el de hoy sería mentira sobre cuándo se capturó.
+        item.creado_at, contexto.usuario_id, ahora(),
+      );
+      reconstruidos.push(this.obtener('items', id)!);
+
+      /* Su pieza del plano se va con él, buscándola por código. */
+      if (clave) {
+        const r = this.sql.exec(
+          `UPDATE quell_elements SET item_id = ? WHERE item_id = ? AND code = ?`, id, item_id, clave,
+        );
+        piezas_repartidas += Number(r.rowsWritten ?? 0);
+      }
+    }
+
+    delete refs.agrupados;
+    this.sql.exec(
+      `UPDATE items SET producto_id = NULL, cantidad = ?, monto = ?, refs = ?, actualizado_at = ? WHERE id = ?`,
+      porDevolver.length ? quedaCant : cant(item.cantidad),
+      porDevolver.length ? quedaMonto : Math.round(Number(item.monto ?? 0)),
+      JSON.stringify(refs), ahora(), item_id,
+    );
+
+    if (proyecto_id) this.recalcularProyecto(proyecto_id);
+    this.avisar({ t: 'item.cambio', id: item_id }, 'todos');
+    return {
+      ok: true, item: this.obtener('items', item_id)!, salio_de, reconstruidos,
+      piezas_repartidas, venta_antes, venta_despues: venta(),
+    };
+  }
+
+  /** Separar TODO un producto: sus piezas salen del grupo y cada renglón
+   *  fusionado devuelve los suyos. Un solo envío, porque «sepárame todos los
+   *  ítems de puertas» son 29 clics de otra manera. */
+  separarProducto(
+    proyecto_id: string,
+    producto_id: string,
+    contexto: { usuario_id: string },
+  ): { ok: true; separados: number; reconstruidos: number; piezas_repartidas: number; venta_antes: number; venta_despues: number }
+    | { error: string; detalle?: unknown } {
+    const proyecto = this.obtener('proyectos', proyecto_id);
+    if (!proyecto) return { error: 'no_encontrado', detalle: { que: 'proyecto', id: proyecto_id } };
+    const producto = this.obtener('productos', producto_id);
+    if (!producto) return { error: 'no_encontrado', detalle: { que: 'producto', id: producto_id } };
+
+    const suyos = this.sql
+      .exec(`SELECT id FROM items WHERE proyecto_id = ? AND producto_id = ?`, proyecto_id, producto_id)
+      .toArray() as Fila[];
+    if (!suyos.length) return { error: 'no_encontrado', detalle: { que: 'items', motivo: 'ese producto no tiene piezas en esta obra' } };
+
+    const venta_antes = Number((this.obtener('proyectos', proyecto_id) as Fila).precio_venta ?? 0);
+    let reconstruidos = 0;
+    let piezas_repartidas = 0;
+    for (const it of suyos) {
+      const r = this.separarItem(String(it.id), contexto);
+      /* Un `no_cuadra` en uno no debe frenar a los otros veintiocho: ése se
+       * queda como está y se dice cuántos salieron. Lo que no se hace es
+       * escribirlo a medias, y eso ya lo cuida `separarItem`. */
+      if ('ok' in r) { reconstruidos += r.reconstruidos.length; piezas_repartidas += r.piezas_repartidas; }
+    }
+    return {
+      ok: true, separados: suyos.length, reconstruidos, piezas_repartidas, venta_antes,
+      venta_despues: Number((this.obtener('proyectos', proyecto_id) as Fila).precio_venta ?? 0),
+    };
   }
 
 

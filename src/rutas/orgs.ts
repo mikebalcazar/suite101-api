@@ -510,6 +510,52 @@ rutas.post('/:o/items/:id/producto', async (c) => {
   return ok(c, { item: r.item, producto: r.producto, venta_antes: r.venta_antes, venta_despues: r.venta_despues });
 });
 
+/* ────────── separar: deshacer el grupo, y rescatar lo fusionado ──────────
+ *
+ * Mike, 20-sep, con HOLCIM enfrente: «ya se hizo un desastre con todos los
+ * cambios y ahora no puedo separar los ítems para agruparlos en otro
+ * producto. O mejor sepárame todos los ítems de puertas otra vez».
+ *
+ * Dos cosas distintas se ven igual desde la pantalla: un ítem metido en un
+ * producto —sacarlo de uno en uno son 29 clics— y un renglón que viene de la
+ * FUSIÓN del contrato 0.30.0, que borraba los renglones que absorbía y por
+ * eso no se puede partir. Estas dos rutas atienden las dos.
+ *
+ * El dinero no se mueve: lo que se le resta al que sobrevivió es lo que se
+ * les pone a los reconstruidos. Si no cuadra, no se escribe nada.
+ */
+
+/** POST /orgs/:o/items/:id/separar — sacar UN ítem de su producto y, si es
+ *  un renglón fusionado, devolver los renglones que se tragó. */
+rutas.post('/:o/items/:id/separar', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'separar un ítem lo hace quien es de la empresa' });
+  const r = await stub(c).separarItem(c.req.param('id'), { usuario_id: quien.usuario_id });
+  if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 409, r.detalle);
+  return ok(c, {
+    item: r.item, salio_de: r.salio_de, reconstruidos: r.reconstruidos,
+    piezas_repartidas: r.piezas_repartidas, venta_antes: r.venta_antes, venta_despues: r.venta_despues,
+  });
+});
+
+/** POST /orgs/:o/proyectos/:id/separar {producto_id} — separar TODAS las
+ *  piezas de un producto de una obra, de un golpe.
+ *
+ *  Va en un solo envío por lo mismo que acomodar: 29 llamadas donde la
+ *  número 12 puede fallar dejan la lista a medio separar. */
+rutas.post('/:o/proyectos/:id/separar', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'separar los ítems lo hace quien es de la empresa' });
+  const b = await c.req.json<{ producto_id?: string }>().catch(() => ({}) as { producto_id?: string });
+  if (!b.producto_id) return err(c, 'datos_invalidos', 400, { falta: 'producto_id' });
+  const r = await stub(c).separarProducto(c.req.param('id'), b.producto_id, { usuario_id: quien.usuario_id });
+  if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 409, r.detalle);
+  return ok(c, {
+    separados: r.separados, reconstruidos: r.reconstruidos, piezas_repartidas: r.piezas_repartidas,
+    venta_antes: r.venta_antes, venta_despues: r.venta_despues,
+  });
+});
+
 /** POST /orgs/:o/proyectos/:id/acomodar {items:[{id, partida?, orden?}]} — la
  *  partida de cada ítem y el lugar que ocupa dentro de ella (§102).
  *
