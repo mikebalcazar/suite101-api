@@ -195,6 +195,9 @@ export interface ApiOrgDB {
   ): Promise<{ ok: true; raya: Fila; pagos: Fila[] } | { error: string; detalle?: unknown }>;
   cancelarRaya(id: string): Promise<{ ok: true; raya: Fila; pagos: Fila[] } | { error: string; detalle?: unknown }>;
   recibido(pago_id: string, recibido: boolean): Promise<{ ok: true; pago: Fila } | { error: string; detalle?: unknown }>;
+  /* La raya contra los expedientes de roster101 (§107). */
+  trabajadoresDeRoster(): Promise<Fila[]>;
+  personaDeRoster(roster_id: string, contexto: { usuario_id: string }): Promise<{ ok: true; persona: Fila; nueva: boolean } | { error: string; detalle?: unknown }>;
   fusionarItemsDeLaObra(
     obra_id: string,
     plan: {
@@ -2983,6 +2986,85 @@ export class OrgDB extends DurableObject<Env> {
     if (!pago) return { error: 'no_encontrado', detalle: { que: 'pago', id: pago_id } };
     this.sql.exec(`UPDATE raya_pagos SET recibido_at = ? WHERE id = ?`, recibido ? ahora() : null, pago_id);
     return { ok: true, pago: this.sql.exec(`SELECT * FROM raya_pagos WHERE id = ?`, pago_id).toArray()[0] as Fila };
+  }
+
+
+  /* ─────────────── la raya y los expedientes de roster101 (§107) ───────────────
+   *
+   * Mike, 20-sep: «en la sección de raya de dash debo poder escoger a quién
+   * se le paga de la lista de los trabajadores en roster101, no en la de
+   * dash. Y de agregar las personas a las que se les realiza el pago».
+   *
+   * Las dos listas existen y NO son la misma, aunque se parezcan:
+   *
+   *   · `roster_trabajadores` es el EXPEDIENTE: quién es, su CURP, su NSS,
+   *     su cuenta, sus documentos. La llena roster101, la llena el propio
+   *     trabajador desde su celular, y es la lista larga de la empresa.
+   *   · `personal` es a quién le toca algo en la suite: quién ve dinero,
+   *     quién lleva la raya, de quién cuelga un pago. Es la lista corta.
+   *
+   * La raya pagaba contra la corta, y en una empresa que lleva expedientes
+   * la corta está vacía: se veía como si no hubiera a quién pagarle. Ahora
+   * la pantalla escoge de la LARGA, y escoger a alguien le abre su renglón
+   * en la corta, ligado por `expediente_ref`.
+   *
+   * Por qué no se paga directo contra el expediente: un pago cuelga de
+   * `raya_pagos.personal_id`, y esa llave apunta a `personal`. Cambiarla
+   * sería mover la nómina entera para ahorrarse una fila. Y la fila sirve:
+   * es donde vive el permiso.
+   */
+
+  /** Los expedientes de roster101, con su renglón en `personal` si ya lo
+   *  tienen. Es la lista que se ofrece al armar un corte. */
+  trabajadoresDeRoster(): Fila[] {
+    return this.sql
+      .exec(
+        `SELECT t.id, t.nombre, t.apellido_paterno, t.apellido_materno, t.puesto, t.estado, t.email,
+                p.id AS personal_id
+         FROM roster_trabajadores t
+         LEFT JOIN personal p ON p.expediente_ref = t.id
+         ORDER BY t.nombre, t.apellido_paterno`,
+      )
+      .toArray()
+      .map((t) => {
+        const f = t as Fila;
+        /* Sin nombre todavía sale con su correo, y no vacío: la mayoría de
+         * los expedientes están en borrador el día que hay que pagarles
+         * —entraron con su correo y no han llenado la ficha—, y un renglón
+         * en blanco en una lista de gente no se puede escoger. */
+        const nombre = [f.nombre, f.apellido_paterno, f.apellido_materno]
+          .map((x) => String(x ?? '').trim()).filter(Boolean).join(' ') || String(f.email ?? '');
+        return {
+          id: f.id, nombre, puesto: String(f.puesto ?? ''), correo: String(f.email ?? ''),
+          expediente: String(f.estado ?? ''), personal_id: f.personal_id ?? null,
+        };
+      });
+  }
+
+  /** Escoger a alguien del expediente: si ya tiene renglón en `personal`, se
+   *  devuelve; si no, se le abre uno ligado a su expediente.
+   *
+   *  Ligado y no copiado: el nombre se toma del expediente al abrirlo, pero
+   *  `expediente_ref` es lo que dice que son la misma persona. Sin esa liga,
+   *  escoger dos veces al mismo abriría dos renglones y la raya le pagaría
+   *  doble sin que nada se viera raro. */
+  personaDeRoster(roster_id: string, contexto: { usuario_id: string }): { ok: true; persona: Fila; nueva: boolean } | { error: string; detalle?: unknown } {
+    const exp = this.sql
+      .exec(`SELECT id, nombre, apellido_paterno, apellido_materno, puesto, email FROM roster_trabajadores WHERE id = ?`, roster_id)
+      .toArray()[0] as Fila | undefined;
+    if (!exp) return { error: 'no_encontrado', detalle: { que: 'trabajador', id: roster_id } };
+
+    const ya = this.sql.exec(`SELECT * FROM personal WHERE expediente_ref = ?`, roster_id).toArray()[0] as Fila | undefined;
+    if (ya) return { ok: true, persona: this.afuera('personal', ya)!, nueva: false };
+
+    const nombre = [exp.nombre, exp.apellido_paterno, exp.apellido_materno]
+      .map((x) => String(x ?? '').trim()).filter(Boolean).join(' ') || String(exp.email ?? 'Sin nombre');
+    const fila = this.crear(
+      'personal',
+      { nombre, puesto: String(exp.puesto ?? ''), correo: String(exp.email ?? ''), expediente_ref: roster_id, activo: 1 } as unknown as Fila,
+      { app: 'roster101', usuario_id: contexto.usuario_id },
+    );
+    return { ok: true, persona: fila, nueva: true };
   }
 
   /* ─────────────── pool para autocompletar (§7) ─────────────── */

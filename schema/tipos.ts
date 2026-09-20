@@ -13,7 +13,23 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.31.1 (EL ALCANCE DEL ÍTEM: lo que está dentro, lo
+ * Versión del contrato: 0.32.0 (LA RAYA SE ARMA CON LOS EXPEDIENTES DE
+ * roster101. `GET /orgs/:o/nomina/trabajadores` lista `roster_trabajadores`
+ * —la lista larga: quién es cada quien, la que llena roster101 y llena el
+ * propio trabajador— diciendo en cada renglón si ya tiene su lugar en
+ * `personal`, y `POST /orgs/:o/nomina/gente/de-roster {roster_id}` se lo
+ * abre, LIGADO por `expediente_ref`. Mike, 20-sep: «en la sección de raya
+ * de dash debo poder escoger a quién se le paga de la lista de los
+ * trabajadores en roster101, no en la de dash». La raya pagaba contra
+ * `personal` —la lista corta, la de quién tiene permisos— y en una empresa
+ * que lleva expedientes esa lista está vacía: parecía que no había a quién
+ * pagarle. No se paga directo contra el expediente porque `raya_pagos`
+ * apunta a `personal`, y esa fila es donde vive el permiso; la liga impide
+ * que escoger dos veces al mismo le abra dos renglones y la raya le pague
+ * doble. Un expediente en borrador sale con su correo por nombre: la
+ * mayoría lo están el día que hay que pagarles. El alta a mano sigue, para
+ * quien paga sin llevar expedientes). Antes:
+ * 0.31.1 (EL ALCANCE DEL ÍTEM: lo que está dentro, lo
  * que todavía no está aprobado y lo que ya se canceló. `POST
  * /orgs/:o/items/:id/aprobar` y `POST /orgs/:o/items/:id/cancelar {motivo?}`,
  * que abren dash101 y quell101 por igual —«se debe poder cancelar algún ítem
@@ -349,7 +365,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.31.1';
+export const VERSION_CONTRATO = '0.32.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
