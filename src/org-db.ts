@@ -167,7 +167,7 @@ export interface ApiOrgDB {
   obraDeProyecto(proyecto_id: string): Promise<Fila | null>;
   sinUbicar(obra_id: string): Promise<{ obra: Fila; items: Fila[] } | { error: string; detalle?: unknown }>;
   ligarObra(obra_id: string, proyecto_id: string): Promise<{ ok: true; obra: Fila } | { error: string; detalle?: unknown }>;
-  itemsDeLaObra(obra_id: string): Promise<{ obra: Fila; parejas: Fila[]; nuevos: Fila[]; sueltos: Fila[] } | { error: string; detalle?: unknown }>;
+  itemsDeLaObra(obra_id: string): Promise<{ obra: Fila; parejas: Fila[]; nuevos: Fila[]; sueltos: Fila[]; candidatos: Fila[] } | { error: string; detalle?: unknown }>;
   rayas(negocio_id: string): Promise<Fila[]>;
   raya(id: string): Promise<{ raya: Fila; pagos: Fila[] } | null>;
   crearRaya(
@@ -188,9 +188,9 @@ export interface ApiOrgDB {
   recibido(pago_id: string, recibido: boolean): Promise<{ ok: true; pago: Fila } | { error: string; detalle?: unknown }>;
   fusionarItemsDeLaObra(
     obra_id: string,
-    plan: { ligar?: Array<{ element_id: string; item_id: string }>; crear?: string[] },
+    plan: { ligar?: Array<{ element_id: string; item_id: string; clave?: 'quell' | 'dash'; nombre?: 'quell' | 'dash' }>; crear?: string[] },
     contexto: { usuario_id: string },
-  ): Promise<{ ok: true; ligados: number; creados: number; obra: Fila } | { error: string; detalle?: unknown }>;
+  ): Promise<{ ok: true; ligados: number; creados: number; renombrados: number; obra: Fila } | { error: string; detalle?: unknown }>;
   desligarObra(obra_id: string): Promise<{ ok: true; obra: Fila } | { error: string; detalle?: unknown }>;
 
   fetch(req: Request): Promise<Response>;
@@ -2003,7 +2003,7 @@ export class OrgDB extends DurableObject<Env> {
    *
    *  Un ítem ya emparejado no vuelve a salir: la propuesta es idempotente y
    *  aplicarla dos veces no duplica nada. */
-  itemsDeLaObra(obra_id: string): { obra: Fila; parejas: Fila[]; nuevos: Fila[]; sueltos: Fila[] } | { error: string; detalle?: unknown } {
+  itemsDeLaObra(obra_id: string): { obra: Fila; parejas: Fila[]; nuevos: Fila[]; sueltos: Fila[]; candidatos: Fila[] } | { error: string; detalle?: unknown } {
     const obra = this.sql.exec(`SELECT * FROM quell_projects WHERE id = ?`, obra_id).toArray()[0] as Fila | undefined;
     if (!obra) return { error: 'no_encontrado', detalle: { que: 'obra', id: obra_id } };
     if (!obra.proyecto_id) {
@@ -2065,7 +2065,24 @@ export class OrgDB extends DurableObject<Env> {
     }
     const emparejados = new Set(parejas.map((p) => String(p.item_id)));
     const sueltos = libres.filter((i) => !emparejados.has(String(i.id)));
-    return { obra, parejas, nuevos, sueltos };
+
+    /* Y TODOS los ítems que todavía admiten una pieza, con cuántas les
+     * caben. Sin esta lista, la pantalla sólo podía aceptar o rechazar lo
+     * que el parecido propuso; con ella, quien decide escoge a mano cuál es
+     * cuál. Mike lo pidió con esas palabras el 20-sep: «que pueda escoger de
+     * la lista qué ítem corresponde al de quell».
+     *
+     * Es la misma lista de `libres`, pero dicha completa: `parejas` y
+     * `sueltos` la parten en dos según lo que el parecido adivinó, y para un
+     * desplegable hace falta entera. */
+    const candidatos = libres.map((i) => {
+      const ya = Number(
+        (this.sql.exec(`SELECT COUNT(*) AS n FROM quell_elements WHERE item_id = ?`, String(i.id)).toArray()[0] as Fila).n,
+      );
+      return { ...i, ubicados: ya, cupo: Math.max(0, Number(i.cantidad ?? 1) - ya) };
+    });
+
+    return { obra, parejas, nuevos, sueltos, candidatos };
   }
 
   /** Aplicar la propuesta. Lo que no venga en el cuerpo NO se toca.
@@ -2082,9 +2099,9 @@ export class OrgDB extends DurableObject<Env> {
    *  lo decide. */
   fusionarItemsDeLaObra(
     obra_id: string,
-    plan: { ligar?: Array<{ element_id: string; item_id: string }>; crear?: string[] },
+    plan: { ligar?: Array<{ element_id: string; item_id: string; clave?: 'quell' | 'dash'; nombre?: 'quell' | 'dash' }>; crear?: string[] },
     contexto: { usuario_id: string },
-  ): { ok: true; ligados: number; creados: number; obra: Fila } | { error: string; detalle?: unknown } {
+  ): { ok: true; ligados: number; creados: number; renombrados: number; obra: Fila } | { error: string; detalle?: unknown } {
     const obra = this.sql.exec(`SELECT * FROM quell_projects WHERE id = ?`, obra_id).toArray()[0] as Fila | undefined;
     if (!obra) return { error: 'no_encontrado', detalle: { que: 'obra', id: obra_id } };
     if (!obra.proyecto_id) return { error: 'sin_liga', detalle: { motivo: 'esta obra todavía no está ligada a un proyecto de dash101' } };
@@ -2095,17 +2112,134 @@ export class OrgDB extends DurableObject<Env> {
     const pieza = (eid: string) =>
       this.sql.exec(`SELECT * FROM quell_elements WHERE id = ? AND project_id = ?`, eid, obra_id).toArray()[0] as Fila | undefined;
 
-    let ligados = 0;
-    for (const par of plan.ligar ?? []) {
+    /* DOS PASADAS: primero se revisa TODO, y sólo si todo cuadra se escribe.
+     *
+     * No es purismo. La primera versión escribía la liga y después revisaba
+     * el código; cuando el código chocaba, contestaba 409 y la pieza se
+     * quedaba ligada de todos modos. Lo atrapó su propia prueba: el rechazo
+     * tiene que dejar las cosas como estaban.
+     *
+     * Y la cuenta del cupo se lleva DENTRO de la pasada, no sólo contra la
+     * base: en un mismo envío se puede escoger dos veces el mismo ítem de
+     * cantidad 1, y contra la base las dos pasarían. */
+    const ligar = (plan.ligar ?? []).filter((par) => {
       const pz = pieza(par.element_id);
-      if (!pz) return { error: 'no_encontrado', detalle: { que: 'pieza', id: par.element_id, motivo: 'esa pieza no es de esta obra' } };
-      if (pz.item_id) continue; // ya estaba: aplicar dos veces no duplica
+      return pz && !pz.item_id; // lo que ya estaba ligado se salta: aplicar dos veces no duplica
+    });
+
+    const usado = new Map<string, number>();   // item_id → piezas que ya le cuelgan
+    const codigos = new Map<string, string>(); // element_id → código que le va a quedar
+    const nombres = new Map<string, { que: 'item' | 'pieza'; valor: string }>();
+    /* Los códigos que van a existir en la obra al terminar, para que dos
+     * piezas del mismo envío no acaben con el mismo. */
+    const codigoDe = new Map<string, string>();
+    for (const e of this.sql.exec(`SELECT id, code FROM quell_elements WHERE project_id = ?`, obra_id).toArray() as Fila[]) {
+      codigoDe.set(String(e.id), String(e.code ?? ''));
+    }
+
+    for (const par of ligar) {
+      const pz = pieza(par.element_id)!;
       const it = this.sql
-        .exec(`SELECT id FROM items WHERE id = ? AND proyecto_id = ?`, par.item_id, proyecto_id)
+        .exec(`SELECT id, nombre, clave, cantidad FROM items WHERE id = ? AND proyecto_id = ?`, par.item_id, proyecto_id)
         .toArray()[0] as Fila | undefined;
       if (!it) return { error: 'no_encontrado', detalle: { que: 'item', id: par.item_id, motivo: 'ese ítem no es del proyecto de esta obra' } };
+
+      /* EL CUPO SE REVISA AQUÍ, no sólo al proponer.
+       *
+       * Mientras la propuesta la sugería el parecido, el cupo venía
+       * respetado de fábrica. Desde que empareja una persona a mano, este
+       * servidor es el único que lleva la cuenta: se puede escoger tres
+       * veces el mismo ítem de cantidad 1 sin querer, y entonces «cuánto
+       * falta por fabricar» tendría tres respuestas ciertas. */
+      const yaEnBase = Number(
+        (this.sql.exec(`SELECT COUNT(*) AS n FROM quell_elements WHERE item_id = ?`, par.item_id).toArray()[0] as Fila).n,
+      );
+      const ya = yaEnBase + (usado.get(String(par.item_id)) ?? 0);
+      if (ya >= Number(it.cantidad ?? 1)) {
+        return {
+          error: 'sin_cupo',
+          detalle: { item_id: par.item_id, item: it.nombre, cantidad: Number(it.cantidad ?? 1), ubicados: ya,
+                     motivo: 'ese ítem ya tiene en el plano todas las piezas que dice su cantidad' },
+        };
+      }
+      usado.set(String(par.item_id), (usado.get(String(par.item_id)) ?? 0) + 1);
+
+      /* EL CÓDIGO ES LA IDENTIDAD, y queda igual en los dos lados.
+       *
+       * Mike, 20-sep: «lo que va a ser lo mismo es el código de ítem, ej.
+       * CAR-01, PT-09, porque el nombre descriptivo viene en el detalle de
+       * dash y en el detalle de quell». Tiene razón, y cambia qué se
+       * unifica: el código es lo que nombra a la MISMA pieza en las dos
+       * apps; el nombre es una descripción y cada lado puede tener la suya.
+       *
+       * Tres casos, y sólo uno necesita que alguien decida:
+       *   · uno tiene código y el otro no  → se copia. Eso es llenar un
+       *     hueco, no decidir;
+       *   · los dos tienen el MISMO        → no hay nada que hacer;
+       *   · los dos tienen y son distintos → gana el que se pidió en
+       *     `clave`. Sin `clave` no se toca ninguno: inventarle un ganador a
+       *     dos códigos que alguien tecleó a propósito es justo lo que no se
+       *     hace solo. */
+      const claveItem = String(it.clave ?? '').trim();
+      const clavePieza = String(pz.code ?? '').trim();
+      const claveFinal =
+        claveItem && clavePieza && claveItem !== clavePieza
+          ? (par.clave === 'dash' ? claveItem : par.clave === 'quell' ? clavePieza : '')
+          : (claveItem || clavePieza);
+
+      if (claveFinal && claveFinal !== clavePieza) {
+        /* El código es único dentro de la obra y lo impide la base. Si ya lo
+         * trae otra pieza se dice CUÁL: sin eso, el choque sale como falla
+         * interna y quien lo ve no sabe con qué chocó ni qué hacer. */
+        for (const [eid, cod] of codigoDe) {
+          if (eid !== par.element_id && cod === claveFinal) {
+            const otra = this.sql.exec(`SELECT name FROM quell_elements WHERE id = ?`, eid).toArray()[0] as Fila | undefined;
+            return {
+              error: 'codigo_en_uso',
+              detalle: { clave: claveFinal, pieza_id: eid, pieza: otra?.name ?? '',
+                         motivo: 'otra pieza del plano ya tiene ese código, y dentro de una obra el código es único' },
+            };
+          }
+        }
+        codigoDe.set(par.element_id, claveFinal);
+        codigos.set(par.element_id, claveFinal);
+      }
+      if (claveFinal && claveFinal !== claveItem) {
+        nombres.set(`clave:${par.item_id}`, { que: 'item', valor: claveFinal });
+      }
+
+      /* El nombre: LOS DOS LADOS LO TIENEN, y unificarlo es una decisión, no
+       * un hueco que llenar.
+       *
+       * Mike lo precisó el 20-sep: «el código y el nombre son 2 campos
+       * diferentes, pero sí los llevan los 2 apps». Los dos siempre traen
+       * nombre —en la base ninguno admite vacío—, así que nunca hay nada que
+       * copiar: o se deja cada uno con el suyo, o alguien escoge cuál gana.
+       * Por eso, sin `nombre`, no se toca ninguno; y cuando se escoge, queda
+       * en los dos lados, que fue lo que él decidió.
+       *
+       * La DESCRIPCIÓN no entra en esto: `items` la tiene y
+       * `quell_elements` no. Vive sólo del lado de dash101 y ahí se queda. */
+      if (par.nombre === 'quell' && pz.name && pz.name !== it.nombre) {
+        nombres.set(`nombre:${par.item_id}`, { que: 'item', valor: String(pz.name) });
+      } else if (par.nombre === 'dash' && it.nombre && it.nombre !== pz.name) {
+        nombres.set(`pieza:${par.element_id}`, { que: 'pieza', valor: String(it.nombre) });
+      }
+    }
+
+    // Todo cuadró: ahora sí se escribe.
+    let ligados = 0;
+    let renombrados = 0;
+    for (const par of ligar) {
       this.sql.exec(`UPDATE quell_elements SET item_id = ? WHERE id = ?`, par.item_id, par.element_id);
       ligados++;
+    }
+    for (const [eid, cod] of codigos) this.sql.exec(`UPDATE quell_elements SET code = ? WHERE id = ?`, cod, eid);
+    for (const [llave, v] of nombres) {
+      const id = llave.split(':')[1];
+      if (llave.startsWith('clave:')) this.actualizar('items', id, { clave: v.valor } as unknown as Fila);
+      else if (llave.startsWith('nombre:')) { this.actualizar('items', id, { nombre: v.valor } as unknown as Fila); renombrados++; }
+      else { this.sql.exec(`UPDATE quell_elements SET name = ? WHERE id = ?`, v.valor, id); renombrados++; }
     }
 
     let creados = 0;
@@ -2128,7 +2262,7 @@ export class OrgDB extends DurableObject<Env> {
       creados++;
     }
 
-    return { ok: true, ligados, creados, obra: this.obras().find((o) => o.id === obra_id)! };
+    return { ok: true, ligados, creados, renombrados, obra: this.obras().find((o) => o.id === obra_id)! };
   }
 
   /** El precio de un ítem cambió: se cuenta en la bitácora de cada pieza del
