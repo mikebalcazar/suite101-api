@@ -213,3 +213,12 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   20-sep dejarla **un mes más como respaldo**: hacia mediados de octubre hay
   que recordárselo para que la borre él. Ojo: **`bitacora-obra-files` NO se
   toca**, ésa sí la usa el Worker de quell101 para servir sus instaladores.
+- **La dirección de baja del correo: `info@forespot.com`.** Mike la dio el
+  20-sep, cuando le pregunté a dónde debía apuntar `List-Unsubscribe`. Vive en
+  la variable `CORREO_BAJA` del `wrangler.toml`, en producción y en staging, y
+  sale sólo en los avisos —bienvenida y estado de una orden—, nunca en el
+  código de acceso. Si ese buzón deja de leerse, se **quita la variable**: sin
+  ella el código omite la cabecera solo. Como su ausencia no rompe nada,
+  `pruebas/config-correo.py` la vigila en la puerta de despliegue. El detalle
+  completo, y los tres registros de DNS que siguen siendo de Mike, están en
+  `CORREO.md`.
