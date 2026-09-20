@@ -358,23 +358,59 @@ describe('emparejar a mano', () => {
   });
 
   it('cuando los dos traen código y difieren, gana el que se pida', async () => {
-    const eB = await piezaEn('Buró izquierdo', 'BUR-09');
-    await o('mike', `/items/${dosPiezas}`, { method: 'PATCH', app: 'quell101', json: { clave: 'BR-1' } });
+    /* El código es la identidad de UNA pieza, así que este caso es el de un
+     * ítem de cantidad 1: una cabecera, una pieza en el plano, dos códigos
+     * tecleados y alguien que escoge cuál queda. */
+    const eZ = await piezaEn('Tocador del vestidor', 'TOC-09');
+    const tocador = (await o('mike', '/items', { method: 'POST', json: {
+      negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto2,
+      nombre: 'Tocador', monto: 12_000_00, cantidad: 1, estado: 'vendido',
+    } })).data.id;
+    await o('mike', `/items/${tocador}`, { method: 'PATCH', app: 'quell101', json: { clave: 'TC-1' } });
 
     const sinDecir = await o('mike', `/obras/${obra2}/items`, {
-      method: 'POST', json: { ligar: [{ element_id: eB, item_id: dosPiezas }] },
+      method: 'POST', json: { ligar: [{ element_id: eZ, item_id: tocador }] },
     });
     expect(sinDecir.estado, JSON.stringify(sinDecir)).toBe(200);
     // Sin `clave`, no se toca ninguno: inventarle un ganador a dos códigos
     // que alguien tecleó a propósito es justo lo que no se hace solo.
-    expect((await o('mike', `/items/${dosPiezas}`)).data.clave).toBe('BR-1');
+    expect((await o('mike', `/items/${tocador}`)).data.clave).toBe('TC-1');
 
-    const eC = await piezaEn('Buró derecho', 'BUR-10');
+    const eZ2 = await piezaEn('Tocador gemelo', 'TOC-10');
+    const otroTocador = (await o('mike', '/items', { method: 'POST', json: {
+      negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto2,
+      nombre: 'Tocador gemelo', monto: 12_000_00, cantidad: 1, estado: 'vendido',
+    } })).data.id;
+    await o('mike', `/items/${otroTocador}`, { method: 'PATCH', app: 'quell101', json: { clave: 'TC-2' } });
     const conQuell = await o('mike', `/obras/${obra2}/items`, {
-      method: 'POST', json: { ligar: [{ element_id: eC, item_id: dosPiezas, clave: 'quell' }] },
+      method: 'POST', json: { ligar: [{ element_id: eZ2, item_id: otroTocador, clave: 'quell' }] },
     });
     expect(conQuell.estado, JSON.stringify(conQuell)).toBe(200);
-    expect((await o('mike', `/items/${dosPiezas}`)).data.clave, 'gana el del plano').toBe('BUR-10');
+    expect((await o('mike', `/items/${otroTocador}`)).data.clave, 'gana el del plano').toBe('TOC-10');
+  });
+
+  it('un CONCEPTO de varias piezas no toma el código de ninguna, ni les pone el suyo', async () => {
+    /* Desde que se pueden agrupar (§98), un ítem puede ser «dos burós» o
+     * «21 puertas». Un código nombra UNA pieza del plano —la base lo impide
+     * dos veces en la misma obra—, así que un concepto de varias no tiene
+     * uno: ni se lo copia a las piezas, ni se queda con el de la última que
+     * se ligó, que es lo que hacía antes y era arbitrario. */
+    const eB = await piezaEn('Buró izquierdo', 'BUR-09');
+    await o('mike', `/items/${dosPiezas}`, { method: 'PATCH', app: 'quell101', json: { clave: 'BR-1' } });
+    const uno = await o('mike', `/obras/${obra2}/items`, {
+      method: 'POST', json: { ligar: [{ element_id: eB, item_id: dosPiezas }] },
+    });
+    expect(uno.estado, JSON.stringify(uno)).toBe(200);
+
+    const eC = await piezaEn('Buró derecho', 'BUR-10');
+    const dos = await o('mike', `/obras/${obra2}/items`, {
+      method: 'POST', json: { ligar: [{ element_id: eC, item_id: dosPiezas, clave: 'quell' }] },
+    });
+    expect(dos.estado, JSON.stringify(dos)).toBe(200);
+
+    expect((await o('mike', `/items/${dosPiezas}`)).data.clave, 'el concepto conserva el suyo').toBe('BR-1');
+    expect((await q('mike', `/elements/${eB}`)).element.code, 'y cada pieza el suyo').toBe('BUR-09');
+    expect((await q('mike', `/elements/${eC}`)).element.code).toBe('BUR-10');
   });
 
   it('el cupo se revisa AL APLICAR: el tercer buró ya no cabe', async () => {

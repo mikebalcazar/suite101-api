@@ -369,6 +369,88 @@ rutas.post('/:o/clientes/:id/fusionar', async (c) => {
   return ok(c, { cliente: r.cliente, movidos: r.movidos });
 });
 
+/* ─────────────── varios ítems iguales, un solo concepto (§98) ───────────────
+ *
+ * Mike, 20-sep: «necesito poder agrupar varios ítems en un solo concepto.
+ * Son varias puertas iguales en diferente ubicación —quell las ubica en plano
+ * y cada una tiene su seguimiento— pero el producto es el mismo y no tiene
+ * caso tener 21 ítems idénticos enlistados en dash».
+ *
+ * Dos rutas y el mismo reparto de siempre: una PROPONE y no toca nada, la
+ * otra aplica lo que alguien escogió. Las piezas del plano no se tocan: las
+ * 21 puertas siguen siendo 21 en quell101, con su ubicación y su bitácora;
+ * lo que se junta es el renglón que se cobra.
+ */
+
+/** GET /orgs/:o/proyectos/:id/agrupables — qué renglones son el mismo
+ *  producto capturado varias veces. Propone; no junta. */
+rutas.get('/:o/proyectos/:id/agrupables', async (c) => {
+  const permiso = puedeLeer(c, 'items');
+  if (permiso) return permiso;
+  const r = await stub(c).gruposDeItems(c.req.param('id'));
+  if ('error' in r) return err(c, r.error, 404, r.detalle);
+  return ok(c, { proyecto: r.proyecto, grupos: r.grupos });
+});
+
+/** POST /orgs/:o/proyectos/:id/agrupar {queda_id, se_van[], nombre?} — que
+ *  sean uno solo.
+ *
+ *  No se puede deshacer: los renglones que se van se borran una vez que su
+ *  historia —piezas del plano, movimientos, partidas y avances— ya se mudó
+ *  al que se queda. Por eso lo hace quien dirige la empresa, igual que
+ *  fusionar dos clientes.
+ *
+ *  El precio de venta del proyecto no se mueve: `monto` es el importe de la
+ *  línea y el del concepto es la suma. */
+rutas.post('/:o/proyectos/:id/agrupar', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro' || (quien.rol !== 'owner' && quien.rol !== 'admin' && quien.rol !== 'socio')) {
+    return err(c, 'sin_permiso', 403, { motivo: 'juntar ítems en un concepto no se puede deshacer: lo hace quien dirige la empresa' });
+  }
+  type Cuerpo = { queda_id?: string; se_van?: string[]; nombre?: string };
+  const b = await c.req.json<Cuerpo>().catch(() => ({}) as Cuerpo);
+  if (!b.queda_id) return err(c, 'datos_invalidos', 400, { falta: 'queda_id' });
+  if (!Array.isArray(b.se_van)) return err(c, 'datos_invalidos', 400, { motivo: '`se_van` es una lista de ids' });
+  const r = await stub(c).agruparItems(
+    c.req.param('id'),
+    { queda_id: b.queda_id, se_van: b.se_van, nombre: b.nombre },
+    { usuario_id: quien.usuario_id },
+  );
+  if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : r.error === 'datos_invalidos' ? 400 : 409, r.detalle);
+  return ok(c, { item: r.item, absorbidos: r.absorbidos, movidos: r.movidos });
+});
+
+/** POST /orgs/:o/proyectos/:id/acomodar {items:[{id, partida?, orden?}]} — la
+ *  partida de cada ítem y el lugar que ocupa dentro de ella (§102).
+ *
+ *  Mike, 20-sep: «quiero también poder ordenar los ítems y agrupar por
+ *  partidas. Incluso podría ser por pestañas (como folders)».
+ *
+ *  Va en un solo envío: acomodar 21 renglones de uno en uno son 21 idas y
+ *  vueltas, y la que falle deja la lista a medio acomodar. Lo que no venga
+ *  en la lista no se mueve, así que renombrar una partida es mandar sus
+ *  ítems con el nombre nuevo.
+ *
+ *  OJO con la palabra: esta `partida` es el capítulo de la cotización
+ *  —Cocina, Recámaras—, no la tabla `partidas`, que son los compromisos con
+ *  proveedores. La migración 0015 cuenta por qué conviven. */
+rutas.post('/:o/proyectos/:id/acomodar', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase === 'cliente') return err(c, 'sin_permiso', 403, { motivo: 'un cliente solo abre /peek' });
+  /* Se revisa contra los permisos de campo, no contra el rol: acomodar es
+   * escribir `partida` y `orden` de un ítem, y quién puede escribir qué
+   * campo de qué tabla se decide en UN solo lugar (src/permisos.ts). Una
+   * ruta que se inventa su propia regla es la que se olvida de actualizar. */
+  const veredicto = revisarEscritura('items', c.get('app'), ['partida', 'orden']);
+  if (!veredicto.ok) return err(c, veredicto.error, 403, veredicto.detalle);
+  type Cuerpo = { items?: Array<{ id: string; partida?: string; orden?: number }> };
+  const b = await c.req.json<Cuerpo>().catch(() => ({}) as Cuerpo);
+  if (!Array.isArray(b.items)) return err(c, 'datos_invalidos', 400, { motivo: '`items` es una lista de {id, partida?, orden?}' });
+  const r = await stub(c).acomodarItems(c.req.param('id'), b.items);
+  if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 400, r.detalle);
+  return ok(c, { acomodados: r.acomodados });
+});
+
 /* ─────────────── quell101: la bitácora de obra, dentro de la empresa (0.16.0) ───────────────
  *
  * Desde el 19-sep quell101 no tiene base propia: sus tablas viven en el
