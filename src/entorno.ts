@@ -20,6 +20,11 @@ export interface Env {
    *  nadie y rebota contra el dominio que manda los códigos reales. Se prende a
    *  mano y por un rato, sólo para probar el camino del correo. */
   CORREO_DE_VERDAD?: string;
+  /** Dirección atendida por una persona a la que se le pide la baja de los
+   *  avisos. Si no está puesta, no se manda la cabecera `List-Unsubscribe`:
+   *  una salida que nadie procesa es una promesa falsa, y de ésas vive la
+   *  carpeta de basura. */
+  CORREO_BAJA?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   /** El origen público de ESTA API (https://suite101-api.mike-929.workers.dev).

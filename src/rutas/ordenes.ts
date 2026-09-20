@@ -349,6 +349,6 @@ async function avisar(
     url: `${(c.env.URL_PUBLICA || '').replace(/\/+$/, '')}/orgs/${c.get('org_id')}/ordenes/${String(orden.id)}`,
   };
   const msg = que === 'pagada' ? correoOrdenPagada(datos) : correoOrdenResuelta(que, datos);
-  const r = await enviarCorreo(c.env, { para, ...msg });
+  const r = await enviarCorreo(c.env, { para, ...msg, conBaja: true });
   return { ...r, para };
 }

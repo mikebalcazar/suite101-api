@@ -41,9 +41,38 @@ const CIFRAS = "'Fira Sans','Raleway',Helvetica,Arial,sans-serif";
  *  quién la prendió. */
 const sale = (env: Env) => env.ENTORNO === 'produccion' || env.CORREO_DE_VERDAD === '1';
 
-export async function enviarCorreo(env: Env, msg: { para: string; asunto: string; html: string; texto: string }): Promise<{ enviado: boolean; motivo?: string }> {
+/** El pie que va en TODOS los mensajes, y por qué.
+ *
+ *  Mike decidió el 20-sep que estos correos no llevan `Reply-To`: no hay
+ *  buzón que alguien lea todos los días, y un `Reply-To` que nadie contesta
+ *  es peor que no tenerlo —la gente responde, nadie le contesta, y la
+ *  siguiente vez ya no confía en el remitente—.
+ *
+ *  Pero si no se contesta, HAY QUE DECIRLO. Un correo que parece una persona
+ *  y no lo es acaba marcado como basura por quien escribió tres veces sin
+ *  respuesta, y eso sí pega en la reputación del dominio. */
+export const NO_SE_CONTESTA = 'Este buzón no recibe respuestas. Si necesitas algo, escríbele a quien administra la Suite 101 en tu empresa.';
+
+/** ¿A dónde se pide dejar de recibir avisos?
+ *
+ *  Es una dirección de verdad, atendida por una persona, o no se pone. Un
+ *  `List-Unsubscribe` que nadie procesa es una promesa falsa en una cabecera,
+ *  y de ésas vive la carpeta de basura.
+ *
+ *  Y NO se pone en el correo del código de acceso, ni en ningún otro que la
+ *  persona pidió al momento: darle salida a tu propio código de entrada es
+ *  ofrecerle a alguien que se deje fuera de su cuenta. La cabecera es para
+ *  los avisos —la bienvenida, el estado de una orden—, que sí son algo que
+ *  uno puede querer que deje de llegarle. */
+const bajaDe = (env: Env): string | null => (env.CORREO_BAJA ? `<mailto:${env.CORREO_BAJA}?subject=Baja>` : null);
+
+export async function enviarCorreo(
+  env: Env,
+  msg: { para: string; asunto: string; html: string; texto: string; conBaja?: boolean },
+): Promise<{ enviado: boolean; motivo?: string }> {
   if (!env.RESEND_API_KEY) return { enviado: false, motivo: 'correo_no_configurado' };
   if (!sale(env)) return { enviado: false, motivo: 'correo_apagado_fuera_de_produccion' };
+  const baja = msg.conBaja ? bajaDe(env) : null;
   const r = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
@@ -53,6 +82,15 @@ export async function enviarCorreo(env: Env, msg: { para: string; asunto: string
       subject: msg.asunto,
       html: msg.html,
       text: msg.texto,
+      headers: {
+        /* Sin esto, Gmail agrupa los mensajes de asunto parecido —«Tu código
+         * de acceso: 481920»— en una sola conversación y colapsa los de
+         * atrás. La persona pide un código nuevo, le llega, y ve el viejo
+         * hasta arriba: teclea el que ya venció y cree que el sistema está
+         * descompuesto. Una referencia distinta por mensaje lo impide. */
+        'X-Entity-Ref-ID': crypto.randomUUID(),
+        ...(baja ? { 'List-Unsubscribe': baja } : {}),
+      },
     }),
   });
   if (!r.ok) {
@@ -65,7 +103,7 @@ export async function enviarCorreo(env: Env, msg: { para: string; asunto: string
 export function correoCodigo(codigo: string): { asunto: string; html: string; texto: string } {
   return {
     asunto: `Tu código de acceso: ${codigo} — Suite 101`,
-    texto: `Tu código de acceso es ${codigo}. Vence en 10 minutos. Si tú no lo pediste, ignora este correo.`,
+    texto: `Tu código de acceso es ${codigo}. Vence en 10 minutos. Si tú no lo pediste, ignora este correo.\n\n${NO_SE_CONTESTA}`,
     html: `<!doctype html><html lang="es"><body style="margin:0;background:#f4f6f8;font-family:${TEXTO};color:${OSCURO}">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px"><tr><td align="center">
   <table role="presentation" width="100%" style="max-width:560px;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 14px rgba(18,39,51,.08)">
@@ -79,7 +117,7 @@ export function correoCodigo(codigo: string): { asunto: string; html: string; te
       <p style="margin:18px 0 0;font-size:13px;color:#6b7a85">Si tú no lo pediste, ignora este correo.</p>
     </td></tr>
     <tr><td style="padding:16px 26px 24px;border-top:1px solid #e6ebef;font-size:12px;color:#6b7a85">
-      Mensaje automático de Taller 101. Si no reconoces esta actividad, avísale a administración.
+      Mensaje automático de Taller 101. ${NO_SE_CONTESTA}
     </td></tr>
   </table>
 </td></tr></table></body></html>`,
@@ -101,7 +139,9 @@ No hay contraseña que recordar: al escribir tu correo te llega un código de ac
 
 Desde ese panel das de alta a tu gente y decides quién entra a qué. Apps de tu empresa: ${apps}.
 
-Si tú no esperabas este correo, ignóralo.`;
+Si tú no esperabas este correo, ignóralo.
+
+${NO_SE_CONTESTA}`;
   return {
     asunto: `${d.empresa} ya está en la Suite 101 — tu acceso como director`,
     texto,
@@ -119,7 +159,7 @@ Si tú no esperabas este correo, ignóralo.`;
       <p style="margin:0;font-size:13px;color:#6b7a85">Apps de tu empresa: ${escapa(apps)}.<br>Si tú no esperabas este correo, ignóralo.</p>
     </td></tr>
     <tr><td style="padding:16px 26px 24px;border-top:1px solid #e6ebef;font-size:12px;color:#6b7a85">
-      Mensaje automático de la Suite 101.
+      Mensaje automático de la Suite 101. ${NO_SE_CONTESTA}
     </td></tr>
   </table>
 </td></tr></table></body></html>`,
@@ -163,7 +203,7 @@ const sobre = (titulo: string, color: string, cuerpo: string) =>
       ${cuerpo}
     </td></tr>
     <tr><td style="padding:16px 26px 24px;border-top:1px solid #e6ebef;font-size:12px;color:#6b7a85">
-      Mensaje automático de Taller 101. Si no reconoces esta orden, avísale a administración.
+      Mensaje automático de Taller 101. ${NO_SE_CONTESTA}
     </td></tr>
   </table>
 </td></tr></table></body></html>`;
@@ -174,7 +214,8 @@ export function correoOrdenPagada(d: DatosOrden): { asunto: string; html: string
     asunto: `Pagada tu orden ${d.folio} · ${monto}`,
     texto: `Se pagó tu orden ${d.folio}.\n\nProveedor: ${d.proveedor}\nConcepto: ${d.concepto}\n`
       + `Monto: ${monto}\nFecha de pago: ${d.fecha || 'hoy'}\nSalió de: ${d.cuenta || 'la cuenta de la empresa'}\n`
-      + (d.url ? `\nEl comprobante y la orden completa: ${d.url}\n` : ''),
+      + (d.url ? `\nEl comprobante y la orden completa: ${d.url}\n` : '')
+      + `\n${NO_SE_CONTESTA}\n`,
     html: sobre('Ya se pagó tu orden', AZUL,
       `<p style="margin:0 0 18px;font-size:15px;line-height:1.6">La orden que pediste ya está pagada.</p>
        <table role="presentation" width="100%" style="border-collapse:collapse;margin:0 0 18px">
@@ -199,7 +240,8 @@ export function correoOrdenResuelta(que: 'devuelta' | 'rechazada', d: DatosOrden
   return {
     asunto: `${devuelta ? 'Devuelta' : 'Rechazada'} tu orden ${d.folio} · ${monto}`,
     texto: `${titulo}: ${d.folio}.\n\nProveedor: ${d.proveedor}\nConcepto: ${d.concepto}\nMonto: ${monto}\n\n`
-      + `Motivo: ${d.nota}\n\n${que_sigue}\n` + (d.url ? `\n${d.url}\n` : ''),
+      + `Motivo: ${d.nota}\n\n${que_sigue}\n` + (d.url ? `\n${d.url}\n` : '')
+      + `\n${NO_SE_CONTESTA}\n`,
     html: sobre(titulo, devuelta ? '#9A6200' : '#A32D2D',
       `<table role="presentation" width="100%" style="border-collapse:collapse;margin:0 0 14px">
          ${renglon('Folio', d.folio, true)}
