@@ -783,12 +783,30 @@ export async function atender(req, env, url, path) {
         const { results: delaObra } = await env.DB.prepare(`SELECT code FROM quell_elements WHERE project_id = ?`).bind(pid).all();
         codigo = siguienteCodigo(delaObra, tipo);
       }
+      /* De qué ítem vendido es esta pieza (migración 0011). Viene de la lista
+       * de «ítems sin ubicar»: se escoge el ítem y se pica en el plano.
+       *
+       * Se comprueba aquí, en el servidor, que el ítem sea del proyecto
+       * ligado a ESTA obra —si no, una pieza podría colgarse de la venta de
+       * otra casa— y que todavía falten piezas por poner de él. Sin `item_id`
+       * todo sigue igual: una obra puede tener piezas que nadie cotizó. */
+      let itemId = null;
+      if (b.item_id) {
+        const fila = await env.DB.prepare(
+          `SELECT i.id AS id, i.cantidad AS cantidad,
+                  (SELECT COUNT(*) FROM quell_elements e WHERE e.item_id = i.id) AS ubicados
+             FROM items i JOIN quell_projects o ON o.proyecto_id = i.proyecto_id
+            WHERE i.id = ? AND o.id = ? AND i.estado = 'vendido'`).bind(b.item_id, pid).first();
+        if (!fila) return err('ese ítem no es de esta obra', 400);
+        if (Number(fila.ubicados) >= Number(fila.cantidad || 1)) return err('de ese ítem ya no falta ninguno por ubicar', 409);
+        itemId = fila.id;
+      }
       // Nace en producción: todavía no hay nada entregado que corregir.
       const alta = await conCodigoUnico(async () => {
-        await env.DB.prepare(`INSERT INTO quell_elements (id, plan_id, project_id, code, type, name, resp, x, y, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)`)
-          .bind(id, seg[1], pid, codigo, tipo, b.name, b.resp || '', +b.x, +b.y, user.id).run();
+        await env.DB.prepare(`INSERT INTO quell_elements (id, plan_id, project_id, code, type, name, resp, x, y, created_by, item_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+          .bind(id, seg[1], pid, codigo, tipo, b.name, b.resp || '', +b.x, +b.y, user.id, itemId).run();
         await apunta(env, b.op_id);
-        return json({ ok: true, id, code: codigo });
+        return json({ ok: true, id, code: codigo, item_id: itemId });
       }, codigo);
       return alta;
     }

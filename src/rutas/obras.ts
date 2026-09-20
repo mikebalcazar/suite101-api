@@ -69,6 +69,19 @@ export function montarObras(rutas: App): void {
     return ok(c, { obra: await stub(c).obraDeProyecto(c.req.param('id')) });
   });
 
+  /** GET /orgs/:o/obras/:id/sin-ubicar — los ítems vendidos del proyecto de
+   *  esta obra que todavía no tienen pieza en un plano, con cuántas faltan
+   *  de cada uno. Es la lista que quell101 enseña para ir poniéndolas.
+   *
+   *  409 `sin_liga` si la obra no tiene proyecto: no es un error de quien
+   *  pregunta, es que falta ligarla, y la pantalla puede decirlo así. */
+  rutas.get('/:o/obras/:id/sin-ubicar', async (c) => {
+    if (!esDeLaCasa(c)) return err(c, 'sin_permiso', 403, { motivo: 'las obras son de la empresa' });
+    const r = await stub(c).sinUbicar(c.req.param('id'));
+    if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 409, r.detalle);
+    return ok(c, { obra: r.obra, items: r.items });
+  });
+
   /** POST /orgs/:o/obras/:id/ligar {proyecto_id} — son la misma casa. */
   rutas.post('/:o/obras/:id/ligar', async (c) => {
     if (!puedeLigar(c)) return err(c, 'sin_permiso', 403, { motivo: 'ligar una obra con un proyecto lo hace quien dirige la empresa' });

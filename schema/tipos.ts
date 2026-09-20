@@ -13,7 +13,19 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.23.0 (el cliente es uno solo en las tres apps:
+ * Versión del contrato: 0.24.0 (la cantidad del ítem y los «ítems sin
+ * ubicar»: `items.cantidad` (migración 0011, por omisión 1) dice cuántas
+ * piezas iguales son —«20 puertas del mismo acabado y precio»—, y
+ * `quell_elements.item_id` dice qué pieza del plano cumple cuál ítem
+ * vendido. `monto` NO cambia de significado: sigue siendo el importe de la
+ * línea, porque `proyectos.precio_venta` es su suma y cambiarlo movería el
+ * precio de todos los proyectos que ya existen; el precio por pieza sale de
+ * dividir. `GET /orgs/:o/obras/:id/sin-ubicar` devuelve los ítems vendidos
+ * del proyecto de esa obra con cuántas piezas faltan por poner en un plano
+ * —la cuenta la hace el servidor, no la pantalla—, y al crear una pieza en
+ * `POST /orgs/:o/quell/plans/:id/elements` se puede mandar `item_id`, que se
+ * revisa contra el proyecto ligado a esa obra. Lo pidió Mike el 20-sep).
+ * Antes: 0.23.0 (el cliente es uno solo en las tres apps:
  * `GET /orgs/:o/clientes/parecidos?nombre=&negocio_id=` contesta «¿no te
  * refieres a…?» con la regla escrita UNA vez y en el servidor —mismo nombre
  * normalizado, o uno contenido en el otro, y menos de tres letras no
@@ -197,7 +209,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.23.0';
+export const VERSION_CONTRATO = '0.24.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -596,8 +608,13 @@ export interface Item {
   nombre: string;
   descripcion: string | null;
   tipo: 'mueble' | 'servicio' | 'visita' | 'otro';
-  /** centavos */
+  /** centavos. Es el importe de LA LÍNEA: las 20 puertas juntas, no una.
+   *  `proyectos.precio_venta` es la suma de estos. */
   monto: number;
+  /** Cuántas piezas iguales son (0011). Por omisión 1. El precio por pieza
+   *  sale de `monto / cantidad`, y es exacto: la multiplicación se hizo en
+   *  centavos enteros al capturar. */
+  cantidad: number;
   moneda: Moneda;
   estado: EstadoItem;
   etapa: Etapa;

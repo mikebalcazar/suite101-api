@@ -110,7 +110,7 @@ export const DEFS: Record<Tabla, Def> = {
   items: {
     cols: {
       ...IDENT, negocio_id: 'texto', proyecto_id: 'texto', cliente_id: 'texto', clave: 'texto', nombre: 'texto',
-      descripcion: 'texto', tipo: 'texto', monto: 'dinero', moneda: 'texto', estado: 'texto', etapa: 'entero',
+      descripcion: 'texto', tipo: 'texto', monto: 'dinero', cantidad: 'entero', moneda: 'texto', estado: 'texto', etapa: 'entero',
       etapa_at: 'texto', etapa_por: 'texto', fecha_entrega: 'texto', asignados: 'json', origen: 'json',
       refs: 'json', creado_por: 'texto', actualizado_at: 'texto',
     },
