@@ -13,7 +13,12 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.21.1 (quien abre una empresa como dueño sin ser
+ * Versión del contrato: 0.21.2 (`GET /orgs/:o/ordenes` y
+ * `/orgs/:o/ordenes/buzon` aceptan `?negocio_id=`, y con él la lista Y SUS
+ * TOTALES son de ese negocio. dash101 trabaja con un negocio activo a la
+ * vez; sin el filtro, el buzón mezclaba los negocios de la empresa y el
+ * «hay por pagar» de arriba sumaba dinero de otro lado sin decirlo).
+ * Antes: 0.21.1 (quien abre una empresa como dueño sin ser
  * miembro de ella —el superadmin de la suite, que es de Taller 101— sale en
  * `GET /orgs/:o/ordenes/contadores` y se puede marcar a sí mismo. Sin esto,
  * en una empresa recién dada de alta la pantalla salía vacía y no había
@@ -159,7 +164,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.21.1';
+export const VERSION_CONTRATO = '0.21.2';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

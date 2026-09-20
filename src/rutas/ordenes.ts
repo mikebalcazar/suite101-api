@@ -60,7 +60,7 @@ export function montarOrdenes(rutas: App): void {
   /** El buzón. Va antes de `/:id` o `buzon` se leería como un id. */
   rutas.get('/:o/ordenes/buzon', async (c) => {
     if (!(await esContador(c))) return err(c, 'sin_permiso', 403, { motivo: 'el buzón es de quien paga' });
-    return ok(c, await stub(c).buzon());
+    return ok(c, await stub(c).buzon(undefined, c.req.query('negocio_id') || null));
   });
 
   /** Quién puede pagar hoy. La ve el dueño para repartir la etiqueta.
@@ -146,7 +146,7 @@ export function montarOrdenes(rutas: App): void {
   /** Mis órdenes. Un miembro ve SÓLO las suyas: el filtro es del servidor. */
   rutas.get('/:o/ordenes', async (c) => {
     if (!puedePedir(c)) return err(c, 'sin_permiso', 403);
-    return ok(c, { filas: await stub(c).misOrdenes(c.get('quien').usuario_id) });
+    return ok(c, { filas: await stub(c).misOrdenes(c.get('quien').usuario_id, c.req.query('negocio_id') || null) });
   });
 
   /** Pedir una compra. Sin autorización previa: cae directa al buzón. */

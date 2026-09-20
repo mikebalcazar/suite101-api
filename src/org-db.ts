@@ -129,8 +129,8 @@ export interface ApiOrgDB {
   esContador(usuario_id: string): Promise<boolean>;
   marcarContador(args: { personal_id: string; valor: boolean; quien_usuario_id: string; quien_nombre?: string | null }): Promise<Fila | null>;
   crearOrden(args: Record<string, unknown>): Promise<Fila | { error: string; detalle?: unknown }>;
-  misOrdenes(usuario_id: string): Promise<Fila[]>;
-  buzon(hoy?: string): Promise<{ filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number }>;
+  misOrdenes(usuario_id: string, negocio_id?: string | null): Promise<Fila[]>;
+  buzon(hoy?: string, negocio_id?: string | null): Promise<{ filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number }>;
   verOrden(id: string): Promise<{ orden: Fila; eventos: Fila[]; archivos: Fila[] } | null>;
   pagarOrden(args: Record<string, unknown>): Promise<{ ok: true; orden: Fila; movimiento: Fila; partida_id: string | null } | { error: string; detalle?: unknown }>;
   resolverOrden(args: { id: string; que: 'devuelta' | 'rechazada'; nota: string; quien_usuario_id: string; quien_nombre?: string | null }): Promise<Fila | { error: string; detalle?: unknown }>;
@@ -1265,21 +1265,29 @@ export class OrgDB extends DurableObject<Env> {
 
   /** Lo que ve quien pidió: SÓLO lo suyo. El filtro va aquí y no en la
    *  pantalla; una pantalla que filtra es una pantalla que se puede saltar. */
-  misOrdenes(usuario_id: string): Fila[] {
-    const filas = this.sql
-      .exec(`SELECT * FROM ordenes WHERE solicitante_usuario_id = ? ORDER BY creado_at DESC`, usuario_id)
-      .toArray() as Fila[];
+  misOrdenes(usuario_id: string, negocio_id?: string | null): Fila[] {
+    // El negocio se filtra aquí y no en la pantalla: dash101 trabaja con un
+    // negocio activo a la vez, y una lista que mezcle dos negocios enseña
+    // números de otro lado sin decirlo.
+    const filas = negocio_id
+      ? this.sql.exec(`SELECT * FROM ordenes WHERE solicitante_usuario_id = ? AND negocio_id = ? ORDER BY creado_at DESC`, usuario_id, negocio_id).toArray() as Fila[]
+      : this.sql.exec(`SELECT * FROM ordenes WHERE solicitante_usuario_id = ? ORDER BY creado_at DESC`, usuario_id).toArray() as Fila[];
     return this.leerInternas('ordenes', filas);
   }
 
   /** El buzón del contador: lo que vence primero, arriba. Las que ya vencieron
    *  van antes que todo, que es como se lee una bandeja de pagos. */
-  buzon(hoy?: string): { filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number } {
+  buzon(hoy?: string, negocio_id?: string | null): { filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number } {
     const dia = (hoy ?? ahora()).slice(0, 10);
-    const filas = this.leerInternas('ordenes', this.sql
-      .exec(`SELECT * FROM ordenes WHERE estado = 'en_buzon'
-             ORDER BY (fecha_maxima_pago IS NULL), fecha_maxima_pago ASC, creado_at ASC`)
-      .toArray() as Fila[]);
+    // Con `negocio_id`, el buzón y sus TOTALES son de ese negocio. Sin él,
+    // de toda la empresa. Los totales tienen que salir de la misma consulta
+    // que la lista o el número de arriba contradice a los renglones de
+    // abajo, que ya fue un defecto real el 7-sep.
+    const orden = `ORDER BY (fecha_maxima_pago IS NULL), fecha_maxima_pago ASC, creado_at ASC`;
+    const filas = this.leerInternas('ordenes', (negocio_id
+      ? this.sql.exec(`SELECT * FROM ordenes WHERE estado = 'en_buzon' AND negocio_id = ? ${orden}`, negocio_id)
+      : this.sql.exec(`SELECT * FROM ordenes WHERE estado = 'en_buzon' ${orden}`)
+    ).toArray() as Fila[]);
     const enOchoDias = new Date(Date.parse(`${dia}T00:00:00Z`) + 7 * 86400000).toISOString().slice(0, 10);
     let total = 0, semana = 0, vencidas = 0;
     for (const f of filas) {
