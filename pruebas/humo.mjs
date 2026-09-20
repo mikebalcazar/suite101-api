@@ -552,6 +552,33 @@ async function recorrido() {
  *  cortesía, la app la activa, el token abre sólo con la llave pública, late,
  *  y al borrarla la clave deja de existir. Lo que en vitest corre en workerd,
  *  aquí corre contra el D1 de verdad. */
+/** Entra como Mike, respetando el freno de códigos.
+ *
+ * La API frena los códigos por correo —45 segundos entre uno y otro— y el
+ * recorrido entra varias veces con el MISMO correo. Cuando toca el freno,
+ * `/auth/codigo` contesta 429 con `detalle.espera_segundos`, `codigo_prueba`
+ * viene vacío, y `/auth/entrar` falla sin cookie: de ahí en adelante TODO
+ * sale rojo con `undefined`, que fue lo que pasó en el despliegue de las
+ * 05:11 del 20-sep. El bloque de licencias ya esperaba; el de importación
+ * entraba a pelo. Ahora los dos usan esto.
+ *
+ * Devuelve si se logró entrar, para que el primer `rev` que falle lo diga en
+ * vez de dejar veinte fallas sin explicación. */
+async function entrarComoMike() {
+  galleta = '';
+  for (let i = 0; i < 4; i++) {
+    const c = await pedir(STAGING, '/auth/codigo', { method: 'POST', body: { correo: CORREO } });
+    if (c.ok && c.data?.codigo_prueba) {
+      const e = await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO, codigo: c.data.codigo_prueba } });
+      if (e.ok) return true;
+    }
+    const espera = (c.detalle?.espera_segundos ?? 2) + 1;
+    linea(`  …el freno de códigos pide ${espera} s; se espera`);
+    await new Promise((r) => setTimeout(r, espera * 1000));
+  }
+  return false;
+}
+
 async function licencias() {
   linea('');
   linea(`== Licencias (0.13.0) == ${STAGING}`);
@@ -560,12 +587,7 @@ async function licencias() {
   if (!(yo.ok && yo.data?.superadmin)) {
     // Si el recorrido dejó otra sesión, se entra otra vez como Mike; si el freno
     // de códigos está gastado, se espera lo que la API pida.
-    galleta = '';
-    for (let i = 0; i < 3; i++) {
-      const c = await pedir(STAGING, '/auth/codigo', { method: 'POST', body: { correo: CORREO } });
-      if (c.ok) { await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO, codigo: c.data?.codigo_prueba } }); break; }
-      await new Promise((r) => setTimeout(r, ((c.detalle?.espera_segundos ?? 1) + 1) * 1000));
-    }
+    await entrarComoMike();
   }
   const llave = await pedir(STAGING, '/licencias/llave');
   rev(llave.estado === 200 && llave.data?.alg === 'Ed25519', 'staging sirve la llave pública', `kid ${llave.data?.kid}`);
@@ -692,14 +714,12 @@ async function ordenesYFiscal() {
 async function importacion() {
   linea('');
   linea('== Importación (fase 2) ==');
-  galleta = '';
-
-  const cod = await pedir(STAGING, '/auth/codigo', { method: 'POST', body: { correo: CORREO } });
-  await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO, codigo: cod.data?.codigo_prueba } });
+  const entro = await entrarComoMike();
 
   const ORGI = `imp-${process.env.GITHUB_RUN_ID || Date.now()}`.slice(0, 40);
   const nueva = await pedir(STAGING, '/admin/orgs', { method: 'POST', body: { id: ORGI, nombre: 'Importada' } });
-  rev(nueva.estado === 201, `se crea la org ${ORGI}`);
+  rev(nueva.estado === 201, `se crea la org ${ORGI}`,
+      entro ? `${nueva.estado} ${nueva.error ?? ''}` : 'no se pudo entrar: el freno de códigos no cedió');
 
   // La plata puesta a propósito donde duele: 1500.5 y el medio centavo de
   // 20000.005, que la fórmula vieja (Math.round(v * 100)) perdía.
