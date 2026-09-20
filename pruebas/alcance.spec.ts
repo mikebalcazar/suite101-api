@@ -234,6 +234,46 @@ describe('el alcance viaja calculado', () => {
   });
 });
 
+describe('los cinco campos del ítem, en la obra (§105)', () => {
+  /* Mike, 20-sep: «todos los ítems se deben identificar con estos campos:
+   * código, nombre, precio, descripción, tipo. Y así ayuda a organizar
+   * entre quell y dash y quote».
+   *
+   * Y la decisión que tomó con botones el mismo día: en quell el precio lo
+   * ven «sólo tú y la administración». */
+  let conTodo = '', pieza_ = '';
+
+  beforeAll(async () => {
+    conTodo = (await o('mike', '/items', { method: 'POST', json: {
+      negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto,
+      nombre: 'Puerta de nogal', descripcion: '0.90 × 2.40, nogal natural', tipo: 'Puerta',
+      monto: 18_000_00, cantidad: 1, estado: 'vendido',
+    } })).data.id;
+    pieza_ = await pieza('Puerta de nogal', conTodo);
+  });
+
+  it('el detalle de la pieza trae código, nombre, tipo y DESCRIPCIÓN', async () => {
+    const det = await q('mike', `/elements/${pieza_}`);
+    /* El código de la pieza lo propone la obra (MW-…, PT-…) y al ligarla se
+     * copia al ítem, que no lo traía: por eso los dos dicen lo mismo. */
+    expect(det.element.code, 'el código').toBeTruthy();
+    expect((await o('mike', `/items/${conTodo}`)).data.clave, 'y el ítem quedó con el mismo').toBe(det.element.code);
+    expect(det.element.name, 'el nombre').toBeTruthy();
+    expect(det.element.type, 'el tipo').toBeTruthy();
+    /* La descripción vivía sólo en dash101. Ahora viaja de ida: es el campo
+     * que faltaba de los cinco. */
+    expect(det.element.item_descripcion).toBe('0.90 × 2.40, nogal natural');
+  });
+
+  it('y el PRECIO sólo para quien manda en la empresa', async () => {
+    /* Se recorta en el servidor, no al pintar: lo que viaja se lee. Mike lo
+     * escogió así el 20-sep sabiendo el costo —un supervisor en obra no ve
+     * en cuánto se vendió—. */
+    const det = await q('mike', `/elements/${pieza_}`);
+    expect(det.element.item_monto, 'el dueño sí lo ve, en centavos').toBe(18_000_00);
+  });
+});
+
 describe('una pieza sin ítem sigue dentro', () => {
   it('no se esconde del plano por no tener renglón en dash', async () => {
     /* Es trabajo de la obra que nadie cotizó. Esconderlo por una razón de

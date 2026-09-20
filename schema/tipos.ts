@@ -13,7 +13,7 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.31.0 (EL ALCANCE DEL ÍTEM: lo que está dentro, lo
+ * Versión del contrato: 0.31.1 (EL ALCANCE DEL ÍTEM: lo que está dentro, lo
  * que todavía no está aprobado y lo que ya se canceló. `POST
  * /orgs/:o/items/:id/aprobar` y `POST /orgs/:o/items/:id/cancelar {motivo?}`,
  * que abren dash101 y quell101 por igual —«se debe poder cancelar algún ítem
@@ -32,7 +32,12 @@
  * `quell101` gana permiso de escribir `items.estado`, que es lo que esas dos
  * rutas mueven. Y cada ítem viaja con `alcance` YA CALCULADO —no es
  * columna: se calcula al salir y no se puede escribir desde fuera—, para
- * que ninguna pantalla vuelva a deducirlo de dos campos). Antes:
+ * que ninguna pantalla vuelva a deducirlo de dos campos. Y los CINCO CAMPOS
+ * del ítem —código, nombre, precio, descripción y tipo, Mike 20-sep— quedan
+ * en las tres apps: el detalle de una pieza en quell101 trae ya la
+ * descripción del ítem, y el precio SÓLO para dueño, administración y
+ * socios —decisión de Mike del 20-sep—, recortado en el servidor y no al
+ * pintar: lo que viaja se lee). Antes:
  * 0.30.0 (VARIOS ÍTEMS IGUALES, UN SOLO CONCEPTO, y la
  * PARTIDA del ítem. `GET /orgs/:o/proyectos/:id/agrupables` propone qué
  * renglones son el mismo producto capturado varias veces —mismo nombre,
@@ -344,7 +349,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.31.0';
+export const VERSION_CONTRATO = '0.31.1';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
