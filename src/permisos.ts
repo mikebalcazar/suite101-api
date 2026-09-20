@@ -17,7 +17,7 @@ type Campos = readonly string[] | '*';
 export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = {
   items: {
     cotizador101: ['nombre', 'descripcion', 'tipo', 'monto', 'cantidad', 'moneda', 'estado', 'proyecto_id', 'cliente_id', 'negocio_id', 'origen'],
-    dash101: ['nombre', 'descripcion', 'tipo', 'monto', 'cantidad', 'moneda', 'estado', 'proyecto_id', 'cliente_id', 'negocio_id', 'fecha_entrega'],
+    dash101: ['nombre', 'descripcion', 'tipo', 'monto', 'cantidad', 'moneda', 'estado', 'proyecto_id', 'cliente_id', 'negocio_id', 'fecha_entrega', 'partida', 'orden'],
     quell101: ['etapa', 'etapa_at', 'etapa_por', 'clave', 'asignados'], // etapa solo vía /etapa
     roster101: ['asignados'],
     nest101: ['refs'],

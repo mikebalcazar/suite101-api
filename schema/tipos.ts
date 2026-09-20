@@ -13,7 +13,34 @@
  *      visita o un servicio.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.29.0 (el ESTADO DE CUENTA de un cliente:
+ * Versión del contrato: 0.30.0 (VARIOS ÍTEMS IGUALES, UN SOLO CONCEPTO, y la
+ * PARTIDA del ítem. `GET /orgs/:o/proyectos/:id/agrupables` propone qué
+ * renglones son el mismo producto capturado varias veces —mismo nombre,
+ * tipo, estado, moneda y precio POR PIEZA— y `POST .../agrupar
+ * {queda_id, se_van[], nombre?}` los junta: la cantidad y el importe se
+ * suman, las piezas del plano, los movimientos, las partidas y los avances
+ * se mudan al que se queda, y los demás renglones se borran. El precio de
+ * venta del proyecto NO se mueve: `monto` es el importe de la línea, así que
+ * el del concepto es la suma (Mike, 20-sep: «son varias puertas iguales en
+ * diferente ubicación pero el producto es el mismo, y no tiene caso tener 21
+ * ítems idénticos enlistados en dash»). La etapa que queda es la del más
+ * atrasado, y la `clave` sólo si todos traían la misma: un código nombra UNA
+ * pieza del plano. Por lo mismo, al emparejar (0.28.0) un ítem de cantidad
+ * mayor que uno ya NO unifica código con la pieza —antes se quedaba con el
+ * de la última ligada, que era arbitrario—. Y la migración 0015 agrega
+ * `items.partida` y `items.orden`, con `POST .../acomodar` para mandarlos en
+ * un solo envío: la partida es el capítulo de la cotización —Cocina,
+ * Recámaras—, que NO es la tabla `partidas`, la de los compromisos con
+ * proveedores. Y desde el plano (`POST /orgs/:o/obras/:id/items`) se puede
+ * cerrar el renglón en un paso: `crear` acepta `{element_id, monto,
+ * descripcion, nombre}` y con precio el ítem nace VENDIDO —sin precio sigue
+ * naciendo cotizado y en cero—, y `ligar` acepta `sumar: true`, que en vez
+ * de 409 `sin_cupo` sube en uno la cantidad del concepto y le agrega el
+ * precio de una pieza, dejando huella del cambio de precio en la bitácora
+ * («una puerta más a las 14 ya existentes del mismo modelo»). Sin `sumar`
+ * el 409 se mantiene: crecer mueve dinero. Encargos de Mike del 20-sep).
+ * Antes:
+ * 0.29.0 (el ESTADO DE CUENTA de un cliente:
  * `GET /orgs/:o/clientes/:id/estado-de-cuenta` contesta qué se le vendió,
  * qué pagó y qué debe, global y por proyecto, con los cobros de cada uno.
  * No es `/peek`: aquél es lo que el cliente ve de sí mismo y sus pagos
@@ -297,7 +324,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.29.0';
+export const VERSION_CONTRATO = '0.30.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

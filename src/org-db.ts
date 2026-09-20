@@ -27,6 +27,7 @@ import cantidad from '../migrations/org/0011_cantidad.sql';
 import facturaEsperada from '../migrations/org/0012_factura_esperada.sql';
 import bitacoraPrecio from '../migrations/org/0013_bitacora_precio.sql';
 import raya from '../migrations/org/0014_raya.sql';
+import partidaOrden from '../migrations/org/0015_partida_orden.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { atender as atenderRoster, type DatosEmpresaRoster, type SesionRoster } from './roster/motor.js';
 import { invitarClienteEnSuite } from './clientes';
@@ -46,7 +47,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden];
 
 /** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
  *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
@@ -194,10 +195,25 @@ export interface ApiOrgDB {
   recibido(pago_id: string, recibido: boolean): Promise<{ ok: true; pago: Fila } | { error: string; detalle?: unknown }>;
   fusionarItemsDeLaObra(
     obra_id: string,
-    plan: { ligar?: Array<{ element_id: string; item_id: string; clave?: 'quell' | 'dash'; nombre?: 'quell' | 'dash' }>; crear?: string[] },
+    plan: {
+      ligar?: Array<{ element_id: string; item_id: string; clave?: 'quell' | 'dash'; nombre?: 'quell' | 'dash'; sumar?: boolean }>;
+      crear?: Array<string | { element_id: string; monto?: number; descripcion?: string; nombre?: string }>;
+    },
     contexto: { usuario_id: string },
-  ): Promise<{ ok: true; ligados: number; creados: number; renombrados: number; obra: Fila } | { error: string; detalle?: unknown }>;
+  ): Promise<{ ok: true; ligados: number; creados: number; renombrados: number; sumados: number; obra: Fila } | { error: string; detalle?: unknown }>;
   desligarObra(obra_id: string): Promise<{ ok: true; obra: Fila } | { error: string; detalle?: unknown }>;
+
+  /* Varios ítems iguales, un solo concepto (§98). */
+  gruposDeItems(proyecto_id: string): Promise<{ proyecto: Fila; grupos: Fila[] } | { error: string; detalle?: unknown }>;
+  agruparItems(
+    proyecto_id: string,
+    args: { queda_id: string; se_van: string[]; nombre?: string },
+    contexto: { usuario_id: string },
+  ): Promise<{ ok: true; item: Fila; absorbidos: number; movidos: Record<string, number> } | { error: string; detalle?: unknown }>;
+  acomodarItems(
+    proyecto_id: string,
+    items: Array<{ id: string; partida?: string; orden?: number }>,
+  ): Promise<{ ok: true; acomodados: number } | { error: string; detalle?: unknown }>;
 
   fetch(req: Request): Promise<Response>;
 }
@@ -2096,18 +2112,32 @@ export class OrgDB extends DurableObject<Env> {
    *  `ligar` cuelga una pieza del plano de un ítem que ya existe. `crear` le
    *  hace un ítem nuevo a una pieza que no tenía.
    *
-   *  El ítem nuevo nace **cotizado y en cero**, y las dos cosas son a
-   *  propósito. Una pieza del plano no trae precio: nadie se lo ha puesto.
-   *  Nacer «vendido» en cero metería una venta de cero pesos en el precio
-   *  del proyecto —`precio_venta` suma los vendidos— y dejaría la proyección
-   *  diciendo una cifra que nadie tecleó. Cotizado sale en la lista de
-   *  dash101 para ponerle precio, y no mueve un solo peso hasta que alguien
-   *  lo decide. */
+   *  SIN PRECIO, el ítem nuevo nace **cotizado y en cero**, y las dos cosas
+   *  son a propósito. Una pieza del plano no trae precio: nadie se lo ha
+   *  puesto. Nacer «vendido» en cero metería una venta de cero pesos en el
+   *  precio del proyecto —`precio_venta` suma los vendidos— y dejaría la
+   *  proyección diciendo una cifra que nadie tecleó.
+   *
+   *  CON PRECIO nace vendido, y eso también es a propósito. Mike, 20-sep:
+   *  «debería poder de ahí mismo agregar un ítem nuevo con precio y
+   *  descripción para que ya se sume». Quien teclea un precio en esa
+   *  pantalla está diciendo cuánto vale, no proponiéndolo; obligarlo a ir al
+   *  proyecto a marcarlo vendido es un segundo paso que sólo sirve para
+   *  olvidarse.
+   *
+   *  Y `sumar` es la tercera puerta: «o agregarlo al conteo de un concepto
+   *  ya existente, una puerta más a las 14 ya existentes del mismo modelo».
+   *  Sube en uno la cantidad del ítem y le agrega el precio de UNA pieza.
+   *  Eso mueve dinero, así que no pasa nunca solo: sin `sumar`, una pieza de
+   *  más sigue siendo 409 `sin_cupo`. */
   fusionarItemsDeLaObra(
     obra_id: string,
-    plan: { ligar?: Array<{ element_id: string; item_id: string; clave?: 'quell' | 'dash'; nombre?: 'quell' | 'dash' }>; crear?: string[] },
+    plan: {
+      ligar?: Array<{ element_id: string; item_id: string; clave?: 'quell' | 'dash'; nombre?: 'quell' | 'dash'; sumar?: boolean }>;
+      crear?: Array<string | { element_id: string; monto?: number; descripcion?: string; nombre?: string }>;
+    },
     contexto: { usuario_id: string },
-  ): { ok: true; ligados: number; creados: number; renombrados: number; obra: Fila } | { error: string; detalle?: unknown } {
+  ): { ok: true; ligados: number; creados: number; renombrados: number; sumados: number; obra: Fila } | { error: string; detalle?: unknown } {
     const obra = this.sql.exec(`SELECT * FROM quell_projects WHERE id = ?`, obra_id).toArray()[0] as Fila | undefined;
     if (!obra) return { error: 'no_encontrado', detalle: { que: 'obra', id: obra_id } };
     if (!obra.proyecto_id) return { error: 'sin_liga', detalle: { motivo: 'esta obra todavía no está ligada a un proyecto de dash101' } };
@@ -2134,6 +2164,7 @@ export class OrgDB extends DurableObject<Env> {
     });
 
     const usado = new Map<string, number>();   // item_id → piezas que ya le cuelgan
+    const crecer = new Map<string, number>();  // item_id → en cuántas piezas crece el concepto
     const codigos = new Map<string, string>(); // element_id → código que le va a quedar
     const nombres = new Map<string, { que: 'item' | 'pieza'; valor: string }>();
     /* Los códigos que van a existir en la obra al terminar, para que dos
@@ -2161,12 +2192,20 @@ export class OrgDB extends DurableObject<Env> {
         (this.sql.exec(`SELECT COUNT(*) AS n FROM quell_elements WHERE item_id = ?`, par.item_id).toArray()[0] as Fila).n,
       );
       const ya = yaEnBase + (usado.get(String(par.item_id)) ?? 0);
-      if (ya >= Number(it.cantidad ?? 1)) {
-        return {
-          error: 'sin_cupo',
-          detalle: { item_id: par.item_id, item: it.nombre, cantidad: Number(it.cantidad ?? 1), ubicados: ya,
-                     motivo: 'ese ítem ya tiene en el plano todas las piezas que dice su cantidad' },
-        };
+      const cabe = Number(it.cantidad ?? 1) + (crecer.get(String(par.item_id)) ?? 0);
+      if (ya >= cabe) {
+        /* O crece el concepto, o se rechaza. Crecer mueve dinero —una
+         * puerta más vale una puerta más—, así que sólo pasa si alguien lo
+         * pidió con todas sus letras. */
+        if (!par.sumar) {
+          return {
+            error: 'sin_cupo',
+            detalle: { item_id: par.item_id, item: it.nombre, cantidad: Number(it.cantidad ?? 1), ubicados: ya,
+                       motivo: 'ese ítem ya tiene en el plano todas las piezas que dice su cantidad',
+                       se_puede: 'mandar `sumar: true` en esa pareja para que el concepto pase a una pieza más, con su precio' },
+          };
+        }
+        crecer.set(String(par.item_id), (crecer.get(String(par.item_id)) ?? 0) + 1);
       }
       usado.set(String(par.item_id), (usado.get(String(par.item_id)) ?? 0) + 1);
 
@@ -2186,7 +2225,16 @@ export class OrgDB extends DurableObject<Env> {
        *     `clave`. Sin `clave` no se toca ninguno: inventarle un ganador a
        *     dos códigos que alguien tecleó a propósito es justo lo que no se
        *     hace solo. */
-      const claveItem = String(it.clave ?? '').trim();
+      /* UN CONCEPTO DE VARIAS PIEZAS NO TIENE UN CÓDIGO.
+       *
+       * Desde que se pueden agrupar (§98), un ítem puede ser «21 puertas
+       * iguales». Copiarle su código a las 21 piezas les pondría el mismo a
+       * todas, y la base lo impide con razón: dentro de una obra el código
+       * nombra UNA pieza del plano. Con `cantidad` mayor que uno, cada lado
+       * se queda con el suyo y no se pregunta nada: no hay una identidad
+       * que unificar, hay veintiuna. */
+      const variasPiezas = Math.trunc(Number(it.cantidad ?? 1)) > 1;
+      const claveItem = variasPiezas ? '' : String(it.clave ?? '').trim();
       const clavePieza = String(pz.code ?? '').trim();
       const claveFinal =
         claveItem && clavePieza && claveItem !== clavePieza
@@ -2210,7 +2258,7 @@ export class OrgDB extends DurableObject<Env> {
         codigoDe.set(par.element_id, claveFinal);
         codigos.set(par.element_id, claveFinal);
       }
-      if (claveFinal && claveFinal !== claveItem) {
+      if (!variasPiezas && claveFinal && claveFinal !== claveItem) {
         nombres.set(`clave:${par.item_id}`, { que: 'item', valor: claveFinal });
       }
 
@@ -2248,18 +2296,52 @@ export class OrgDB extends DurableObject<Env> {
       else { this.sql.exec(`UPDATE quell_elements SET name = ? WHERE id = ?`, v.valor, id); renombrados++; }
     }
 
+    /* Los conceptos que crecen: una pieza más, y el precio de una pieza más.
+     *
+     * El precio de la pieza sale de dividir el importe de la línea entre su
+     * cantidad, que es exacto porque la multiplicación se hizo en centavos
+     * enteros. Si la división no es entera se redondea, y el precio por
+     * pieza queda con centavos de diferencia: es preferible a inventarle un
+     * precio a la pieza nueva, y se corrige tecleando el importe del
+     * concepto, que es donde vive la cifra que se cobra. */
+    let sumados = 0;
+    for (const [item_id, cuantas] of crecer) {
+      const it = this.sql.exec(`SELECT monto, cantidad FROM items WHERE id = ?`, item_id).toArray()[0] as Fila;
+      const cantidadAntes = Math.max(1, Math.trunc(Number(it.cantidad ?? 1)));
+      const porPieza = Math.round(Number(it.monto ?? 0) / cantidadAntes);
+      const antes = Number(it.monto ?? 0);
+      this.sql.exec(
+        `UPDATE items SET cantidad = ?, monto = ?, actualizado_at = ? WHERE id = ?`,
+        cantidadAntes + cuantas, antes + porPieza * cuantas, ahora(), item_id,
+      );
+      /* El precio del concepto cambió, así que deja huella en la bitácora de
+       * sus piezas, igual que cuando lo cambian a mano en dash101. */
+      if (porPieza) this.huellaDePrecio(item_id, antes);
+      sumados += cuantas;
+    }
+
     let creados = 0;
-    for (const eid of plan.crear ?? []) {
+    for (const nueva of plan.crear ?? []) {
+      const pide = typeof nueva === 'string' ? { element_id: nueva } : nueva;
+      const eid = pide.element_id;
       const pz = pieza(eid);
       if (!pz) return { error: 'no_encontrado', detalle: { que: 'pieza', id: eid, motivo: 'esa pieza no es de esta obra' } };
       if (pz.item_id) continue;
+      /* Con precio nace vendido; sin precio, cotizado y en cero. Un importe
+       * negativo no es un precio, y en centavos enteros: la pantalla
+       * convierte, aquí no se adivina. */
+      const monto = Number.isFinite(Number(pide.monto)) && Number(pide.monto) > 0 ? Math.trunc(Number(pide.monto)) : 0;
+      if (pide.monto !== undefined && !Number.isInteger(Number(pide.monto))) {
+        return { error: 'dinero_no_entero', detalle: { element_id: eid, monto: pide.monto, motivo: 'el dinero va en centavos enteros' } };
+      }
       const item = this.crear(
         'items',
         {
           negocio_id: proyecto.negocio_id, proyecto_id, cliente_id: proyecto.cliente_id,
-          clave: pz.code ?? '', nombre: pz.name ?? 'Pieza del plano', tipo: pz.type ?? '',
-          monto: 0, cantidad: 1, estado: 'cotizado',
-          descripcion: 'Traído del plano de la obra. Falta ponerle precio.',
+          clave: pz.code ?? '', nombre: String(pide.nombre ?? '').trim() || pz.name || 'Pieza del plano', tipo: pz.type ?? '',
+          monto, cantidad: 1, estado: monto > 0 ? 'vendido' : 'cotizado',
+          descripcion: String(pide.descripcion ?? '').trim() ||
+            (monto > 0 ? 'Traído del plano de la obra.' : 'Traído del plano de la obra. Falta ponerle precio.'),
           origen: { de: 'quell', element_id: pz.id, obra_id },
         } as unknown as Fila,
         { app: 'quell101', usuario_id: contexto.usuario_id },
@@ -2268,7 +2350,8 @@ export class OrgDB extends DurableObject<Env> {
       creados++;
     }
 
-    return { ok: true, ligados, creados, renombrados, obra: this.obras().find((o) => o.id === obra_id)! };
+    if (sumados || creados) this.recalcularProyecto(proyecto_id);
+    return { ok: true, ligados, creados, renombrados, sumados, obra: this.obras().find((o) => o.id === obra_id)! };
   }
 
   /** El precio de un ítem cambió: se cuenta en la bitácora de cada pieza del
@@ -2308,6 +2391,258 @@ export class OrgDB extends DurableObject<Env> {
     if (!obra) return { error: 'no_encontrado', detalle: { que: 'obra', id: obra_id } };
     this.sql.exec(`UPDATE quell_projects SET proyecto_id = NULL WHERE id = ?`, obra_id);
     return { ok: true, obra: this.obras().find((o) => o.id === obra_id)! };
+  }
+
+
+  /* ─────────────── varios ítems iguales, un solo concepto (§98) ───────────────
+   *
+   * Mike, 20-sep-2026: «necesito poder agrupar varios ítems en un solo
+   * concepto. Ejemplo: son varias puertas iguales en diferente ubicación
+   * —quell las ubica en plano y cada una tiene su seguimiento— pero el
+   * producto es el mismo, "una puerta de X*X de tal acabado", y no tiene caso
+   * tener 21 ítems idénticos enlistados en dash».
+   *
+   * LO QUE SE JUNTA ES EL CONCEPTO, NO EL SEGUIMIENTO. Las 21 puertas siguen
+   * siendo 21 piezas en quell101, cada una con su ubicación en el plano, su
+   * bitácora y sus etapas. Lo que cambia es que las 21 cuelgan del MISMO
+   * ítem, y `items.cantidad` dice cuántas son. La columna ya existía
+   * (migración 0011) y ya se usa para el cupo al emparejar; lo que faltaba es
+   * poder juntar los que ya se capturaron por separado. Por eso esto no lleva
+   * migración: no hay columna nueva, hay una operación nueva.
+   *
+   * LA REGLA QUE NO SE ROMPE: el precio de venta del proyecto no se mueve.
+   * `monto` es el importe de la línea —no el de una pieza—, así que el del
+   * concepto es la SUMA de los que se juntaron. Si acomodar la lista moviera
+   * el total, sería un cambio de precio disfrazado de acomodo.
+   */
+
+  /** Qué ítems del proyecto son el mismo producto capturado varias veces.
+   *
+   *  La propuesta es por nombre normalizado, tipo, estado, moneda y PRECIO
+   *  POR PIEZA. El precio va en la llave a propósito: dos renglones que se
+   *  llaman igual y cuestan distinto no son el mismo producto, o alguien se
+   *  equivocó en uno de los dos, y juntarlos taparía el error dentro de un
+   *  promedio.
+   *
+   *  Propone; no junta. Quien decide escoge, porque el parecido de un nombre
+   *  no es la última palabra —la lección de emparejar los ítems, 20-sep—. */
+  gruposDeItems(proyecto_id: string): { proyecto: Fila; grupos: Fila[] } | { error: string; detalle?: unknown } {
+    const proyecto = this.obtener('proyectos', proyecto_id);
+    if (!proyecto) return { error: 'no_encontrado', detalle: { que: 'proyecto', id: proyecto_id } };
+
+    const items = this.sql
+      .exec(`SELECT * FROM items WHERE proyecto_id = ? AND estado <> 'cancelado' ORDER BY creado_at`, proyecto_id)
+      .toArray() as Fila[];
+
+    const ubicadosDe = (item_id: string) =>
+      Number((this.sql.exec(`SELECT COUNT(*) AS n FROM quell_elements WHERE item_id = ?`, item_id).toArray()[0] as Fila).n);
+
+    const por = new Map<string, Fila[]>();
+    for (const it of items) {
+      const cant = Math.max(1, Math.trunc(Number(it.cantidad ?? 1)));
+      const pieza = Math.round(Number(it.monto ?? 0) / cant);
+      const llave = [normalizar(it.nombre), String(it.tipo ?? ''), String(it.estado), String(it.moneda ?? 'MXN'), pieza].join('|');
+      const ya = por.get(llave);
+      if (ya) ya.push(it);
+      else por.set(llave, [it]);
+    }
+
+    const grupos = [...por.values()]
+      .filter((g) => g.length > 1)
+      .map((g) => {
+        const cant = (it: Fila) => Math.max(1, Math.trunc(Number(it.cantidad ?? 1)));
+        return {
+          nombre: g[0].nombre,
+          tipo: g[0].tipo,
+          estado: g[0].estado,
+          moneda: g[0].moneda ?? 'MXN',
+          precio_pieza: Math.round(Number(g[0].monto ?? 0) / cant(g[0])),
+          renglones: g.length,
+          piezas: g.reduce((s, it) => s + cant(it), 0),
+          monto: g.reduce((s, it) => s + Number(it.monto ?? 0), 0),
+          items: g.map((it) => ({
+            id: it.id, clave: it.clave, nombre: it.nombre, cantidad: cant(it), monto: Number(it.monto ?? 0),
+            etapa: Number(it.etapa ?? 0), fecha_entrega: it.fecha_entrega, ubicados: ubicadosDe(String(it.id)),
+          })),
+        } as unknown as Fila;
+      })
+      .sort((a, b) => Number(b.piezas) - Number(a.piezas));
+
+    return { proyecto, grupos };
+  }
+
+  /** Juntarlos. `queda_id` es el renglón que se queda con todo; los de
+   *  `se_van` desaparecen y le dejan sus piezas del plano, sus movimientos,
+   *  sus partidas y sus avances.
+   *
+   *  DOS PASADAS, como al emparejar: se revisa todo y sólo si todo cuadra se
+   *  escribe. Un rechazo a la mitad dejaría medio concepto juntado y el
+   *  precio del proyecto contando dos veces lo mismo.
+   *
+   *  Lo que se hereda, y por qué cada cosa:
+   *
+   *   · `cantidad` y `monto`: la suma. El total no se mueve (ver arriba).
+   *   · `etapa`: la del MÁS ATRASADO. Un concepto no va más adelantado que
+   *     su pieza más atrasada; tomar la mayor diría que ya están las 21
+   *     cuando faltan 6.
+   *   · `fecha_entrega`: la más próxima de las que traigan. Es la que hay
+   *     que perseguir; la lejana no urge y la lista de entregas ordena por
+   *     esa columna.
+   *   · `clave`: se conserva sólo si TODOS traían la misma. Un código nombra
+   *     una pieza —CAR-01, PT-09—, y dejarle PT-01 a un concepto de 21
+   *     puertas nombra a una y esconde veinte. El código de cada pieza sigue
+   *     en su plano, que es donde se lee.
+   *   · `asignados`: la unión. Quitarle el trabajo a alguien por acomodar
+   *     una lista es perder un dato que nadie va a notar que se perdió.
+   *   · `refs.agrupados`: qué renglones se juntaron, con su clave y su
+   *     importe. El renglón se borra; lo que decía, no.
+   *
+   *  Es irreversible: por eso la ruta la reserva a quien dirige la empresa. */
+  agruparItems(
+    proyecto_id: string,
+    args: { queda_id: string; se_van: string[]; nombre?: string },
+    contexto: { usuario_id: string },
+  ): { ok: true; item: Fila; absorbidos: number; movidos: Record<string, number> } | { error: string; detalle?: unknown } {
+    const proyecto = this.obtener('proyectos', proyecto_id);
+    if (!proyecto) return { error: 'no_encontrado', detalle: { que: 'proyecto', id: proyecto_id } };
+
+    const seVan = [...new Set((args.se_van ?? []).filter((id) => id && id !== args.queda_id))];
+    if (!args.queda_id) return { error: 'datos_invalidos', detalle: { falta: 'queda_id' } };
+    if (!seVan.length) return { error: 'datos_invalidos', detalle: { motivo: 'hay que decir cuáles se juntan con él' } };
+
+    const traer = (id: string) =>
+      this.sql.exec(`SELECT * FROM items WHERE id = ? AND proyecto_id = ?`, id, proyecto_id).toArray()[0] as Fila | undefined;
+
+    const queda = traer(args.queda_id);
+    if (!queda) return { error: 'no_encontrado', detalle: { que: 'item', id: args.queda_id, motivo: 'ese ítem no es de este proyecto' } };
+
+    const otros: Fila[] = [];
+    for (const id of seVan) {
+      const it = traer(id);
+      if (!it) return { error: 'no_encontrado', detalle: { que: 'item', id, motivo: 'ese ítem no es de este proyecto' } };
+      /* Estado y moneda tienen que coincidir, y no es formalismo: juntar un
+       * cotizado con un vendido vendería el cotizado sin que nadie lo
+       * decida, y sumar pesos con dólares da un número que no es dinero. */
+      if (String(it.estado) !== String(queda.estado)) {
+        return { error: 'estado_distinto', detalle: { id, estado: it.estado, esperado: queda.estado,
+                 motivo: 'sólo se juntan ítems en el mismo estado: juntar un cotizado con un vendido lo vendería sin que nadie lo decida' } };
+      }
+      if (String(it.moneda ?? 'MXN') !== String(queda.moneda ?? 'MXN')) {
+        return { error: 'moneda_distinta', detalle: { id, moneda: it.moneda, esperado: queda.moneda } };
+      }
+      otros.push(it);
+    }
+
+    const todos = [queda, ...otros];
+    const cant = (it: Fila) => Math.max(1, Math.trunc(Number(it.cantidad ?? 1)));
+
+    /* ── ya cuadró todo: ahora se escribe ── */
+
+    const cuantos = (sql: string, ...a: SqlStorageValue[]) => Number((this.sql.exec(sql, ...a).toArray()[0] as Fila).n);
+    const movidos = { piezas: 0, movimientos: 0, partidas: 0, avances: 0 };
+    for (const it of otros) {
+      const id = String(it.id);
+      movidos.piezas += cuantos(`SELECT COUNT(*) AS n FROM quell_elements WHERE item_id = ?`, id);
+      movidos.movimientos += cuantos(`SELECT COUNT(*) AS n FROM movimientos WHERE item_id = ?`, id);
+      movidos.partidas += cuantos(`SELECT COUNT(*) AS n FROM partidas WHERE item_id = ?`, id);
+      movidos.avances += cuantos(`SELECT COUNT(*) AS n FROM avances WHERE item_id = ?`, id);
+      this.sql.exec(`UPDATE quell_elements SET item_id = ? WHERE item_id = ?`, queda.id, id);
+      this.sql.exec(`UPDATE movimientos SET item_id = ? WHERE item_id = ?`, queda.id, id);
+      this.sql.exec(`UPDATE partidas SET item_id = ? WHERE item_id = ?`, queda.id, id);
+      this.sql.exec(`UPDATE avances SET item_id = ? WHERE item_id = ?`, queda.id, id);
+    }
+
+    const atrasado = todos.reduce((a, b) => (Number(b.etapa ?? 0) < Number(a.etapa ?? 0) ? b : a), todos[0]);
+    const fechas = todos.map((it) => String(it.fecha_entrega ?? '')).filter(Boolean).sort();
+    const claves = [...new Set(todos.map((it) => String(it.clave ?? '').trim()))];
+    const asignados = [
+      ...new Set(todos.flatMap((it) => {
+        try { const v = JSON.parse(String(it.asignados ?? '[]')); return Array.isArray(v) ? v.map(String) : []; } catch { return []; }
+      })),
+    ];
+    const descripcion = todos.map((it) => String(it.descripcion ?? '').trim()).find(Boolean) ?? '';
+
+    let refs: Record<string, unknown> = {};
+    try { const v = JSON.parse(String(queda.refs ?? '{}')); if (v && typeof v === 'object' && !Array.isArray(v)) refs = v as Record<string, unknown>; } catch { refs = {}; }
+    const antes = Array.isArray(refs.agrupados) ? (refs.agrupados as unknown[]) : [];
+    refs.agrupados = [
+      ...antes,
+      ...otros.map((it) => ({
+        id: it.id, clave: it.clave ?? null, nombre: it.nombre, cantidad: cant(it), monto: Number(it.monto ?? 0),
+        agrupado_at: ahora(), agrupado_por: contexto.usuario_id,
+      })),
+    ];
+
+    this.sql.exec(
+      `UPDATE items SET nombre = ?, descripcion = ?, clave = ?, cantidad = ?, monto = ?, etapa = ?, etapa_at = ?, etapa_por = ?,
+              fecha_entrega = ?, asignados = ?, refs = ?, actualizado_at = ? WHERE id = ?`,
+      String(args.nombre?.trim() || queda.nombre),
+      descripcion,
+      claves.length === 1 ? claves[0] : '',
+      todos.reduce((s, it) => s + cant(it), 0),
+      todos.reduce((s, it) => s + Number(it.monto ?? 0), 0),
+      Number(atrasado.etapa ?? 0),
+      (atrasado.etapa_at as string | null) ?? null,
+      (atrasado.etapa_por as string | null) ?? null,
+      fechas[0] ?? null,
+      JSON.stringify(asignados),
+      JSON.stringify(refs),
+      ahora(),
+      queda.id,
+    );
+
+    /* Se borran al final, cuando ya no cuelga nada de ellos. El CRUD no deja
+     * borrar un ítem —`items_nunca_se_borran`, y con razón: un ítem suelto
+     * se lleva su historia—; aquí no se pierde nada porque la historia ya se
+     * mudó al que se queda, renglón por renglón, contada arriba. */
+    for (const it of otros) this.sql.exec(`DELETE FROM items WHERE id = ?`, it.id);
+
+    this.recalcularProyecto(proyecto_id);
+    this.avisar({ t: 'item.cambio', id: String(queda.id) }, 'todos');
+    return { ok: true, item: this.obtener('items', String(queda.id))!, absorbidos: otros.length, movidos };
+  }
+
+
+  /* ─────────────── la partida y el orden de los ítems (§102) ───────────────
+   *
+   * Mike, 20-sep: «quiero también poder ordenar los ítems y agrupar por
+   * partidas. Incluso podría ser por pestañas (como folders) para cambiar
+   * entre partidas».
+   *
+   * Un solo envío con la lista acomodada, no una llamada por renglón. Con 21
+   * puertas, acomodar de una en una son 21 idas y vueltas donde la número 12
+   * puede fallar y dejar la lista a medio acomodar, con dos ítems en el
+   * lugar 5 y ninguno en el 12.
+   *
+   * `partida` es texto libre y renombrarla es mandar sus ítems con el nombre
+   * nuevo: no hay catálogo que dar de alta antes de poder teclear «Cocina».
+   */
+
+  /** Acomodar. Lo que no venga en la lista no se mueve. Dos pasadas: se
+   *  revisa que todos sean del proyecto y sólo entonces se escribe. */
+  acomodarItems(
+    proyecto_id: string,
+    items: Array<{ id: string; partida?: string; orden?: number }>,
+  ): { ok: true; acomodados: number } | { error: string; detalle?: unknown } {
+    const proyecto = this.obtener('proyectos', proyecto_id);
+    if (!proyecto) return { error: 'no_encontrado', detalle: { que: 'proyecto', id: proyecto_id } };
+    if (!Array.isArray(items) || !items.length) return { error: 'datos_invalidos', detalle: { motivo: 'no viene ningún ítem que acomodar' } };
+
+    for (const it of items) {
+      const fila = this.sql.exec(`SELECT id FROM items WHERE id = ? AND proyecto_id = ?`, it.id, proyecto_id).toArray()[0];
+      if (!fila) return { error: 'no_encontrado', detalle: { que: 'item', id: it.id, motivo: 'ese ítem no es de este proyecto' } };
+    }
+
+    for (const it of items) {
+      const campos: string[] = [];
+      const valores: SqlStorageValue[] = [];
+      if (it.partida !== undefined) { campos.push('partida = ?'); valores.push(String(it.partida).trim().slice(0, 80)); }
+      if (it.orden !== undefined) { campos.push('orden = ?'); valores.push(Math.trunc(Number(it.orden) || 0)); }
+      if (!campos.length) continue;
+      campos.push('actualizado_at = ?'); valores.push(ahora());
+      this.sql.exec(`UPDATE items SET ${campos.join(', ')} WHERE id = ?`, ...valores, it.id);
+    }
+    return { ok: true, acomodados: items.length };
   }
 
   /* ─────────────── la raya: lo que se le paga a la gente (§96) ───────────────

@@ -358,23 +358,59 @@ describe('emparejar a mano', () => {
   });
 
   it('cuando los dos traen código y difieren, gana el que se pida', async () => {
-    const eB = await piezaEn('Buró izquierdo', 'BUR-09');
-    await o('mike', `/items/${dosPiezas}`, { method: 'PATCH', app: 'quell101', json: { clave: 'BR-1' } });
+    /* El código es la identidad de UNA pieza, así que este caso es el de un
+     * ítem de cantidad 1: una cabecera, una pieza en el plano, dos códigos
+     * tecleados y alguien que escoge cuál queda. */
+    const eZ = await piezaEn('Tocador del vestidor', 'TOC-09');
+    const tocador = (await o('mike', '/items', { method: 'POST', json: {
+      negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto2,
+      nombre: 'Tocador', monto: 12_000_00, cantidad: 1, estado: 'vendido',
+    } })).data.id;
+    await o('mike', `/items/${tocador}`, { method: 'PATCH', app: 'quell101', json: { clave: 'TC-1' } });
 
     const sinDecir = await o('mike', `/obras/${obra2}/items`, {
-      method: 'POST', json: { ligar: [{ element_id: eB, item_id: dosPiezas }] },
+      method: 'POST', json: { ligar: [{ element_id: eZ, item_id: tocador }] },
     });
     expect(sinDecir.estado, JSON.stringify(sinDecir)).toBe(200);
     // Sin `clave`, no se toca ninguno: inventarle un ganador a dos códigos
     // que alguien tecleó a propósito es justo lo que no se hace solo.
-    expect((await o('mike', `/items/${dosPiezas}`)).data.clave).toBe('BR-1');
+    expect((await o('mike', `/items/${tocador}`)).data.clave).toBe('TC-1');
 
-    const eC = await piezaEn('Buró derecho', 'BUR-10');
+    const eZ2 = await piezaEn('Tocador gemelo', 'TOC-10');
+    const otroTocador = (await o('mike', '/items', { method: 'POST', json: {
+      negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto2,
+      nombre: 'Tocador gemelo', monto: 12_000_00, cantidad: 1, estado: 'vendido',
+    } })).data.id;
+    await o('mike', `/items/${otroTocador}`, { method: 'PATCH', app: 'quell101', json: { clave: 'TC-2' } });
     const conQuell = await o('mike', `/obras/${obra2}/items`, {
-      method: 'POST', json: { ligar: [{ element_id: eC, item_id: dosPiezas, clave: 'quell' }] },
+      method: 'POST', json: { ligar: [{ element_id: eZ2, item_id: otroTocador, clave: 'quell' }] },
     });
     expect(conQuell.estado, JSON.stringify(conQuell)).toBe(200);
-    expect((await o('mike', `/items/${dosPiezas}`)).data.clave, 'gana el del plano').toBe('BUR-10');
+    expect((await o('mike', `/items/${otroTocador}`)).data.clave, 'gana el del plano').toBe('TOC-10');
+  });
+
+  it('un CONCEPTO de varias piezas no toma el código de ninguna, ni les pone el suyo', async () => {
+    /* Desde que se pueden agrupar (§98), un ítem puede ser «dos burós» o
+     * «21 puertas». Un código nombra UNA pieza del plano —la base lo impide
+     * dos veces en la misma obra—, así que un concepto de varias no tiene
+     * uno: ni se lo copia a las piezas, ni se queda con el de la última que
+     * se ligó, que es lo que hacía antes y era arbitrario. */
+    const eB = await piezaEn('Buró izquierdo', 'BUR-09');
+    await o('mike', `/items/${dosPiezas}`, { method: 'PATCH', app: 'quell101', json: { clave: 'BR-1' } });
+    const uno = await o('mike', `/obras/${obra2}/items`, {
+      method: 'POST', json: { ligar: [{ element_id: eB, item_id: dosPiezas }] },
+    });
+    expect(uno.estado, JSON.stringify(uno)).toBe(200);
+
+    const eC = await piezaEn('Buró derecho', 'BUR-10');
+    const dos = await o('mike', `/obras/${obra2}/items`, {
+      method: 'POST', json: { ligar: [{ element_id: eC, item_id: dosPiezas, clave: 'quell' }] },
+    });
+    expect(dos.estado, JSON.stringify(dos)).toBe(200);
+
+    expect((await o('mike', `/items/${dosPiezas}`)).data.clave, 'el concepto conserva el suyo').toBe('BR-1');
+    expect((await q('mike', `/elements/${eB}`)).element.code, 'y cada pieza el suyo').toBe('BUR-09');
+    expect((await q('mike', `/elements/${eC}`)).element.code).toBe('BUR-10');
   });
 
   it('el cupo se revisa AL APLICAR: el tercer buró ya no cabe', async () => {
@@ -487,5 +523,113 @@ describe('un rechazo no deja nada a medias', () => {
     });
     expect(r.estado, JSON.stringify(r)).toBe(200);
     expect(r.data.ligados).toBe(1);
+  });
+});
+
+describe('desde el plano: con precio, o una pieza más al concepto (§103)', () => {
+  /* Mike, 20-sep: «en esta pantalla debería poder de ahí mismo agregar un
+   * ítem nuevo con precio y descripción para que ya se sume. Y puede ser
+   * crear un concepto nuevo (derivado del ítem de quell) o agregarlo al
+   * conteo de un concepto ya existente (ej. una puerta más a las 14 ya
+   * existentes del mismo modelo)».
+   *
+   * Lo que estas pruebas cuidan es que el dinero se mueva SÓLO cuando
+   * alguien lo pidió: con precio se vende, sin precio no; y una pieza de más
+   * crece el concepto únicamente si viene `sumar`. */
+  let obra4 = '', plano4 = '', proyecto4 = '', modelo = '', primeraPuerta = '';
+
+  const venta = async () => Number((await o('mike', `/proyectos/${proyecto4}`)).data.precio_venta);
+  const piezaEn = async (name: string) => {
+    const r = await q('mike', `/plans/${plano4}/elements`, {
+      method: 'POST', json: { op_id: crypto.randomUUID(), name, type: 'Puerta', x: 0.2, y: 0.7 },
+    });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    return r.id as string;
+  };
+
+  beforeAll(async () => {
+    proyecto4 = (await o('mike', '/proyectos', { method: 'POST', json: { negocio_id: negocio, cliente_id: cliente, nombre: 'Casa con precio' } })).data.id;
+    obra4 = (await q('mike', '/projects', { method: 'POST', json: { name: 'Casa con precio (obra)', client: 'Familia' } })).id;
+    await o('mike', `/obras/${obra4}/ligar`, { method: 'POST', json: { proyecto_id: proyecto4 } });
+    const fd = new FormData();
+    fd.append('name', 'Planta'); fd.append('file_name', 'p.pdf'); fd.append('width', '1000'); fd.append('height', '800');
+    fd.append('image', new File([PNG], 'plan.png', { type: 'image/png' }));
+    plano4 = (await q('mike', `/projects/${obra4}/plans`, { method: 'POST', body: fd })).id;
+
+    modelo = (await o('mike', '/items', { method: 'POST', json: {
+      negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto4,
+      nombre: 'Puerta modelo A', monto: 28_000_00, cantidad: 2, estado: 'vendido',
+    } })).data.id;
+  }, 60000);
+
+  it('sin precio sigue naciendo cotizado y en cero: la venta no se mueve', async () => {
+    const antes = await venta();
+    const eA = await piezaEn('Clóset sin cotizar');
+    const r = await o('mike', `/obras/${obra4}/items`, { method: 'POST', json: { crear: [eA] } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.creados).toBe(1);
+    expect(await venta(), 'una pieza del plano no trae precio').toBe(antes);
+  });
+
+  it('con precio y descripción nace VENDIDO y ya se suma', async () => {
+    const antes = await venta();
+    const eB = await piezaEn('Clóset de blancos');
+    const r = await o('mike', `/obras/${obra4}/items`, { method: 'POST', json: { crear: [
+      { element_id: eB, monto: 18_500_00, nombre: 'Clóset de blancos 1.20', descripcion: 'Nogal, tres entrepaños' },
+    ] } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(await venta()).toBe(antes + 18_500_00);
+
+    /* No sale en `candidatos`: nace con su pieza ya colgada, así que su
+     * cupo es cero y no admite otra. Se busca donde vive, en los ítems del
+     * proyecto. */
+    const lista = await o('mike', `/items?proyecto_id=${proyecto4}`);
+    const nuevo = lista.data.filas.find((f: any) => f.nombre === 'Clóset de blancos 1.20');
+    expect(nuevo, 'sale como ítem del proyecto').toBeTruthy();
+    expect(nuevo.estado).toBe('vendido');
+    expect(nuevo.descripcion).toBe('Nogal, tres entrepaños');
+    expect(nuevo.cantidad).toBe(1);
+  });
+
+  it('un precio con centavos partidos se rechaza, no se redondea', async () => {
+    const eC = await piezaEn('Repisa rara');
+    const r = await o('mike', `/obras/${obra4}/items`, { method: 'POST', json: { crear: [{ element_id: eC, monto: 1000.5 }] } });
+    expect(r.estado).toBe(400);
+    expect(r.error).toBe('dinero_no_entero');
+  });
+
+  it('la tercera puerta del modelo no cabe… salvo que se pida sumarla', async () => {
+    primeraPuerta = await piezaEn('Puerta 1');
+    const e1 = primeraPuerta;
+    const e2 = await piezaEn('Puerta 2');
+    const e3 = await piezaEn('Puerta 3');
+    const dos = await o('mike', `/obras/${obra4}/items`, { method: 'POST', json: { ligar: [
+      { element_id: e1, item_id: modelo }, { element_id: e2, item_id: modelo },
+    ] } });
+    expect(dos.estado, JSON.stringify(dos)).toBe(200);
+
+    const sinSumar = await o('mike', `/obras/${obra4}/items`, { method: 'POST', json: { ligar: [{ element_id: e3, item_id: modelo }] } });
+    expect(sinSumar.estado).toBe(409);
+    expect(sinSumar.error).toBe('sin_cupo');
+    // Y dice cómo se resuelve, que es la diferencia entre un error y un muro.
+    expect(sinSumar.detalle.se_puede).toMatch(/sumar/);
+
+    const antes = await venta();
+    const conSumar = await o('mike', `/obras/${obra4}/items`, { method: 'POST', json: { ligar: [{ element_id: e3, item_id: modelo, sumar: true }] } });
+    expect(conSumar.estado, JSON.stringify(conSumar)).toBe(200);
+    expect(conSumar.data.sumados).toBe(1);
+
+    const it = (await o('mike', `/items/${modelo}`)).data;
+    expect(it.cantidad, 'tres puertas del mismo modelo').toBe(3);
+    expect(it.monto, 'y el precio de una más').toBe(42_000_00);
+    expect(await venta()).toBe(antes + 14_000_00);
+  });
+
+  it('crecer el concepto deja huella en la bitácora de sus piezas', async () => {
+    /* El que está en obra se entera de que el precio del concepto cambió;
+     * es la misma regla que cuando lo cambian a mano en dash101. */
+    const det = await q('mike', `/elements/${primeraPuerta}`);
+    expect(det.element, 'la pieza sigue en el plano').toBeTruthy();
+    expect(det.log.some((l: any) => l.kind === 'precio'), 'quedó anotado el cambio de precio').toBe(true);
   });
 });

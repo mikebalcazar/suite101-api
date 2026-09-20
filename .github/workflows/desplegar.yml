@@ -63,6 +63,7 @@ jobs:
           python3 pruebas/migracion-0012.py
           python3 pruebas/migracion-0013.py
           python3 pruebas/migracion-0014.py
+          python3 pruebas/migracion-0015.py
           python3 pruebas/config-correo.py
       - name: Pruebas contra el Durable Object y el D1 de verdad
         run: npx vitest run --reporter=verbose

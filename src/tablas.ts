@@ -119,9 +119,14 @@ export const DEFS: Record<Tabla, Def> = {
       descripcion: 'texto', tipo: 'texto', monto: 'dinero', cantidad: 'entero', moneda: 'texto', estado: 'texto', etapa: 'entero',
       etapa_at: 'texto', etapa_por: 'texto', fecha_entrega: 'texto', asignados: 'json', origen: 'json',
       refs: 'json', creado_por: 'texto', actualizado_at: 'texto',
+      /* 0015 · el capítulo bajo el que va el ítem —Cocina, Recámaras— y su
+       * lugar dentro de él. OJO: `partida` aquí NO es la tabla `partidas`,
+       * que son los compromisos con proveedores; es la palabra de la
+       * cotización. La migración 0015 explica por qué conviven. */
+      partida: 'texto', orden: 'entero',
     },
     requeridos: ['negocio_id', 'cliente_id', 'nombre'],
-    filtros: ['negocio_id', 'proyecto_id', 'cliente_id', 'estado', 'etapa'],
+    filtros: ['negocio_id', 'proyecto_id', 'cliente_id', 'estado', 'etapa', 'partida'],
     orden: 'creado_at',
     fecha: 'fecha_entrega',
   },
