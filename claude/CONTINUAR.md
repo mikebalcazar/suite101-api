@@ -250,8 +250,41 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   del proyecto antes y después, porque heredar el costo lo mueve y la
   pantalla tiene que decirlo. El muro del 20-sep a las 23:00 cuenta por qué
   el diseño anterior estaba mal.
-- **Pendiente en dash101, no urgente: `ProductoProyecto` se llama mal.** En
-  esa app los renglones del proyecto se llaman `productos` desde la época de
-  Firestore y NO son los productos del catálogo; ahora conviven los dos
-  nombres. Son 55 usos en 6 archivos. Quedó señalado en el PR #66 y como
-  tarea aparte; no se metió en ese cambio para no arriesgarlo.
+- **`ProductoProyecto` ya se llama `ItemProyecto` (20-sep, dash101 #68).** En
+  esa app los renglones del proyecto se llamaban `productos` desde la época de
+  Firestore y NO son los productos del catálogo. Con las dos tablas
+  conviviendo el nombre viejo ya mentía, así que se renombró: 55 usos en 6
+  archivos, en un cambio aparte para no arriesgar el del contrato 0.35.0.
+- **Separar, y rescatar lo que la fusión ya había borrado (20-sep, contrato
+  0.36.0).** Salir de un producto es `POST /orgs/:o/items/:id/separar`, y
+  vaciar un producto entero `POST /orgs/:o/proyectos/:id/separar`. El caso
+  caro es el otro: los renglones que el «Juntar los iguales» viejo fusionó y
+  BORRÓ sólo se pueden reconstruir porque aquel código dejó escrito
+  `refs.agrupados` con el id, la clave y el importe de cada uno. De ahí se
+  rehacen, y las piezas del plano se reparten por código. **El precio de
+  venta del proyecto es invariante**: lo que se le resta al renglón grande es
+  exactamente lo que se les pone a los rescatados, y si no cuadra contesta
+  409 `no_cuadra` sin escribir nada. Lo que NO vuelve, y está dicho así en el
+  muro y en el recado: de qué renglón era cada cobro y cada avance, porque la
+  fusión los mudó todos al que se quedaba sin anotar de dónde venían.
+  Detalle que costó una hora: `separarItem` tiene que leer la fila CRUDA con
+  `sql.exec`, no con `obtener()`, porque `afuera()` ya trae `refs` convertido
+  en objeto y el `JSON.parse` truena.
+- **Agrupar a un producto que YA existe (20-sep, contrato 0.37.0).** El
+  cuerpo de `POST /orgs/:o/proyectos/:id/agrupar` acepta `producto_id`; con
+  él, los ítems marcados entran a ese producto y **adoptan su precio**, y el
+  nombre y el precio del producto no se tocan desde ahí. Lo pidió Mike con la
+  captura de las 25 puertas en $0 junto a las 2 en $2,850. Y se le quitó el
+  candado de «sólo el dueño»: quien puede editar los ítems del proyecto puede
+  agruparlos.
+- **Lo fiscal son dos preguntas, no una (21-sep, sólo dash101).** Mike: «ese
+  marcador de facturado son 2 pasos: uno que indica si ese monto es facturado
+  —o sea que se desglosa el IVA—, y eso activa otro que dice si ya se facturó
+  o no. Si un movimiento no va fiscalizado, no tiene caso el marcador de si
+  ya se hizo la factura». Los dos campos ya existían en la API
+  (`movimientos.requiere_factura` desde la migración 0012 y `facturado`), así
+  que el contrato no se movió: lo que estaba mal era la pantalla, que los
+  mezclaba en un interruptor. Y los fiscalizados traen ícono en su renglón
+  —el mismo ícono, ROJO mientras falta la factura y VERDE cuando ya está—,
+  con la palabra completa en el `title` porque el color solo no se lee. La
+  regla vive en `components/marca-fiscal.tsx` y se mide sin montar React.
