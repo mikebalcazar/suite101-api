@@ -30,6 +30,7 @@ import raya from '../migrations/org/0014_raya.sql';
 import partidaOrden from '../migrations/org/0015_partida_orden.sql';
 import alcance from '../migrations/org/0016_alcance_item.sql';
 import productos from '../migrations/org/0017_productos.sql';
+import ivaDelProyecto from '../migrations/org/0018_iva_del_proyecto.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { atender as atenderRoster, type DatosEmpresaRoster, type SesionRoster } from './roster/motor.js';
 import { invitarClienteEnSuite } from './clientes';
@@ -50,7 +51,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto];
 
 /** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
  *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
@@ -127,6 +128,22 @@ export interface ApiOrgDB {
     proyectos: Fila[];
     otros_pagos: Fila[];
     totales: { vendido: number; cobrado: number; saldo: number; sin_proyecto: number };
+  } | null>;
+  /** El estado de cuenta de UN proyecto: la lista que suma, el desglose de
+   *  IVA como lo lleve esa obra, los pagos del cliente y la fecha del
+   *  servidor. Lo abren dash101 y peek101 con el mismo cálculo (§119). */
+  estadoDelProyecto(proyecto_id: string): Promise<{
+    generado_at: string;
+    proyecto: Fila;
+    cliente: Fila | null;
+    negocio: Fila | null;
+    items: Fila[];
+    movimientos: Fila[];
+    totales: {
+      subtotal: number; iva: number; total: number;
+      tasa_iva: number; iva_incluido: boolean;
+      cobrado: number; saldo: number; piezas: number;
+    };
   } | null>;
   conectados(): Promise<number>;
   /** Puerta de servicio: solo la usa POST /admin/importar (fase 2). */
@@ -3713,6 +3730,118 @@ export class OrgDB extends DurableObject<Env> {
     const cobrado = conSaldo.reduce((t, p) => t + Number(p.cobrado), 0) + sin_proyecto;
 
     return { cliente, proyectos: conSaldo, otros_pagos, totales: { vendido, cobrado, saldo: vendido - cobrado, sin_proyecto } };
+  }
+
+  /* ─────────────── el estado de cuenta de UN proyecto (§119) ───────────────
+   *
+   * Mike, 21-sep: «necesito poder exportar un estado de cuenta en pdf y un
+   * excel con lo siguiente de cada proyecto: saldo general, lista de
+   * productos en proyecto, subtotal, IVA y total de proyecto completo,
+   * movimientos de proyecto (pagos), fecha del día que se genera el status.
+   * Creo que esto es lo mismo que el cliente podría descargar desde peek101».
+   *
+   * Tiene razón en lo último, y por eso esto vive AQUÍ y no en dash101: el
+   * mismo documento lo va a abrir la empresa y lo va a bajar el cliente. Dos
+   * pantallas armando cada una sus totales es la manera segura de que un día
+   * no cuadren, y el que se daría cuenta es el cliente.
+   *
+   * TRES REGLAS QUE NO SE VEN Y SOSTIENEN EL DOCUMENTO:
+   *
+   *   1. La LISTA y el SUBTOTAL son la misma cifra. Los renglones son los
+   *      ítems VENDIDOS, que es exactamente lo que suma `precio_venta`; si
+   *      metiéramos los cotizados o los cancelados, la suma de la tabla no
+   *      daría el total de abajo y el cliente lo vería antes que nosotros.
+   *   2. Sólo van INGRESOS. Lo que se le pagó a un proveedor no es asunto
+   *      del cliente, y este documento lo abre él.
+   *   3. El SALDO es contra el TOTAL CON IVA, porque es lo que va a pagar.
+   *      OJO: el KPI de saldo que enseña dash101 en otras pantallas es
+   *      contra `precio_venta` sin IVA. No es una contradicción, son dos
+   *      preguntas distintas —cuánto vendí y cuánto me deben—, pero el
+   *      documento lo dice con letras para que nadie compare dos números
+   *      que no son el mismo.
+   *
+   * La fecha la pone el SERVIDOR (`generado_at`). La del navegador es la del
+   * reloj de quien imprime, y un estado de cuenta con la fecha de la laptop
+   * mal puesta es un documento con la fecha mal puesta.
+   */
+  estadoDelProyecto(proyecto_id: string): {
+    generado_at: string;
+    proyecto: Fila;
+    cliente: Fila | null;
+    negocio: Fila | null;
+    items: Fila[];
+    movimientos: Fila[];
+    totales: {
+      subtotal: number; iva: number; total: number;
+      tasa_iva: number; iva_incluido: boolean;
+      cobrado: number; saldo: number; piezas: number;
+    };
+  } | null {
+    const proyecto = this.obtener('proyectos', proyecto_id);
+    if (!proyecto) return null;
+
+    const cliente = proyecto.cliente_id
+      ? (this.sql.exec(`SELECT id, nombre, rfc, correo, telefono FROM clientes WHERE id = ?`, proyecto.cliente_id).toArray()[0] as Fila | undefined) ?? null
+      : null;
+    const negocio = proyecto.negocio_id
+      ? (this.sql.exec(`SELECT id, nombre, rfc, moneda FROM negocios WHERE id = ?`, proyecto.negocio_id).toArray()[0] as Fila | undefined) ?? null
+      : null;
+
+    /* Los VENDIDOS, que son los que suman. `pr.nombre` sale por LEFT JOIN
+     * para que un ítem agrupado diga de qué modelo es sin que la pantalla
+     * tenga que pedir el catálogo aparte. */
+    const items = this.sql
+      .exec(
+        `SELECT i.id, i.clave, i.nombre, i.descripcion, i.tipo, i.cantidad, i.monto,
+                i.etapa, i.fecha_entrega, i.partida, i.producto_id, pr.nombre AS producto_nombre
+         FROM items i
+         LEFT JOIN productos pr ON pr.id = i.producto_id
+         WHERE i.proyecto_id = ? AND i.estado = 'vendido'
+         ORDER BY COALESCE(i.partida, ''), COALESCE(i.orden, 0), i.creado_at`,
+        proyecto_id,
+      )
+      .toArray()
+      .map((f) => {
+        const i = f as Fila;
+        const cantidad = Math.max(1, Math.trunc(Number(i.cantidad ?? 1)));
+        return { ...i, cantidad, precio_unitario: Math.round(Number(i.monto ?? 0) / cantidad), importe: Number(i.monto ?? 0) };
+      });
+
+    const movimientos = this.sql
+      .exec(
+        `SELECT m.id, m.fecha, m.monto, m.descripcion, m.facturado, m.requiere_factura, m.uuid_cfdi,
+                c.nombre AS cuenta_nombre
+         FROM movimientos m
+         LEFT JOIN cuentas c ON c.id = m.cuenta_id
+         WHERE m.proyecto_id = ? AND m.tipo = 'ingreso'
+         ORDER BY m.fecha, m.creado_at`,
+        proyecto_id,
+      )
+      .toArray() as Fila[];
+
+    /* El precio de venta es el caché que ya mantiene `recalcularProyecto`, y
+     * es por construcción la suma de los vendidos. No se vuelve a sumar aquí
+     * a propósito: dos maneras de calcular la misma cifra es una de más. */
+    const venta = Number(proyecto.precio_venta ?? 0);
+    const tasa = Math.max(0, Math.trunc(Number(proyecto.tasa_iva ?? 1600)));
+    const incluido = Number(proyecto.iva_incluido ?? 0) === 1;
+
+    /* En puntos base y con enteros de punta a punta: un 0.16 en coma
+     * flotante deja centavos de diferencia entre el PDF y el Excel. */
+    const subtotal = incluido ? Math.round((venta * 10000) / (10000 + tasa)) : venta;
+    const iva = incluido ? venta - subtotal : Math.round((venta * tasa) / 10000);
+    const total = subtotal + iva;
+    const cobrado = movimientos.reduce((t, m) => t + Number(m.monto ?? 0), 0);
+
+    return {
+      generado_at: ahora(),
+      proyecto, cliente, negocio, items, movimientos,
+      totales: {
+        subtotal, iva, total, tasa_iva: tasa, iva_incluido: incluido,
+        cobrado, saldo: total - cobrado,
+        piezas: items.reduce((t, i) => t + Number(i.cantidad ?? 1), 0),
+      },
+    };
   }
 
   /* ─────────────── /peek — lo del cliente, ya sumado ───────────────

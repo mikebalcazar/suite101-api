@@ -567,6 +567,35 @@ rutas.post('/:o/proyectos/:id/separar', async (c) => {
   });
 });
 
+/** GET /orgs/:o/proyectos/:id/estado — el estado de cuenta de una obra.
+ *
+ *  Mike, 21-sep: «necesito poder exportar un estado de cuenta en pdf y un
+ *  excel con lo siguiente de cada proyecto: saldo general, lista de
+ *  productos en proyecto, subtotal, IVA y total de proyecto completo,
+ *  movimientos de proyecto (pagos), fecha del día que se genera el status.
+ *  Creo que esto es lo mismo que el cliente podría descargar desde peek101».
+ *
+ *  UNA SOLA RUTA para los dos, y ésta es la segunda excepción a «un cliente
+ *  sólo abre /peek», con la misma razón que la primera: lo que ve está
+ *  recortado EN EL SERVIDOR y probado. El cliente sólo abre el estado de SU
+ *  proyecto —se compara contra la sesión, no contra lo que diga la
+ *  dirección— y el documento no trae un solo egreso, así que lo que le pagas
+ *  a tus proveedores no viaja.
+ *
+ *  Que sea una y no dos es el punto: el día que los totales de la empresa y
+ *  los del cliente se calculen en dos lugares, el que va a notar que no
+ *  cuadran es el cliente. */
+rutas.get('/:o/proyectos/:id/estado', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase === 'personal') return err(c, 'sin_permiso', 403, { motivo: 'el estado de cuenta lleva dinero' });
+  const r = await stub(c).estadoDelProyecto(c.req.param('id'));
+  if (!r) return err(c, 'no_encontrado', 404, { que: 'proyecto', id: c.req.param('id') });
+  if (quien.clase === 'cliente' && String(r.proyecto.cliente_id ?? '') !== String(quien.ref_id ?? '')) {
+    return err(c, 'sin_permiso', 403, { motivo: 'ese proyecto no es suyo' });
+  }
+  return ok(c, r);
+});
+
 /** POST /orgs/:o/proyectos/:id/borrar-cancelados {modo:'seco'|'borrar'} —
  *  limpiar de un proyecto los ítems que se cancelaron.
  *
