@@ -476,3 +476,182 @@ describe('cuántos días faltan', () => {
     expect(faltaParaEntrega(null)).toBe(null);
   });
 });
+
+/* La documentación del ítem · contrato 0.41.0
+ *
+ * Mike, 21-sep: «un apartado por ítem de documentación. Subir PDF de planos y
+ * de anotaciones adicionales. Quiero que ese PDF pueda tener anotaciones
+ * (poder anotar desde el cel o la compu cosas encima). Y después poder
+ * actualizar ese PDF a una versión nueva, sin borrar la anterior, pero
+ * archivarla (…). Y una opción para ver versiones anteriores por si hay
+ * dudas». Y: «hay un archivo base que es el plano o imagen sobre la que están
+ * las anotaciones del ítem (…) los demás archivos son de soporte. Sólo en el
+ * principal se hacen anotaciones».
+ *
+ * LO QUE DE VERDAD APORTAN ESTAS PRUEBAS:
+ *
+ *   · que la versión anterior NO SE BORRE. Es la mitad del encargo y lo
+ *     único aquí que no se puede deshacer si se hace mal;
+ *   · que lo archivado DEJE DE ESTAR A LA VISTA pero siga pidiéndose. Las
+ *     dos cosas: si sólo se escondiera, «ver versiones anteriores» no
+ *     existiría; si sólo se guardara, la pantalla se llenaría de repetidos;
+ *   · que las MARCAS SE QUEDEN CON SU VERSIÓN. Una nota clavada en un punto
+ *     de la revisión vieja puede apuntar a nada en la nueva; que la
+ *     archivada conserve las suyas es el registro de lo que se dijo ese día;
+ *   · que COPIARLAS sea una decisión de quien sube y no del esquema;
+ *   · que SÓLO SE ANOTE EL PRINCIPAL, que es textual de Mike, y que no se
+ *     anote una versión archivada: se consulta, no se escribe;
+ *   · que el contratista NO suba ni anote documentación del ítem.
+ */
+describe('la documentación del ítem', () => {
+  let principal = '', soporte = '', v2 = '';
+  const pdf = (nombre: string) => new File([PNG], nombre, { type: 'application/pdf' });
+
+  const subir = (quien: string, eid: string, campos: Record<string, string | Blob>) =>
+    q(quien, `/elements/${eid}/docs`, { method: 'POST', body: forma(campos) });
+
+  it('se sube el plano principal del ítem', async () => {
+    const r = await subir('mike', m1, { archivo: pdf('plano-gradas.pdf'), rol: 'principal', nombre: 'Plano de las gradas', paginas: '3' });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    principal = r.doc.id;
+    expect(r.doc.rol).toBe('principal');
+    expect(r.doc.version).toBe(1);
+    expect(r.doc.paginas).toBe(3);
+    expect(r.doc.familia_id, 'la primera versión estrena su familia').toBe(principal);
+  });
+
+  it('y los de soporte, que son los que acompañan', async () => {
+    const r = await subir('mike', m1, { archivo: pdf('herrajes.pdf'), rol: 'soporte', nombre: 'Ficha de herrajes' });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    soporte = r.doc.id;
+    const d = await q('mike', `/elements/${m1}/docs`);
+    expect(d.principal.id).toBe(principal);
+    expect(d.soporte.map((x: any) => x.id)).toEqual([soporte]);
+  });
+
+  it('un segundo principal NO se cuela: se dice que use versión nueva', async () => {
+    const r = await subir('mike', m1, { archivo: pdf('otro.pdf'), rol: 'principal' });
+    expect(r.estado).toBe(409);
+    expect(String(r.error)).toMatch(/versión nueva/);
+  });
+
+  it('se anota encima: una nota anclada y un trazo', async () => {
+    const nota = await q('mike', `/docs/${principal}/marcas`, { method: 'POST', json: {
+      tipo: 'nota', pagina: 1, x: 0.3, y: 0.42, texto: 'Falta la medida de la huella', op_id: crypto.randomUUID(),
+    } });
+    expect(nota.estado, JSON.stringify(nota)).toBe(200);
+    const trazo = await q('mike', `/docs/${principal}/marcas`, { method: 'POST', json: {
+      tipo: 'trazo', pagina: 1, trazo: [[0.1, 0.1], [0.2, 0.15], [0.3, 0.1]], color: '#D33A2F', op_id: crypto.randomUUID(),
+    } });
+    expect(trazo.estado, JSON.stringify(trazo)).toBe(200);
+    expect(trazo.marcas).toHaveLength(2);
+    const t = trazo.marcas.find((x: any) => x.tipo === 'trazo');
+    expect(t.trazo, 'el trazo viaja como lista de puntos, ya convertido').toEqual([[0.1, 0.1], [0.2, 0.15], [0.3, 0.1]]);
+    expect(t.quien, 'y se sabe quién lo hizo').toBeTruthy();
+  });
+
+  it('las coordenadas se recortan: nada se pinta fuera del papel', async () => {
+    const r = await q('mike', `/docs/${principal}/marcas`, { method: 'POST', json: {
+      tipo: 'nota', x: 1.8, y: -3, texto: 'Fuera de la hoja', op_id: crypto.randomUUID(),
+    } });
+    const puesta = r.marcas.find((x: any) => x.texto === 'Fuera de la hoja');
+    expect(puesta.x).toBe(1);
+    expect(puesta.y).toBe(0);
+  });
+
+  it('una nota sin texto y un trazo de un punto no son marcas', async () => {
+    expect((await q('mike', `/docs/${principal}/marcas`, { method: 'POST', json: { tipo: 'nota', x: 0.1, y: 0.1, texto: '  ', op_id: crypto.randomUUID() } })).estado).toBe(400);
+    expect((await q('mike', `/docs/${principal}/marcas`, { method: 'POST', json: { tipo: 'trazo', trazo: [[0.1, 0.1]], op_id: crypto.randomUUID() } })).estado).toBe(400);
+  });
+
+  it('sólo se anota el PRINCIPAL; el de soporte no', async () => {
+    const r = await q('mike', `/docs/${soporte}/marcas`, { method: 'POST', json: { tipo: 'nota', x: 0.5, y: 0.5, texto: 'No va aquí', op_id: crypto.randomUUID() } });
+    expect(r.estado).toBe(409);
+    expect(String(r.error)).toMatch(/principal/);
+  });
+
+  it('la versión nueva ARCHIVA la anterior y no la borra', async () => {
+    const r = await q('mike', `/docs/${principal}/version`, { method: 'POST', body: forma({ archivo: pdf('plano-gradas-r2.pdf'), nombre: 'Plano de las gradas · rev. B' }) });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    v2 = r.doc.id;
+    expect(r.doc.version).toBe(2);
+    expect(r.doc.familia_id, 'sigue siendo la misma familia').toBe(principal);
+    expect(r.copiadas, 'sin pedirlo, las marcas NO se copian').toBe(0);
+
+    /* A la vista queda sólo la nueva. */
+    const d = await q('mike', `/elements/${m1}/docs`);
+    expect(d.principal.id).toBe(v2);
+    expect(d.marcas, 'la versión nueva empieza limpia').toHaveLength(0);
+  });
+
+  it('y la anterior se puede consultar, con lo que se marcó sobre ella', async () => {
+    const vs = await q('mike', `/docs/${v2}/versiones`);
+    expect(vs.estado, JSON.stringify(vs)).toBe(200);
+    expect(vs.versiones.map((x: any) => x.version)).toEqual([2, 1]);
+    const vieja = vs.versiones.find((x: any) => x.version === 1);
+    expect(vieja.archivado_at, 'la vieja quedó archivada').toBeTruthy();
+    expect(vieja.n_marcas, 'y conserva sus marcas').toBe(3);
+
+    const marcas = await q('mike', `/docs/${principal}/marcas`);
+    expect(marcas.marcas).toHaveLength(3);
+  });
+
+  it('una versión archivada se consulta, no se anota', async () => {
+    const r = await q('mike', `/docs/${principal}/marcas`, { method: 'POST', json: { tipo: 'nota', x: 0.2, y: 0.2, texto: 'Tarde', op_id: crypto.randomUUID() } });
+    expect(r.estado).toBe(409);
+    expect(String(r.error)).toMatch(/archivada/);
+  });
+
+  it('copiar las marcas al subir es una decisión de quien sube', async () => {
+    await q('mike', `/docs/${v2}/marcas`, { method: 'POST', json: { tipo: 'nota', x: 0.6, y: 0.6, texto: 'Revisar el barandal', op_id: crypto.randomUUID() } });
+    const r = await q('mike', `/docs/${v2}/version`, { method: 'POST', body: forma({ archivo: pdf('rev-c.pdf'), copiar_marcas: '1' }) });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.copiadas).toBe(1);
+    const d = await q('mike', `/elements/${m1}/docs`);
+    expect(d.principal.version).toBe(3);
+    expect(d.marcas.map((x: any) => x.texto)).toEqual(['Revisar el barandal']);
+  });
+
+  it('borrar una marca la esconde, y la lista queda al día', async () => {
+    const d = await q('mike', `/elements/${m1}/docs`);
+    const mk = d.marcas[0];
+    const r = await q('mike', `/marcas/${mk.id}/borrar`, { method: 'POST', json: { op_id: crypto.randomUUID() } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.marcas).toHaveLength(0);
+  });
+
+  it('el principal no se archiva a mano: se reemplaza', async () => {
+    const d = await q('mike', `/elements/${m1}/docs`);
+    const r = await q('mike', `/docs/${d.principal.id}/archivar`, { method: 'POST', json: { op_id: crypto.randomUUID() } });
+    expect(r.estado).toBe(409);
+    expect(String(r.error)).toMatch(/versión nueva/);
+  });
+
+  it('un archivo de soporte sí se quita de la vista', async () => {
+    const r = await q('mike', `/docs/${soporte}/archivar`, { method: 'POST', json: { op_id: crypto.randomUUID() } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect((await q('mike', `/elements/${m1}/docs`)).soporte).toHaveLength(0);
+  });
+
+  it('el contratista no sube ni anota documentación', async () => {
+    expect((await subir('goyo', m1, { archivo: pdf('mio.pdf'), rol: 'soporte' })).estado).toBe(403);
+    const d = await q('mike', `/elements/${m1}/docs`);
+    expect((await q('goyo', `/docs/${d.principal.id}/marcas`, { method: 'POST', json: { tipo: 'nota', x: 0.1, y: 0.1, texto: 'x', op_id: crypto.randomUUID() } })).estado).toBe(403);
+  });
+
+  it('pero sí la puede LEER: es el plano de lo que va a fabricar', async () => {
+    const d = await q('goyo', `/elements/${m1}/docs`);
+    expect(d.estado, JSON.stringify(d)).toBe(200);
+    expect(d.principal).toBeTruthy();
+  });
+
+  it('un documento de otra empresa no se abre', async () => {
+    /* Quien no pertenece a la empresa ni siquiera llega a esta ruta: la
+     * puerta de la suite lo para antes con un 401 porque no tiene sesión
+     * aquí. Si algún día entrara con sesión pero sin la obra, el motor
+     * contestaría 403. Las dos son «no pasas»; lo que no puede pasar
+     * nunca es un 200 con el plano de otro. */
+    const r = await q('fuera', `/docs/${principal}/versiones`);
+    expect([401, 403], JSON.stringify(r)).toContain(r.estado);
+  });
+});

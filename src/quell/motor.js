@@ -366,6 +366,65 @@ async function apunta(env, opId) {
   await env.DB.prepare(`INSERT OR IGNORE INTO quell_operaciones (id, cuando) VALUES (?,?)`).bind(opId, now()).run();
 }
 
+/* ---------- la documentación del ítem (§121) ----------
+ *
+ * Mike, 21-sep: «un apartado por ítem de documentación (…) hay un archivo
+ * base que es el plano o imagen sobre la que están las anotaciones del ítem,
+ * sería como el principal, y los demás archivos son de soporte».
+ */
+
+/** Un número de 0 a 1, recortado. Las marcas se guardan RELATIVAS a la
+ *  página y no en píxeles: la misma marca se ve en un celular y en una
+ *  pantalla de escritorio, y una coordenada en píxeles se despega del dibujo
+ *  en cuanto cambia el tamaño. Recortar aquí y no confiar en la pantalla:
+ *  una marca en 1.4 se pinta fuera del papel y nadie la vuelve a encontrar. */
+const ceroAUno = (v) => Math.min(1, Math.max(0, Number(v) || 0));
+
+/** Lo que está A LA VISTA de un ítem: el principal y los de soporte. Lo
+ *  archivado no sale de aquí —se pide por la familia— porque «que no esté a
+ *  la vista» es justo lo que Mike pidió. */
+async function docsVivos(env, elementId) {
+  const { results } = await env.DB.prepare(
+    `SELECT d.*, u.name AS subio FROM quell_element_docs d LEFT JOIN quell_users u ON u.id = d.subido_por
+      WHERE d.element_id = ? AND d.archivado_at IS NULL
+      ORDER BY CASE d.rol WHEN 'principal' THEN 0 ELSE 1 END, d.created_at`).bind(elementId).all();
+  return {
+    principal: results.find((d) => d.rol === 'principal') || null,
+    soporte: results.filter((d) => d.rol !== 'principal'),
+  };
+}
+
+/** Las marcas vivas de una versión, con quién las hizo. El trazo sale ya
+ *  convertido en lista de puntos: guardarlo como texto es cosa de la base, y
+ *  hacer que cada pantalla lo interprete es pedir que una lo haga distinto. */
+async function marcasDe(env, docId) {
+  const { results } = await env.DB.prepare(
+    `SELECT mk.*, u.name AS quien FROM quell_doc_marcas mk LEFT JOIN quell_users u ON u.id = mk.user_id
+      WHERE mk.doc_id = ? AND mk.borrado_at IS NULL ORDER BY mk.created_at`).bind(docId).all();
+  return results.map((mk) => ({ ...mk, trazo: mk.trazo ? JSON.parse(mk.trazo) : null }));
+}
+
+/** Guardar el archivo en R2 y su renglón en la base.
+ *
+ *  El nombre del archivo NO se usa para armar la llave: un «plano final
+ *  (2).pdf» con acentos y paréntesis en una llave de R2 es un problema el
+ *  día que haya que buscarlo a mano. La llave lleva el id, que es único, y
+ *  el nombre bonito se guarda en la columna, que es donde sirve. */
+async function guardaDoc(env, { element_id, rol, archivo, nombre, paginas, familia_id, version, user }) {
+  const id = uid();
+  const ext = (String(archivo.name || '').split('.').pop() || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5);
+  const llave = `${env.PREFIJO_R2}docs/${element_id}/${id}${ext ? '.' + ext : ''}`;
+  await env.FILES.put(llave, archivo.stream(), { httpMetadata: { contentType: archivo.type || 'application/octet-stream' } });
+  await env.DB.prepare(
+    `INSERT INTO quell_element_docs (id, element_id, familia_id, rol, nombre, r2_key, mime, bytes, paginas, version, subido_por)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    .bind(id, element_id, familia_id || id, rol,
+          String(nombre || archivo.name || 'Documento').slice(0, 200),
+          llave, archivo.type || null, archivo.size || 0,
+          Math.max(1, Math.trunc(Number(paginas) || 1)), Number(version) || 1, user.id).run();
+  return await env.DB.prepare(`SELECT * FROM quell_element_docs WHERE id = ?`).bind(id).first();
+}
+
 // ---------- photos ----------
 async function savePhotos(env, user, ownerType, ownerId, files) {
   const out = [];
@@ -651,6 +710,10 @@ export async function atender(req, env, url, path) {
       await suma(`SELECT f.r2_key AS k FROM quell_photos f JOIN quell_punch_items p ON f.owner_type = 'punch' AND f.owner_id = p.id JOIN quell_elements e ON e.id = p.element_id WHERE e.project_id = ?`);
       await suma(`SELECT f.r2_key AS k FROM quell_photos f JOIN quell_dudas d ON f.owner_type = 'duda' AND f.owner_id = d.id WHERE d.project_id = ?`);
       await suma(`SELECT f.r2_key AS k FROM quell_photos f JOIN quell_duda_respuestas r ON f.owner_type = 'duda_resp' AND f.owner_id = r.id JOIN quell_dudas d ON d.id = r.duda_id WHERE d.project_id = ?`);
+      /* La documentación de los ítems (0019), TODAS sus versiones: las
+       * archivadas también ocupan lugar en R2, y borrar la obra sin ellas
+       * deja pagando archivos que ya no reclama nadie. */
+      await suma(`SELECT d.r2_key AS k FROM quell_element_docs d JOIN quell_elements e ON e.id = d.element_id WHERE e.project_id = ?`);
       await env.DB.prepare(`DELETE FROM quell_projects WHERE id = ?`).bind(pid).run();
       for (const k of llaves) await env.FILES.delete(k).catch(() => {});
       return json({ ok: true, archivos: llaves.length });
@@ -859,6 +922,121 @@ export async function atender(req, env, url, path) {
     }
   }
 
+  /* ----- docs y marcas: se llega por el id del documento -----
+   *
+   * Van antes de `elements` porque comparten el mismo tramo de la dirección
+   * y el permiso se resuelve por la obra del ítem al que cuelga el
+   * documento, no por el documento en sí. */
+  if (seg[0] === 'docs' && seg[1]) {
+    const doc = await env.DB.prepare(`SELECT * FROM quell_element_docs WHERE id = ?`).bind(seg[1]).first();
+    if (!doc) return err('no encontrado', 404);
+    const pid = await projectOfElement(env, doc.element_id);
+    if (!pid || !(await canAccessProject(env, user, pid))) return err('sin acceso', 403);
+
+    if (seg[2] === 'versiones' && m === 'GET') {
+      /* La familia entera, de la más nueva a la más vieja, con cuántas
+       * marcas trae cada una: sin ese número, una versión archivada parece
+       * un archivo repetido en vez del registro de lo que se marcó ese día. */
+      const { results } = await env.DB.prepare(
+        `SELECT d.*, u.name AS subio,
+                (SELECT COUNT(*) FROM quell_doc_marcas mm WHERE mm.doc_id = d.id AND mm.borrado_at IS NULL) AS n_marcas
+           FROM quell_element_docs d LEFT JOIN quell_users u ON u.id = d.subido_por
+          WHERE d.familia_id = ? ORDER BY d.version DESC`).bind(doc.familia_id).all();
+      return json({ ok: true, versiones: results });
+    }
+    if (seg[2] === 'marcas' && m === 'GET') {
+      return json({ ok: true, marcas: await marcasDe(env, doc.id) });
+    }
+    if (seg[2] === 'version' && m === 'POST') {
+      if (!isStaff(user)) return err('Subir una versión nueva es del supervisor.', 403);
+      const fd = await req.formData();
+      const op = String(fd.get('op_id') || '');
+      if (await yaHecha(env, op)) return json({ ok: true, repetida: true });
+      const archivo = fd.get('archivo');
+      if (!(archivo instanceof File) || !archivo.size) return err('falta el archivo');
+      if (doc.archivado_at) return err('Ésa ya es una versión archivada. La versión nueva se sube sobre la que está a la vista.', 409);
+
+      const ahora = new Date().toISOString();
+      /* Primero se archiva y luego se inserta: el índice único deja UNA sola
+       * viva por familia, así que al revés reventaría. Y es el orden que
+       * queremos aunque no hubiera índice: entre los dos pasos es preferible
+       * quedarse sin versión viva un instante que con dos. */
+      await env.DB.prepare(`UPDATE quell_element_docs SET archivado_at = ? WHERE id = ?`).bind(ahora, doc.id).run();
+      const nueva = await guardaDoc(env, {
+        element_id: doc.element_id, rol: doc.rol, archivo,
+        nombre: fd.get('nombre') || doc.nombre, paginas: fd.get('paginas'),
+        familia_id: doc.familia_id, version: Number(doc.version) + 1, user,
+      });
+
+      /* Copiar las marcas de la anterior es una DECISIÓN de quien sube, no
+       * del esquema. Una nota clavada en un punto de la revisión vieja puede
+       * apuntar a nada en la nueva —el dibujo cambió—, y por eso no se
+       * copian solas; pero cuando el cambio es chico, volver a clavar
+       * catorce notas a mano es lo que hace que nadie las use. */
+      let copiadas = 0;
+      if (String(fd.get('copiar_marcas') || '') === '1') {
+        const viejas = await marcasDe(env, doc.id);
+        for (const mk of viejas) {
+          await env.DB.prepare(
+            `INSERT INTO quell_doc_marcas (id, doc_id, tipo, pagina, x, y, trazo, color, texto, user_id) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+            .bind(uid(), nueva.id, mk.tipo, mk.pagina, mk.x, mk.y, mk.trazo, mk.color, mk.texto, user.id).run();
+          copiadas++;
+        }
+      }
+      await apunta(env, op);
+      return json({ ok: true, doc: nueva, archivada: doc.id, copiadas });
+    }
+    if (seg[2] === 'archivar' && m === 'POST') {
+      if (!isStaff(user)) return err('Archivar documentación es del supervisor.', 403);
+      const b = await req.json().catch(() => ({}));
+      if (await yaHecha(env, b.op_id)) return json({ ok: true, repetida: true });
+      if (doc.rol === 'principal') {
+        return err('El plano principal no se archiva a mano: se reemplaza subiendo una versión nueva, y así el ítem nunca se queda sin plano.', 409);
+      }
+      await env.DB.prepare(`UPDATE quell_element_docs SET archivado_at = ? WHERE id = ?`).bind(new Date().toISOString(), doc.id).run();
+      await apunta(env, b.op_id);
+      return json({ ok: true });
+    }
+    if (seg[2] === 'marcas' && m === 'POST') {
+      if (!isStaff(user)) return err('Anotar el plano del ítem es del supervisor.', 403);
+      if (doc.rol !== 'principal') return err('Sólo se anota sobre el plano principal; los demás son de soporte.', 409);
+      if (doc.archivado_at) return err('Esa versión está archivada: se consulta, no se anota.', 409);
+      const b = await req.json().catch(() => ({}));
+      if (await yaHecha(env, b.op_id)) return json({ ok: true, repetida: true });
+      const tipo = b.tipo === 'trazo' ? 'trazo' : 'nota';
+      const texto = String(b.texto ?? '').trim().slice(0, 2000);
+      /* Un trazo sin puntos y una nota sin texto no son marcas: son un toque
+       * que se fue. Se rechazan para que el plano no se llene de nada. */
+      const puntos = Array.isArray(b.trazo) ? b.trazo.filter((p) => Array.isArray(p) && p.length === 2).map(([x, y]) => [ceroAUno(x), ceroAUno(y)]) : [];
+      if (tipo === 'trazo' && puntos.length < 2) return err('un trazo necesita al menos dos puntos');
+      if (tipo === 'nota' && !texto) return err('la nota necesita texto');
+      const id = uid();
+      await env.DB.prepare(
+        `INSERT INTO quell_doc_marcas (id, doc_id, tipo, pagina, x, y, trazo, color, texto, user_id) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+        .bind(id, doc.id, tipo, Math.max(1, Math.trunc(Number(b.pagina) || 1)),
+              tipo === 'nota' ? ceroAUno(b.x) : null, tipo === 'nota' ? ceroAUno(b.y) : null,
+              tipo === 'trazo' ? JSON.stringify(puntos) : null,
+              b.color ? String(b.color).slice(0, 16) : null, texto, user.id).run();
+      await apunta(env, b.op_id);
+      return json({ ok: true, marcas: await marcasDe(env, doc.id) });
+    }
+    return err('no encontrado', 404);
+  }
+  if (seg[0] === 'marcas' && seg[1] && seg[2] === 'borrar' && m === 'POST') {
+    const mk = await env.DB.prepare(
+      `SELECT mk.*, d.element_id FROM quell_doc_marcas mk JOIN quell_element_docs d ON d.id = mk.doc_id WHERE mk.id = ?`).bind(seg[1]).first();
+    if (!mk) return err('no encontrado', 404);
+    const pid = await projectOfElement(env, mk.element_id);
+    if (!pid || !(await canAccessProject(env, user, pid))) return err('sin acceso', 403);
+    if (!isStaff(user)) return err('Borrar una marca es del supervisor.', 403);
+    const b = await req.json().catch(() => ({}));
+    if (await yaHecha(env, b.op_id)) return json({ ok: true, repetida: true });
+    await env.DB.prepare(`UPDATE quell_doc_marcas SET borrado_at = ? WHERE id = ? AND borrado_at IS NULL`)
+      .bind(new Date().toISOString(), mk.id).run();
+    await apunta(env, b.op_id);
+    return json({ ok: true, marcas: await marcasDe(env, mk.doc_id) });
+  }
+
   // ----- elements -----
   if (seg[0] === 'elements' && seg[1]) {
     const eid = seg[1];
@@ -1040,6 +1218,49 @@ export async function atender(req, env, url, path) {
         .bind(cruda || null, new Date().toISOString(), el.item_id).run();
       await apunta(env, b.op_id);
       return json({ ok: true, fecha_entrega: cruda || null });
+    }
+    /* ─────────────── la documentación del ítem (§121) ───────────────
+     *
+     * Mike, 21-sep: «un apartado por ítem de documentación. Subir PDF de
+     * planos y de anotaciones adicionales (…). Hay un archivo base que es el
+     * plano o imagen sobre la que están las anotaciones del ítem, sería como
+     * el principal, y los demás archivos son de soporte. Sólo en el
+     * principal se hacen anotaciones».
+     *
+     * GET  /elements/:id/docs        lo vivo: el principal, los de soporte y
+     *                                las marcas del principal
+     * POST /elements/:id/docs        subir uno (rol: principal | soporte)
+     * POST /docs/:id/version         subir la versión nueva; la anterior se
+     *                                ARCHIVA, no se borra
+     * GET  /docs/:id/versiones       la familia completa, de la nueva a la vieja
+     * POST /docs/:id/archivar        quitar de la vista un archivo de soporte
+     * POST /docs/:id/marcas          una nota anclada o un trazo
+     * POST /marcas/:id/borrar        esconder una marca
+     */
+    if (seg[2] === 'docs' && m === 'GET') {
+      const docs = await docsVivos(env, eid);
+      const marcas = docs.principal ? await marcasDe(env, docs.principal.id) : [];
+      return json({ ok: true, ...docs, marcas });
+    }
+    if (seg[2] === 'docs' && m === 'POST') {
+      if (!isStaff(user)) return err('Subir documentación del ítem es del supervisor.', 403);
+      const fd = await req.formData();
+      const op = String(fd.get('op_id') || '');
+      if (await yaHecha(env, op)) return json({ ok: true, repetida: true });
+      const archivo = fd.get('archivo');
+      if (!(archivo instanceof File) || !archivo.size) return err('falta el archivo');
+      const rol = fd.get('rol') === 'principal' ? 'principal' : 'soporte';
+      /* Un principal nuevo cuando ya hay uno vivo NO se cuela por el índice
+       * único: se dice que use «versión nueva», que es lo que de verdad
+       * quiere y lo que conserva la anterior. */
+      if (rol === 'principal') {
+        const ya = await env.DB.prepare(
+          `SELECT id FROM quell_element_docs WHERE element_id = ? AND rol = 'principal' AND archivado_at IS NULL`).bind(eid).first();
+        if (ya) return err('Este ítem ya tiene un plano principal. Súbelo como versión nueva para conservar el anterior, o mándalo como soporte.', 409);
+      }
+      const doc = await guardaDoc(env, { element_id: eid, rol, archivo, nombre: fd.get('nombre'), paginas: fd.get('paginas'), user });
+      await apunta(env, op);
+      return json({ ok: true, doc });
     }
     if (seg[2] === 'log' && m === 'POST') {
       if (!isStaff(user)) return err('El contratista sube su evidencia en el pendiente que le toca, no en la bitácora.', 403);

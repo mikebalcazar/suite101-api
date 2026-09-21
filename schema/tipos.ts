@@ -17,7 +17,41 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.40.0 (LA FECHA DE ENTREGA, EN LA OBRA Y CON LA
+ * Versión del contrato: 0.41.0 (LA DOCUMENTACIÓN DE CADA ÍTEM, CON
+ * VERSIONES QUE NO SE BORRAN. Mike, 21-sep: «necesito en quell un apartado
+ * por ítem de documentación. Subir PDF de planos y de anotaciones
+ * adicionales. Quiero que ese PDF pueda tener anotaciones (poder anotar
+ * desde el cel o la compu cosas encima). Y después poder actualizar ese PDF
+ * a una versión nueva, sin borrar la anterior, pero archivarla, o sea que no
+ * esté a la vista. Y una opción para ver versiones anteriores por si hay
+ * dudas». Y: «hay un archivo base que es el plano o imagen sobre la que
+ * están las anotaciones del ítem, sería como el principal, y los demás
+ * archivos son de soporte. Sólo en el principal se hacen anotaciones».
+ *   · Migración org 0019: `quell_element_docs` y `quell_doc_marcas`.
+ *   · UN principal vivo por ítem y UNA versión viva por familia, con dos
+ *     índices únicos parciales (`WHERE archivado_at IS NULL`). Archivar no
+ *     borra: apaga. La versión vieja sigue completa, con sus marcas, y se
+ *     consulta por la familia. Si esto se hubiera dejado en manos de la
+ *     pantalla, dos personas subiendo versión a la vez dejaban dos vivas.
+ *   · Las marcas son de DOS tipos —`nota` anclada y `trazo` a mano alzada—,
+ *     porque Mike escogió «notas y también rayar encima» con botones.
+ *     Se guardan RELATIVAS (x, y de 0 a 1, y el trazo igual): un PDF se ve
+ *     a un ancho en el celular y a otro en la compu, y una marca en píxeles
+ *     habría caído en otro lado en cada pantalla.
+ *   · Sólo se anota el principal y sólo si está vivo. Una versión archivada
+ *     se consulta, no se escribe: es el registro de lo que se dijo ese día.
+ *   · Copiar las marcas al subir versión es una decisión de quien sube
+ *     (`copiar_marcas=1`), no del esquema: un plano corregido normalmente
+ *     invalida las notas que lo corregían.
+ *   · Rutas, todas bajo `/orgs/:o/quell`: `GET|POST /elements/:id/docs`,
+ *     `GET /docs/:id/versiones`, `POST /docs/:id/version`,
+ *     `POST /docs/:id/archivar`, `GET|POST /docs/:id/marcas`,
+ *     `POST /marcas/:id/borrar`. El contratista LEE —es el plano de lo que
+ *     va a fabricar— y no sube ni anota.
+ *   · Los archivos viven en R2 con el prefijo de la empresa y se borran con
+ *     la obra, todas las versiones incluidas: si no, cada corte dejaba
+ *     basura pagada por bytes que ya nadie puede abrir.
+ * Antes: 0.40.0 (LA FECHA DE ENTREGA, EN LA OBRA Y CON LA
  * CUENTA HECHA. Mike, 21-sep: «hay que agregar un campo en el ítem de fecha
  * de entrega y un contador de cuántos días quedan para la entrega».
  *   · La fecha NO es nueva: `items.fecha_entrega` existe desde la 0001 y se
@@ -533,7 +567,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.40.0';
+export const VERSION_CONTRATO = '0.41.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1133,6 +1167,12 @@ export const TABLAS_INTERNAS = [
   'quell_users', 'quell_projects', 'quell_project_members', 'quell_plans', 'quell_elements', 'quell_log_entries',
   'quell_punch_items', 'quell_photos', 'quell_operaciones', 'quell_etapas', 'quell_element_etapas', 'quell_dudas',
   'quell_duda_respuestas', 'quell_element_contratistas',
+  /* La documentación de cada ítem (0019): el plano principal sobre el que se
+   * anota, sus archivos de soporte y las marcas encima. Tampoco salen por el
+   * CRUD genérico: quién puede subir, anotar o archivar depende de la obra y
+   * del rol —el contratista lee y no escribe—, y eso se resuelve renglón por
+   * renglón en el motor. */
+  'quell_element_docs', 'quell_doc_marcas',
   // roster101 (0007): las usa el motor de los expedientes por /roster/:o/api/*.
   'roster_trabajadores', 'roster_documentos', 'roster_codigos', 'roster_bitacora', 'roster_consentimientos',
   'roster_papelera', 'roster_administradores',
