@@ -38,7 +38,10 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
     dash101: ['nombre', 'nombre_norm', 'correo', 'telefono', 'rfc', 'notas', 'portal_activo', 'negocio_id'],
   },
   proyectos: {
-    dash101: ['nombre', 'descripcion', 'estado', 'fecha_inicio', 'fecha_fin_estimada', 'fecha_cierre', 'cliente_id', 'negocio_id'],
+    /* `tasa_iva` e `iva_incluido` (0018) SÍ los escribe dash101: no son
+     * cachés sino una decisión de quien vende, y se marca una vez por
+     * obra en «Editar el proyecto». */
+    dash101: ['nombre', 'descripcion', 'estado', 'fecha_inicio', 'fecha_fin_estimada', 'fecha_cierre', 'cliente_id', 'negocio_id', 'tasa_iva', 'iva_incluido'],
     cotizador101: ['nombre', 'cliente_id', 'negocio_id'], // solo al crear desde /vender
   },
   // Las partidas son de dash101 y de nadie más. `monto_pagado` y `estado` no

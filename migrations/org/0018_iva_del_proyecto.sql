@@ -1,0 +1,40 @@
+-- OrgDB v18 — cómo lleva el IVA cada proyecto.
+--
+-- POR QUÉ
+--
+-- Mike, 21-sep-2026: «necesito poder exportar un estado de cuenta en pdf y un
+-- excel con lo siguiente de cada proyecto: saldo general, lista de productos
+-- en proyecto, subtotal, IVA y total de proyecto completo, movimientos de
+-- proyecto (pagos), fecha del día que se genera el status».
+--
+-- Ese documento se le manda a un cliente, así que la pregunta «¿el precio que
+-- está capturado ya trae IVA o se le suma?» no se podía adivinar: adivinar
+-- mal pone un total equivocado enfrente de quien va a pagar. Se le preguntó
+-- con botones y escogió que LO DIGA CADA PROYECTO, con «+ IVA» de arranque.
+-- Su razón, en los hechos de su taller: HOLCIM pide factura y desglose, y una
+-- casa particular cotizada «con todo» no; las dos conviven.
+--
+-- QUÉ QUEDA
+--
+--   · `tasa_iva` en PUNTOS BASE —1600 = 16.00 %—, como ya viaja en el módulo
+--     fiscal. En puntos base y no en decimal para que no haya un 0.16 que se
+--     redondee distinto en dos lugares. Queda configurable, no clavada en 16,
+--     porque el 0 % existe (exportación) y el día que aparezca no queremos
+--     otra migración.
+--   · `iva_incluido`: 0 = lo capturado es el SUBTOTAL y el IVA se suma
+--     encima; 1 = lo capturado es el TOTAL y el documento lo desglosa hacia
+--     atrás. Arranca en 0 por decisión de Mike.
+--
+-- LO QUE ESTO NO HACE
+--
+-- No toca un solo peso. `items.monto` y `proyectos.precio_venta` siguen
+-- valiendo exactamente lo mismo que ayer; lo único que se agrega es CÓMO SE
+-- LEE esa cifra al armar el documento. Por eso los proyectos que ya existen
+-- no necesitan que nadie los revise para que sus pantallas sigan cuadrando:
+-- con `iva_incluido = 0` el precio de venta es el subtotal, que es como se
+-- venía enseñando en todas partes.
+--
+-- Dinero: INTEGER en centavos. Nunca REAL.
+
+ALTER TABLE proyectos ADD COLUMN tasa_iva INTEGER NOT NULL DEFAULT 1600;
+ALTER TABLE proyectos ADD COLUMN iva_incluido INTEGER NOT NULL DEFAULT 0;

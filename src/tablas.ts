@@ -107,6 +107,13 @@ export const DEFS: Record<Tabla, Def> = {
       fecha_inicio: 'texto', fecha_fin_estimada: 'texto', fecha_cierre: 'texto',
       precio_venta: 'dinero', cobrado: 'dinero', pagado_prov: 'dinero', compromiso: 'dinero', avance: 'real',
       actualizado_at: 'texto',
+      /* 0018 · cómo lleva el IVA esta obra, para el estado de cuenta que se
+       * le manda al cliente. `tasa_iva` en PUNTOS BASE (1600 = 16 %) e
+       * `iva_incluido` 0/1: 0 dice que el precio capturado es el subtotal y
+       * el IVA se suma; 1, que ya viene dentro y se desglosa hacia atrás.
+       * Lo escogió Mike con botones el 21-sep. No mueve ningún peso: sólo
+       * dice cómo se LEE `precio_venta`. */
+      tasa_iva: 'entero', iva_incluido: 'entero',
     },
     requeridos: ['negocio_id', 'cliente_id', 'nombre'],
     filtros: ['negocio_id', 'cliente_id', 'estado'],

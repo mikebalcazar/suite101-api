@@ -17,7 +17,34 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.38.0 (BORRAR LO CANCELADO DE UN PROYECTO. Mike,
+ * Versión del contrato: 0.39.0 (EL ESTADO DE CUENTA DE UN PROYECTO, Y CÓMO
+ * LLEVA EL IVA CADA OBRA. Mike, 21-sep: «necesito poder exportar un estado
+ * de cuenta en pdf y un excel con lo siguiente de cada proyecto: saldo
+ * general, lista de productos en proyecto, subtotal, IVA y total de proyecto
+ * completo, movimientos de proyecto (pagos), fecha del día que se genera el
+ * status. Creo que esto es lo mismo que el cliente podría descargar desde
+ * peek101».
+ *   · `GET /orgs/:o/proyectos/:id/estado` arma el documento entero: la
+ *     lista, el desglose, los pagos y `generado_at` del SERVIDOR. UNA sola
+ *     ruta para dash101 y para peek101 —segunda excepción a «un cliente
+ *     sólo abre /peek»—, porque dos pantallas armando cada una sus totales
+ *     es la manera segura de que un día no cuadren, y el que lo notaría es
+ *     el cliente. Un cliente sólo abre el de SU proyecto, comparado contra
+ *     la sesión.
+ *   · LA LISTA Y EL SUBTOTAL SON LA MISMA CIFRA: los renglones son los
+ *     ítems VENDIDOS, que es exactamente lo que suma `precio_venta`.
+ *   · SÓLO INGRESOS. Lo que se le paga a un proveedor no viaja en un
+ *     documento que abre el cliente.
+ *   · EL SALDO ES CONTRA EL TOTAL CON IVA, que es lo que va a pagar. El KPI
+ *     de saldo de las otras pantallas es contra `precio_venta` sin IVA: son
+ *     dos preguntas distintas y el documento lo dice con letras.
+ *   · Migración 0018: `proyectos.tasa_iva` (PUNTOS BASE, 1600 = 16 %) e
+ *     `iva_incluido` (0/1). Mike lo escogió con botones el 21-sep —«que lo
+ *     diga cada proyecto», con «+ IVA» de arranque— porque adivinarlo pone
+ *     un total equivocado enfrente de quien va a pagar, y en su taller
+ *     conviven HOLCIM, que pide desglose, y una casa cotizada «con todo».
+ *     No mueve un solo peso: sólo dice cómo se LEE `precio_venta`). Antes:
+ * 0.38.0 (BORRAR LO CANCELADO DE UN PROYECTO. Mike,
  * 21-sep: «ya todo lo cancelado lo puedes eliminar por completo». `POST
  * /orgs/:o/proyectos/:id/borrar-cancelados {modo:'seco'|'borrar'}`.
  *   · EL SECO NO ESCRIBE. Contesta el censo exacto —cuáles se van, cuáles se
@@ -484,7 +511,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.38.0';
+export const VERSION_CONTRATO = '0.39.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -851,6 +878,15 @@ export interface Proyecto {
   compromiso: number;
   /** 0..1 */
   avance: number;
+  /* 0018 · cómo lleva el IVA esta obra en su estado de cuenta. NO son
+   * cachés: los escribe dash101 y son una decisión de quien vende. */
+  /** Puntos base: 1600 = 16.00 %. En puntos base y no en decimal para que
+   *  el PDF y el Excel no redondeen distinto. */
+  tasa_iva: number;
+  /** 0 = `precio_venta` es el SUBTOTAL y el IVA se suma encima (como nacen
+   *  todos, decisión de Mike del 21-sep); 1 = ya viene dentro y el documento
+   *  lo desglosa hacia atrás. */
+  iva_incluido: number;
   creado_at: string;
   actualizado_at: string | null;
 }
