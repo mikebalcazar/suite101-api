@@ -3777,8 +3777,28 @@ export class OrgDB extends DurableObject<Env> {
       cobrado: number; saldo: number; piezas: number;
     };
   } | null {
-    const proyecto = this.obtener('proyectos', proyecto_id);
-    if (!proyecto) return null;
+    const completo = this.obtener('proyectos', proyecto_id);
+    if (!completo) return null;
+
+    /* EL PROYECTO VA RECORTADO, y esto no es cosmética.
+     *
+     * `proyectos` trae `pagado_prov` —lo que le pagaste a tus proveedores— y
+     * `compromiso` —lo que les debes—. El contrato lo dice con todas sus
+     * letras desde el 0.1.0: «el cliente NUNCA lo ve». Y ESTA RUTA LA ABRE
+     * EL CLIENTE, así que devolver la fila entera le enseñaría tus costos en
+     * el mismo documento donde le cobras.
+     *
+     * Se recorta aquí y no en la pantalla porque la pantalla es peek101 y
+     * dash101, y basta con que una se distraiga. Va por lista blanca —lo que
+     * SÍ sale— y no por lista negra: una columna nueva en `proyectos` no se
+     * asoma sola. */
+    const proyecto: Fila = {
+      id: completo.id, nombre: completo.nombre, descripcion: completo.descripcion,
+      estado: completo.estado, cliente_id: completo.cliente_id, negocio_id: completo.negocio_id,
+      fecha_inicio: completo.fecha_inicio, fecha_fin_estimada: completo.fecha_fin_estimada,
+      fecha_cierre: completo.fecha_cierre, precio_venta: completo.precio_venta,
+      tasa_iva: completo.tasa_iva, iva_incluido: completo.iva_incluido,
+    };
 
     const cliente = proyecto.cliente_id
       ? (this.sql.exec(`SELECT id, nombre, rfc, correo, telefono FROM clientes WHERE id = ?`, proyecto.cliente_id).toArray()[0] as Fila | undefined) ?? null
@@ -3822,9 +3842,9 @@ export class OrgDB extends DurableObject<Env> {
     /* El precio de venta es el caché que ya mantiene `recalcularProyecto`, y
      * es por construcción la suma de los vendidos. No se vuelve a sumar aquí
      * a propósito: dos maneras de calcular la misma cifra es una de más. */
-    const venta = Number(proyecto.precio_venta ?? 0);
-    const tasa = Math.max(0, Math.trunc(Number(proyecto.tasa_iva ?? 1600)));
-    const incluido = Number(proyecto.iva_incluido ?? 0) === 1;
+    const venta = Number(completo.precio_venta ?? 0);
+    const tasa = Math.max(0, Math.trunc(Number(completo.tasa_iva ?? 1600)));
+    const incluido = Number(completo.iva_incluido ?? 0) === 1;
 
     /* En puntos base y con enteros de punta a punta: un 0.16 en coma
      * flotante deja centavos de diferencia entre el PDF y el Excel. */
