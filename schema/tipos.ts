@@ -17,7 +17,36 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.41.0 (LA DOCUMENTACIÓN DE CADA ÍTEM, CON
+ * Versión del contrato: 0.42.0 (supply101 TIENE LLAVE PROPIA. Defecto que
+ * reportó Mike el 21-sep: fer@forespot.com abría supply101 y le salía
+ * `app_no_permitida`.
+ *   · La causa: supply101 mandaba `X-App: dash101` «porque la llave ya está
+ *     prendida», y la lista de apps POR PERSONA se aplica con esa llave. Fer
+ *     tiene quell, peek, cotizador, roster y nest — no dash.
+ *   · Por qué es un defecto y no un ajuste: supply101 se hizo EXACTAMENTE
+ *     para quien no entra a dash101 —«quien pide no tiene por qué entrar al
+ *     tablero del dinero»—, así que compartir la llave le cerraba la puerta
+ *     a la gente para la que se construyó. De las cuatro personas de
+ *     Forespot, las dos que la necesitaban eran las dos que no podían
+ *     entrar. Compartir una llave es compartir el permiso; aquí los
+ *     permisos tenían que ser distintos.
+ *   · `supply101` entra en `APPS` con la llave `supply`. Mike escogió con
+ *     botones: permiso propio, que se da sin dar `dash`.
+ *   · A NIVEL EMPRESA va junto a dash101 —es la otra cara del mismo módulo
+ *     de órdenes y no se cobra aparte—: la migración d1/0008 la prende donde
+ *     `dash` esté prendido, y una empresa nueva nace con las dos.
+ *   · A NIVEL PERSONA son independientes en los DOS sentidos: `supply` sin
+ *     `dash` entra a supply101 y no al tablero; `dash` sin `supply` ya no
+ *     abre supply101. Lo segundo importa tanto como lo primero: si `supply`
+ *     se heredara de `dash`, el defecto volvería para quien sólo pide.
+ *     Nadie pierde lo que hoy tiene porque la misma migración le escribe
+ *     `supply` a quien traía `dash`, no porque una llave arrastre a la otra.
+ *   · Y `PATCH /admin/orgs/:o {apps}` ahora MEZCLA en vez de reemplazar.
+ *     Apagar una app siempre fue mandarla en `false`; el UPDATE pisaba el
+ *     objeto entero, así que una pantalla que mandara su lista de seis
+ *     borraba la llave nueva sin que nadie lo pidiera. Esto deja que una app
+ *     futura sobreviva a una pantalla que todavía no la conoce.
+ * Antes: 0.41.0 (LA DOCUMENTACIÓN DE CADA ÍTEM, CON
  * VERSIONES QUE NO SE BORRAN. Mike, 21-sep: «necesito en quell un apartado
  * por ítem de documentación. Subir PDF de planos y de anotaciones
  * adicionales. Quiero que ese PDF pueda tener anotaciones (poder anotar
@@ -567,7 +596,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.41.0';
+export const VERSION_CONTRATO = '0.42.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -701,6 +730,14 @@ export type ErrorApi =
 
 export const APPS = [
   'dash101',
+  /* supply101 es la CARA DE EMPLEADO del módulo de órdenes de dash101, y
+   * tiene llave propia desde el 21-sep-2026. Hasta ese día mandaba
+   * `X-App: dash101` «porque ya está prendido», y eso resultó ser el defecto
+   * justo: la lista de apps por persona se aplica con esa llave, así que la
+   * app que se hizo para quien NO entra al tablero del dinero le cerraba la
+   * puerta a exactamente esa gente. Compartir una llave es compartir el
+   * permiso, y aquí los permisos tenían que ser distintos. */
+  'supply101',
   'quell101',
   'peek101',
   'cotizador101',
@@ -715,6 +752,7 @@ export type App = (typeof APPS)[number];
 /** La llave con la que cada app aparece en `orgs.apps`. */
 export const LLAVE_APP: Record<App, string> = {
   dash101: 'dash',
+  supply101: 'supply',
   quell101: 'quell',
   peek101: 'peek',
   cotizador101: 'cotizador',

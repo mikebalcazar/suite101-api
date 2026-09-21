@@ -171,7 +171,11 @@ export async function crearOrg(env: Env, datos: DatosEmpresa): Promise<Org> {
     id: datos.id,
     nombre: datos.nombre,
     plan: datos.plan ?? 'base',
-    apps: JSON.stringify(datos.apps ?? { dash: true, quell: true, peek: true, cotizador: true, roster: true, nest: true }),
+    /* `supply` va junto a `dash` en una empresa nueva: supply101 es la cara
+     * de empleado del mismo módulo de órdenes, no se cobra aparte, y quien
+     * contrata dash101 contrata las dos. Lo que SÍ se reparte persona por
+     * persona son los permisos, y ahí van separados (21-sep-2026). */
+    apps: JSON.stringify(datos.apps ?? { dash: true, supply: true, quell: true, peek: true, cotizador: true, roster: true, nest: true }),
     moneda: datos.moneda ?? 'MXN',
     activa: 1,
     creado_at: ahora(),

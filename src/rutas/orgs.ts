@@ -63,7 +63,7 @@ rutas.use('/:o/*', async (c, next) => {
   if (!s) return err(c, 'sin_sesion', 401);
 
   const nombreApp = c.req.header('X-App');
-  if (!nombreApp) return err(c, 'sin_app', 400, { manda: 'X-App: dash101|quell101|peek101|cotizador101|roster101|nest101|master101|workshop101|suite101' });
+  if (!nombreApp) return err(c, 'sin_app', 400, { manda: `X-App: ${APPS.join('|')}` });
   if (!(APPS as readonly string[]).includes(nombreApp)) return err(c, 'app_desconocida', 400, { recibido: nombreApp, apps: APPS });
   const app = nombreApp as App;
 

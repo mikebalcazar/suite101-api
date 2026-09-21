@@ -198,7 +198,18 @@ rutas.patch('/orgs/:o', async (c) => {
   const args: unknown[] = [];
   if (cuerpo.nombre !== undefined) { sets.push('nombre = ?'); args.push(cuerpo.nombre); }
   if (cuerpo.plan !== undefined) { sets.push('plan = ?'); args.push(cuerpo.plan); }
-  if (cuerpo.apps !== undefined) { sets.push('apps = ?'); args.push(JSON.stringify(cuerpo.apps)); }
+  /* `apps` se MEZCLA, no se reemplaza. Apagar una app es mandarla en `false`,
+   * no dejarla fuera: eso ya era así para quien lee el código, pero el UPDATE
+   * pisaba el objeto entero, así que una pantalla que mandara su lista de
+   * seis borraba del renglón cualquier llave que no conociera.
+   *
+   * Eso no era teórico: el 21-sep supply101 ganó la llave `supply`, y hasta
+   * que master101 y workshop101 se desplegaran con ella, un guardado de apps
+   * desde cualquiera de las dos habría apagado supply101 en esa empresa sin
+   * que nadie lo pidiera ni lo notara. Mezclar deja que una llave nueva
+   * sobreviva a una pantalla que todavía no la conoce, que es lo que un PATCH
+   * debía hacer desde el principio. */
+  if (cuerpo.apps !== undefined) { sets.push('apps = ?'); args.push(JSON.stringify({ ...antes.apps, ...cuerpo.apps })); }
   if (cuerpo.activa !== undefined) { sets.push('activa = ?'); args.push(cuerpo.activa ? 1 : 0); }
   // 0.14.0 · los datos con los que se vende y se cobra
   for (const [campo, max] of [['razon_social', 120], ['rfc', 20], ['telefono', 30], ['director_nombre', 120], ['director_telefono', 30]] as const) {

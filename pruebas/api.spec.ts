@@ -673,6 +673,90 @@ describe('11 · workshop101: el administrador de la empresa (contrato 0.6.0)', (
     expect((await pedir(`/orgs/${ORG}`, { app: 'quell101' })).estado).toBe(200);
   });
 
+  /* EL DEFECTO DE FER (21-sep-2026).
+   *
+   * Mike: «me sale esto cuando fer@forespot.com quiere usar supply101» —
+   * `app_no_permitida`. supply101 mandaba `X-App: dash101`, así que la lista
+   * de apps por persona se revisaba con la llave `dash`. Fer no la tiene.
+   *
+   * Y eso no era una configuración mal puesta: supply101 EXISTE para quien
+   * no entra a dash101 —«quien pide no tiene por qué entrar al tablero del
+   * dinero»—, así que la app le cerraba la puerta justo a la gente para la
+   * que se hizo. En Forespot, de cuatro personas, las dos que la necesitaban
+   * eran las dos que no podían entrar.
+   *
+   * Lo que estas pruebas amarran es que los dos permisos quedaron
+   * INDEPENDIENTES, en los dos sentidos. Uno solo de los dos casos no basta:
+   * si mañana alguien «arregla» esto haciendo que `supply` se herede de
+   * `dash`, el primer caso seguiría pasando y el defecto volvería para quien
+   * sólo tiene `supply`. */
+  it('pedir compras y ver el dinero son dos permisos distintos, y ninguno arrastra al otro', async () => {
+    await entrarComo('duena@ejemplo.mx');
+    // Como Fer: todo menos el tablero del dinero, y con permiso de pedir.
+    const fer = await pedir(`/admin/orgs/${ORG}/miembros`, {
+      method: 'POST',
+      body: JSON.stringify({ correo: 'fer@ejemplo.mx', rol: 'admin', apps: ['quell', 'supply'] }),
+    });
+    expect(fer.estado, JSON.stringify(fer)).toBe(201);
+    expect(fer.data.apps).toEqual(['quell', 'supply']);
+
+    await entrarComo('fer@ejemplo.mx');
+    const supply = await pedir(`/orgs/${ORG}`, { app: 'supply101' });
+    expect(supply.estado, 'quien pide compras entra a supply101').toBe(200);
+    const dash = await pedir(`/orgs/${ORG}`, { app: 'dash101' });
+    expect(dash.estado, 'y NO al tablero del dinero').toBe(403);
+    expect(dash.error).toBe('app_no_permitida');
+
+    // Y al revés: `dash` por sí solo ya no abre supply101. Quien lo tenía
+    // antes del 21-sep no lo perdió, pero porque la migración 0008 le
+    // escribió `supply` en su lista, no porque una llave arrastre a la otra.
+    await entrarComo('duena@ejemplo.mx');
+    await pedir(`/admin/orgs/${ORG}/miembros`, {
+      method: 'POST',
+      body: JSON.stringify({ correo: 'tesorero@ejemplo.mx', rol: 'staff', apps: ['dash'] }),
+    });
+    await entrarComo('tesorero@ejemplo.mx');
+    expect((await pedir(`/orgs/${ORG}`, { app: 'dash101' })).estado).toBe(200);
+    const sinSupply = await pedir(`/orgs/${ORG}`, { app: 'supply101' });
+    expect(sinSupply.estado, '`dash` no arrastra a `supply`').toBe(403);
+    expect(sinSupply.error).toBe('app_no_permitida');
+  });
+
+  it('guardar apps desde una pantalla vieja no apaga una app que no conoce', async () => {
+    /* El PATCH de `apps` MEZCLA. Antes pisaba el objeto entero, así que
+     * master101 o workshop101 mandando su lista de seis llaves habrían
+     * apagado `supply` —la llave que nació el 21-sep— en cuanto alguien
+     * guardara apps en una empresa, sin pedirlo y sin que se notara hasta
+     * que la liga de supply101 dejara de abrir.
+     *
+     * Apagar sigue siendo mandar `false`; lo que ya no apaga es el silencio. */
+    galleta = galletaMike;
+    const seis = { dash: true, quell: true, cotizador: true, peek: true, roster: true, nest: true };
+    await pedir(`/admin/orgs/${ORG}`, { method: 'PATCH', body: JSON.stringify({ apps: seis }) });
+    const tras = await pedir(`/admin/orgs/${ORG}`);
+    expect(tras.data.apps.supply, 'la llave que la pantalla no mandó sigue prendida').toBe(true);
+
+    // Y apagarla a propósito sí la apaga.
+    await pedir(`/admin/orgs/${ORG}`, { method: 'PATCH', body: JSON.stringify({ apps: { supply: false } }) });
+    expect((await pedir(`/admin/orgs/${ORG}`)).data.apps.supply).toBe(false);
+    await pedir(`/admin/orgs/${ORG}`, { method: 'PATCH', body: JSON.stringify({ apps: { supply: true } }) });
+    expect((await pedir(`/admin/orgs/${ORG}`)).data.apps.supply).toBe(true);
+  });
+
+  it('una empresa nueva trae supply101 prendida junto a dash101', async () => {
+    /* La migración 0008 arregla las empresas que ya existían; esto cuida las
+     * que nazcan mañana. Sin esto, cada empresa nueva repetiría el defecto:
+     * dash101 prendido, supply101 apagada, y nadie sabría por qué la liga
+     * que se reparte por WhatsApp no abre. */
+    galleta = galletaMike;   // el superadmin
+    const nueva = `nacida-${Date.now().toString(36)}`;
+    const alta = await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: nueva, nombre: 'Recién nacida' }) });
+    expect(alta.estado, JSON.stringify(alta)).toBe(201);
+    const det = await pedir(`/admin/orgs/${nueva}`);
+    expect(det.data.apps.supply).toBe(true);
+    expect(det.data.apps.dash).toBe(true);
+  });
+
   it('la administración no nombra ni toca dueños, y nadie se toca a sí mismo', async () => {
     await entrarComo('admi@ejemplo.mx');
     const nombra = await pedir(`/admin/orgs/${ORG}/miembros`, { method: 'POST', body: JSON.stringify({ correo: 'otro-dueno@ejemplo.mx', rol: 'owner' }) });
