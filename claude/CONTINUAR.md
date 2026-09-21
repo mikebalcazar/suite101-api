@@ -277,6 +277,35 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   captura de las 25 puertas en $0 junto a las 2 en $2,850. Y se le quitó el
   candado de «sólo el dueño»: quien puede editar los ítems del proyecto puede
   agruparlos.
+- **El IVA lo dice cada proyecto (21-sep, contrato 0.39.0, migración
+  0018).** Mike pidió «exportar un estado de cuenta en pdf y un excel con lo
+  siguiente de cada proyecto: saldo general, lista de productos, subtotal,
+  IVA y total, movimientos (pagos), fecha del día que se genera». Ese
+  documento se le manda a un cliente, así que la pregunta «¿el precio
+  capturado ya trae IVA o se le suma?» no se podía adivinar. Le pregunté con
+  botones y escogió **que lo diga cada proyecto**, con «+ IVA» de arranque;
+  su razón, en los hechos de su taller: HOLCIM pide desglose y una casa
+  cotizada «con todo» no. Quedó `proyectos.tasa_iva` en PUNTOS BASE (1600) e
+  `iva_incluido` 0/1. NO mueve un peso: sólo dice cómo se LEE
+  `precio_venta`. Los proyectos que ya existían quedan en «+ IVA», que es
+  como se venían leyendo en todas las pantallas.
+- **Y el documento es UNO SOLO para las dos caras.** `GET
+  /orgs/:o/proyectos/:id/estado` (y `…/estado.xlsx`) los abren dash101 y
+  peek101 —segunda excepción a «un cliente sólo abre /peek», con el mismo
+  recorte en el servidor—. Mike lo dijo antes que yo: «creo que esto es lo
+  mismo que el cliente podría descargar desde peek101». Dos pantallas
+  sumando cada una por su lado es la manera segura de que un día no cuadren,
+  y el que lo notaría es el cliente. Tres reglas que sostienen el papel: la
+  lista son los VENDIDOS y su suma ES el subtotal; sólo van INGRESOS (lo que
+  se le paga a un proveedor no viaja); y el saldo es contra el TOTAL CON
+  IVA, no contra `precio_venta` como el KPI de las otras pantallas —son dos
+  preguntas distintas y el documento lo dice con letras—. El armador del
+  .xlsx vive en la API por lo mismo, y porque peek101 no tiene empaquetador.
+- **Y una fuga que salió escribiendo la prueba de peek101:** la ruta
+  devolvía la fila entera de `proyectos`, con `pagado_prov` y `compromiso`.
+  El contrato dice desde el 0.1.0 que el cliente NUNCA los ve, y esa ruta la
+  abre él. Ahora va por lista blanca, para que una columna nueva no se asome
+  sola.
 - **Lo fiscal son dos preguntas, no una (21-sep, sólo dash101).** Mike: «ese
   marcador de facturado son 2 pasos: uno que indica si ese monto es facturado
   —o sea que se desglosa el IVA—, y eso activa otro que dice si ya se facturó
