@@ -113,6 +113,32 @@ describe('lo que dice el papel', () => {
     expect(r.data.items.map((i: any) => i.nombre)).not.toContain('Pérgola que nadie aprobó');
   });
 
+  it('NO viajan los costos del taller, ni para la empresa', async () => {
+    /* `proyectos` trae `pagado_prov` y `compromiso`. El contrato dice desde
+     * el 0.1.0 que el cliente NUNCA los ve, y esta ruta la abre él: mandar
+     * la fila entera le enseñaría los costos en el mismo papel donde se le
+     * cobra. Se recorta en el servidor, así que tampoco salen aquí. */
+    const crudo = JSON.stringify((await estado()).data);
+    for (const prohibido of ['pagado_prov', 'compromiso']) {
+      expect(crudo, `no se asoma «${prohibido}»`).not.toContain(prohibido);
+    }
+  });
+
+  it('el cliente tampoco los recibe en su copia', async () => {
+    /* Se mide aparte porque es la que de verdad importa: el mismo recorte,
+     * pero visto desde el portal del cliente. */
+    const inv = await o('mike', '/clientes/invitar', { method: 'POST', json: { correo: 'contacto@holcim.mx', nombre: 'Contacto' } });
+    expect([201, 409]).toContain(inv.estado);
+    const c = await pedir('holcim2', '/auth/codigo', { method: 'POST', json: { correo: 'contacto@holcim.mx' }, app: '' });
+    await pedir('holcim2', '/auth/entrar', { method: 'POST', json: { correo: 'contacto@holcim.mx', codigo: c.data.codigo_prueba }, app: '' });
+    const r = await o('holcim2', `/proyectos/${proyecto}/estado`, { app: 'peek101' });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    const crudo = JSON.stringify(r.data);
+    for (const prohibido of ['pagado_prov', 'compromiso']) {
+      expect(crudo, `el cliente no ve «${prohibido}»`).not.toContain(prohibido);
+    }
+  });
+
   it('la fecha la pone el servidor', async () => {
     const r = await estado();
     expect(r.data.generado_at, 'viene con forma de fecha ISO').toMatch(/^\d{4}-\d{2}-\d{2}T/);
