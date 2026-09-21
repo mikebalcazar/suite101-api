@@ -317,3 +317,22 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   —el mismo ícono, ROJO mientras falta la factura y VERDE cuando ya está—,
   con la palabra completa en el `title` porque el color solo no se lee. La
   regla vive en `components/marca-fiscal.tsx` y se mide sin montar React.
+- **La documentación por ítem en quell (21-sep, contrato 0.41.0).** Mike:
+  «necesito en quell un apartado por ítem de documentación… hay un archivo
+  base que es el plano o imagen sobre la que están las anotaciones del ítem,
+  sería como el principal, y los demás archivos son de soporte. Sólo en el
+  principal se hacen anotaciones». Y con botones escogió **notas Y rayar
+  encima**, las dos. Migración org 0019 (`quell_element_docs`,
+  `quell_doc_marcas`) y ocho rutas bajo `/orgs/:o/quell`. Lo que no se puede
+  perder de vista si alguien lo toca: **«sin borrar la anterior» es una
+  columna, no una costumbre** —`archivado_at` más dos índices únicos
+  PARCIALES (`WHERE archivado_at IS NULL`), uno por ítem para el principal y
+  otro por familia para la versión viva—, y por el índice la ruta archiva
+  ANTES de insertar. Las marcas van **relativas de 0 a 1**, recortadas en el
+  servidor; la pantalla usa un `<svg viewBox="0 0 1 1">` encima de la hoja
+  para no hacer la cuenta a mano. Copiar las marcas a la versión nueva es
+  decisión de quien sube (`copiar_marcas=1`), no del esquema. El contratista
+  lee y no escribe. Y los archivos se borran con la obra, todas las
+  versiones. La pantalla es `web/src/DocsItem.jsx` en quell101, medida con
+  `pruebas/docs-del-item.mjs` y con un recorrido en Chromium a 390 y a 1280
+  que comprueba que la misma nota cae en el mismo punto en las dos.
