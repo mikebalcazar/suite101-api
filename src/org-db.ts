@@ -31,6 +31,7 @@ import partidaOrden from '../migrations/org/0015_partida_orden.sql';
 import alcance from '../migrations/org/0016_alcance_item.sql';
 import productos from '../migrations/org/0017_productos.sql';
 import ivaDelProyecto from '../migrations/org/0018_iva_del_proyecto.sql';
+import docsDelItem from '../migrations/org/0019_docs_del_item.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { atender as atenderRoster, type DatosEmpresaRoster, type SesionRoster } from './roster/motor.js';
 import { invitarClienteEnSuite } from './clientes';
@@ -51,7 +52,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem];
 
 /** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
  *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
