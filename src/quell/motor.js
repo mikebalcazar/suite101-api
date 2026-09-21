@@ -23,6 +23,12 @@
  */
 
 import { PREFIJOS, siguienteCodigo } from './codigos.js';
+/* La cuenta de los días la hace el CONTRATO, no la pantalla ni este archivo.
+ * Viaja resuelta en el detalle del ítem para que quell101 no la repita: una
+ * cuenta copiada en el navegador también hereda el reloj del aparato, y un
+ * celular con la fecha mal puesta diría que faltan tres días cuando ya
+ * venció. */
+import { faltaParaEntrega } from '../../schema/tipos';
 
 const JSON_H = { 'content-type': 'application/json; charset=utf-8' };
 const json = (data, status = 200, extra = {}) => new Response(JSON.stringify(data), { status, headers: { ...JSON_H, ...extra } });
@@ -889,6 +895,10 @@ export async function atender(req, env, url, path) {
         }
       }
       if (!element) return err('no encontrado', 404);
+      /* Cuántos días faltan, ya contado (contrato 0.40.0). `null` cuando no
+       * hay fecha: ahí la pantalla decide qué poner, y lo que pone es un
+       * botón para fijarla. */
+      element.item_entrega_falta = faltaParaEntrega(element.item_fecha_entrega);
       // El cliente: el ítem para ubicarse y sus puntos por definir, y nada más
       // (decisión 4). Ni fase, ni pendientes, ni bitácora, ni responsable.
       if (esCli(user)) {

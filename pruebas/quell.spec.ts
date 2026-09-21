@@ -399,9 +399,23 @@ describe('la fecha de entrega del ítem, desde la obra', () => {
     expect(desdeDash.data.fecha_entrega).toBe('2026-10-15');
   });
 
-  it('y el detalle del ítem en la obra la trae', async () => {
+  it('y el detalle del ítem en la obra la trae, con la cuenta ya hecha', async () => {
     const d = await q('mike', `/elements/${m1}`);
     expect(d.element.item_fecha_entrega).toBe('2026-10-15');
+    /* La cuenta viaja RESUELTA para que la pantalla no la repita: una cuenta
+     * copiada en el navegador hereda el reloj del aparato, y un celular con
+     * la fecha mal puesta diría que faltan tres días cuando ya venció. */
+    const { faltaParaEntrega } = await import('../schema/tipos');
+    expect(d.element.item_entrega_falta).toEqual(faltaParaEntrega('2026-10-15'));
+    expect(d.element.item_entrega_falta.dice).toMatch(/Faltan|Falta|hoy|Venció|Vencida/);
+  });
+
+  it('sin fecha, la cuenta viene en null y no en cero', async () => {
+    /* Cero querría decir «se entrega hoy». Sin fecha no se sabe nada, y esa
+     * diferencia es la que hace que la pantalla ponga un botón en vez de una
+     * alarma. */
+    const d = await q('mike', `/elements/${suelta}`);
+    expect(d.element.item_entrega_falta).toBe(null);
   });
 
   it('vaciarla se puede: «todavía no se sabe» es una respuesta', async () => {
