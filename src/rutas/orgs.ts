@@ -17,6 +17,7 @@ import { acceso, accesoDe, miembro, org, ponerAcceso, quitarAcceso, usuarioPorCo
 import { invitarClienteEnSuite } from '../clientes';
 import { crearUsuario } from '../maestro';
 import { guardarPin, normalizaCorreo, pinAceptable, ulid } from '../lib';
+import { TIPO_XLSX, xlsx, type Celda } from '../xlsx';
 import { montarOrdenes } from './ordenes';
 import { montarObras } from './obras';
 import { montarNomina } from './nomina';
@@ -594,6 +595,89 @@ rutas.get('/:o/proyectos/:id/estado', async (c) => {
     return err(c, 'sin_permiso', 403, { motivo: 'ese proyecto no es suyo' });
   }
   return ok(c, r);
+});
+
+/** GET /orgs/:o/proyectos/:id/estado.xlsx — el mismo estado de cuenta, en
+ *  Excel.
+ *
+ *  Lo arma la API y no cada pantalla por la misma razón que los totales: el
+ *  archivo lo bajan dash101 y peek101, y dos armadores es la manera segura
+ *  de que un día no digan lo mismo. Además peek101 no tiene empaquetador:
+ *  una copia allá sería una copia de verdad.
+ *
+ *  DOS HOJAS, no una: los ítems y los pagos son dos tablas, y pegadas en un
+ *  CSV con renglones en blanco en medio es donde Excel empieza a adivinar
+ *  tipos y las fechas se vuelven números.
+ *
+ *  Los importes van en PESOS y como NÚMERO. Un «$1,234.00» es texto para
+ *  Excel: la suma da cero y quien lo abra va a creer que no le deben nada.
+ *  El formato lo pone quien lo abre; el dato lo ponemos nosotros. */
+rutas.get('/:o/proyectos/:id/estado.xlsx', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase === 'personal') return err(c, 'sin_permiso', 403, { motivo: 'el estado de cuenta lleva dinero' });
+  const r = await stub(c).estadoDelProyecto(c.req.param('id'));
+  if (!r) return err(c, 'no_encontrado', 404, { que: 'proyecto', id: c.req.param('id') });
+  if (quien.clase === 'cliente' && String(r.proyecto.cliente_id ?? '') !== String(quien.ref_id ?? '')) {
+    return err(c, 'sin_permiso', 403, { motivo: 'ese proyecto no es suyo' });
+  }
+
+  const pesos = (centavos: unknown) => Math.round(Number(centavos ?? 0)) / 100;
+  const dia = String(r.generado_at).slice(0, 10);
+  const encabezado: Celda[][] = [
+    ['Estado de cuenta'],
+    ['Proyecto', String(r.proyecto.nombre ?? '')],
+    ['Cliente', String(r.cliente?.nombre ?? '')],
+    ['Generado el', dia],
+    [],
+  ];
+  const t = r.totales;
+
+  const libro = xlsx([
+    {
+      nombre: 'Ítems',
+      filas: [
+        ...encabezado,
+        ['Código', 'Concepto', 'Modelo', 'Cantidad', 'Precio unitario', 'Importe'],
+        ...r.items.map((i): Celda[] => [
+          String(i.clave ?? ''), String(i.nombre ?? ''), String(i.producto_nombre ?? ''),
+          Number(i.cantidad ?? 1), pesos(i.precio_unitario), pesos(i.importe),
+        ]),
+        [],
+        ['', '', '', '', 'Subtotal', pesos(t.subtotal)],
+        ['', '', '', '', `IVA ${t.tasa_iva / 100}%`, pesos(t.iva)],
+        ['', '', '', '', 'Total', pesos(t.total)],
+        ['', '', '', '', 'Pagado', pesos(t.cobrado)],
+        ['', '', '', '', 'Saldo', pesos(t.saldo)],
+      ],
+    },
+    {
+      nombre: 'Pagos',
+      filas: [
+        ...encabezado,
+        ['Fecha', 'Concepto', 'Cuenta', 'Monto'],
+        ...r.movimientos.map((m): Celda[] => [
+          String(m.fecha ?? ''), String(m.descripcion ?? ''), String(m.cuenta_nombre ?? ''), pesos(m.monto),
+        ]),
+        [],
+        ['', '', 'Pagado', pesos(t.cobrado)],
+        ['', '', 'Saldo', pesos(t.saldo)],
+      ],
+    },
+  ]);
+
+  /* El nombre del archivo sin acentos ni espacios: viaja por una cabecera y
+   * ahí los acentos se vuelven signos raros en algunos navegadores. */
+  const limpio = String(r.proyecto.nombre ?? 'proyecto')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'proyecto';
+
+  return new Response(libro as unknown as BodyInit, {
+    headers: {
+      'content-type': TIPO_XLSX,
+      'content-disposition': `attachment; filename="estado-${limpio}-${dia}.xlsx"`,
+      'cache-control': 'no-store',
+    },
+  });
 });
 
 /** POST /orgs/:o/proyectos/:id/borrar-cancelados {modo:'seco'|'borrar'} —

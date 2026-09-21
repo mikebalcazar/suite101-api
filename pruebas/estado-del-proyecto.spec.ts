@@ -23,11 +23,15 @@
  *     proyecto de otro cliente enfrente;
  *   · que la FECHA la ponga el servidor, no el navegador de quien imprime;
  *   · que cambiar el modo de IVA NO MUEVA ningún peso guardado: cambia cómo
- *     se lee `precio_venta`, no cuánto vale.
+ *     se lee `precio_venta`, no cuánto vale;
+ *   · que el EXCEL lleve los MISMOS números que el JSON y que sea un archivo
+ *     válido. Un .xlsx mal armado no avisa: abre con «archivo dañado» y no
+ *     dice dónde.
  */
 
 import { SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { crc32 } from '../src/xlsx';
 
 const CORREO = 'mike@forespot.com';
 const ORG = 'estado-proyecto';
@@ -215,5 +219,68 @@ describe('quién lo abre', () => {
 
   it('un proyecto que no existe es 404', async () => {
     expect((await o('mike', '/proyectos/no-existe/estado')).estado).toBe(404);
+  });
+});
+
+describe('el mismo estado, en Excel', () => {
+  /** Abre el ZIP como lo abriría Excel y devuelve sus partes. */
+  const abrir = (bytes: Uint8Array) => {
+    const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let fin = bytes.length - 22;
+    while (fin >= 0 && v.getUint32(fin, true) !== 0x06054b50) fin--;
+    expect(fin, 'trae su fin de directorio central').toBeGreaterThanOrEqual(0);
+    const cuantos = v.getUint16(fin + 10, true);
+    let p = v.getUint32(fin + 16, true);
+    const partes: Record<string, string> = {};
+    const texto = new TextDecoder();
+    for (let i = 0; i < cuantos; i++) {
+      const suma = v.getUint32(p + 16, true);
+      const tam = v.getUint32(p + 24, true);
+      const largo = v.getUint16(p + 28, true);
+      const donde = v.getUint32(p + 42, true);
+      const nombre = texto.decode(bytes.subarray(p + 46, p + 46 + largo));
+      const inicio = donde + 30 + v.getUint16(donde + 26, true) + v.getUint16(donde + 28, true);
+      const datos = bytes.subarray(inicio, inicio + tam);
+      expect(crc32(datos), `${nombre} cuadra con su suma`).toBe(suma);
+      partes[nombre] = texto.decode(datos);
+      p += 46 + largo + v.getUint16(p + 30, true) + v.getUint16(p + 32, true);
+    }
+    return partes;
+  };
+
+  const bajar = async (quien: string, pid: string, app = 'dash101') => {
+    const cabeceras: Record<string, string> = { 'X-App': app };
+    if (galletas[quien]) cabeceras.Cookie = galletas[quien];
+    return SELF.fetch(`https://api.local/orgs/${ORG}/proyectos/${pid}/estado.xlsx`, { headers: cabeceras });
+  };
+
+  it('baja como archivo, con su tipo y su nombre', async () => {
+    const r = await bajar('mike', proyecto);
+    expect(r.status).toBe(200);
+    expect(r.headers.get('content-type')).toContain('spreadsheetml.sheet');
+    expect(r.headers.get('content-disposition')).toMatch(/attachment; filename="estado-.*\.xlsx"/);
+  });
+
+  it('es un ZIP válido con las dos hojas, y los números son los del documento', async () => {
+    const bytes = new Uint8Array(await (await bajar('mike', proyecto)).arrayBuffer());
+    expect(bytes[0], 'empieza con PK').toBe(0x50);
+    const partes = abrir(bytes);
+    expect(Object.keys(partes)).toContain('xl/worksheets/sheet1.xml');
+    expect(Object.keys(partes)).toContain('xl/worksheets/sheet2.xml');
+    expect(partes['xl/workbook.xml']).toContain('name="Ítems"');
+    expect(partes['xl/workbook.xml']).toContain('name="Pagos"');
+
+    const t = (await estado()).data.totales;
+    const hoja = partes['xl/worksheets/sheet1.xml'];
+    /* En PESOS y como NÚMERO: si viajara «$129,050.00» la suma de Excel
+     * daría cero y quien lo abra creería que no le deben nada. */
+    expect(hoja, 'el total en pesos, como número').toContain(`<v>${t.total / 100}</v>`);
+    expect(hoja).toContain(`<v>${t.subtotal / 100}</v>`);
+    expect(partes['xl/worksheets/sheet2.xml'], 'el pago').toContain(`<v>${t.cobrado / 100}</v>`);
+  });
+
+  it('el cliente baja el suyo y NO el de otro', async () => {
+    expect((await bajar('holcim', proyecto, 'peek101')).status).toBe(200);
+    expect((await bajar('holcim', ajeno, 'peek101')).status).toBe(403);
   });
 });
