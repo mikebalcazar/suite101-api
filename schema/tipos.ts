@@ -17,7 +17,29 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.37.0 (AGRUPAR A UN PRODUCTO QUE YA EXISTE. Mike,
+ * Versión del contrato: 0.38.0 (BORRAR LO CANCELADO DE UN PROYECTO. Mike,
+ * 21-sep: «ya todo lo cancelado lo puedes eliminar por completo». `POST
+ * /orgs/:o/proyectos/:id/borrar-cancelados {modo:'seco'|'borrar'}`.
+ *   · EL SECO NO ESCRIBE. Contesta el censo exacto —cuáles se van, cuáles se
+ *     quedan y qué los detiene— para que la pantalla lo enseñe antes. Borrar
+ *     no se deshace; una vista previa que no sea el mismo cálculo que el
+ *     borrado no sirve, así que es el mismo código con una bandera.
+ *   · NO SE BORRA lo que trae dinero (`movimientos`), historia de obra
+ *     (`avances`), un compromiso con proveedor (`partidas`) o un papel
+ *     (`archivos`): son llaves foráneas y borrar el ítem dejaría al cobro
+ *     sin dueño. Ése se queda y se dice por qué, renglón por renglón.
+ *   · LA PIEZA DEL PLANO SOBREVIVE. `quell_elements.item_id` es
+ *     `ON DELETE SET NULL` desde la migración 0011: la pieza es de quell101
+ *     y no se toca desde aquí; queda sin ítem y se cuenta en
+ *     `piezas_sin_item`, porque enterarse después es peor.
+ *   · EL PRECIO DE VENTA NO SE MUEVE: un cancelado nunca sumó. Se devuelve
+ *     `venta_antes` y `venta_despues` para que se vea, no para que se crea.
+ *   · Se van los CANCELADOS y los DESCARTADOS —los dos son `estado =
+ *     'cancelado'`—, contados aparte: los descartados no salen en ninguna
+ *     pantalla de dash101, así que la cuenta del seco puede ser mayor que lo
+ *     que Mike ve en la pestaña, y eso hay que decirlo antes y no después.
+ *     El borrado de verdad va por el dueño o la administración). Antes:
+ * 0.37.0 (AGRUPAR A UN PRODUCTO QUE YA EXISTE. Mike,
  * 20-sep: «donde dice nombre del modelo debería poderse hacer uno nuevo, o
  * seleccionar agregar a alguno ya existente. Recuerda que al asignarlo a un
  * producto existente, adopta en automático el precio del producto al que se
@@ -462,7 +484,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.37.0';
+export const VERSION_CONTRATO = '0.38.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

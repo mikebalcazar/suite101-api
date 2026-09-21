@@ -246,6 +246,19 @@ export interface ApiOrgDB {
     args: { motivo?: string },
     contexto: { usuario_id: string },
   ): Promise<{ ok: true; item: Fila; alcance: 'cancelado' | 'descartado' } | { error: string; detalle?: unknown }>;
+  /** Borrar lo cancelado de un proyecto (§117). `modo: 'seco'` no escribe:
+   *  contesta el mismo censo para poder enseñarlo antes. */
+  borrarCancelados(
+    proyecto_id: string,
+    args: { modo: 'seco' | 'borrar' },
+    contexto: { usuario_id: string },
+  ): Promise<{
+    ok: true; modo: 'seco' | 'borrar'; total: number;
+    borrados: number; cancelados: number; descartados: number;
+    se_van: Array<{ id: string; clave: string | null; nombre: string; monto: number; piezas: number }>;
+    se_quedan: Array<{ id: string; clave: string | null; nombre: string; monto: number; porque: string[] }>;
+    piezas_sin_item: number; venta_antes: number; venta_despues: number;
+  } | { error: string; detalle?: unknown }>;
 
   fetch(req: Request): Promise<Response>;
 }
@@ -3123,6 +3136,149 @@ export class OrgDB extends DurableObject<Env> {
     this.avisar({ t: 'item.cambio', id }, 'todos');
     const ya = this.obtener('items', id)!;
     return { ok: true, item: ya, alcance: ya.aprobado_at ? 'cancelado' : 'descartado' };
+  }
+
+  /* ─────────────── borrar lo cancelado de un proyecto (§117) ───────────────
+   *
+   * Mike, 21-sep: «ya todo lo cancelado lo puedes eliminar por completo».
+   *
+   * Un ítem cancelado no suma en el precio de venta —`recalcularProyecto`
+   * sólo cuenta los vendidos—, así que borrarlo NO mueve el dinero del
+   * proyecto. Eso está medido, y las dos rutas devuelven la venta antes y
+   * después para que se vea.
+   *
+   * Lo que sí puede colgar de un ítem es historia que no es suya:
+   *
+   * | Qué cuelga           | Qué pasaría si se borrara el ítem            |
+   * |----------------------|----------------------------------------------|
+   * | `movimientos`        | un cobro o un gasto SIN dueño: dinero movido |
+   * | `avances`            | lo que se trabajó en la obra, perdido        |
+   * | `partidas`           | el compromiso con el proveedor, huérfano     |
+   * | `archivos`           | el papel queda en R2 sin quién lo reclame    |
+   * | `quell_elements`     | la pieza SOBREVIVE y se queda sin ítem       |
+   *
+   * Las cuatro primeras son llaves foráneas: SQLite no deja borrar y el
+   * `DELETE` truena. No se fuerzan. Un ítem que trae dinero o historia se
+   * QUEDA, y se dice cuál y por qué; borrarlo sería decidir por Mike que ese
+   * cobro ya no tiene dueño.
+   *
+   * La quinta es distinta a propósito (`ON DELETE SET NULL`, migración
+   * 0011): la pieza del plano es de quell101 y no se toca desde aquí. Se
+   * queda sin ítem y se cuenta, para que nadie se entere después.
+   *
+   * Y por eso el modo SECO existe: enseña el censo exacto —cuántos se van,
+   * cuántos se quedan y qué los detiene— antes de escribir. Borrar 96
+   * renglones es de las pocas cosas de esta base que no se pueden deshacer.
+   */
+
+  /** El censo, ítem por ítem. Una sola pasada por tabla y no cinco consultas
+   *  por renglón: con 96 cancelados eso son 480 consultas dentro del Durable
+   *  Object, y este censo lo pide una pantalla mientras alguien espera. */
+  private censarCancelados(proyecto_id: string): Array<{
+    id: string; clave: string | null; nombre: string; monto: number;
+    alcance: 'cancelado' | 'descartado';
+    cobros: number; avances: number; compromisos: number; archivos: number; piezas: number;
+  }> {
+    const items = this.sql
+      .exec(`SELECT id, clave, nombre, monto, aprobado_at FROM items WHERE proyecto_id = ? AND estado = 'cancelado' ORDER BY creado_at`, proyecto_id)
+      .toArray() as Fila[];
+    if (!items.length) return [];
+
+    const ids = new Set(items.map((i) => String(i.id)));
+    const cuenta = (sql: string, ...args: unknown[]) => {
+      const m = new Map<string, number>();
+      for (const f of this.sql.exec(sql, ...args).toArray() as Fila[]) {
+        const k = String(f.item_id ?? f.de_id ?? '');
+        if (ids.has(k)) m.set(k, Number(f.n ?? 0));
+      }
+      return m;
+    };
+    const cobros = cuenta(`SELECT item_id, COUNT(*) AS n FROM movimientos WHERE item_id IS NOT NULL GROUP BY item_id`);
+    const avances = cuenta(`SELECT item_id, COUNT(*) AS n FROM avances GROUP BY item_id`);
+    const compromisos = cuenta(`SELECT item_id, COUNT(*) AS n FROM partidas WHERE item_id IS NOT NULL GROUP BY item_id`);
+    const archivos = cuenta(`SELECT de_id, COUNT(*) AS n FROM archivos WHERE de_tabla = 'items' GROUP BY de_id`);
+    const piezas = cuenta(`SELECT item_id, COUNT(*) AS n FROM quell_elements WHERE item_id IS NOT NULL GROUP BY item_id`);
+
+    return items.map((i) => {
+      const id = String(i.id);
+      return {
+        id, clave: (i.clave as string | null) ?? null, nombre: String(i.nombre ?? ''),
+        monto: Number(i.monto ?? 0),
+        alcance: (i.aprobado_at ? 'cancelado' : 'descartado') as 'cancelado' | 'descartado',
+        cobros: cobros.get(id) ?? 0, avances: avances.get(id) ?? 0,
+        compromisos: compromisos.get(id) ?? 0, archivos: archivos.get(id) ?? 0,
+        piezas: piezas.get(id) ?? 0,
+      };
+    });
+  }
+
+  /** Qué detiene a un ítem, en palabras. Vacío quiere decir que se puede
+   *  borrar. Vive en un solo lugar para que el modo seco y el borrado no
+   *  puedan opinar distinto: una vista previa que promete algo que el
+   *  borrado no cumple es peor que no tener vista previa. */
+  private loQueDetiene(c: { cobros: number; avances: number; compromisos: number; archivos: number }): string[] {
+    const r: string[] = [];
+    if (c.cobros) r.push(`${c.cobros} movimiento${c.cobros === 1 ? '' : 's'} de dinero`);
+    if (c.avances) r.push(`${c.avances} avance${c.avances === 1 ? '' : 's'} de obra`);
+    if (c.compromisos) r.push(`${c.compromisos} compromiso${c.compromisos === 1 ? '' : 's'} con proveedor`);
+    if (c.archivos) r.push(`${c.archivos} archivo${c.archivos === 1 ? '' : 's'}`);
+    return r;
+  }
+
+  /** `modo: 'seco'` no escribe nada y contesta el mismo censo que el
+   *  borrado; `modo: 'borrar'` borra los que no traen nada, todos o
+   *  ninguno. */
+  borrarCancelados(
+    proyecto_id: string,
+    args: { modo: 'seco' | 'borrar' },
+    contexto: { usuario_id: string },
+  ): {
+    ok: true; modo: 'seco' | 'borrar'; total: number;
+    borrados: number; cancelados: number; descartados: number;
+    se_van: Array<{ id: string; clave: string | null; nombre: string; monto: number; piezas: number }>;
+    se_quedan: Array<{ id: string; clave: string | null; nombre: string; monto: number; porque: string[] }>;
+    piezas_sin_item: number; venta_antes: number; venta_despues: number;
+  } | { error: string; detalle?: unknown } {
+    const proyecto = this.obtener('proyectos', proyecto_id);
+    if (!proyecto) return { error: 'no_encontrado', detalle: { que: 'proyecto', id: proyecto_id } };
+
+    const censo = this.censarCancelados(proyecto_id);
+    const se_van = censo.filter((c) => this.loQueDetiene(c).length === 0);
+    const se_quedan = censo
+      .filter((c) => this.loQueDetiene(c).length > 0)
+      .map((c) => ({ id: c.id, clave: c.clave, nombre: c.nombre, monto: c.monto, porque: this.loQueDetiene(c) }));
+
+    const venta_antes = Number(proyecto.precio_venta ?? 0);
+    let borrados = 0;
+    if (args.modo === 'borrar' && se_van.length) {
+      /* Entero o nada. El censo ya garantiza que ninguno tiene llaves
+       * apuntándole, así que un `FOREIGN KEY` aquí significaría que algo
+       * cambió entre el censo y el borrado —alguien capturando un cobro al
+       * mismo tiempo—, y entonces no se borra ni uno. */
+      this.ctx.storage.transactionSync(() => {
+        for (const c of se_van) {
+          this.sql.exec(`DELETE FROM items WHERE id = ?`, c.id);
+          borrados++;
+        }
+      });
+      void contexto;
+      this.recalcularProyecto(proyecto_id);
+      this.avisar({ t: 'item.cambio', id: proyecto_id }, 'todos');
+    }
+
+    return {
+      ok: true, modo: args.modo, total: censo.length,
+      borrados,
+      cancelados: censo.filter((c) => c.alcance === 'cancelado').length,
+      descartados: censo.filter((c) => c.alcance === 'descartado').length,
+      se_van: se_van.map((c) => ({ id: c.id, clave: c.clave, nombre: c.nombre, monto: c.monto, piezas: c.piezas })),
+      se_quedan,
+      /* Las piezas que se quedan en el plano sin ítem. En seco es lo que
+       * PASARÍA; después de borrar es lo que pasó. */
+      piezas_sin_item: se_van.reduce((s, c) => s + c.piezas, 0),
+      venta_antes,
+      venta_despues: Number((this.obtener('proyectos', proyecto_id) as Fila).precio_venta ?? 0),
+    };
   }
 
   /* ─────────────── la partida y el orden de los ítems (§102) ───────────────

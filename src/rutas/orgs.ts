@@ -567,6 +567,36 @@ rutas.post('/:o/proyectos/:id/separar', async (c) => {
   });
 });
 
+/** POST /orgs/:o/proyectos/:id/borrar-cancelados {modo:'seco'|'borrar'} —
+ *  limpiar de un proyecto los ítems que se cancelaron.
+ *
+ *  Mike, 21-sep: «ya todo lo cancelado lo puedes eliminar por completo».
+ *
+ *  Dos modos, y el seco es el que importa: contesta el censo EXACTO —cuáles
+ *  se van, cuáles se quedan y qué los detiene— sin escribir una sola fila.
+ *  Borrar 96 renglones no se deshace, así que la pantalla enseña primero lo
+ *  que va a pasar y quien decide ve el número antes.
+ *
+ *  Lo que trae dinero (un cobro), historia de obra (un avance), un
+ *  compromiso con proveedor o un papel NO se borra: se queda y se dice por
+ *  qué. Eso no es un candado tímido, es la regla: borrar el ítem dejaría un
+ *  cobro sin dueño, y decidir eso no le toca a una ruta.
+ *
+ *  Va por el dueño y la administración, como cancelar: es de las pocas
+ *  operaciones de esta API que no tienen vuelta. */
+rutas.post('/:o/proyectos/:id/borrar-cancelados', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'borrar ítems lo hace quien es de la empresa' });
+  const b = await c.req.json<{ modo?: string }>().catch(() => ({}) as { modo?: string });
+  const modo = b.modo === 'borrar' ? 'borrar' : 'seco';
+  if (modo === 'borrar' && quien.rol !== 'owner' && quien.rol !== 'admin') {
+    return err(c, 'sin_permiso', 403, { motivo: 'borrar de verdad lo hacen el dueño o la administración' });
+  }
+  const r = await stub(c).borrarCancelados(c.req.param('id'), { modo }, { usuario_id: quien.usuario_id });
+  if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 409, r.detalle);
+  return ok(c, r);
+});
+
 /** POST /orgs/:o/proyectos/:id/acomodar {items:[{id, partida?, orden?}]} — la
  *  partida de cada ítem y el lugar que ocupa dentro de ella (§102).
  *
