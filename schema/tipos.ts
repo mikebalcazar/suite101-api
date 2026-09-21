@@ -17,7 +17,21 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.39.0 (EL ESTADO DE CUENTA DE UN PROYECTO, Y CÓMO
+ * Versión del contrato: 0.40.0 (LA FECHA DE ENTREGA, EN LA OBRA Y CON LA
+ * CUENTA HECHA. Mike, 21-sep: «hay que agregar un campo en el ítem de fecha
+ * de entrega y un contador de cuántos días quedan para la entrega».
+ *   · La fecha NO es nueva: `items.fecha_entrega` existe desde la 0001 y se
+ *     queda donde está. Una sola fecha para dash101, quell101 y el portal;
+ *     dos habría sido la manera segura de que un día no coincidan.
+ *   · El detalle del ítem en quell101 la trae (`item_fecha_entrega`), y
+ *     `POST /orgs/:o/quell/elements/:id/entrega {fecha}` la fija desde la
+ *     obra: quell101 gana `fecha_entrega` en sus campos de escritura.
+ *   · `diasParaEntrega` y `faltaParaEntrega` viven en este archivo, no en
+ *     cada pantalla: tres apps contando días son tres maneras de que una
+ *     diga «faltan 3» y otra «faltan 2». Y la cuenta tiene una trampa real
+ *     —una fecha sin hora no tiene zona, y `new Date('2026-10-15')` se lee
+ *     en Londres—, así que las dos puntas se anclan a medianoche UTC).
+ * Antes: 0.39.0 (EL ESTADO DE CUENTA DE UN PROYECTO, Y CÓMO
  * LLEVA EL IVA CADA OBRA. Mike, 21-sep: «necesito poder exportar un estado
  * de cuenta en pdf y un excel con lo siguiente de cada proyecto: saldo
  * general, lista de productos en proyecto, subtotal, IVA y total de proyecto
@@ -519,7 +533,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.39.0';
+export const VERSION_CONTRATO = '0.40.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1223,6 +1237,55 @@ export function alcanceDeItem(item: { estado?: string | null; aprobado_at?: stri
   if (estado === 'cancelado') return item.aprobado_at ? 'cancelado' : 'descartado';
   if (estado === 'vendido') return 'dentro';
   return 'no_aprobado';
+}
+
+/* ─────────────── la fecha de entrega y lo que falta (§123) ───────────────
+ *
+ * Mike, 21-sep: «hay que agregar un campo en el ítem de fecha de entrega y un
+ * contador de cuántos días quedan para la entrega».
+ *
+ * La fecha ya existía —`items.fecha_entrega`, desde la 0001— y se queda donde
+ * está: UNA sola fecha que ven dash101, quell101 y el portal del cliente. Lo
+ * que faltaba era enseñarla en la obra y poder fijarla desde ahí.
+ *
+ * LA CUENTA VIVE AQUÍ y no en cada pantalla, por lo de siempre: tres apps
+ * contando días son tres maneras de que una diga «faltan 3» y otra «faltan
+ * 2». Y porque esta cuenta tiene una trampa real que ya nos mordió el 21-sep
+ * con las fechas de los movimientos: una fecha SIN HORA no tiene zona. Si se
+ * hace `new Date('2026-10-15')` se lee medianoche en Londres, y restarle el
+ * reloj de México da un día de menos. Aquí las dos puntas se anclan a
+ * medianoche UTC, así que la resta es un múltiplo exacto de un día y no hay
+ * horas de por medio.
+ */
+
+/** Medianoche UTC de una fecha `YYYY-MM-DD`, o null si no lo es. */
+function medianoche(fecha: unknown): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(fecha ?? ''));
+  return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
+}
+
+/** Cuántos días faltan para la entrega. Positivo = faltan; 0 = es hoy;
+ *  negativo = lleva ese número de días vencida. `null` si no hay fecha.
+ *
+ *  `hoy` se recibe para poder medirlo: una cuenta que sólo sabe leer el reloj
+ *  del aparato no se puede probar. */
+export function diasParaEntrega(fecha: unknown, hoy: unknown = new Date().toISOString().slice(0, 10)): number | null {
+  const a = medianoche(fecha);
+  const b = medianoche(hoy);
+  if (a === null || b === null) return null;
+  return Math.round((a - b) / 86400000);
+}
+
+/** La misma cuenta, en palabras, para que las tres apps digan lo mismo.
+ *  `null` cuando no hay fecha: ahí la pantalla decide qué poner. */
+export function faltaParaEntrega(fecha: unknown, hoy?: unknown): { dias: number; dice: string; tarde: boolean } | null {
+  const dias = diasParaEntrega(fecha, hoy);
+  if (dias === null) return null;
+  if (dias === 0) return { dias, dice: 'Se entrega hoy', tarde: false };
+  if (dias === 1) return { dias, dice: 'Falta 1 día', tarde: false };
+  if (dias > 1) return { dias, dice: `Faltan ${dias} días`, tarde: false };
+  if (dias === -1) return { dias, dice: 'Venció ayer', tarde: true };
+  return { dias, dice: `Vencida hace ${Math.abs(dias)} días`, tarde: true };
 }
 
 /** Lo que se enseña de cada alcance, en palabras de Mike. */
