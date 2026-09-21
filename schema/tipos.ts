@@ -43,7 +43,15 @@
  *     diga cada proyecto», con «+ IVA» de arranque— porque adivinarlo pone
  *     un total equivocado enfrente de quien va a pagar, y en su taller
  *     conviven HOLCIM, que pide desglose, y una casa cotizada «con todo».
- *     No mueve un solo peso: sólo dice cómo se LEE `precio_venta`). Antes:
+ *     No mueve un solo peso: sólo dice cómo se LEE `precio_venta`.
+ *   · `GET /orgs/:o/proyectos/:id/estado.xlsx` es el mismo documento en
+ *     Excel, armado AQUÍ y no en cada pantalla: lo bajan dash101 y peek101,
+ *     y dos armadores es la manera segura de que un día no digan lo mismo
+ *     —además peek101 no tiene empaquetador, así que una copia allá sería
+ *     una copia de verdad—. Dos hojas, ítems y pagos, porque son dos tablas.
+ *     Los importes van en PESOS y como NÚMERO: un «$1,234.00» es texto para
+ *     Excel, la suma da cero y quien lo abra cree que no le deben nada).
+ * Antes:
  * 0.38.0 (BORRAR LO CANCELADO DE UN PROYECTO. Mike,
  * 21-sep: «ya todo lo cancelado lo puedes eliminar por completo». `POST
  * /orgs/:o/proyectos/:id/borrar-cancelados {modo:'seco'|'borrar'}`.
