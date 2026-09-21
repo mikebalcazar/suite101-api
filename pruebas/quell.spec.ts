@@ -353,3 +353,112 @@ describe('borrar una obra y contar lo de quell101', () => {
     expect(conteos.data.filas.quell_plans).toBe(1);
   });
 });
+
+/* La fecha de entrega, en la obra · contrato 0.40.0
+ *
+ * Mike, 21-sep: «hay que agregar un campo en el ítem de fecha de entrega y un
+ * contador de cuántos días quedan para la entrega».
+ *
+ * LO QUE DE VERDAD APORTA:
+ *
+ *   · que la fecha sea UNA SOLA. Se escribe desde la obra y se lee en
+ *     `items.fecha_entrega`, que es la misma que ve dash101 y la que el
+ *     portal ya le enseña al cliente. Si un día se guardara una copia en el
+ *     elemento, esta prueba se pondría roja, y ése es su trabajo;
+ *   · que una pieza SIN ítem ligado lo diga en vez de tragarse la fecha;
+ *   · que la cuenta de días no se corra por la zona horaria. Es la misma
+ *     trampa que nos costó el «un día menos» de los movimientos: una fecha
+ *     sin hora no tiene zona;
+ *   · que la pueda fijar el supervisor y no cualquiera.
+ */
+describe('la fecha de entrega del ítem, desde la obra', () => {
+  let item = '', suelta = '';
+
+  beforeAll(async () => {
+    const negocio = (await pedir('mike', `/orgs/${ORG}/negocios`, { method: 'POST', json: { nombre: 'Taller de la obra' }, app: 'dash101' })).data.id;
+    const cliente = (await pedir('mike', `/orgs/${ORG}/clientes`, { method: 'POST', json: { negocio_id: negocio, nombre: 'Quien recibe' }, app: 'dash101' })).data.id;
+    const proyecto = (await pedir('mike', `/orgs/${ORG}/proyectos`, { method: 'POST', json: { negocio_id: negocio, cliente_id: cliente, nombre: 'Obra con fechas' }, app: 'dash101' })).data.id;
+    item = (await pedir('mike', `/orgs/${ORG}/items`, { method: 'POST', json: {
+      negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto,
+      nombre: 'Gradas', monto: 50_000_00, cantidad: 1, estado: 'vendido', tipo: 'mueble',
+    }, app: 'dash101' })).data.id;
+
+    await pedir('mike', `/orgs/${ORG}/obras/${obraA}/ligar`, { method: 'POST', json: { proyecto_id: proyecto }, app: 'dash101' });
+    const l = await pedir('mike', `/orgs/${ORG}/obras/${obraA}/items`, { method: 'POST', json: { ligar: [{ element_id: m1, item_id: item }] }, app: 'dash101' });
+    expect(l.estado, JSON.stringify(l)).toBe(200);
+    suelta = m2; // ésta se queda sin ítem a propósito
+  });
+
+  it('se fija desde la obra y queda en el ítem, que es donde vive', async () => {
+    const r = await q('mike', `/elements/${m1}/entrega`, { method: 'POST', json: { fecha: '2026-10-15', op_id: crypto.randomUUID() } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.fecha_entrega).toBe('2026-10-15');
+
+    /* Leída por donde la lee dash101: la MISMA fila, no una copia. */
+    const desdeDash = await pedir('mike', `/orgs/${ORG}/items/${item}`, { app: 'dash101' });
+    expect(desdeDash.data.fecha_entrega).toBe('2026-10-15');
+  });
+
+  it('y el detalle del ítem en la obra la trae', async () => {
+    const d = await q('mike', `/elements/${m1}`);
+    expect(d.element.item_fecha_entrega).toBe('2026-10-15');
+  });
+
+  it('vaciarla se puede: «todavía no se sabe» es una respuesta', async () => {
+    expect((await q('mike', `/elements/${m1}/entrega`, { method: 'POST', json: { fecha: '', op_id: crypto.randomUUID() } })).fecha_entrega).toBe(null);
+    expect((await pedir('mike', `/orgs/${ORG}/items/${item}`, { app: 'dash101' })).data.fecha_entrega).toBe(null);
+    await q('mike', `/elements/${m1}/entrega`, { method: 'POST', json: { fecha: '2026-10-15', op_id: crypto.randomUUID() } });
+  });
+
+  it('una pieza sin ítem ligado lo dice, no se traga la fecha', async () => {
+    const r = await q('mike', `/elements/${suelta}/entrega`, { method: 'POST', json: { fecha: '2026-10-15', op_id: crypto.randomUUID() } });
+    expect(r.estado).toBe(409);
+    expect(String(r.error)).toMatch(/ligada a un ítem/);
+  });
+
+  it('una fecha con mala forma se rechaza', async () => {
+    expect((await q('mike', `/elements/${m1}/entrega`, { method: 'POST', json: { fecha: '15/10/2026', op_id: crypto.randomUUID() } })).estado).toBe(400);
+  });
+
+  it('la fija el supervisor, no el contratista', async () => {
+    expect((await q('goyo', `/elements/${m1}/entrega`, { method: 'POST', json: { fecha: '2026-11-01', op_id: crypto.randomUUID() } })).estado).toBe(403);
+  });
+
+  it('mandarla dos veces con el mismo op_id no la escribe dos veces', async () => {
+    const op = crypto.randomUUID();
+    await q('mike', `/elements/${m1}/entrega`, { method: 'POST', json: { fecha: '2026-12-01', op_id: op } });
+    const otra = await q('mike', `/elements/${m1}/entrega`, { method: 'POST', json: { fecha: '2026-01-01', op_id: op } });
+    expect(otra.repetida).toBe(true);
+    expect((await pedir('mike', `/orgs/${ORG}/items/${item}`, { app: 'dash101' })).data.fecha_entrega).toBe('2026-12-01');
+  });
+});
+
+/* La cuenta de días, que vive en el contrato y no en cada pantalla. */
+describe('cuántos días faltan', () => {
+  it('cuenta por día y no se corre por la zona horaria', async () => {
+    const { diasParaEntrega } = await import('../schema/tipos');
+    expect(diasParaEntrega('2026-10-15', '2026-10-15')).toBe(0);
+    expect(diasParaEntrega('2026-10-15', '2026-10-14')).toBe(1);
+    expect(diasParaEntrega('2026-10-15', '2026-10-18')).toBe(-3);
+    /* Cruzando fin de mes y año, que es donde una resta a mano se equivoca. */
+    expect(diasParaEntrega('2026-11-01', '2026-10-31')).toBe(1);
+    expect(diasParaEntrega('2027-01-01', '2026-12-31')).toBe(1);
+    /* Y cruzando el cambio de horario de CDMX: si la cuenta usara horas
+     * locales, aquí saldría 0 o 2 en vez de 1. */
+    expect(diasParaEntrega('2026-10-26', '2026-10-25')).toBe(1);
+    expect(diasParaEntrega(null)).toBe(null);
+    expect(diasParaEntrega('mañana')).toBe(null);
+  });
+
+  it('y lo dice en palabras iguales para las tres apps', async () => {
+    const { faltaParaEntrega } = await import('../schema/tipos');
+    expect(faltaParaEntrega('2026-10-15', '2026-10-15')!.dice).toBe('Se entrega hoy');
+    expect(faltaParaEntrega('2026-10-15', '2026-10-14')!.dice).toBe('Falta 1 día');
+    expect(faltaParaEntrega('2026-10-15', '2026-10-10')!.dice).toBe('Faltan 5 días');
+    expect(faltaParaEntrega('2026-10-15', '2026-10-16')!.dice).toBe('Venció ayer');
+    expect(faltaParaEntrega('2026-10-15', '2026-10-20')!.dice).toBe('Vencida hace 5 días');
+    expect(faltaParaEntrega('2026-10-15', '2026-10-20')!.tarde).toBe(true);
+    expect(faltaParaEntrega('2026-10-15', '2026-10-14')!.tarde).toBe(false);
+    expect(faltaParaEntrega(null)).toBe(null);
+  });
+});

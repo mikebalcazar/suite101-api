@@ -868,7 +868,8 @@ export async function atender(req, env, url, path) {
        * al contratista, y eso lo decide Mike, no este archivo. */
       const element = await env.DB.prepare(
         `SELECT e.*, pl.name AS plan_name, ${ALCANCE_SQL}, it.descripcion AS item_descripcion,
-                it.monto AS item_monto, it.cantidad AS item_cantidad
+                it.monto AS item_monto, it.cantidad AS item_cantidad,
+                it.fecha_entrega AS item_fecha_entrega
          FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id
               LEFT JOIN items it ON it.id = e.item_id
          WHERE e.id = ?`).bind(eid).first();
@@ -1003,6 +1004,32 @@ export async function atender(req, env, url, path) {
       if (r.error) return err(r.error, 400);
       await apunta(env, b.op_id);
       return json({ ok: true, fase });
+    }
+    /* La fecha de entrega, fijada desde la obra (contrato 0.40.0).
+     *
+     * Mike, 21-sep: «hay que agregar un campo en el ítem de fecha de entrega
+     * y un contador de cuántos días quedan».
+     *
+     * Escribe `items.fecha_entrega`, que es la MISMA que ve dash101 y la que
+     * el portal del cliente ya enseña. No se guarda una copia en el
+     * elemento: dos fechas es la manera segura de que un día no coincidan, y
+     * la que vería el cliente sería la equivocada.
+     *
+     * Una pieza SIN ítem ligado no tiene dónde guardarla, y eso se dice en
+     * vez de inventarle un lugar. Vacío borra la fecha: «todavía no se sabe»
+     * es una respuesta legítima y tiene que poderse volver a ella. */
+    if (seg[2] === 'entrega' && m === 'POST') {
+      if (!isStaff(user)) return err('La fecha de entrega la fija el supervisor.', 403);
+      const el = await env.DB.prepare(`SELECT item_id FROM quell_elements WHERE id = ?`).bind(eid).first();
+      if (!el?.item_id) return err('Esta pieza todavía no está ligada a un ítem, así que no tiene dónde guardar la fecha.', 409);
+      const b = await req.json().catch(() => ({}));
+      if (await yaHecha(env, b.op_id)) return json({ ok: true, repetida: true });
+      const cruda = String(b.fecha ?? '').trim();
+      if (cruda && !/^\d{4}-\d{2}-\d{2}$/.test(cruda)) return err('la fecha va como 2026-10-15');
+      await env.DB.prepare(`UPDATE items SET fecha_entrega = ?, actualizado_at = ? WHERE id = ?`)
+        .bind(cruda || null, new Date().toISOString(), el.item_id).run();
+      await apunta(env, b.op_id);
+      return json({ ok: true, fecha_entrega: cruda || null });
     }
     if (seg[2] === 'log' && m === 'POST') {
       if (!isStaff(user)) return err('El contratista sube su evidencia en el pendiente que le toca, no en la bitácora.', 403);

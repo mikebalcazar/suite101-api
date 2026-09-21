@@ -25,7 +25,10 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
      * pasa por esta lista porque quién puede escribir qué campo se decide
      * en un solo lugar, y una ruta con su propia regla es la que se olvida
      * de actualizarse. */
-    quell101: ['etapa', 'etapa_at', 'etapa_por', 'clave', 'asignados', 'estado'], // etapa solo vía /etapa
+    /* `fecha_entrega` la gana quell101 el 21-sep: «hay que agregar un campo
+     * en el ítem de fecha de entrega». La fecha es UNA —la de `items`— y se
+     * fija desde donde se sabe: en la obra. Va por POST /elements/:id/entrega. */
+    quell101: ['etapa', 'etapa_at', 'etapa_por', 'clave', 'asignados', 'estado', 'fecha_entrega'], // etapa solo vía /etapa
     roster101: ['asignados'],
     nest101: ['refs'],
   },
