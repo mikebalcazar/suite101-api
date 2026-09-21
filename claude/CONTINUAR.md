@@ -336,3 +336,25 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   versiones. La pantalla es `web/src/DocsItem.jsx` en quell101, medida con
   `pruebas/docs-del-item.mjs` y con un recorrido en Chromium a 390 y a 1280
   que comprueba que la misma nota cae en el mismo punto en las dos.
+- **DEFECTO de origen: supply101 pedía la llave de dash101 (21-sep, contrato
+  0.42.0).** Mike lo reportó con una captura: `fer@forespot.com` veía
+  `app_no_permitida`. supply101 mandaba `X-App: dash101` —yo lo escribí así
+  el 20-sep y lo dejé comentado como decisión razonada—, y **esa llave hace
+  dos trabajos**: en `orgs.apps` dice qué contrató la empresa y en
+  `miembros.apps` a qué entra cada quien. Razoné sobre el primero; el segundo
+  vino de a gratis, y dejó a supply101 —hecho para quien NO entra al tablero
+  del dinero— exigiendo la llave del tablero del dinero. **Antes de reusar
+  una llave hay que preguntar cuántas preguntas contesta.** Arreglado con
+  llave propia `supply`: a nivel empresa va junto a `dash` (migración
+  `d1/0008`, y una empresa nueva nace con las dos), a nivel persona son
+  independientes **en los dos sentidos** —y la prueba amarra los dos, porque
+  si algún día `supply` se heredara de `dash` el defecto volvería en silencio
+  para quien sólo pide—. Nadie perdió acceso porque la migración le escribió
+  `supply` a quien traía `dash`, no porque una llave arrastre a la otra.
+  De paso: **`PATCH /admin/orgs/:o {apps}` ahora MEZCLA** en vez de pisar el
+  objeto entero; si no, master101 o workshop101 mandando su lista de seis
+  llaves habrían apagado `supply` en la primera empresa donde alguien
+  guardara apps. Tocó cuatro repos: suite101-api, dash101 (el Worker de
+  supply101), workshop101 (la casilla «pedir compras») y master101 (la
+  columna). **Pendiente de Mike:** palomearle «pedir compras» a Fer y a Goyo
+  en workshop101; no se lo puse yo porque dar un permiso es decisión suya.
