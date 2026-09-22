@@ -358,3 +358,26 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   supply101), workshop101 (la casilla «pedir compras») y master101 (la
   columna). **Pendiente de Mike:** palomearle «pedir compras» a Fer y a Goyo
   en workshop101; no se lo puse yo porque dar un permiso es decisión suya.
+- **El requerimiento, y los tipos en cinco (22-sep, contrato 0.43.0).** Los
+  tipos son Mueble, Puerta, Acabado, Servicio y **Requerimiento**; prefijos
+  MW-, PT-, FX-, SV- y RQ-. El encargo venía contradictorio a propósito —«es
+  un nuevo tipo de ítem» y una lista de cuatro que no lo incluía—, se le
+  preguntó con botones y escogió el tipo; la aclaración que siguió («es un
+  tipo pero que **aún está en revisión**. Sí aparece en mapa, sí aparece en
+  ítems, pero está pendiente de cotizarse y autorizarse para entrar en
+  producción») no estaba en ninguna de las tres opciones y es la buena.
+  Lo que hay que no romper: **las dos mitades tiran para lados contrarios**.
+  Un requerimiento NO se esconde —a diferencia de un `no_aprobado`, que en
+  quell sólo sale en la vista de fuera de alcance— y a la vez NO entra en
+  producción. La regla vive en `marcaEtapa`, el CUELLO por donde pasan
+  `/elements/:id/etapas` y `/elements/:id/fase`, no en cada ruta ni en la
+  pantalla (la app de Android trae su propia copia de la interfaz). Se
+  pregunta con `esRequerimiento`, que NORMALIZA: `type` es texto libre y un
+  «requerimiento» en minúscula guardado desde otra pantalla tiene que contar.
+  Al aprobarse se le cambia el tipo y ya: conserva pin, bitácora y fotos.
+  **No viaja a dash101** para cotizarse — era otra de las opciones y no la
+  escogió; si se pide, es encargo aparte.
+  **Deuda:** `web/src/codigos.js` de quell101 es COPIA de
+  `src/quell/codigos.js` de la API (la clave se propone sin red). Se tocaron
+  las dos y hay prueba de los prefijos, pero nada impide tocar una sola;
+  cerrarlo de verdad es publicar el archivo desde la API.
