@@ -17,7 +17,34 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.42.0 (supply101 TIENE LLAVE PROPIA. Defecto que
+ * Versión del contrato: 0.43.0 (EL REQUERIMIENTO, Y LOS CUATRO TIPOS DE
+ * ÍTEM. Mike, 22-sep: «necesito el botón de agregar requerimiento —que es el
+ * ítem que apenas se va a aprobar y a cotizar— dentro de quell. Es un nuevo
+ * tipo de ítem. Y actualizar los tipos de ítem a: mueble, puerta, acabado,
+ * servicio». Y aclarando: «el requerimiento es un tipo de ítem pero que aún
+ * está en revisión. Sí aparece en mapa, sí aparece en ítems, pero está
+ * pendiente de cotizarse y autorizarse para entrar en producción».
+ *   · Los tipos de la obra son Mueble, Puerta, Acabado y **Servicio**, más
+ *     **Requerimiento**. Prefijos de código: MW-, PT-, FX-, **SV-** y
+ *     **RQ-**. El requerimiento lleva prefijo propio porque es lo que hace
+ *     que al mirar un plano impreso se vea qué está pedido y qué vendido.
+ *   · `type` sigue siendo texto libre en la columna: un ítem con un tipo
+ *     viejo no desaparece ni se renumera. Lo que cambia es la lista que se
+ *     ofrece y las reglas que cuelgan de ella.
+ *   · **Un requerimiento no entra en producción.** La regla vive en
+ *     `marcaEtapa`, que es el cuello por donde pasan los dos caminos que
+ *     mueven un ítem —`POST /elements/:id/etapas` y `POST
+ *     /elements/:id/fase`—, y contesta 400 con qué hacer: cambiarle el tipo
+ *     cuando se apruebe. No es una etiqueta: marcar «comprado» o «fletado»
+ *     en algo que nadie cotizó es empezar a gastar en una pieza que el
+ *     cliente todavía puede rechazar.
+ *   · Y NO se esconde. Un `no_aprobado` en quell sólo sale si pides la vista
+ *     de fuera de alcance (regla del 20-sep); un requerimiento sale siempre,
+ *     en el mapa y en la lista, que es textual de Mike. Son dos cosas
+ *     distintas y conviene no confundirlas.
+ *   · Al aprobarse se le cambia el tipo y ya: conserva su pin, su bitácora y
+ *     sus fotos. Ésa es la ventaja de que sea un tipo y no otra tabla.
+ * Antes: 0.42.0 (supply101 TIENE LLAVE PROPIA. Defecto que
  * reportó Mike el 21-sep: fer@forespot.com abría supply101 y le salía
  * `app_no_permitida`.
  *   · La causa: supply101 mandaba `X-App: dash101` «porque la llave ya está
@@ -596,7 +623,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.42.0';
+export const VERSION_CONTRATO = '0.43.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

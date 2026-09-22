@@ -655,3 +655,107 @@ describe('la documentación del ítem', () => {
     expect([401, 403], JSON.stringify(r)).toContain(r.estado);
   });
 });
+
+/* EL REQUERIMIENTO: UN TIPO QUE TODAVÍA NO ENTRA EN PRODUCCIÓN
+ *
+ * Mike, 22-sep-2026: «necesito el botón de agregar requerimiento (que es el
+ * ítem que apenas se va a aprobar y a cotizar) dentro de quell», y luego,
+ * aclarando: «el requerimiento es un tipo de ítem pero que aún está en
+ * revisión. Sí aparece en mapa, sí aparece en ítems, pero está pendiente de
+ * cotizarse y autorizarse para entrar en producción».
+ *
+ * Los tipos quedaron en mueble, puerta, acabado y servicio, más éste.
+ *
+ * QUÉ CUIDAN ESTAS PRUEBAS
+ *
+ * Las dos mitades de la frase de Mike, que tiran para lados contrarios:
+ *
+ *   · «sí aparece en mapa, sí aparece en ítems» — un requerimiento NO se
+ *     esconde. Es la diferencia con un `no_aprobado`, que en quell sólo sale
+ *     si pides la vista de fuera de alcance (regla del 20-sep). Si alguien
+ *     lo escondiera «por consistencia», Mike dejaría de ver lo que levantó.
+ *
+ *   · «pendiente de … para entrar en producción» — y ahí sí se frena. La
+ *     regla vive en `marcaEtapa`, que es el cuello por donde pasan los DOS
+ *     caminos que mueven un ítem: `/etapa` y `/fase`. Se prueban los dos por
+ *     separado a propósito: taparlos en la pantalla habría dejado la puerta
+ *     abierta desde la app de Android empacada, que trae su propia copia.
+ *
+ * Lo que se protege no es una etiqueta: marcar «comprado» o «fletado» en
+ * algo que nadie cotizó ni autorizó es empezar a gastar en una pieza que el
+ * cliente todavía puede rechazar.
+ */
+describe('el requerimiento, que está en revisión', () => {
+  let rq = '';
+  const alta = (cuerpo: Record<string, unknown>) =>
+    q('mike', `/plans/${pa}/elements`, { method: 'POST', json: { op_id: crypto.randomUUID(), ...cuerpo } });
+
+  it('se levanta desde la obra y estrena su propio prefijo', async () => {
+    const r = await alta({ name: 'Clóset que pidió el cliente', type: 'Requerimiento', x: 0.44, y: 0.44 });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.code, 'RQ- para que en el plano se vea qué está pedido y qué vendido').toBe('RQ-01');
+    rq = r.id;
+    const otro = await alta({ name: 'Otro más', type: 'Requerimiento', x: 0.45, y: 0.45 });
+    expect(otro.code).toBe('RQ-02');
+  });
+
+  it('un servicio también tiene el suyo', async () => {
+    const r = await alta({ name: 'Instalación en sitio', type: 'Servicio', x: 0.46, y: 0.46 });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.code).toBe('SV-01');
+  });
+
+  it('SÍ sale en el plano y en la lista, como cualquier otro', async () => {
+    /* Ésta es la mitad que se pierde si alguien lo trata como un
+     * `no_aprobado`: aquéllos se esconden salvo en la vista de fuera de
+     * alcance. Un requerimiento no. */
+    const obra = await q('mike', `/projects/${obraA}`);
+    expect(obra.estado).toBe(200);
+    const suyo = obra.elements.find((e: any) => e.id === rq);
+    expect(suyo, 'el requerimiento viaja con los demás elementos del plano').toBeTruthy();
+    expect(suyo.type).toBe('Requerimiento');
+    expect(suyo.alcance ?? 'dentro', 'y no se esconde detrás del filtro de alcance').toBe('dentro');
+  });
+
+  it('pero NO se le puede marcar una etapa: está pendiente de cotizarse y autorizarse', async () => {
+    const etapas = await q('mike', `/elements/${rq}`);
+    expect(etapas.estado).toBe(200);
+    const primera = (etapas.etapas || [])[0];
+    expect(primera, 'la obra tiene etapas configuradas').toBeTruthy();
+    const r = await q('mike', `/elements/${rq}/etapas`, { method: 'POST', json: { clave: primera.clave, hecha: true, op_id: crypto.randomUUID() } });
+    expect(r.estado, JSON.stringify(r)).toBe(400);
+    expect(r.error).toMatch(/requerimiento/i);
+    expect(r.error, 'y el mensaje dice qué hacer, no sólo que no').toMatch(/cámbiale el tipo/i);
+  });
+
+  it('ni entregarse, que es el otro camino a producción', async () => {
+    const r = await q('mike', `/elements/${rq}/fase`, { method: 'POST', json: { fase: 'punchlist', op_id: crypto.randomUUID() } });
+    expect(r.estado, JSON.stringify(r)).toBe(400);
+    expect(r.error).toMatch(/requerimiento/i);
+  });
+
+  it('en cuanto se aprueba y se le cambia el tipo, entra a producción sin volver a capturarlo', async () => {
+    /* El requerimiento no se borra ni se recaptura: se le cambia el tipo a
+     * lo que de verdad es, y con eso conserva su pin, su bitácora y sus
+     * fotos. Ésa es toda la ventaja de que sea un tipo y no otra tabla. */
+    const cambio = await q('mike', `/elements/${rq}`, { method: 'PATCH', json: { type: 'Mueble' } });
+    expect(cambio.estado, JSON.stringify(cambio)).toBe(200);
+    const d = await q('mike', `/elements/${rq}`);
+    expect(d.element.type).toBe('Mueble');
+    const primera = (d.etapas || [])[0];
+    const r = await q('mike', `/elements/${rq}/etapas`, { method: 'POST', json: { clave: primera.clave, hecha: true, op_id: crypto.randomUUID() } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+  });
+
+  it('y la regla no se cuela por cómo se escriba el tipo', async () => {
+    /* `type` es texto libre en la columna: basta que otra pantalla guarde
+     * «requerimiento» en minúscula para que una comparación con `===` deje
+     * de frenar. Por eso se compara con `esRequerimiento`, que normaliza. */
+    const r = await alta({ name: 'En minúscula', type: 'requerimiento', x: 0.47, y: 0.47 });
+    expect(r.estado).toBe(200);
+    const d = await q('mike', `/elements/${r.id}`);
+    const primera = (d.etapas || [])[0];
+    const marca = await q('mike', `/elements/${r.id}/etapas`, { method: 'POST', json: { clave: primera.clave, hecha: true, op_id: crypto.randomUUID() } });
+    expect(marca.estado, JSON.stringify(marca)).toBe(400);
+  });
+});
