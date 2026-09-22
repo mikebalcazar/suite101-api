@@ -22,7 +22,7 @@
  * firma que TypeScript necesita del lado del Durable Object.
  */
 
-import { PREFIJOS, siguienteCodigo } from './codigos.js';
+import { PREFIJOS, REQUERIMIENTO, esRequerimiento, siguienteCodigo } from './codigos.js';
 /* La cuenta de los días la hace el CONTRATO, no la pantalla ni este archivo.
  * Viaja resuelta en el detalle del ítem para que quell101 no la repita: una
  * cuenta copiada en el navegador también hereda el reloj del aparato, y un
@@ -280,6 +280,25 @@ async function catalogoEtapas(env) {
 // eso sólo se sostiene si el camino no tiene huecos: nadie fleta lo que no ha
 // comprado, y si resulta que no se había comprado, tampoco había salido.
 async function marcaEtapa(env, user, eid, clave, hecha) {
+  /* UN REQUERIMIENTO NO ENTRA EN PRODUCCIÓN (Mike, 22-sep-2026).
+   *
+   * «El requerimiento es un tipo de ítem pero que aún está en revisión. Sí
+   * aparece en mapa, sí aparece en ítems, pero está pendiente de cotizarse y
+   * autorizarse para entrar en producción.»
+   *
+   * La regla va AQUÍ y no en la pantalla porque éste es el cuello por donde
+   * pasan los dos caminos que mueven un ítem —`/etapa` y `/fase`— y porque
+   * quell101 es una de varias puertas: la app de Android empacada trae su
+   * propia copia de la pantalla, y una regla que sólo viva allá se queda
+   * vieja en los teléfonos que nadie actualizó.
+   *
+   * Y es una regla que protege dinero, no una cortesía: marcar «comprado» o
+   * «fletado» en algo que nadie cotizó ni autorizó es empezar a gastar en
+   * una pieza que quizá el cliente no aprueba. */
+  const suyo = await env.DB.prepare(`SELECT type FROM quell_elements WHERE id = ?`).bind(eid).first();
+  if (suyo && esRequerimiento(suyo.type)) {
+    return { error: 'Esto todavía es un requerimiento: está pendiente de cotizarse y autorizarse. Cuando se apruebe, cámbiale el tipo a lo que de verdad es y entra a producción.' };
+  }
   const etapas = await catalogoEtapas(env);
   const i = etapas.findIndex((x) => x.clave === clave);
   if (i < 0) return { error: 'etapa desconocida' };
