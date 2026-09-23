@@ -17,7 +17,31 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.43.0 (EL REQUERIMIENTO, Y LOS CUATRO TIPOS DE
+ * Versión del contrato: 0.44.0 (UNA LICENCIA A TU NOMBRE ES EL PERMISO.
+ * Encontrado el 23-sep-2026: Mike le activó a Alex su licencia de draw101 y
+ * Alex no pudo entrar —«sin permiso»—, ni con Google ni con código. La
+ * licencia estaba en `suscripciones`; lo que no había era una fila en
+ * `usuarios` con ese correo, y las dos puertas de entrada la piden. No se
+ * había visto porque las seis licencias anteriores eran de Mike y de Fer,
+ * que ya eran de una empresa.
+ *   · Quien tiene una licencia a su nombre y todavía no es de ninguna
+ *     empresa YA PUEDE ENTRAR: la cuenta se hace sola la primera vez que la
+ *     usa, en `cuentaPorLicencia` (`src/maestro.ts`). Esa cuenta por sí sola
+ *     no abre nada —sin empresa no se ve ninguna—; nada más sirve para
+ *     probar quién es y recoger su licencia.
+ *   · Se hace al ENTRAR y no al crear la licencia porque una licencia puede
+ *     nacer por otros caminos —Stripe, la tienda— y el hueco volvería a
+ *     abrirse en cada uno. Las dos puertas —`POST /auth/codigo` y el regreso
+ *     de Google— son el único lugar por donde se entra.
+ *   · Basta con TENER licencia, aunque hoy no sea vigente: a quien se le
+ *     venció hay que dejarlo entrar para que `POST /licencias/mia` le diga
+ *     cuándo venció y qué pagar. «Sin permiso» ahí lo manda a buscar el
+ *     problema donde no está.
+ *   · `sin_permiso` en la pantalla de activar ya no quiere decir «no tienes
+ *     cuenta»: quiere decir que ese correo no tiene ninguna licencia, y así
+ *     lo dice ahora.
+ *
+ * 0.43.0 (EL REQUERIMIENTO, Y LOS CUATRO TIPOS DE
  * ÍTEM. Mike, 22-sep: «necesito el botón de agregar requerimiento —que es el
  * ítem que apenas se va a aprobar y a cotizar— dentro de quell. Es un nuevo
  * tipo de ítem. Y actualizar los tipos de ítem a: mueble, puerta, acabado,
@@ -623,7 +647,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.43.0';
+export const VERSION_CONTRATO = '0.44.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

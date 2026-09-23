@@ -33,7 +33,7 @@ import {
   normalizaCorreo, pinAceptable, pinCoincide, revisaClave, sha256, ulid, vencida,
 } from '../lib';
 import {
-  abrirSesion, acceso, cerrarSesion, crearUsuario, esSuperadmin, vidaDe,
+  abrirSesion, acceso, cerrarSesion, crearUsuario, cuentaPorLicencia, esSuperadmin, vidaDe,
   vidaQueQueda,
   miembro, org, orgs, secretoDe, sembrarSuperadmin, usuarioPorCorreo, usuarioPorId,
   secretosDe, type Como,
@@ -78,6 +78,10 @@ rutas.post('/codigo', async (c) => {
   let usuario = await usuarioPorCorreo(c.env, correo);
   const esPrimero = !usuario && normalizaCorreo(c.env.CORREO_SUPERADMIN || '') === correo;
   if (esPrimero) usuario = { ...(await crearUsuario(c.env, correo)), pin_hash: null, clave_hash: null };
+  // Quien compró una licencia a su nombre tampoco «tiene nada en la suite», y
+  // aun así tiene que poder entrar: su licencia es el permiso (ver
+  // `cuentaPorLicencia`). Si no, el código nunca sale y nadie sabe por qué.
+  if (!usuario) usuario = await cuentaPorLicencia(c.env, correo);
   if (!usuario) {
     // No se dice si existe o no: eso convertiría esta ruta en un directorio.
     return ok(c, { enviado: false, mensaje: 'Si ese correo tiene acceso, le llega un código.' });
@@ -318,6 +322,9 @@ rutas.get('/google/callback', async (c) => {
   if (!usuario && normalizaCorreo(c.env.CORREO_SUPERADMIN || '') === correo) {
     usuario = { ...(await crearUsuario(c.env, correo, carga.name)), pin_hash: null, clave_hash: null };
   }
+  // Y quien compró una licencia a su nombre: es por aquí por donde entraba
+  // Alex el 23-sep y se topaba con «sin permiso» (ver `cuentaPorLicencia`).
+  if (!usuario) usuario = await cuentaPorLicencia(c.env, correo, carga.name);
   if (!usuario) return err(c, 'sin_permiso', 403);
   await c.env.MASTER.prepare(`UPDATE usuarios SET google_sub = ? WHERE id = ?`).bind(carga.sub, usuario.id).run();
   await sembrarSuperadmin(c.env, usuario.id, correo);

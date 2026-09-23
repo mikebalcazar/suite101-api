@@ -358,6 +358,22 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   supply101), workshop101 (la casilla «pedir compras») y master101 (la
   columna). **Pendiente de Mike:** palomearle «pedir compras» a Fer y a Goyo
   en workshop101; no se lo puse yo porque dar un permiso es decisión suya.
+- **Una licencia a tu nombre es el permiso (23-sep, contrato 0.44.0).** Mike:
+  «activé la licencia de draw de alex.baca5@gmail.com. Pero cuando entro con
+  Google account no me deja. Me dice "sin permiso"». La licencia estaba bien
+  puesta; lo que faltaba era la **cuenta**. Crear una licencia escribe en
+  `suscripciones` y nada más, y las dos puertas de entrada —`POST
+  /auth/codigo` y el regreso de Google— piden una fila en `usuarios`. Nadie lo
+  había visto porque las seis licencias anteriores eran de Mike y de Fer, que
+  ya eran de una empresa; y la prueba que existía usaba el correo de Mike, así
+  que tampoco lo habría visto nunca.
+  Ahora la cuenta **se hace sola** al entrar (`cuentaPorLicencia`, en
+  `src/maestro.ts`). Lo que hay que no romper: (1) va en la ENTRADA y no en
+  `POST /licencias`, porque una licencia puede nacer por Stripe o por la
+  tienda y el hueco volvería a abrirse en cada camino; (2) basta con TENER
+  licencia, aunque hoy no sea vigente, para que a quien se le venció se le
+  pueda decir cuándo y qué pagar en vez de «sin permiso»; (3) esa cuenta por
+  sí sola no abre nada: sin empresa no ve ninguna.
 - **El requerimiento, y los tipos en cinco (22-sep, contrato 0.43.0).** Los
   tipos son Mueble, Puerta, Acabado, Servicio y **Requerimiento**; prefijos
   MW-, PT-, FX-, SV- y RQ-. El encargo venía contradictorio a propósito —«es

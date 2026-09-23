@@ -54,6 +54,38 @@ export async function crearUsuario(env: Env, correo: string, nombre?: string | n
   return u as Usuario;
 }
 
+/**
+ * La cuenta de quien compró una licencia y todavía no es de ninguna empresa.
+ *
+ * Encontrado el 23-sep-2026: Mike le activó a Alex su licencia de draw101 y
+ * Alex no pudo entrar —«sin permiso»—, ni con Google ni con código. Y la
+ * pantalla tenía razón: la licencia vive en `suscripciones`, pero en la suite
+ * no había ninguna cuenta con ese correo, y las dos puertas de entrada piden
+ * una. No se había visto antes porque las seis licencias anteriores eran de
+ * Mike y de Fer, que ya eran de una empresa.
+ *
+ * LA REGLA: **una licencia a tu nombre ES el permiso.** No hace falta pedirle
+ * a nadie que además te dé de alta: la cuenta se hace sola la primera vez que
+ * la persona la usa. Por sí sola no abre nada —quien no es de ninguna empresa
+ * no ve ninguna—; nada más sirve para probar quién es y recoger su licencia.
+ *
+ * Se hace AQUÍ y no al crear la licencia porque una licencia puede nacer por
+ * otros caminos —Stripe, la tienda de aplicaciones— y el hueco volvería a
+ * abrirse en cada uno. Éste es el único lugar por donde se entra.
+ *
+ * Y basta con TENER licencia, aunque hoy no sea vigente: a quien se le venció
+ * hay que dejarlo entrar para que la pantalla le diga cuándo venció y qué
+ * pagar. «Sin permiso» ahí sería mandarlo a buscar el problema donde no está.
+ */
+export async function cuentaPorLicencia(env: Env, correo: string, nombre?: string | null): Promise<UsuarioConSecretos | null> {
+  const suyo = normalizaCorreo(correo);
+  const lic = await env.MASTER.prepare(
+    `SELECT cliente FROM suscripciones WHERE lower(correo) = ? ORDER BY creado_at LIMIT 1`,
+  ).bind(suyo).first<{ cliente: string | null }>();
+  if (!lic) return null;
+  return { ...(await crearUsuario(env, suyo, nombre ?? lic.cliente)), pin_hash: null, clave_hash: null };
+}
+
 /* ─────────────── sesiones ─────────────── */
 
 /** Con qué se abrió una sesión. `codigo` y `google` prueban que la persona
