@@ -1799,6 +1799,76 @@ describe('0.11.0 · quote101 puede crear su negocio, y nada más', () => {
  *
  * `/admin/orgs/:o/quote` es la herramienta para encontrarlo: agrupa por el
  * `negocio_id` que trae cada renglón, no por la lista de negocios. */
+describe('0.46.0 · aprobar una cotización crea sus piezas en el proyecto', () => {
+  /* Mike, 23-sep: «cada renglón es un ítem que se va agregando con su
+   * producto, su descripción y su cantidad (que define cuántos ítems se crean
+   * de ese producto)», y se crean AL APROBAR la cotización. */
+  const ORG_A = 'aprobar-cot';
+  let neg = '', cli = '', proy = '', cot = '', puerta = '';
+  const Q = { app: 'cotizador101' } as const;
+
+  beforeAll(async () => {
+    await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: ORG_A, nombre: 'Aprobar cotizaciones' }) });
+    neg = (await pedir(`/orgs/${ORG_A}/negocios`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Taller', moneda: 'MXN' }) })).data.id;
+    cli = (await pedir(`/orgs/${ORG_A}/clientes`, { ...Q, method: 'POST', body: JSON.stringify({ nombre: 'Casa Lomas', negocio_id: neg }) })).data.id;
+    proy = (await pedir(`/orgs/${ORG_A}/proyectos`, { ...Q, method: 'POST', body: JSON.stringify({ nombre: 'Departamento', cliente_id: cli, negocio_id: neg }) })).data.id;
+    cot = (await pedir(`/orgs/${ORG_A}/cotizaciones`, { ...Q, method: 'POST', body: JSON.stringify({ negocio_id: neg, cliente_id: cli, total: 0, datos: { nombre: 'Corrida 1', proyecto_id: proy, versiones: [] } }) })).data.id;
+    puerta = (await pedir(`/orgs/${ORG_A}/productos`, { app: 'dash101', method: 'POST', body: JSON.stringify({ negocio_id: neg, codigo: 'PT-STD', nombre: 'Puerta estándar', precio: 250000 }) })).data.id;
+  });
+
+  const LINEAS = () => [
+    { nombre: 'Cocina integral', codigo: 'MW-01', descripcion: 'Laminado blanco', cantidad: 2, precio: 1374000 },
+    { nombre: 'Instalación en sitio', cantidad: 1, precio: 100000, tipo: 'servicio' },
+    { nombre: 'Puerta estándar', codigo: 'PT-STD', cantidad: 3, precio: 250000, producto_id: puerta, tipo: 'puerta' },
+  ];
+
+  it('una pieza por unidad, vendidas, en el proyecto; las iguales amarradas por su producto', async () => {
+    const r = await pedir(`/orgs/${ORG_A}/cotizaciones/${cot}/aprobar`, { ...Q, method: 'POST', body: JSON.stringify({ proyecto_id: proy, lineas: LINEAS() }) });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    expect(r.data.items).toBe(6);
+    expect(r.data.productos_nuevos, 'sólo la cocina necesita producto nuevo: la puerta ya traía el suyo y la instalación es una').toBe(1);
+    expect(r.data.cotizacion.estado).toBe('aceptada');
+    expect(r.data.cotizacion.datos.aprobacion.items).toBe(6);
+    expect(r.data.proyecto.precio_venta, 'el precio de venta es la suma de las piezas').toBe(2 * 1374000 + 100000 + 3 * 250000);
+
+    const items = (await pedir(`/orgs/${ORG_A}/items?proyecto_id=${proy}`, { app: 'dash101' })).data.filas as any[];
+    expect(items.length).toBe(6);
+    expect(items.every((i) => i.estado === 'vendido' && i.cantidad === 1 && i.aprobado_at), 'vendidas, de una en una, aprobadas').toBe(true);
+    expect(items.every((i) => i.origen?.cotizacion_id === cot), 'y cada una sabe de qué cotización salió').toBe(true);
+    const cocinas = items.filter((i) => i.nombre === 'Cocina integral');
+    expect(cocinas.length).toBe(2);
+    expect(cocinas[0].producto_id && cocinas[0].producto_id === cocinas[1].producto_id, 'las dos cocinas son el mismo producto').toBeTruthy();
+    expect(cocinas.every((i) => i.monto === 1374000 && i.clave === 'MW-01')).toBe(true);
+    const prod = (await pedir(`/orgs/${ORG_A}/productos/${cocinas[0].producto_id}`, { app: 'dash101' })).data;
+    expect(prod).toMatchObject({ nombre: 'Cocina integral', codigo: 'MW-01', precio: 1374000, descripcion: 'Laminado blanco' });
+    const inst = items.filter((i) => i.nombre === 'Instalación en sitio');
+    expect(inst.length === 1 && inst[0].producto_id === null, 'una sola pieza es su propio producto').toBe(true);
+    expect(items.filter((i) => i.producto_id === puerta).length, 'las del catálogo se amarran al producto que traían').toBe(3);
+  });
+
+  it('se aprueba una sola vez, y aprobada ya no se edita', async () => {
+    const otra = await pedir(`/orgs/${ORG_A}/cotizaciones/${cot}/aprobar`, { ...Q, method: 'POST', body: JSON.stringify({ proyecto_id: proy, lineas: LINEAS() }) });
+    expect(otra.estado, 'dos clics no meten las piezas dos veces').toBe(409);
+    expect(otra.error).toBe('ya_aprobada');
+    expect((await pedir(`/orgs/${ORG_A}/items?proyecto_id=${proy}`, { app: 'dash101' })).data.filas.length).toBe(6);
+    const cambio = await pedir(`/orgs/${ORG_A}/cotizaciones/${cot}`, { ...Q, method: 'PATCH', body: JSON.stringify({ datos: { nombre: 'otra cosa', versiones: [] } }) });
+    expect(cambio.estado, 'lo aprobado es lo que se vendió').toBe(409);
+    expect(cambio.error).toBe('ya_aprobada');
+  });
+
+  it('todo o nada: una línea mala no deja piezas sueltas, y «aceptada» sólo la pone aprobar', async () => {
+    const c2 = (await pedir(`/orgs/${ORG_A}/cotizaciones`, { ...Q, method: 'POST', body: JSON.stringify({ negocio_id: neg, cliente_id: cli, total: 0, datos: { nombre: 'Corrida 2', proyecto_id: proy, versiones: [] } }) })).data.id;
+    const mala = await pedir(`/orgs/${ORG_A}/cotizaciones/${c2}/aprobar`, { ...Q, method: 'POST', body: JSON.stringify({ proyecto_id: proy, lineas: [{ nombre: 'Buena', cantidad: 1, precio: 100 }, { nombre: 'Mala', cantidad: 0, precio: 100 }] }) });
+    expect(mala.estado).toBe(400);
+    const pesos = await pedir(`/orgs/${ORG_A}/cotizaciones/${c2}/aprobar`, { ...Q, method: 'POST', body: JSON.stringify({ proyecto_id: proy, lineas: [{ nombre: 'Con decimales', cantidad: 1, precio: 10.5 }] }) });
+    expect(pesos.error, 'el dinero va en centavos enteros').toBe('dinero_no_entero');
+    expect((await pedir(`/orgs/${ORG_A}/items?proyecto_id=${proy}`, { app: 'dash101' })).data.filas.length, 'ninguna pieza de más').toBe(6);
+    expect((await pedir(`/orgs/${ORG_A}/cotizaciones/${c2}`, Q)).data.estado).not.toBe('aceptada');
+    const atajo = await pedir(`/orgs/${ORG_A}/cotizaciones/${c2}`, { ...Q, method: 'PATCH', body: JSON.stringify({ estado: 'aceptada' }) });
+    expect(atajo.estado, 'marcarla aceptada sin crear sus piezas dejaría la obra sin lo vendido').toBe(400);
+  });
+});
+
 describe('0.45.1 · al dueño de la suite, sus empresas primero en /yo', () => {
   it('una empresa ajena que va antes por nombre no le gana el primer lugar a la suya', async () => {
     /* Lo que pasó el 22-sep: se dio de alta «BASE arquitectura», que por

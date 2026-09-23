@@ -17,7 +17,23 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.45.1 (A QUIEN ES DUEÑO DE LA SUITE, SUS EMPRESAS
+ * Versión del contrato: 0.46.0 (APROBAR UNA COTIZACIÓN CREA SUS PIEZAS. Mike,
+ * 23-sep-2026, con la hoja nueva de quote101: «cada renglón es un ítem que se
+ * va agregando con su producto, su descripción y su cantidad (que define
+ * cuántos ítems se crean de ese producto)», y se crean AL APROBAR.
+ *   · `POST /orgs/:o/cotizaciones/:id/aprobar {proyecto_id, lineas[]}`, con
+ *     cada línea `{nombre, descripcion?, codigo?, tipo?, cantidad, precio,
+ *     producto_id?}` y `precio` de UNA pieza en centavos. Crea una fila de
+ *     `items` por pieza, vendida, en el proyecto, con `clave` = el código y
+ *     `origen` = la cotización y la línea. Varias piezas de una línea las
+ *     amarra un producto: el que traía del catálogo o uno nuevo con los
+ *     datos de la línea. Una sola pieza es su propio producto único.
+ *   · Todo o nada, y una sola vez: la segunda contesta 409 `ya_aprobada`.
+ *   · La cotización queda `estado: 'aceptada'` con `datos.aprobacion`, y ya
+ *     no se edita (PATCH → 409 `ya_aprobada`). `aceptada` sólo la pone esta
+ *     ruta.
+ *
+ * 0.45.1 (A QUIEN ES DUEÑO DE LA SUITE, SUS EMPRESAS
  * PRIMERO. Mike, 23-sep-2026: «sigue sin aparecer mi info en quote101». La
  * causa no era un negocio: era la EMPRESA. Para el superadmin, `/yo` lista
  * todas las empresas por nombre, y quote101 abre `orgs[0]`. El 22-sep se dio
@@ -679,7 +695,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.45.1';
+export const VERSION_CONTRATO = '0.46.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

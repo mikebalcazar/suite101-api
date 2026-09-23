@@ -80,6 +80,19 @@ export interface Sujeto {
  * saliendo de las manos (TS2589). Esta interfaz dice lo mismo en plano: mismos
  * metodos, mismas firmas, envueltos en Promise porque del otro lado hay una
  * llamada a distancia. Si se agrega un metodo publico, se agrega aqui. */
+/** Una línea de la hoja de quote101 al aprobarse (0.46.0). `precio` es el
+ *  de UNA pieza, en centavos, ya con el descuento de la hoja repartido. */
+export interface LineaAprobada {
+  nombre: string; descripcion?: string | null; codigo?: string | null; tipo?: string | null;
+  cantidad: number; precio: number; producto_id?: string | null;
+}
+export interface AprobarCotizacion {
+  cotizacion_id: string; proyecto_id: string; lineas: LineaAprobada[]; usuario_id: string; app: string;
+}
+export type ResultadoAprobar =
+  | { ok: true; cotizacion: Fila; proyecto: Fila; items: number; productos_nuevos: number }
+  | { ok: false; error: string; detalle?: Record<string, any> };
+
 export interface ApiOrgDB {
   version(): Promise<number>;
   /** Puerta de servicio: borra TODO y vuelve a migrar. Solo DELETE /admin/orgs/:o fuera de producción. */
@@ -118,6 +131,7 @@ export interface ApiOrgDB {
   venderItems(args: {
     item_ids: string[]; proyecto_id?: string | null; nombre_proyecto?: string; app: string; usuario_id: string;
   }): Promise<{ ok: true; proyecto: Fila; items: Fila[] } | { ok: false; error: string; detalle?: Record<string, any> }>;
+  aprobarCotizacion(args: AprobarCotizacion): Promise<ResultadoAprobar>;
   registrarArchivo(datos: {
     id: string; r2_key: string; nombre: string; mime: string | null; bytes: number;
     de_tabla: string; de_id: string; subido_por: string;
@@ -1063,6 +1077,97 @@ export class OrgDB extends DurableObject<Env> {
     }
     const proyecto = this.recalcularProyecto(proyecto_id)!;
     return { ok: true, proyecto, items: args.item_ids.map((id) => this.obtener('items', id)!).filter(Boolean) };
+  }
+
+  /* ─────────────── aprobar una cotización (0.46.0) ───────────────
+   *
+   * Mike, 23-sep-2026: cada renglón de la hoja de quote101 «es un ítem que se
+   * va agregando con su producto, su descripción y su cantidad (que define
+   * cuántos ítems se crean de ese producto)». Y se crean AL APROBAR: mientras
+   * se cotiza, los renglones sólo viven en la cotización, para que las
+   * corridas y versiones descartadas no llenen el proyecto de piezas que nadie
+   * autorizó.
+   *
+   * Por eso aquí:
+   *   · UNA fila de `items` por pieza, vendida y en el proyecto. «× 3» son
+   *     tres ítems, cada uno con su etapa y su lugar en el plano.
+   *   · Si son varias piezas del mismo renglón, las amarra un PRODUCTO
+   *     (0.35.0): el que traía el renglón del catálogo, o uno nuevo con el
+   *     nombre, la descripción y el precio del renglón. Una pieza sola es su
+   *     propio producto único (`producto_id` NULL), como en el resto de la
+   *     suite.
+   *   · Todo o nada: si una línea no sirve, no se crea ninguna pieza.
+   *   · Una cotización se aprueba UNA vez. La segunda contesta 409: dos
+   *     clics seguidos no pueden meter las piezas dos veces. */
+  aprobarCotizacion(args: AprobarCotizacion): ResultadoAprobar {
+    const cot = this.obtener('cotizaciones', args.cotizacion_id);
+    if (!cot) return { ok: false, error: 'no_encontrado', detalle: { cotizacion_id: args.cotizacion_id } };
+    if (cot.estado === 'aceptada') {
+      const datos = (cot.datos ?? {}) as Record<string, any>;
+      return { ok: false, error: 'ya_aprobada', detalle: { aprobacion: datos.aprobacion ?? null } };
+    }
+    const proyecto = this.obtener('proyectos', args.proyecto_id);
+    if (!proyecto) return { ok: false, error: 'no_encontrado', detalle: { proyecto_id: args.proyecto_id } };
+    if (!Array.isArray(args.lineas) || !args.lineas.length) return { ok: false, error: 'datos_invalidos', detalle: { falta: 'lineas' } };
+
+    const MAX_PIEZAS = 1000;
+    let piezas = 0;
+    for (const [i, l] of args.lineas.entries()) {
+      const n = Number(l.cantidad);
+      if (!String(l.nombre ?? '').trim()) return { ok: false, error: 'datos_invalidos', detalle: { linea: i + 1, falta: 'nombre' } };
+      if (!Number.isInteger(n) || n < 1) return { ok: false, error: 'datos_invalidos', detalle: { linea: i + 1, cantidad: l.cantidad, regla: 'entero de 1 o más' } };
+      if (!Number.isInteger(Number(l.precio)) || Number(l.precio) < 0) {
+        return { ok: false, error: 'dinero_no_entero', detalle: { linea: i + 1, precio: l.precio, regla: 'centavos, INTEGER, de una pieza' } };
+      }
+      if (l.producto_id && !this.obtener('productos', String(l.producto_id))) {
+        return { ok: false, error: 'no_encontrado', detalle: { linea: i + 1, producto_id: l.producto_id } };
+      }
+      piezas += n;
+    }
+    if (piezas > MAX_PIEZAS) return { ok: false, error: 'datos_invalidos', detalle: { piezas, maximo: MAX_PIEZAS } };
+
+    const negocio_id = String(proyecto.negocio_id ?? cot.negocio_id);
+    const contexto = { app: args.app, usuario_id: args.usuario_id };
+    let creados = 0;
+    let productosNuevos = 0;
+    this.ctx.storage.transactionSync(() => {
+      args.lineas.forEach((l, i) => {
+        const n = Number(l.cantidad);
+        const codigo = String(l.codigo ?? '').trim();
+        let producto_id: string | null = l.producto_id ? String(l.producto_id) : null;
+        if (!producto_id && n > 1) {
+          /* El código del producto es único dentro del negocio. Si ya lo usa
+           * otro, el producto nuevo nace sin código en vez de tronar la
+           * aprobación: el renglón sigue diciendo su código en cada pieza. */
+          const ocupado = codigo
+            ? this.sql.exec(`SELECT 1 FROM productos WHERE negocio_id = ? AND codigo = ?`, negocio_id, codigo).toArray().length > 0
+            : false;
+          const p = this.crear('productos', {
+            negocio_id, codigo: ocupado ? '' : codigo, nombre: String(l.nombre).trim(),
+            descripcion: l.descripcion ?? null, tipo: l.tipo || 'mueble', precio: Number(l.precio), moneda: 'MXN',
+          }, contexto);
+          producto_id = String(p.id);
+          productosNuevos++;
+        }
+        for (let k = 0; k < n; k++) {
+          this.crear('items', {
+            negocio_id, cliente_id: proyecto.cliente_id, proyecto_id: args.proyecto_id,
+            nombre: String(l.nombre).trim(), descripcion: l.descripcion ?? null, tipo: l.tipo || 'mueble',
+            clave: codigo || null, monto: Number(l.precio), cantidad: 1, moneda: 'MXN', estado: 'vendido',
+            producto_id, origen: { app: 'cotizador101', cotizacion_id: args.cotizacion_id, linea: i + 1 },
+          }, contexto);
+          creados++;
+        }
+      });
+      const datos = { ...((cot.datos ?? {}) as Record<string, any>) };
+      datos.aprobacion = { at: ahora(), por: args.usuario_id, proyecto_id: args.proyecto_id, items: creados };
+      this.sql.exec(
+        `UPDATE cotizaciones SET estado = 'aceptada', datos = ?, actualizado_at = ? WHERE id = ?`,
+        JSON.stringify(datos), ahora(), args.cotizacion_id,
+      );
+    });
+    const p = this.recalcularProyecto(args.proyecto_id)!;
+    return { ok: true, cotizacion: this.obtener('cotizaciones', args.cotizacion_id)!, proyecto: p, items: creados, productos_nuevos: productosNuevos };
   }
 
   /** Alta de un archivo ya subido a R2. Va aparte del CRUD genérico porque el
