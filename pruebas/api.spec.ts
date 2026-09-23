@@ -1787,6 +1787,82 @@ describe('0.11.0 · quote101 puede crear su negocio, y nada más', () => {
   });
 });
 
+/* EL DEFECTO DEL 23-SEP-2026. Mike: «desapareció mi info de quote», y con el
+ * selector de negocio puesto (quote101 G83) seguía vacío en los tres.
+ *
+ * Lo que esta prueba deja escrito es el MECANISMO por el que eso pasa sin
+ * que nadie borre un solo cliente: `clientes`, `proyectos` y `cotizaciones`
+ * guardan su `negocio_id` sin llave foránea (0001), así que borrar un
+ * negocio que no tiene cuentas se permite y lo suyo se queda en la base
+ * apuntando a nada. Ninguna app lo enseña —todas filtran por un negocio que
+ * existe— y por eso se lee como perdido.
+ *
+ * `/admin/orgs/:o/quote` es la herramienta para encontrarlo: agrupa por el
+ * `negocio_id` que trae cada renglón, no por la lista de negocios. */
+describe('0.45.0 · dónde está lo de quote101, incluido lo que quedó huérfano', () => {
+  const ORG_Q = 'quote-huerfano';
+  let alfa = '', zeta = '';
+
+  beforeAll(async () => {
+    await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: ORG_Q, nombre: 'Con un negocio borrado' }) });
+    alfa = (await pedir(`/orgs/${ORG_Q}/negocios`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Alfa', moneda: 'MXN' }) })).data.id;
+    zeta = (await pedir(`/orgs/${ORG_Q}/negocios`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Zeta', moneda: 'MXN' }) })).data.id;
+    // Lo de quote101 vive en Alfa: dos clientes y una cotización.
+    const cli = await pedir(`/orgs/${ORG_Q}/clientes`, { app: 'cotizador101', method: 'POST', body: JSON.stringify({ nombre: 'Cliente que se pierde', negocio_id: alfa }) });
+    await pedir(`/orgs/${ORG_Q}/clientes`, { app: 'cotizador101', method: 'POST', body: JSON.stringify({ nombre: 'Otro cliente', negocio_id: alfa }) });
+    await pedir(`/orgs/${ORG_Q}/cotizaciones`, { app: 'cotizador101', method: 'POST', body: JSON.stringify({ negocio_id: alfa, cliente_id: cli.data.id, datos: { nombre: 'Cocina', versiones: [] } }) });
+  });
+
+  it('un negocio con clientes o cotizaciones ya no se borra: dejaría todo huérfano', async () => {
+    /* Hasta el 23-sep esto contestaba 200: no hay llave foránea de
+     * `clientes`/`cotizaciones` a `negocios`, y lo suyo se quedaba apuntando a
+     * nada. Ahora es el mismo 409 que da un proyecto con ítems. */
+    const borra = await pedir(`/orgs/${ORG_Q}/negocios/${alfa}`, { app: 'dash101', method: 'DELETE' });
+    expect(borra.estado, 'con cosas adentro, no se va').toBe(409);
+    expect(borra.error).toBe('en_uso');
+    // Uno vacío sí se puede borrar: la regla no traba lo que no hace daño.
+    const vacio = (await pedir(`/orgs/${ORG_Q}/negocios`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Se va', moneda: 'MXN' }) })).data.id;
+    expect((await pedir(`/orgs/${ORG_Q}/negocios/${vacio}`, { app: 'dash101', method: 'DELETE' })).estado).toBe(200);
+  });
+
+  it('lo que YA quedó huérfano no lo ve ninguna app', async () => {
+    /* Así llega lo de antes de esta regla: renglones que apuntan a un negocio
+     * que ya no está. Se fabrica escribiendo con un `negocio_id` que no es
+     * ningún negocio, que es exactamente lo que dejaba un borrado. */
+    await pedir(`/orgs/${ORG_Q}/clientes`, { app: 'cotizador101', method: 'POST', body: JSON.stringify({ nombre: 'Cliente perdido', negocio_id: 'negocio-borrado' }) });
+    await pedir(`/orgs/${ORG_Q}/cotizaciones`, { app: 'cotizador101', method: 'POST', body: JSON.stringify({ negocio_id: 'negocio-borrado', datos: { nombre: 'Baño', versiones: [] } }) });
+    const negocios = await pedir(`/orgs/${ORG_Q}/negocios`, { app: 'cotizador101' });
+    expect(negocios.data.filas.some((n: any) => n.id === 'negocio-borrado'), 'no sale en el selector').toBe(false);
+    for (const n of negocios.data.filas) {
+      const cl = await pedir(`/orgs/${ORG_Q}/clientes?negocio_id=${n.id}`, { app: 'cotizador101' });
+      expect(cl.data.filas.some((c: any) => c.nombre === 'Cliente perdido'), `ni aparece en «${n.nombre}»`).toBe(false);
+    }
+  });
+
+  it('la herramienta los encuentra: huérfanos primero, con cuántos y de cuándo', async () => {
+    const r = await pedir(`/admin/orgs/${ORG_Q}/quote`);
+    expect(r.estado).toBe(200);
+    const [primero, ...resto] = r.data.negocios;
+    expect(primero.negocio_id).toBe('negocio-borrado');
+    expect(primero.existe, 'el negocio ya no existe').toBe(false);
+    expect(primero.nombre).toBeNull();
+    expect(primero.clientes).toBe(1);
+    expect(primero.cotizaciones).toBe(1);
+    expect(primero.ultima_cotizacion, 'y dice de cuándo es lo último, para reconocer cuál era el tuyo').toMatch(/^\d{4}-\d{2}-\d{2}/);
+    const a = resto.find((n: any) => n.negocio_id === alfa);
+    expect(a, 'los negocios que sí existen salen con lo suyo').toMatchObject({ existe: true, nombre: 'Alfa', clientes: 2, cotizaciones: 1 });
+    const z = resto.find((n: any) => n.negocio_id === zeta);
+    expect(z, 'y los vacíos también, para ver que ahí no está').toMatchObject({ existe: true, nombre: 'Zeta', clientes: 0, cotizaciones: 0 });
+  });
+
+  it('es sólo del dueño de la suite', async () => {
+    const antes = galleta;
+    galleta = '';
+    expect((await pedir(`/admin/orgs/${ORG_Q}/quote`)).estado).toBe(401);
+    galleta = antes;
+  });
+});
+
 describe('17 · la sesión la decide quién entra, no con qué entró (contrato 0.12.0)', () => {
   const MES = 30 * 24 * 3600;
   const MEDIO_DIA = 12 * 3600;

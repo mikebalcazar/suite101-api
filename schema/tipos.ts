@@ -17,7 +17,26 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.44.0 (UNA LICENCIA A TU NOMBRE ES EL PERMISO.
+ * Versión del contrato: 0.45.0 (UN NEGOCIO CON COSAS ADENTRO NO SE BORRA, Y
+ * LO QUE YA QUEDÓ HUÉRFANO SE PUEDE ENCONTRAR. Mike, 23-sep-2026:
+ * «desapareció mi info de quote». Con el selector de negocio de quote101 G83
+ * puesto, seguía vacío en los tres negocios de forespot.
+ *   · `clientes`, `proyectos`, `cotizaciones` y las demás tablas guardan su
+ *     `negocio_id` SIN llave foránea (0001); sólo `cuentas`, conciliaciones
+ *     y raya la tienen. Así que borrar un negocio sin cuentas se permitía y
+ *     todo lo suyo quedaba apuntando a nada: invisible desde todas las apps,
+ *     que filtran por un negocio que existe. Se lee como perdido sin que se
+ *     haya borrado un solo cliente.
+ *   · Desde aquí `DELETE /orgs/:o/negocios/:id` contesta 409 `en_uso` si
+ *     CUALQUIER tabla que traiga `negocio_id` tiene renglones de ese negocio.
+ *     Se revisan todas las que lo traen, no una lista a mano.
+ *   · `GET /admin/orgs/:o/quote` (sólo superadmin, sólo lee): lo de quote101
+ *     agrupado por el `negocio_id` que trae cada renglón —no por la lista de
+ *     negocios—, con `existe: false` para los huérfanos, que salen primero,
+ *     y la fecha de la última cotización de cada grupo para reconocer cuál
+ *     era el trabajo de quién.
+ *
+ * 0.44.0 (UNA LICENCIA A TU NOMBRE ES EL PERMISO.
  * Encontrado el 23-sep-2026: Mike le activó a Alex su licencia de draw101 y
  * Alex no pudo entrar —«sin permiso»—, ni con Google ni con código. La
  * licencia estaba en `suscripciones`; lo que no había era una fila en
@@ -647,7 +666,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.44.0';
+export const VERSION_CONTRATO = '0.45.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

@@ -154,6 +154,8 @@ export interface ApiOrgDB {
   conteosQuell(): Promise<Record<string, number>>;
   /** Cuántas filas hay en cada tabla de roster101. Para master101 y para medir la mudanza. */
   conteosRoster(): Promise<Record<string, number>>;
+  /** Lo de quote101, POR NEGOCIO, incluidos los negocios que ya no existen. */
+  conteosQuote(): Promise<ConteoQuote[]>;
   /* Órdenes de compra (0008). Los permisos los resuelve el Worker; aquí sólo
    * viven las reglas que son verdad de la base —una orden pagada no se vuelve
    * a pagar— y lo que tiene que pasar todo o nada. */
@@ -343,6 +345,18 @@ export const TABLAS_QUELL = [
 
 /** Lo que devuelve una corrida del importador. Todo son números medidos
  *  dentro del SQLite, no lo que el importador creyó escribir. */
+/** Lo de quote101 de un negocio —o de un `negocio_id` que ya no es ningún
+ *  negocio: `existe: false`—. Ver `conteosQuote`. */
+export interface ConteoQuote {
+  negocio_id: string | null;
+  nombre: string | null;
+  existe: boolean;
+  clientes: number;
+  proyectos: number;
+  cotizaciones: number;
+  ultima_cotizacion: string | null;
+}
+
 export interface Importacion {
   antes: Record<string, number>;
   despues: Record<string, number>;
@@ -667,6 +681,23 @@ export class OrgDB extends DurableObject<Env> {
   borrar(tabla: Tabla, id: string): boolean | 'en_uso' {
     const antes = this.obtener(tabla, id);
     if (!antes) return false;
+    /* UN NEGOCIO CON COSAS ADENTRO NO SE BORRA. Las llaves foráneas sólo
+     * cuidan `cuentas`, conciliaciones y raya; `clientes`, `proyectos`,
+     * `cotizaciones` y las demás guardan su `negocio_id` sin llave (0001). Así
+     * que hasta el 23-sep-2026 un negocio sin cuentas se borraba y todo lo
+     * suyo se quedaba en la base apuntando a nada: invisible desde todas las
+     * apps, que filtran por un negocio que existe. Se leía como perdido —Mike:
+     * «desapareció mi info de quote»—.
+     *
+     * Se revisa TODA tabla que traiga `negocio_id`, no una lista escrita a
+     * mano: la tabla que alguien agregue mañana queda cuidada sin acordarse. */
+    if (tabla === 'negocios') {
+      for (const t of TABLAS) {
+        if (t === 'negocios' || !DEFS[t].cols.negocio_id) continue;
+        const n = (this.sql.exec(`SELECT COUNT(*) AS n FROM ${t} WHERE negocio_id = ?`, id).one() as { n: number }).n;
+        if (n > 0) return 'en_uso';
+      }
+    }
     // Las llaves foráneas se aplican. Se contesta con un valor y no con una
     // excepción: cruzar el RPC con una excepción deja «uncaught» en el registro
     // del Worker aunque el Worker la atrape.
@@ -1272,6 +1303,46 @@ export class OrgDB extends DurableObject<Env> {
 
   conteosQuell(): Record<string, number> { return this.contarTablas(TABLAS_QUELL); }
   conteosRoster(): Record<string, number> { return this.contarTablas(TABLAS_ROSTER); }
+
+  /**
+   * Lo de quote101 contado POR NEGOCIO, y con los negocios que ya no existen.
+   *
+   * Nació el 23-sep-2026: Mike, «desapareció mi info de quote», y con el
+   * selector de negocio puesto seguía vacío en los tres. La razón por la que
+   * eso puede pasar sin que se haya borrado nada: `clientes`, `proyectos` y
+   * `cotizaciones` guardan su `negocio_id` SIN llave foránea (0001). Borrar
+   * un negocio que no tiene cuentas se permite, y lo que colgaba de él se
+   * queda en la base apuntando a un negocio que ya no está — invisible desde
+   * todas las apps, porque todas filtran por un negocio que sí existe.
+   *
+   * Por eso aquí se agrupa por el `negocio_id` que trae cada renglón, NO por
+   * la lista de negocios: un grupo sin negocio es justo lo que se busca.
+   * Sólo lee.
+   */
+  conteosQuote(): ConteoQuote[] {
+    const negocios = new Map(
+      (this.sql.exec(`SELECT id, nombre FROM negocios`).toArray() as Array<{ id: string; nombre: string }>).map((n) => [n.id, n.nombre]),
+    );
+    const grupos = new Map<string, ConteoQuote>();
+    const grupo = (id: string | null): ConteoQuote => {
+      const k = id ?? '';
+      let g = grupos.get(k);
+      if (!g) {
+        g = { negocio_id: id, nombre: id ? negocios.get(id) ?? null : null, existe: !!id && negocios.has(id), clientes: 0, proyectos: 0, cotizaciones: 0, ultima_cotizacion: null };
+        grupos.set(k, g);
+      }
+      return g;
+    };
+    for (const id of negocios.keys()) grupo(id);
+    for (const t of ['clientes', 'proyectos', 'cotizaciones'] as const) {
+      const filas = this.sql.exec(`SELECT negocio_id, COUNT(*) AS n FROM ${t} GROUP BY negocio_id`).toArray() as Array<{ negocio_id: string | null; n: number }>;
+      for (const f of filas) grupo(f.negocio_id || null)[t] = f.n;
+    }
+    const ultimas = this.sql.exec(`SELECT negocio_id, MAX(COALESCE(actualizado_at, creado_at)) AS u FROM cotizaciones GROUP BY negocio_id`).toArray() as Array<{ negocio_id: string | null; u: string | null }>;
+    for (const f of ultimas) grupo(f.negocio_id || null).ultima_cotizacion = f.u;
+    // Los huérfanos primero: son lo que se vino a buscar.
+    return [...grupos.values()].sort((a, b) => Number(a.existe) - Number(b.existe) || b.cotizaciones - a.cotizaciones);
+  }
 
   private contarTablas(tablas: readonly string[]): Record<string, number> {
     const out: Record<string, number> = {};

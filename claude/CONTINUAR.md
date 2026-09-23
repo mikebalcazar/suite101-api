@@ -358,6 +358,17 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   supply101), workshop101 (la casilla «pedir compras») y master101 (la
   columna). **Pendiente de Mike:** palomearle «pedir compras» a Fer y a Goyo
   en workshop101; no se lo puse yo porque dar un permiso es decisión suya.
+- **Un negocio con cosas adentro no se borra (23-sep, contrato 0.45.0).**
+  Mike: «desapareció mi info de quote». Dos causas encadenadas: quote101
+  abría siempre el primer negocio por nombre (arreglado en quote101 G83, con
+  selector y memoria), y aun con el selector seguía vacío en los tres. La
+  segunda: `clientes`/`proyectos`/`cotizaciones` guardan `negocio_id` SIN
+  llave foránea, así que borrar un negocio sin cuentas dejaba todo lo suyo
+  apuntando a nada. Ahora ese borrado da 409 `en_uso`, y
+  `GET /admin/orgs/:o/quote` (master101) enseña lo de quote101 por negocio,
+  huérfanos primero. Lo que NO está hecho todavía: devolver lo huérfano a un
+  negocio. Eso es una escritura en producción y la decide Mike al ver los
+  números.
 - **Una licencia a tu nombre es el permiso (23-sep, contrato 0.44.0).** Mike:
   «activé la licencia de draw de alex.baca5@gmail.com. Pero cuando entro con
   Google account no me deja. Me dice "sin permiso"». La licencia estaba bien

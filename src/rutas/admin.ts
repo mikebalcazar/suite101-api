@@ -69,6 +69,18 @@ rutas.get('/orgs/:o/quell', async (c) => {
   return ok(c, { org: id, filas });
 });
 
+/* 0.45.0 · lo de quote101 POR NEGOCIO, incluidos los que ya no existen. Sólo
+ * lee. Nació de «desapareció mi info de quote» (Mike, 23-sep): ver
+ * `conteosQuote` en el OrgDB para por qué un negocio borrado deja datos
+ * invisibles sin haberlos borrado. */
+rutas.get('/orgs/:o/quote', async (c) => {
+  if (!(await soySuper(c))) return err(c, 'sin_permiso', 403);
+  const id = c.req.param('o')!;
+  if (!(await org(c.env, id))) return err(c, 'org_desconocida', 404);
+  const negocios = await (c.env.ORG.get(c.env.ORG.idFromName(id)) as unknown as ApiOrgDB).conteosQuote();
+  return ok(c, { org: id, negocios });
+});
+
 /* 0.17.0 · lo mismo para roster101: cuántos expedientes, documentos, cuentas. */
 rutas.get('/orgs/:o/roster', async (c) => {
   if (!(await soySuper(c))) return err(c, 'sin_permiso', 403);
