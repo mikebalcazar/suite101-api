@@ -2322,6 +2322,82 @@ describe('18 · licencias por suscripción (0.13.0; tipo y perpetua desde 0.19.0
     await pedir(`/licencias/${porCuenta.id}`, { method: 'DELETE' });
   });
 
+  /* EL DEFECTO DEL 23-SEP-2026. Mike: «activé la licencia de draw de
+   * alex.baca5@gmail.com. Pero cuando entro con Google account no me deja. Me
+   * dice "sin permiso"».
+   *
+   * La licencia estaba bien puesta. Lo que faltaba era la cuenta: crear una
+   * licencia escribe en `suscripciones` y nada más, y las dos puertas de
+   * entrada piden una fila en `usuarios`. Nunca se había visto porque las
+   * seis licencias que existían eran de Mike y de Fer, que ya eran de una
+   * empresa — y la prueba de arriba usa el correo de Mike, así que tampoco lo
+   * habría visto nunca.
+   *
+   * Por eso ésta usa un correo que NO es de ninguna empresa: es la única
+   * forma de medir lo que le pasó a Alex. */
+  it('quien tiene licencia a su nombre y no es de ninguna empresa entra, y su cuenta se hace sola', async () => {
+    await comoSuper();
+    const SUYO = 'licenciado-suelto@ejemplo.mx';
+    const HUELLA_G = 'maquina-g-0123456789abcdef';
+
+    // Antes de la licencia, ese correo no existe para la suite: no le llega código.
+    galleta = '';
+    const antes = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo: SUYO }) });
+    expect(antes.estado).toBe(200);
+    /* Fuera de producción la API devuelve el código en la respuesta, así que
+     * ES el código —y no `enviado`, que aquí es falso porque el correo no
+     * está configurado— lo que dice si se le abrió la puerta a alguien. */
+    expect(antes.data.codigo_prueba, 'sin licencia y sin empresa no se le genera ningún código').toBeUndefined();
+    expect(antes.data.mensaje, 'y no se dice si ese correo existe o no: esta ruta no es un directorio').toMatch(/si ese correo/i);
+
+    await comoSuper();
+    const suya = await pedir('/licencias', { method: 'POST', body: JSON.stringify({ cliente: 'Alguien de Fuera', correo: SUYO, programa: 'draw101', perpetua: true }) });
+    expect(suya.estado).toBe(201);
+
+    // Y ahora sí: la licencia es el permiso, y la cuenta se hace sola.
+    galleta = '';
+    const c = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo: SUYO }) });
+    expect(c.data.codigo_prueba, 'con licencia a su nombre, el código sí sale').toMatch(/^\d{6}$/);
+    const e = await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: SUYO, codigo: c.data.codigo_prueba }) });
+    expect(e.estado, 'y entra: esto es lo que contestaba sin_permiso').toBe(200);
+
+    const yo = await pedir('/yo');
+    expect(yo.estado).toBe(200);
+    expect(yo.data.usuario.correo).toBe(SUYO);
+    expect(yo.data.usuario.nombre, 'se llama como dice su licencia, no en blanco').toBe('Alguien de Fuera');
+    expect(yo.data.orgs, 'y su cuenta no lo mete a ninguna empresa: sólo sirve para su licencia').toEqual([]);
+    expect(yo.data.superadmin).toBeFalsy();
+
+    // Lo que vino a hacer: recoger su licencia.
+    const act = await pedir('/licencias/mia', { method: 'POST', body: JSON.stringify({ programa: 'draw101', huella: HUELLA_G, version: '1.0.0' }) });
+    expect(act.estado, 'y la app se activa').toBe(201);
+    expect((await abrir(act.data.token)).vale).toBe(true);
+
+    await comoSuper();
+    await pedir(`/licencias/${suya.data.id}`, { method: 'DELETE' });
+  });
+
+  it('a quien se le venció la licencia se le deja entrar, para poder decirle qué pagar', async () => {
+    /* Basta con TENER licencia, no con que hoy sea vigente: «sin permiso» a
+     * quien se le venció lo manda a buscar el problema donde no está. Con la
+     * cuenta hecha, `/licencias/mia` le dice cuándo venció. */
+    await comoSuper();
+    const VENCIDO = 'licencia-vencida@ejemplo.mx';
+    const vieja = await pedir('/licencias', { method: 'POST', body: JSON.stringify({ cliente: 'Se le Venció', correo: VENCIDO, programa: 'draw101', paga_hasta: dia(-2) }) });
+    expect(vieja.data.vigente).toBe(false);
+
+    galleta = '';
+    const c = await pedir('/auth/codigo', { method: 'POST', body: JSON.stringify({ correo: VENCIDO }) });
+    expect(c.data.codigo_prueba, 'entra aunque no esté al corriente').toMatch(/^\d{6}$/);
+    await pedir('/auth/entrar', { method: 'POST', body: JSON.stringify({ correo: VENCIDO, codigo: c.data.codigo_prueba }) });
+    const r = await pedir('/licencias/mia', { method: 'POST', body: JSON.stringify({ programa: 'draw101', huella: 'maquina-h-0123456789abcdef' }) });
+    expect(r.error, 'y la pantalla le puede decir qué le falta').toBe('sin_pago');
+    expect(r.detalle.paga_hasta).toBe(dia(-2));
+
+    await comoSuper();
+    await pedir(`/licencias/${vieja.data.id}`, { method: 'DELETE' });
+  });
+
   it('la pantalla que abre la app se sirve sin sesión y sin X-App', async () => {
     galleta = '';
     const r = await SELF.fetch('https://api.prueba/licencias/entrar?programa=nest101&huella=maquina-c-0123456789abcdef&app=nest101');
