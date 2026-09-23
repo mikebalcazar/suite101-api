@@ -11,7 +11,7 @@
 
 import { Hono } from 'hono';
 import { DEFS, columnasDinero, esTabla } from '../tablas';
-import type { ApiOrgDB } from '../org-db';
+import type { ApiOrgDB, LineaAprobada } from '../org-db';
 import { APPEND_ONLY, POR_SU_RUTA, revisarEscritura } from '../permisos';
 import { acceso, accesoDe, miembro, org, ponerAcceso, quitarAcceso, usuarioPorCorreo, usuarioPorId } from '../maestro';
 import { invitarClienteEnSuite } from '../clientes';
@@ -216,6 +216,32 @@ rutas.post('/:o/items/exportar', async (c) => {
     usuario_id: c.get('quien').usuario_id,
   });
   return ok(c, r, 201);
+});
+
+/** POST /orgs/:o/cotizaciones/:id/aprobar {proyecto_id, lineas[]} (0.46.0)
+ *
+ *  Mike, 23-sep: los ítems de una cotización se crean AL APROBARLA. Crea una
+ *  pieza vendida por cada unidad de cada línea, en el proyecto, amarradas por
+ *  su producto cuando son varias (ver `aprobarCotizacion`). La cotización
+ *  queda `aceptada` y ya no se edita: lo aprobado es lo que se vendió. */
+rutas.post('/:o/cotizaciones/:id/aprobar', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'aprobar una cotización lo hace quien es de la empresa' });
+  const app = c.get('app');
+  const permiso = revisarEscritura('items', app, ['nombre', 'monto', 'cantidad', 'estado', 'proyecto_id', 'origen']);
+  if (!permiso.ok) return err(c, permiso.error, 403, permiso.detalle);
+  const cuerpo = await c.req.json<{ proyecto_id?: string; lineas?: LineaAprobada[] }>().catch(() => ({}) as never);
+  if (!cuerpo.proyecto_id) return err(c, 'datos_invalidos', 400, { falta: 'proyecto_id' });
+  if (!Array.isArray(cuerpo.lineas) || !cuerpo.lineas.length) return err(c, 'datos_invalidos', 400, { falta: 'lineas' });
+  const r = await stub(c).aprobarCotizacion({
+    cotizacion_id: c.req.param('id')!, proyecto_id: cuerpo.proyecto_id, lineas: cuerpo.lineas,
+    usuario_id: quien.usuario_id, app,
+  });
+  if (!r.ok) {
+    const estado = r.error === 'no_encontrado' ? 404 : r.error === 'ya_aprobada' ? 409 : 400;
+    return err(c, r.error, estado, r.detalle);
+  }
+  return ok(c, { cotizacion: r.cotizacion, proyecto: r.proyecto, items: r.items, productos_nuevos: r.productos_nuevos }, 201);
 });
 
 rutas.post('/:o/items/vender', async (c) => {
@@ -1102,6 +1128,20 @@ rutas.patch('/:o/:tabla/:id', async (c) => {
 
   const malDinero = revisarDinero(tabla, datos);
   if (malDinero) return err(c, 'dinero_no_entero', 400, malDinero);
+
+  /* 0.46.0 · Una cotización aprobada es lo que se vendió: sus piezas ya están
+   * en el proyecto. Si se pudiera seguir editando, el papel y la obra dirían
+   * cosas distintas. Para cambiarla se hace otra corrida. Y `aceptada` sólo
+   * la pone la aprobación, que es la que crea las piezas. */
+  if (tabla === 'cotizaciones') {
+    const actual = await stub(c).obtener('cotizaciones', c.req.param('id')!);
+    if (actual?.estado === 'aceptada') {
+      return err(c, 'ya_aprobada', 409, { motivo: 'una cotización aprobada ya no se edita; para cambiarla se hace otra corrida' });
+    }
+    if (datos.estado === 'aceptada') {
+      return err(c, 'datos_invalidos', 400, { estado: 'aceptada solo la pone POST /orgs/:o/cotizaciones/:id/aprobar' });
+    }
+  }
 
   const fila = await stub(c).actualizar(tabla, c.req.param('id')!, datos);
   if (!fila) return err(c, 'no_encontrado', 404);
