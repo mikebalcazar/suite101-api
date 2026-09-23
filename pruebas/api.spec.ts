@@ -1799,6 +1799,33 @@ describe('0.11.0 · quote101 puede crear su negocio, y nada más', () => {
  *
  * `/admin/orgs/:o/quote` es la herramienta para encontrarlo: agrupa por el
  * `negocio_id` que trae cada renglón, no por la lista de negocios. */
+describe('0.45.1 · al dueño de la suite, sus empresas primero en /yo', () => {
+  it('una empresa ajena que va antes por nombre no le gana el primer lugar a la suya', async () => {
+    /* Lo que pasó el 22-sep: se dio de alta «BASE arquitectura», que por
+     * nombre va antes que «Forespot», y quote101 —que abre `orgs[0]`— le
+     * enseñó a Mike la empresa nueva, vacía. Aquí: «Aa ajena» (Mike no es
+     * miembro) contra «Zz la mía» (Mike es su director). */
+    await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: 'aa-ajena', nombre: 'Aa ajena' }) });
+    await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: 'zz-la-mia', nombre: 'Zz la mía', director: { correo: CORREO, nombre: 'Mike' } }) });
+    const yo = await pedir('/yo');
+    expect(yo.data.superadmin).toBe(true);
+    const ids = yo.data.orgs.map((o: any) => o.id);
+    expect(ids).toContain('aa-ajena');
+    expect(ids.indexOf('zz-la-mia'), 'la suya antes que la ajena').toBeLessThan(ids.indexOf('aa-ajena'));
+    const suya = yo.data.orgs.find((o: any) => o.id === 'zz-la-mia');
+    const ajena = yo.data.orgs.find((o: any) => o.id === 'aa-ajena');
+    expect(suya.miembro).toBe(true);
+    expect(ajena.miembro).toBe(false);
+    // Todas las suyas van antes que cualquier ajena, y cada grupo por nombre.
+    const marcas = yo.data.orgs.map((o: any) => o.miembro);
+    expect(marcas.indexOf(false) === -1 || marcas.lastIndexOf(true) < marcas.indexOf(false), 'ninguna suya después de una ajena').toBe(true);
+    for (const grupo of [true, false]) {
+      const nombres = yo.data.orgs.filter((o: any) => o.miembro === grupo).map((o: any) => o.nombre);
+      expect(nombres).toEqual([...nombres].sort((a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)));
+    }
+  });
+});
+
 describe('0.45.0 · dónde está lo de quote101, incluido lo que quedó huérfano', () => {
   const ORG_Q = 'quote-huerfano';
   let alfa = '', zeta = '';
