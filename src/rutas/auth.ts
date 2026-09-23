@@ -402,15 +402,26 @@ export async function yo(c: Ctx) {
   const soySuper = await esSuperadmin(c.env, s.usuario_id);
 
   const lista = soySuper ? await orgs(c.env) : [];
-  const mias: Array<{ id: string; nombre: string; rol: string; apps: string[]; negocios: string[] }> = [];
+  const mias: Array<{ id: string; nombre: string; rol: string; apps: string[]; negocios: string[]; miembro: boolean }> = [];
   if (soySuper) {
-    for (const o of lista) mias.push({ id: o.id, nombre: o.nombre, rol: 'owner', apps: [], negocios: [] });
+    /* 0.45.1 · Primero las empresas donde el dueño de la suite DE VERDAD es
+     * miembro, luego las demás, cada grupo por nombre. Las apps que no fijan
+     * su empresa (quote101) abren `orgs[0]`, y con la lista nada más por
+     * nombre, el 22-sep «BASE arquitectura» quedó antes que «Forespot»: Mike
+     * abrió quote101 al día siguiente y lo encontró vacío, porque estaba
+     * mirando la empresa recién dada de alta. `miembro` dice cuál es cuál,
+     * porque `rol` sale 'owner' en todas para él. */
+    const suyas = await c.env.MASTER.prepare(`SELECT org_id FROM miembros WHERE usuario_id = ?`)
+      .bind(s.usuario_id).all<{ org_id: string }>();
+    const soyDe = new Set((suyas.results ?? []).map((f) => f.org_id));
+    for (const o of lista) mias.push({ id: o.id, nombre: o.nombre, rol: 'owner', apps: [], negocios: [], miembro: soyDe.has(o.id) });
+    mias.sort((a, b) => Number(b.miembro) - Number(a.miembro)); // estable: dentro de cada grupo sigue por nombre
   } else {
     const r = await c.env.MASTER.prepare(
       `SELECT m.org_id, m.rol, m.apps, m.negocios, o.nombre FROM miembros m JOIN orgs o ON o.id = m.org_id WHERE m.usuario_id = ?`,
     ).bind(s.usuario_id).all<{ org_id: string; rol: string; apps: string; negocios: string; nombre: string }>();
     for (const f of r.results ?? []) {
-      mias.push({ id: f.org_id, nombre: f.nombre, rol: f.rol, apps: JSON.parse(f.apps || '[]'), negocios: JSON.parse(f.negocios || '[]') });
+      mias.push({ id: f.org_id, nombre: f.nombre, rol: f.rol, apps: JSON.parse(f.apps || '[]'), negocios: JSON.parse(f.negocios || '[]'), miembro: true });
     }
   }
 

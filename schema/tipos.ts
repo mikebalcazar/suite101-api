@@ -17,10 +17,23 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.45.0 (UN NEGOCIO CON COSAS ADENTRO NO SE BORRA, Y
+ * Versión del contrato: 0.45.1 (A QUIEN ES DUEÑO DE LA SUITE, SUS EMPRESAS
+ * PRIMERO. Mike, 23-sep-2026: «sigue sin aparecer mi info en quote101». La
+ * causa no era un negocio: era la EMPRESA. Para el superadmin, `/yo` lista
+ * todas las empresas por nombre, y quote101 abre `orgs[0]`. El 22-sep se dio
+ * de alta «BASE arquitectura», que por nombre va antes que «Forespot», y
+ * desde entonces quote101 le abría a Mike esa empresa nueva, vacía.
+ *   · `/yo` le pone primero al superadmin las empresas donde es miembro de
+ *     verdad y luego las demás, cada grupo por nombre.
+ *   · Cada empresa trae `miembro: boolean`, porque al superadmin `rol` le
+ *     sale 'owner' en todas y no había forma de distinguirlas.
+ *   · quell101, roster101 y dash101 no se vieron afectados: fijan su
+ *     empresa por configuración (`ORG_ID`, `NEXT_PUBLIC_ORG`).
+ *
+ * 0.45.0 (UN NEGOCIO CON COSAS ADENTRO NO SE BORRA, Y
  * LO QUE YA QUEDÓ HUÉRFANO SE PUEDE ENCONTRAR. Mike, 23-sep-2026:
  * «desapareció mi info de quote». Con el selector de negocio de quote101 G83
- * puesto, seguía vacío en los tres negocios de forespot.
+ * puesto, seguía vacío en todos —y resultó ser otra empresa, ver 0.45.1—.
  *   · `clientes`, `proyectos`, `cotizaciones` y las demás tablas guardan su
  *     `negocio_id` SIN llave foránea (0001); sólo `cuentas`, conciliaciones
  *     y raya la tienen. Así que borrar un negocio sin cuentas se permitía y
@@ -666,7 +679,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.45.0';
+export const VERSION_CONTRATO = '0.45.1';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -876,7 +889,10 @@ export interface Usuario {
 export interface Yo {
   usuario: Usuario;
   superadmin: boolean;
-  orgs: Array<{ id: string; nombre: string; rol: Rol; apps: string[]; negocios: string[] }>;
+  /** Para el superadmin salen TODAS, primero en las que es miembro
+   *  (`miembro: true`) y luego las demás, cada grupo por nombre (0.45.1).
+   *  Para los demás, sólo las suyas, todas con `miembro: true`. */
+  orgs: Array<{ id: string; nombre: string; rol: Rol; apps: string[]; negocios: string[]; miembro: boolean }>;
   acceso: { org_id: string; tipo: TipoAcceso; ref_id: string } | null;
 }
 

@@ -369,6 +369,20 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   huérfanos primero. Lo que NO está hecho todavía: devolver lo huérfano a un
   negocio. Eso es una escritura en producción y la decide Mike al ver los
   números.
+- **La causa de verdad era la EMPRESA, no el negocio (23-sep, contrato
+  0.45.1).** Mike: «sigue sin aparecer mi info en quote101». Para el
+  superadmin, `/yo` listaba todas las empresas por nombre, y quote101 abre
+  `orgs[0]`. El 22-sep se dio de alta «BASE arquitectura», que por nombre va
+  antes que «Forespot», y desde ese momento quote101 le abría a Mike la
+  empresa nueva, vacía. El selector de G83 le enseñaba los negocios de BASE
+  arquitectura, no los de Forespot. Ahora `/yo` le pone primero al
+  superadmin las empresas donde es miembro de verdad, y cada empresa trae
+  `miembro: boolean`. quell101, roster101 y dash101 fijan su empresa por
+  configuración y no se vieron afectados. **Ojo:** si Mike guardó algo en
+  quote101 entre el 22 y el 23-sep, quedó en la base de `base-arquitectura`;
+  master101 → BASE arquitectura → «Cotizaciones (quote101)» lo enseña. Lo de
+  fondo, que la persona escoja la empresa, entra con el portal de entrada
+  de suite101 que pidió Mike.
 - **Una licencia a tu nombre es el permiso (23-sep, contrato 0.44.0).** Mike:
   «activé la licencia de draw de alex.baca5@gmail.com. Pero cuando entro con
   Google account no me deja. Me dice "sin permiso"». La licencia estaba bien
