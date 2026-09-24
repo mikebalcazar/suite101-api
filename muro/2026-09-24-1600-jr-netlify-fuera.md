@@ -42,3 +42,10 @@ pasan a verde sin avisos.
 
 draw101 apunta a `t101draw.netlify.app/oda.json`: ya estaba muerto y su código
 cae a la página de ODA. Es código de draw101: aquí sólo se deja dicho.
+
+**De paso, en dash101 (#83):** la prueba contra staging esperaba poder borrar
+un negocio con su cliente adentro. La API 0.45.0 (23-sep) ya no lo deja —es la
+regla que cuida que nada quede huérfano—, y la prueba no había corrido desde
+entonces. Ahora mide la regla de hoy. Queda un negocio «Taller de prueba» por
+corrida en la org demo de staging; antes también quedaban su cliente y sus
+ítems, sólo que huérfanos e invisibles. Si estorba, se reinicia la org demo.
