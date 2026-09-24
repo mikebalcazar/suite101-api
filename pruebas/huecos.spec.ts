@@ -89,7 +89,7 @@ describe('R2: un archivo sube y baja igual', () => {
 });
 
 describe('CORS: lo que va a ver el navegador', () => {
-  const ORIGEN = 'https://conta-master.netlify.app';
+  const ORIGEN = 'https://dash101.mike-929.workers.dev';
 
   it('el preflight de un origen conocido contesta con el origen exacto', async () => {
     const r = await SELF.fetch(`https://api.local/orgs/${ORG}/items`, {
@@ -110,6 +110,15 @@ describe('CORS: lo que va a ver el navegador', () => {
     const r = await SELF.fetch('https://api.local/salud', { headers: { Origin: ORIGEN } });
     expect(r.headers.get('Access-Control-Allow-Origin')).toBe(ORIGEN);
     expect(r.headers.get('Access-Control-Allow-Credentials')).toBe('true');
+  });
+
+  it('los sitios de Netlify ya no reciben permiso (se retiraron el 24-sep)', async () => {
+    // Borrado en Netlify, el nombre queda libre para cualquiera: si siguiera
+    // en la lista, quien lo registrara leería la suite con la cookie ajena.
+    for (const viejo of ['https://conta-master.netlify.app', 'https://cuenta-taller101.netlify.app', 'https://cotizador-t101.netlify.app']) {
+      const r = await SELF.fetch('https://api.local/salud', { headers: { Origin: viejo } });
+      expect(r.headers.get('Access-Control-Allow-Origin'), viejo).toBe(null);
+    }
   });
 
   it('un origen que no está en la lista no recibe permiso', async () => {

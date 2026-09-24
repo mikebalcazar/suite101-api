@@ -564,6 +564,14 @@ describe('3b · Google detrás de un proxy: el boleto de entrada', () => {
     }
   });
 
+  it('a un sitio de Netlify ya no se le manda el boleto de Google', async () => {
+    for (const viejo of ['https://conta-master.netlify.app/login', 'https://cotizador-t101.netlify.app/', 'https://cuenta-taller101.netlify.app/']) {
+      const r = await pedir('/auth/google?volver_a=' + encodeURIComponent(viejo));
+      expect(r.estado, viejo).toBe(403);
+      expect(r.error, viejo).toBe('origen_no_permitido');
+    }
+  });
+
   it('un boleto se canjea una sola vez por la cookie, y con ella /yo contesta', async () => {
     const galletaMike = galleta;
     // Un boleto como lo dejaría el callback de Google: la cookie de una sesión de Mike.

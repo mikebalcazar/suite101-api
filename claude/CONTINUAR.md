@@ -376,6 +376,13 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   crea una pieza vendida por unidad en el proyecto, las amarra con un
   producto cuando son varias, deja la cotización `aceptada` y ya no editable.
   El descuento de la hoja llega ya repartido en el precio de cada pieza.
+- **Netlify fuera de la suite (24-sep, sin cambio de contrato).** La cuenta de
+  Netlify se quedó sin uso («usage_exceeded») y todo lo que servía eran
+  redirecciones viejas. Mike decidió retirarlo. Salieron de `ORIGENES`
+  conta-master, cuenta-taller101 y cotizador-t101 `.netlify.app`: un sitio
+  borrado en Netlify deja su nombre libre, y quien lo registrara tendría CORS
+  con cookie y boletos de Google. Primero se despliega esto; después Mike
+  borra los sitios. Pruebas: esos orígenes no reciben permiso ni boleto.
 - **La causa de verdad era la EMPRESA, no el negocio (23-sep, contrato
   0.45.1).** Mike: «sigue sin aparecer mi info en quote101». Para el
   superadmin, `/yo` listaba todas las empresas por nombre, y quote101 abre
