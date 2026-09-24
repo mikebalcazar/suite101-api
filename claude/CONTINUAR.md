@@ -369,13 +369,6 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   huérfanos primero. Lo que NO está hecho todavía: devolver lo huérfano a un
   negocio. Eso es una escritura en producción y la decide Mike al ver los
   números.
-- **Aprobar una cotización crea sus piezas (23-sep, contrato 0.46.0).** Con
-  la hoja nueva de quote101 (G84), Mike: «cada renglón es un ítem… y su
-  cantidad define cuántos ítems se crean de ese producto», y decidió que se
-  crean al APROBAR, no al guardar. `POST /orgs/:o/cotizaciones/:id/aprobar`
-  crea una pieza vendida por unidad en el proyecto, las amarra con un
-  producto cuando son varias, deja la cotización `aceptada` y ya no editable.
-  El descuento de la hoja llega ya repartido en el precio de cada pieza.
 - **Netlify fuera de la suite (24-sep, sin cambio de contrato).** La cuenta de
   Netlify se quedó sin uso («usage_exceeded») y todo lo que servía eran
   redirecciones viejas. Mike decidió retirarlo. Salieron de `ORIGENES`
@@ -383,6 +376,13 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   borrado en Netlify deja su nombre libre, y quien lo registrara tendría CORS
   con cookie y boletos de Google. Primero se despliega esto; después Mike
   borra los sitios. Pruebas: esos orígenes no reciben permiso ni boleto.
+- **Aprobar una cotización crea sus piezas (23-sep, contrato 0.46.0).** Con
+  la hoja nueva de quote101 (G84), Mike: «cada renglón es un ítem… y su
+  cantidad define cuántos ítems se crean de ese producto», y decidió que se
+  crean al APROBAR, no al guardar. `POST /orgs/:o/cotizaciones/:id/aprobar`
+  crea una pieza vendida por unidad en el proyecto, las amarra con un
+  producto cuando son varias, deja la cotización `aceptada` y ya no editable.
+  El descuento de la hoja llega ya repartido en el precio de cada pieza.
 - **La causa de verdad era la EMPRESA, no el negocio (23-sep, contrato
   0.45.1).** Mike: «sigue sin aparecer mi info en quote101». Para el
   superadmin, `/yo` listaba todas las empresas por nombre, y quote101 abre
