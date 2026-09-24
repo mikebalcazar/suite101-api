@@ -249,7 +249,7 @@ rutas.post('/clave', async (c) => {
  * fingir: en la fase 1 no había credenciales de Google que poner. */
 
 /* `volver_a` puede ser una ruta de aquí mismo ('/') o la URL absoluta de una
- * app (https://conta-master.netlify.app/login). Si es absoluta, su origen
+ * app (https://dash101.mike-929.workers.dev/login). Si es absoluta, su origen
  * tiene que estar en ORIGENES: es a donde se manda el boleto de entrada, y
  * mandarlo a cualquier sitio sería regalar sesiones. */
 function volverAPermitido(c: Ctx, volver_a: string): boolean {

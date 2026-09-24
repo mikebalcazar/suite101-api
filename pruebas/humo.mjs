@@ -123,7 +123,7 @@ async function produccion() {
   // CORS en el borde de verdad. Hasta ahora solo se habia probado con curl y
   // con Node, que no aplican la politica del navegador: la primera app que se
   // conectara iba a ser la que lo descubriera.
-  const ORIGEN = 'https://conta-master.netlify.app';
+  const ORIGEN = 'https://dash101.mike-929.workers.dev';
   const pre = await fetch(`${PROD}/orgs/x/items`, {
     method: 'OPTIONS',
     headers: { Origin: ORIGEN, 'Access-Control-Request-Method': 'PATCH', 'Access-Control-Request-Headers': 'X-App,Content-Type' },

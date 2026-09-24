@@ -60,7 +60,11 @@ CORREO_BAJA = "info@forespot.com"
 # credenciales.
 # Los orígenes a los que se les manda el boleto de Google (volver_a) y que
 # reciben CORS. Cada app como Worker va aquí con su dominio.
-ORIGENES = "https://conta-master.netlify.app,https://cuenta-taller101.netlify.app,https://cotizador-t101.netlify.app,https://t101-portal.mike-929.workers.dev,https://bitacora-obra.mike-929.workers.dev,https://dash101.mike-929.workers.dev,https://peek101.mike-929.workers.dev,https://master101.mike-929.workers.dev,https://quote101.mike-929.workers.dev,https://workshop101.mike-929.workers.dev,https://supply101.mike-929.workers.dev,http://localhost:5173"
+# Los tres sitios de Netlify (conta-master, cuenta-taller101, cotizador-t101)
+# salieron el 24-sep: Netlify se retiró de la suite. Un sitio borrado en
+# Netlify deja su nombre libre para cualquiera; si siguiera en esta lista, ese
+# alguien tendría CORS con la cookie de sesión y recibiría boletos de Google.
+ORIGENES = "https://t101-portal.mike-929.workers.dev,https://bitacora-obra.mike-929.workers.dev,https://dash101.mike-929.workers.dev,https://peek101.mike-929.workers.dev,https://master101.mike-929.workers.dev,https://quote101.mike-929.workers.dev,https://workshop101.mike-929.workers.dev,https://supply101.mike-929.workers.dev,http://localhost:5173"
 # El origen público de esta API: es a donde Google devuelve (ver auth.ts).
 URL_PUBLICA = "https://suite101-api.mike-929.workers.dev"
 URL_PANEL_DIRECTOR = "https://workshop101.mike-929.workers.dev"
