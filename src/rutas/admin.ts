@@ -100,7 +100,7 @@ const nombresDeApps = (o: Org): string[] =>
 /** Manda el correo de bienvenida al director y lo apunta. Nunca truena: si el
  *  correo no sale, la empresa ya quedó creada y master101 lo dice con palabras. */
 async function mandarBienvenida(c: Ctx, o: Org, correo: string, nombre: string | null): Promise<{ enviado: boolean; motivo?: string }> {
-  const urlPanel = c.env.URL_PANEL_DIRECTOR || 'https://workshop101.mike-929.workers.dev';
+  const urlPanel = c.env.URL_PANEL_DIRECTOR || 'https://workshop101.taller101.com';
   const msg = correoBienvenida({ empresa: o.nombre, director: nombre, correo, urlPanel, apps: nombresDeApps(o) });
   const envio = await enviarCorreo(c.env, { para: correo, ...msg, conBaja: true });
   if (envio.enviado) await marcarBienvenida(c.env, o.id);
