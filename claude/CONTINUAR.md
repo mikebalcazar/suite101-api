@@ -369,6 +369,19 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   huérfanos primero. Lo que NO está hecho todavía: devolver lo huérfano a un
   negocio. Eso es una escritura en producción y la decide Mike al ver los
   números.
+- **taller101.com en Cloudflare; quote101, dash101 y peek101 con dominio
+  propio (25-sep, sin cambio de contrato).** Mike movió el DNS de
+  taller101.com a Cloudflare (Free) y cambió los nameservers en GoDaddy; el
+  correo de Google Workspace sigue igual (MX, DKIM, DMARC idénticos a la foto
+  `claude/dns-taller101.com-antes-de-cloudflare.md`; el SPF de la raíz quedó
+  como `include:_spf.google.com` porque el registro `_spfm` de GoDaddy no
+  cruzó). Entraron a `ORIGENES` `https://quote101|dash101|peek101.taller101.com`
+  (#143). Cada app cuelga del dominio como *custom domain* en su
+  `wrangler.toml` con `workers_dev = true` al lado: sin eso wrangler APAGA
+  workers.dev (peek101 se quedó sin su dirección vieja un minuto, #16 → #17).
+  Staging lleva `routes = []` porque `routes` se hereda. Las dos direcciones
+  de cada app siguen vivas; la liga del portal que dash101 le da al cliente
+  ya es `peek101.taller101.com`. La API y las demás apps siguen en workers.dev.
 - **Netlify fuera de la suite (24-sep, sin cambio de contrato).** La cuenta de
   Netlify se quedó sin uso («usage_exceeded») y todo lo que servía eran
   redirecciones viejas. Mike decidió retirarlo. Salieron de `ORIGENES`

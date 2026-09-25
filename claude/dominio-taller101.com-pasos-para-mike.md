@@ -1,5 +1,17 @@
 # taller101.com a Cloudflare — pasos para Mike (25-sep-2026)
 
+**Hecho el 25-sep-2026.** Zona activa, correo verificado, las tres apps
+publicadas en `quote101|dash101|peek101.taller101.com` (ver el recado del muro
+`muro/2026-09-25-0500-jr-dominio-taller101.md`). Lo de abajo queda como
+bitácora de cómo se hizo. Dos cosas que pasaron distinto de lo previsto:
+
+- El TXT `dc-aa8e722993._spfm` no cruzó en la importación de Cloudflare y a
+  Mike no le dejó agregarlo; se editó el SPF de la raíz a
+  `v=spf1 include:_spf.google.com ~all`, que es lo mismo sin el rodeo.
+- Al colgar peek101 del dominio, wrangler apagó workers.dev porque
+  `workers_dev` no estaba escrito. Un minuto sin la dirección vieja; ya está
+  `workers_dev = true` en las tres apps.
+
 Objetivo: que quote101, dash101 y peek101 vivan en `*.taller101.com` sin que
 el correo de Google Workspace se descomponga. Sólo se mueve el DNS; el
 dominio sigue registrado en GoDaddy y el correo sigue en Google.
