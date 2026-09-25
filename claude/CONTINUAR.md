@@ -369,6 +369,22 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   huérfanos primero. Lo que NO está hecho todavía: devolver lo huérfano a un
   negocio. Eso es una escritura en producción y la decide Mike al ver los
   números.
+- **workers.dev manda al dominio: redirigir, no apagar (25-sep, sin cambio
+  de contrato).** Mike preguntó si ya se apagaban las direcciones viejas;
+  escogió redirigir. En cada app, `DOMINIO_PROPIO` (sólo producción) hace que
+  una lectura GET/HEAD por workers.dev conteste 301 al mismo camino en el
+  dominio; `/s101/*` y lo que no es lectura no; en quell101 y roster101
+  tampoco `/api/*`, `/files/*`, `/descargas/*` (apps empacadas con token). La
+  API NO redirige: URL_PUBLICA (regreso de Google) y las apps de escritorio
+  siguen en workers.dev. Sus correos ya llevan workshop101/quell101
+  .taller101.com (#145). Dos lecciones caras: (1) con `run_worker_first`
+  acotado la capa de archivos contesta antes que el Worker y la redirección
+  no corre: ahora es `true` en todas las apps de archivos estáticos; (2) en
+  dash101 `assets` está en línea y un encabezado `[vars]` puesto antes se lo
+  tragó: el Worker salió sin archivos (#86, 10 minutos con 404 en fuentes y
+  chunks) hasta #87; ahí `vars` va en línea y hay prueba. Quien tenga sesión
+  abierta en workers.dev entra una vez más en el dominio (la cookie es por
+  origen).
 - **Toda la suite con dominio propio (25-sep, sin cambio de contrato).**
   Mike: «pasa ya todas las apps a taller101.com». Además de las tres de
   abajo: `quell101` (Worker bitacora-obra), `roster101` (Worker t101-portal),
