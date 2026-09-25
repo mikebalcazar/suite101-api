@@ -564,6 +564,21 @@ describe('3b · Google detrás de un proxy: el boleto de entrada', () => {
     }
   });
 
+  it('las direcciones en taller101.com de quote101, dash101 y peek101 están en ORIGENES', async () => {
+    // Mike movió el DNS de taller101.com a Cloudflare el 25-sep; las apps viven ahí además de en workers.dev.
+    for (const app of ['quote101', 'dash101', 'peek101']) {
+      const r = await pedir('/auth/google?volver_a=' + encodeURIComponent(`https://${app}.taller101.com/`));
+      expect(r.estado, app).toBe(501);
+      expect(r.error, app).toBe('google_no_configurado');
+    }
+    // El dominio pelón y cualquier otro subdominio siguen siendo ajenos.
+    for (const ajeno of ['https://taller101.com/', 'https://otra.taller101.com/']) {
+      const r = await pedir('/auth/google?volver_a=' + encodeURIComponent(ajeno));
+      expect(r.estado, ajeno).toBe(403);
+      expect(r.error, ajeno).toBe('origen_no_permitido');
+    }
+  });
+
   it('a un sitio de Netlify ya no se le manda el boleto de Google', async () => {
     for (const viejo of ['https://conta-master.netlify.app/login', 'https://cotizador-t101.netlify.app/', 'https://cuenta-taller101.netlify.app/']) {
       const r = await pedir('/auth/google?volver_a=' + encodeURIComponent(viejo));
