@@ -369,6 +369,17 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   huérfanos primero. Lo que NO está hecho todavía: devolver lo huérfano a un
   negocio. Eso es una escritura en producción y la decide Mike al ver los
   números.
+- **Toda la suite con dominio propio (25-sep, sin cambio de contrato).**
+  Mike: «pasa ya todas las apps a taller101.com». Además de las tres de
+  abajo: `quell101` (Worker bitacora-obra), `roster101` (Worker t101-portal),
+  `master101`, `workshop101`, `supply101` y la API en `api.taller101.com`
+  (#144 y un PR por repo). Los ocho orígenes están en `ORIGENES`; la API
+  misma no (a ella no se le manda boleto). `URL_PUBLICA` sigue en
+  workers.dev: es la dirección de regreso de Google y cambiarla pide tocar
+  la consola de Google. Las apps de escritorio siguen hablando con
+  workers.dev. Las ligas entre apps (dash101 → quell101, master101 →
+  workshop101, correos de la API) siguen apuntando a workers.dev y sirven;
+  cambiarlas al dominio es trabajo aparte, si Mike lo pide.
 - **taller101.com en Cloudflare; quote101, dash101 y peek101 con dominio
   propio (25-sep, sin cambio de contrato).** Mike movió el DNS de
   taller101.com a Cloudflare (Free) y cambió los nameservers en GoDaddy; el
