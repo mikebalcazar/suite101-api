@@ -64,7 +64,10 @@ CORREO_BAJA = "info@forespot.com"
 # salieron el 24-sep: Netlify se retiró de la suite. Un sitio borrado en
 # Netlify deja su nombre libre para cualquiera; si siguiera en esta lista, ese
 # alguien tendría CORS con la cookie de sesión y recibiría boletos de Google.
-ORIGENES = "https://t101-portal.mike-929.workers.dev,https://bitacora-obra.mike-929.workers.dev,https://dash101.mike-929.workers.dev,https://peek101.mike-929.workers.dev,https://master101.mike-929.workers.dev,https://quote101.mike-929.workers.dev,https://workshop101.mike-929.workers.dev,https://supply101.mike-929.workers.dev,http://localhost:5173"
+# Desde el 25-sep, quote101, dash101 y peek101 también viven en
+# *.taller101.com (DNS en Cloudflare, Mike lo movió ese día); las dos
+# direcciones de cada app —workers.dev y taller101.com— siguen vivas.
+ORIGENES = "https://t101-portal.mike-929.workers.dev,https://bitacora-obra.mike-929.workers.dev,https://dash101.mike-929.workers.dev,https://peek101.mike-929.workers.dev,https://master101.mike-929.workers.dev,https://quote101.mike-929.workers.dev,https://workshop101.mike-929.workers.dev,https://supply101.mike-929.workers.dev,https://quote101.taller101.com,https://dash101.taller101.com,https://peek101.taller101.com,http://localhost:5173"
 # El origen público de esta API: es a donde Google devuelve (ver auth.ts).
 URL_PUBLICA = "https://suite101-api.mike-929.workers.dev"
 URL_PANEL_DIRECTOR = "https://workshop101.mike-929.workers.dev"
