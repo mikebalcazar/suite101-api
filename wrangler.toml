@@ -84,7 +84,9 @@ CORREO_BAJA = "info@forespot.com"
 ORIGENES = "https://t101-portal.mike-929.workers.dev,https://bitacora-obra.mike-929.workers.dev,https://dash101.mike-929.workers.dev,https://peek101.mike-929.workers.dev,https://master101.mike-929.workers.dev,https://quote101.mike-929.workers.dev,https://workshop101.mike-929.workers.dev,https://supply101.mike-929.workers.dev,https://quote101.taller101.com,https://dash101.taller101.com,https://peek101.taller101.com,https://quell101.taller101.com,https://roster101.taller101.com,https://master101.taller101.com,https://workshop101.taller101.com,https://supply101.taller101.com,http://localhost:5173"
 # El origen público de esta API: es a donde Google devuelve (ver auth.ts).
 URL_PUBLICA = "https://suite101-api.mike-929.workers.dev"
-URL_PANEL_DIRECTOR = "https://workshop101.mike-929.workers.dev"
+# Desde el 25-sep-2026 workshop101 vive en su dominio propio; la de
+# workers.dev sigue viva, pero manda para allá. Los correos llevan la buena.
+URL_PANEL_DIRECTOR = "https://workshop101.taller101.com"
 CORREO_QUELL = "quell101 <bitacora@envios.taller101.mx>"
 CORREO_ROSTER = "roster101 <expedientes@envios.taller101.mx>"
 
