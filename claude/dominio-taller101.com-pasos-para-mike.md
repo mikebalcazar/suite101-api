@@ -5,18 +5,23 @@ el correo de Google Workspace se descomponga. Sólo se mueve el DNS; el
 dominio sigue registrado en GoDaddy y el correo sigue en Google.
 
 Antes de empezar: la foto de los registros actuales está en
-`claude/dns-taller101.com-antes-de-cloudflare.md`. Es la lista con la que se
+`claude/dns-taller101.com-antes-de-cloudflare.md`
+(https://github.com/mikebalcazar/suite101-api/blob/main/claude/dns-taller101.com-antes-de-cloudflare.md). Es la lista con la que se
 compara en el paso 3.
 
 ## 1. Cloudflare: agregar el dominio
-1. Entra a dash.cloudflare.com con la MISMA cuenta donde viven los Workers
-   (la de `mike-929.workers.dev`).
-2. Arriba a la derecha: «Add a domain» (Agregar un dominio).
+1. Entra con la MISMA cuenta donde viven los Workers (la de
+   `mike-929.workers.dev`) a: https://dash.cloudflare.com/?to=/:account/add-site
+2. Si no abre directo, en https://dash.cloudflare.com arriba a la derecha:
+   «Add a domain».
 3. Escribe `taller101.com`, deja marcado «Quick scan for DNS records» y
    Continúa.
 4. Plan: **Free**. Continúa.
 
 ## 2. Cloudflare: revisar lo que importó (el paso que cuida el correo)
+Si cerraste la pestaña, la tabla vive en:
+https://dash.cloudflare.com/?to=/:account/taller101.com/dns/records
+
 Cloudflare muestra una tabla con lo que encontró. Tiene que haber:
 - **MX** (5 renglones): aspmx.l.google.com, alt1, alt2, alt3, alt4.
 - **TXT en `@`**: el que empieza con `v=spf1 include:dc-aa8e722993._spfm…`
@@ -36,11 +41,14 @@ y TXT no tienen nube. Luego «Continue».
 Si te ofrece «Email Routing» o «DNSSEC»: **no**, por ahora.
 
 ## 3. Cloudflare te da dos nameservers
+También están en https://dash.cloudflare.com/?to=/:account/taller101.com
+(sección «Nameservers»).
 Se ven así: `algo.ns.cloudflare.com` y `otro.ns.cloudflare.com`. Cópialos
 tal cual (o deja la pestaña abierta).
 
 ## 4. GoDaddy: cambiar los nameservers
-1. Entra a godaddy.com → Mis productos → `taller101.com` → «DNS».
+1. Entra a https://dcc.godaddy.com/manage/taller101.com/dns (o desde
+   https://account.godaddy.com/products → `taller101.com` → «DNS»).
 2. Pestaña «Nameservers» → «Cambiar».
 3. Escoge «Usaré mis propios nameservers».
 4. Borra los dos de GoDaddy y pega los dos de Cloudflare.
