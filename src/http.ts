@@ -25,6 +25,11 @@ export interface Quien {
   ve_dinero: boolean;
   /** owner, admin y socio ven costos y egresos. staff no. */
   ve_costos: boolean;
+  /** 0.47.0 · En supply101, un miembro cuya lista de apps no trae `supply`
+   *  entra de todos modos, pero sólo para pedir REEMBOLSOS: «tu usuario no
+   *  está autorizado para compras» (Mike, 28-sep). Se decide en la puerta
+   *  de /orgs y lo aplica POST /ordenes. */
+  sin_compras?: boolean;
 }
 
 export type Vars = { sesion: Sesion; app: App; quien: Quien; org_id: string };

@@ -19,7 +19,7 @@
 import type { Hono } from 'hono';
 import { err, ok, type Ctx, type Vars } from '../http';
 import type { Env } from '../entorno';
-import type { ApiOrgDB } from '../org-db';
+import { TIPOS_ORDEN, type ApiOrgDB, type TipoOrden } from '../org-db';
 import { miembrosDe } from '../maestro';
 import { enviarCorreo, correoOrdenPagada, correoOrdenResuelta } from '../auth/correo';
 
@@ -57,10 +57,39 @@ export function montarOrdenes(rutas: App): void {
 
   /* ─────────────── órdenes ─────────────── */
 
-  /** El buzón. Va antes de `/:id` o `buzon` se leería como un id. */
+  /** `?tipo=compra|reembolso`, o nada. Otra cosa es 400: una pestaña con
+   *  un tipo mal escrito enseñaría el buzón entero como si fuera de ese tipo. */
+  const tipoPedido = (c: Ctx): TipoOrden | null | { error: string } => {
+    const t = c.req.query('tipo');
+    if (!t) return null;
+    return (TIPOS_ORDEN as readonly string[]).includes(t) ? (t as TipoOrden) : { error: t };
+  };
+
+  /** El buzón. Va antes de `/:id` o `buzon` se leería como un id. Con
+   *  `?tipo=` es una sola pestaña (compras o reembolsos, 0.47.0). */
   rutas.get('/:o/ordenes/buzon', async (c) => {
     if (!(await esContador(c))) return err(c, 'sin_permiso', 403, { motivo: 'el buzón es de quien paga' });
-    return ok(c, await stub(c).buzon(undefined, c.req.query('negocio_id') || null));
+    const tipo = tipoPedido(c);
+    if (tipo && typeof tipo === 'object') return err(c, 'tipo_invalido', 400, { tipo: tipo.error, acepta: TIPOS_ORDEN });
+    return ok(c, await stub(c).buzon(undefined, c.req.query('negocio_id') || null, tipo));
+  });
+
+  /** Qué puede hacer quien pregunta (0.47.0): pedir compras, o sólo
+   *  reembolsos; y si paga. supply101 lo lee al arrancar para bloquear la
+   *  opción «compra» y decir por qué, en vez de dejar que el 403 llegue
+   *  después de llenar el formulario. */
+  rutas.get('/:o/ordenes/permisos', async (c) => {
+    if (!puedePedir(c)) return err(c, 'sin_permiso', 403);
+    return ok(c, { puede_comprar: !c.get('quien').sin_compras, puede_pagar: await esContador(c) });
+  });
+
+  /** Lo pendiente en el buzón, en dos cifras: compras y reembolsos
+   *  (0.47.0). Para el inicio de dash101. Lo lee quien ve dinero, que es
+   *  quien ve el tablero; los renglones siguen siendo de quien paga. */
+  rutas.get('/:o/ordenes/resumen', async (c) => {
+    const q = c.get('quien');
+    if (q.clase === 'cliente' || !q.ve_dinero) return err(c, 'sin_permiso', 403);
+    return ok(c, await stub(c).pendientesDeOrdenes(c.req.query('negocio_id') || null));
   });
 
   /** Quién puede pagar hoy. La ve el dueño para repartir la etiqueta.
@@ -149,11 +178,19 @@ export function montarOrdenes(rutas: App): void {
     return ok(c, { filas: await stub(c).misOrdenes(c.get('quien').usuario_id, c.req.query('negocio_id') || null) });
   });
 
-  /** Pedir una compra. Sin autorización previa: cae directa al buzón. */
+  /** Pedir una compra, o un reembolso (`tipo: 'reembolso'`, 0.47.0). Sin
+   *  autorización previa: cae directa al buzón. Quien entró a supply101 sin
+   *  la llave de compras sólo puede pedir reembolsos, y se le dice con las
+   *  palabras de Mike. */
   rutas.post('/:o/ordenes', async (c) => {
     if (!puedePedir(c)) return err(c, 'sin_permiso', 403);
     const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
     const q = c.get('quien');
+    const tipo = b.tipo ?? 'compra';
+    if (!(TIPOS_ORDEN as readonly unknown[]).includes(tipo)) return err(c, 'tipo_invalido', 400, { tipo, acepta: TIPOS_ORDEN });
+    if (tipo === 'compra' && q.sin_compras) {
+      return err(c, 'compras_no_autorizadas', 403, { mensaje: 'Tu usuario no está autorizado para compras', puede: 'reembolso' });
+    }
     const s = c.get('sesion');
     const persona = (await stub(c).personalDeUsuario(q.usuario_id)) as Record<string, unknown> | null;
     const r = await stub(c).crearOrden({
@@ -339,7 +376,7 @@ async function avisar(
   if (!para) return { enviado: false, motivo: 'la_orden_no_trae_correo' };
   const datos = {
     folio: String(orden.folio),
-    proveedor: String(orden.proveedor_nombre ?? 'sin proveedor'),
+    proveedor: String(orden.proveedor_nombre ?? (orden.tipo === 'reembolso' ? 'reembolso' : 'sin proveedor')),
     concepto: String(orden.concepto ?? ''),
     monto: Number(orden.monto ?? 0),
     moneda: String(orden.moneda ?? 'MXN'),

@@ -121,7 +121,13 @@ rutas.use('/:o/*', async (c, next) => {
   // Contrato 0.6.0: la lista de apps por persona (`miembros.apps`, vacía =
   // todas las de la empresa) se aplica aquí. Antes se guardaba y no se leía.
   if (m && !esPanel && m.apps.length > 0 && !m.apps.includes(LLAVE_APP[app])) {
-    return err(c, 'app_no_permitida', 403, { app, permitidas: m.apps });
+    /* 0.47.0 · supply101 es la excepción: sin la llave `supply` la puerta
+     * NO se cierra, se entra sólo para reembolsos. Mike, 28-sep: «si el
+     * usuario no está autorizado para compras, que solo le diga “tu usuario
+     * no está autorizado para compras” y solo le permita ingresar un
+     * reembolso». Lo aplica POST /orgs/:o/ordenes por tipo. */
+    if (app !== 'supply101') return err(c, 'app_no_permitida', 403, { app, permitidas: m.apps });
+    quien.sin_compras = true;
   }
   // workshop101 es el panel del administrador de la empresa: entra el dueño,
   // la administración y el superadmin; un socio o alguien de oficina, no.

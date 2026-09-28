@@ -17,7 +17,29 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.46.0 (APROBAR UNA COTIZACIÓN CREA SUS PIEZAS. Mike,
+ * Versión del contrato: 0.47.0 (REEMBOLSOS: LA MISMA ORDEN, DE OTRO TIPO.
+ * Mike, 28-sep-2026: «Necesito en dash un módulo para reembolsos. Que el
+ * trabajador pueda pedir reembolsos y en dash le aparezcan (similar a las
+ * Órdenes de compra). De hecho podría ser el mismo portal de supply, pero
+ * poner una opción en el tipo de orden si es reembolso o compra».
+ *   · `ordenes.tipo`: `compra` (todo lo que ya existía) o `reembolso`.
+ *     `POST /orgs/:o/ordenes {tipo?}`; los reembolsos llevan folio `RE-`.
+ *     Mismo buzón, mismo pagar/devolver/rechazar/corregir. Al pagar, el
+ *     egreso lleva `categoria: 'reembolso'` y la contraparte es quien lo
+ *     pidió, no un proveedor. Son salidas de dinero las dos.
+ *   · `GET /orgs/:o/ordenes/buzon?tipo=compra|reembolso`: una pestaña, con
+ *     sus propios totales. Sin `tipo`, todo junto como antes.
+ *   · `GET /orgs/:o/ordenes/resumen?negocio_id=`: `{compras: {total,
+ *     cuantas}, reembolsos: {total, cuantas}}` de lo que está en el buzón,
+ *     para el inicio de dash101 (lo lee quien ve dinero). Los reembolsos
+ *     pendientes restan del capital total.
+ *   · `GET /orgs/:o/ordenes/permisos`: `{puede_comprar, puede_pagar}`.
+ *   · En supply101, un miembro cuya lista de apps NO trae `supply` ya no
+ *     recibe `app_no_permitida`: entra, y `POST /ordenes` con `tipo:
+ *     'compra'` contesta 403 `compras_no_autorizadas` («Tu usuario no está
+ *     autorizado para compras»); con `tipo: 'reembolso'` pasa. En las demás
+ *     apps la puerta sigue igual.
+ * Antes: 0.46.0 (APROBAR UNA COTIZACIÓN CREA SUS PIEZAS. Mike,
  * 23-sep-2026, con la hoja nueva de quote101: «cada renglón es un ítem que se
  * va agregando con su producto, su descripción y su cantidad (que define
  * cuántos ítems se crean de ese producto)», y se crean AL APROBAR.
@@ -695,7 +717,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.46.0';
+export const VERSION_CONTRATO = '0.47.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
