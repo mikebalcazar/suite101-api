@@ -731,9 +731,14 @@ describe('11 · workshop101: el administrador de la empresa (contrato 0.6.0)', (
     expect(dash.estado, 'y NO al tablero del dinero').toBe(403);
     expect(dash.error).toBe('app_no_permitida');
 
-    // Y al revés: `dash` por sí solo ya no abre supply101. Quien lo tenía
+    // Y al revés: `dash` por sí solo NO da permiso de comprar. Quien lo tenía
     // antes del 21-sep no lo perdió, pero porque la migración 0008 le
     // escribió `supply` en su lista, no porque una llave arrastre a la otra.
+    //
+    // Desde 0.47.0 la puerta de supply101 ya no se cierra del todo: se entra
+    // para pedir REEMBOLSOS, y es al pedir una COMPRA donde se dice «tu
+    // usuario no está autorizado para compras» (Mike, 28-sep). El permiso
+    // sigue sin arrastrarse: lo que cambió es dónde se aplica.
     await entrarComo('duena@ejemplo.mx');
     await pedir(`/admin/orgs/${ORG}/miembros`, {
       method: 'POST',
@@ -742,8 +747,12 @@ describe('11 · workshop101: el administrador de la empresa (contrato 0.6.0)', (
     await entrarComo('tesorero@ejemplo.mx');
     expect((await pedir(`/orgs/${ORG}`, { app: 'dash101' })).estado).toBe(200);
     const sinSupply = await pedir(`/orgs/${ORG}`, { app: 'supply101' });
-    expect(sinSupply.estado, '`dash` no arrastra a `supply`').toBe(403);
-    expect(sinSupply.error).toBe('app_no_permitida');
+    expect(sinSupply.estado, 'supply101 abre, para reembolsos (0.47.0)').toBe(200);
+    const permisos = await pedir(`/orgs/${ORG}/ordenes/permisos`, { app: 'supply101' });
+    expect(permisos.data.puede_comprar, '`dash` no arrastra a `supply`').toBe(false);
+    const compra = await pedir(`/orgs/${ORG}/ordenes`, { app: 'supply101', method: 'POST', body: JSON.stringify({ negocio_id: 'x', concepto: 'Clavos', monto: 10_00 }) });
+    expect(compra.estado).toBe(403);
+    expect(compra.error).toBe('compras_no_autorizadas');
   });
 
   it('guardar apps desde una pantalla vieja no apaga una app que no conoce', async () => {

@@ -24,6 +24,9 @@ const GENTE = {
   ana:  { correo: 'ana-oc@ejemplo.mx',  nombre: 'Ana Pide' },
   beto: { correo: 'beto-oc@ejemplo.mx', nombre: 'Beto Paga' },
   caro: { correo: 'caro-oc@ejemplo.mx', nombre: 'Caro Mira' },
+  /* Dora tiene dash101 pero NO supply: es el caso de «tu usuario no está
+   * autorizado para compras» (0.47.0). Entra a supply101 sólo a reembolsos. */
+  dora: { correo: 'dora-oc@ejemplo.mx', nombre: 'Dora Reembolsa' },
 };
 
 const galletas: Record<string, string> = {};
@@ -59,10 +62,12 @@ let pAna = '', pBeto = '', uAna = '', uBeto = '';
 
 beforeAll(async () => {
   await entrar('mike', CORREO);
-  const alta = await pedir('mike', '/admin/orgs', { method: 'POST', json: { id: ORG, nombre: 'Compras de prueba', apps: { dash: true } }, app: '' });
+  const alta = await pedir('mike', '/admin/orgs', { method: 'POST', json: { id: ORG, nombre: 'Compras de prueba', apps: { dash: true, supply: true } }, app: '' });
   expect(alta.estado, JSON.stringify(alta)).toBe(201);
   for (const [apodo, g] of Object.entries(GENTE)) {
-    const m = await pedir('mike', `/admin/orgs/${ORG}/miembros`, { method: 'POST', json: { correo: g.correo, rol: 'staff', nombre: g.nombre, apps: ['dash'] }, app: '' });
+    // Dora es la única sin la llave `supply` (0.47.0).
+    const apps = apodo === 'dora' ? ['dash'] : ['dash', 'supply'];
+    const m = await pedir('mike', `/admin/orgs/${ORG}/miembros`, { method: 'POST', json: { correo: g.correo, rol: 'staff', nombre: g.nombre, apps }, app: '' });
     expect(m.estado, JSON.stringify(m)).toBe(201);
     await entrar(apodo, g.correo);
   }
@@ -521,5 +526,128 @@ describe('20 · contabilidad fiscal (los casos del encargo)', () => {
     await entrar('clienteoc', 'cliente-oc@ejemplo.mx');
     expect((await o('clienteoc', '/fiscal/iva', { app: 'peek101' })).estado).toBe(403);
     expect((await o('clienteoc', '/ordenes', { app: 'peek101' })).estado).toBe(403);
+  });
+});
+
+/* ─────────────── 0.47.0 · reembolsos ───────────────
+ * Mike, 28-sep-2026: «que el trabajador pueda pedir reembolsos y en dash le
+ * aparezcan (similar a las Órdenes de compra) (…) poner una opción en el
+ * tipo de orden si es reembolso o compra (…) si el usuario no está
+ * autorizado para compras, que solo le diga “tu usuario no está autorizado
+ * para compras” y solo le permita ingresar un reembolso (…) los movimientos
+ * se registrarán como reembolso o gasto pero son salidas de dinero las 2».
+ *
+ * Lo que de verdad miden, que no se ve a mano: que un reembolso pagado deje
+ * UN egreso con la categoría correcta y a nombre de la persona (no de un
+ * proveedor); que el buzón por pestaña sume SÓLO lo suyo; que la cifra del
+ * inicio cuadre con el buzón; y que la puerta de supply101 deje pasar a quien
+ * no tiene la llave de compras, pero sólo a reembolsos. */
+describe('0.47.0 · reembolsos: la misma orden, de otro tipo', () => {
+  let re1 = '', re2 = '';
+  const supply = (quien: string, ruta: string, op: Parameters<typeof pedir>[2] = {}) => o(quien, ruta, { ...op, app: 'supply101' });
+
+  it('un reembolso nace en el buzón con folio RE- y tipo reembolso; lo de antes sigue siendo compra', async () => {
+    const r = await o('ana', '/ordenes', { method: 'POST', json: {
+      negocio_id: negocio, tipo: 'reembolso', concepto: 'Gasolina de la camioneta', monto: 850_00, con_factura: false,
+    } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    expect(r.data.tipo).toBe('reembolso');
+    expect(r.data.folio).toMatch(/^RE-\d{6}$/);
+    expect(r.data.estado).toBe('en_buzon');
+    re1 = r.data.id;
+
+    const compra = await o('ana', '/ordenes', { method: 'POST', json: { negocio_id: negocio, concepto: 'Lijas', monto: 120_00 } });
+    expect(compra.data.tipo, 'sin tipo, es compra').toBe('compra');
+    expect(compra.data.folio).toMatch(/^OC-/);
+
+    const raro = await o('ana', '/ordenes', { method: 'POST', json: { negocio_id: negocio, tipo: 'prestamo', concepto: 'x', monto: 1_00 } });
+    expect(raro.estado).toBe(400);
+    expect(raro.error).toBe('tipo_invalido');
+  });
+
+  it('el buzón por pestaña: ?tipo=reembolso trae sólo reembolsos y suma sólo lo suyo; sin tipo, todo', async () => {
+    const todo = await o('beto', '/ordenes/buzon');
+    const re = await o('beto', '/ordenes/buzon?tipo=reembolso');
+    const oc = await o('beto', '/ordenes/buzon?tipo=compra');
+    expect(re.estado).toBe(200);
+    expect(re.data.filas.length).toBeGreaterThan(0);
+    expect(re.data.filas.every((f: any) => f.tipo === 'reembolso')).toBe(true);
+    expect(oc.data.filas.every((f: any) => f.tipo === 'compra')).toBe(true);
+    expect(re.data.total).toBe(re.data.filas.reduce((s: number, f: any) => s + f.monto, 0));
+    expect(re.data.filas.length + oc.data.filas.length, 'las dos pestañas son el buzón entero').toBe(todo.data.filas.length);
+    expect(re.data.total + oc.data.total).toBe(todo.data.total);
+    expect((await o('beto', '/ordenes/buzon?tipo=otra')).estado).toBe(400);
+  });
+
+  it('el resumen del inicio cuadra con el buzón, y lo lee quien ve dinero aunque no pague', async () => {
+    const re = await o('beto', '/ordenes/buzon?tipo=reembolso');
+    const oc = await o('beto', '/ordenes/buzon?tipo=compra');
+    // Ana ve dinero (es miembro) pero no es contadora: el buzón le dice que
+    // no y el resumen sí, porque es una cifra del tablero, no la bandeja.
+    expect((await o('ana', '/ordenes/buzon')).estado).toBe(403);
+    const r = await o('ana', '/ordenes/resumen');
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.reembolsos.total).toBe(re.data.total);
+    expect(r.data.reembolsos.cuantas).toBe(re.data.filas.length);
+    expect(r.data.compras.total).toBe(oc.data.total);
+    // Por negocio: uno que no existe da ceros, no la cifra de la empresa.
+    const vacio = await o('ana', '/ordenes/resumen?negocio_id=no-existe');
+    expect(vacio.data.reembolsos.total).toBe(0);
+    expect(vacio.data.compras.cuantas).toBe(0);
+  });
+
+  it('al pagar un reembolso el egreso es UNO, categoría reembolso y a nombre de quien lo pidió', async () => {
+    const antes = await o('mike', `/movimientos?cuenta_id=${cuenta}`);
+    const r = await o('beto', `/ordenes/${re1}/pagar`, { method: 'POST', json: { cuenta_id: cuenta } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.orden.estado).toBe('pagada');
+    expect(r.data.movimiento.tipo, 'es una salida de dinero, como una compra').toBe('egreso');
+    expect(r.data.movimiento.monto).toBe(850_00);
+    expect(r.data.movimiento.categoria).toBe('reembolso');
+    expect(r.data.movimiento.contraparte_nombre, 'se le paga a la persona, no a un proveedor').toBe(GENTE.ana.nombre);
+    expect(r.data.movimiento.descripcion).toMatch(/^RE-\d{6} · Gasolina/);
+    const despues = await o('mike', `/movimientos?cuenta_id=${cuenta}`);
+    expect(despues.data.filas.length - antes.data.filas.length).toBe(1);
+    expect((await o('beto', `/ordenes/${re1}/pagar`, { method: 'POST', json: { cuenta_id: cuenta } })).estado, 'no se paga dos veces').toBe(409);
+    expect((await o('beto', '/ordenes/buzon?tipo=reembolso')).data.filas.some((f: any) => f.id === re1), 'ya no está en la pestaña').toBe(false);
+  });
+
+  it('un reembolso se devuelve, se corrige y vuelve con el MISMO folio, igual que una compra', async () => {
+    const r = await o('ana', '/ordenes', { method: 'POST', json: { negocio_id: negocio, tipo: 'reembolso', concepto: 'Taxi', monto: 200_00 } });
+    re2 = r.data.id;
+    const dev = await o('beto', `/ordenes/${re2}/devolver`, { method: 'POST', json: { nota: 'Sube el ticket' } });
+    expect(dev.estado).toBe(200);
+    const corr = await o('ana', `/ordenes/${re2}`, { method: 'PATCH', json: { monto: 210_00 } });
+    expect(corr.estado, JSON.stringify(corr)).toBe(200);
+    expect(corr.data.folio).toBe(r.data.folio);
+    expect(corr.data.tipo, 'corregirlo no lo vuelve compra').toBe('reembolso');
+    expect(corr.data.estado).toBe('en_buzon');
+  });
+
+  it('sin la llave de compras, supply101 abre pero sólo para reembolsos: «tu usuario no está autorizado para compras»', async () => {
+    // Antes de 0.47.0 esto era `app_no_permitida` en la puerta.
+    const lista = await supply('dora', '/ordenes');
+    expect(lista.estado, JSON.stringify(lista)).toBe(200);
+    const permisos = await supply('dora', '/ordenes/permisos');
+    expect(permisos.data.puede_comprar).toBe(false);
+    expect(permisos.data.puede_pagar).toBe(false);
+
+    const compra = await supply('dora', '/ordenes', { method: 'POST', json: { negocio_id: negocio, concepto: 'Clavos', monto: 50_00 } });
+    expect(compra.estado).toBe(403);
+    expect(compra.error).toBe('compras_no_autorizadas');
+    expect(compra.detalle.mensaje).toBe('Tu usuario no está autorizado para compras');
+
+    const re = await supply('dora', '/ordenes', { method: 'POST', json: { negocio_id: negocio, tipo: 'reembolso', concepto: 'Pasaje', monto: 60_00 } });
+    expect(re.estado, JSON.stringify(re)).toBe(201);
+    expect(re.data.folio).toMatch(/^RE-/);
+
+    // En las demás apps la puerta sigue cerrada como siempre: Dora no tiene
+    // quell101, y quell101 no tiene excepción.
+    const otra = await o('dora', '/ordenes', { app: 'quell101' });
+    expect(otra.estado).toBe(403);
+    // Y quien SÍ tiene la llave sigue pudiendo comprar desde supply101.
+    const ana = await supply('ana', '/ordenes/permisos');
+    expect(ana.estado).toBe(200);
+    expect(ana.data.puede_comprar).toBe(true);
   });
 });

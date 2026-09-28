@@ -32,6 +32,7 @@ import alcance from '../migrations/org/0016_alcance_item.sql';
 import productos from '../migrations/org/0017_productos.sql';
 import ivaDelProyecto from '../migrations/org/0018_iva_del_proyecto.sql';
 import docsDelItem from '../migrations/org/0019_docs_del_item.sql';
+import reembolsos from '../migrations/org/0020_reembolsos.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { atender as atenderRoster, type DatosEmpresaRoster, type SesionRoster } from './roster/motor.js';
 import { invitarClienteEnSuite } from './clientes';
@@ -52,7 +53,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos];
 
 /** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
  *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
@@ -64,6 +65,11 @@ const PREFIJO_CLAVE: Record<string, string> = { mueble: 'M', servicio: 'S', visi
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Fila = Record<string, any>;
+
+/** Los dos tipos de orden (0.47.0): una compra que se le paga a un proveedor
+ *  o un reembolso que se le regresa a quien puso el dinero. */
+export const TIPOS_ORDEN = ['compra', 'reembolso'] as const;
+export type TipoOrden = (typeof TIPOS_ORDEN)[number];
 
 export interface Sujeto {
   usuario_id: string;
@@ -181,7 +187,8 @@ export interface ApiOrgDB {
   marcarContador(args: { personal_id: string; valor: boolean; quien_usuario_id: string; quien_nombre?: string | null }): Promise<Fila | null>;
   crearOrden(args: Record<string, unknown>): Promise<Fila | { error: string; detalle?: unknown }>;
   misOrdenes(usuario_id: string, negocio_id?: string | null): Promise<Fila[]>;
-  buzon(hoy?: string, negocio_id?: string | null): Promise<{ filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number }>;
+  buzon(hoy?: string, negocio_id?: string | null, tipo?: TipoOrden | null): Promise<{ filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number }>;
+  pendientesDeOrdenes(negocio_id?: string | null): Promise<{ compras: { total: number; cuantas: number }; reembolsos: { total: number; cuantas: number } }>;
   verOrden(id: string): Promise<{ orden: Fila; eventos: Fila[]; archivos: Fila[] } | null>;
   pagarOrden(args: Record<string, unknown>): Promise<{ ok: true; orden: Fila; movimiento: Fila; partida_id: string | null } | { error: string; detalle?: unknown }>;
   resolverOrden(args: { id: string; que: 'devuelta' | 'rechazada'; nota: string; quien_usuario_id: string; quien_nombre?: string | null }): Promise<Fila | { error: string; detalle?: unknown }>;
@@ -1480,6 +1487,8 @@ export class OrgDB extends DurableObject<Env> {
    * paso deja dicho qué columnas son 0/1 en SQLite y true/false hacia
    * afuera: una pantalla que recibe `1` y espera `true` pinta la casilla al
    * revés, y eso no truena, sólo miente. */
+  /* Los dos tipos de orden (0.47.0). El CHECK no cabe en un ALTER de
+   * SQLite, así que la lista vive aquí y `crearOrden` la aplica. */
   private static readonly BOOLS_INTERNAS: Record<string, readonly string[]> = {
     ordenes: ['con_factura', 'urgente'],
   };
@@ -1622,22 +1631,29 @@ export class OrgDB extends DurableObject<Env> {
     concepto: string; monto: number; moneda?: string;
     con_factura?: boolean; subtotal?: number; iva?: number; tasa_iva?: number;
     fecha_maxima_pago?: string | null; urgente?: boolean;
+    /** `compra` (lo de siempre) o `reembolso` (0.47.0): alguien ya puso el
+     *  dinero y se le regresa. Mismo camino, otra serie de folio y otra
+     *  categoría en el egreso. Sin él, es compra. */
+    tipo?: TipoOrden;
   }): Fila | { error: string; detalle?: unknown } {
     const monto = Math.round(Number(args.monto));
     if (!Number.isFinite(monto) || monto <= 0) return { error: 'monto_invalido' };
     if (!String(args.concepto ?? '').trim()) return { error: 'falta_concepto' };
+    const tipo: TipoOrden = args.tipo ?? 'compra';
+    if (!TIPOS_ORDEN.includes(tipo)) return { error: 'tipo_invalido', detalle: { tipo: args.tipo, acepta: TIPOS_ORDEN } };
     const d = this.desglosar(monto, !!args.con_factura, Number(args.tasa_iva ?? 1600), { subtotal: args.subtotal, iva: args.iva });
     if ('error' in d) return { error: d.error, detalle: { monto, subtotal: args.subtotal, iva: args.iva } };
 
     const id = ulid();
-    const folio = `OC-${String(this.apartarNumero('OC')).padStart(6, '0')}`;
+    const serie = tipo === 'reembolso' ? 'RE' : 'OC';
+    const folio = `${serie}-${String(this.apartarNumero(serie)).padStart(6, '0')}`;
     const t = ahora();
     this.sql.exec(
-      `INSERT INTO ordenes (id, negocio_id, folio, solicitante_usuario_id, solicitante_id, solicitante_correo,
+      `INSERT INTO ordenes (id, negocio_id, folio, tipo, solicitante_usuario_id, solicitante_id, solicitante_correo,
         solicitante_nombre, proveedor_id, proveedor_nombre, proyecto_id, partida_id, concepto, monto, moneda,
         con_factura, subtotal, iva, tasa_iva, fecha_maxima_pago, urgente, estado, creado_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'en_buzon',?)`,
-      id, args.negocio_id, folio, args.solicitante_usuario_id, args.solicitante_id ?? null,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'en_buzon',?)`,
+      id, args.negocio_id, folio, tipo, args.solicitante_usuario_id, args.solicitante_id ?? null,
       args.solicitante_correo ?? null, args.solicitante_nombre ?? null,
       args.proveedor_id ?? null, args.proveedor_nombre ?? null,
       args.proyecto_id ?? null, args.partida_id ?? null,
@@ -1647,9 +1663,12 @@ export class OrgDB extends DurableObject<Env> {
     );
     this.apuntarOrden({
       orden_id: id, que: 'creada', quien_usuario_id: args.solicitante_usuario_id,
-      quien_nombre: args.solicitante_nombre ?? null, nota: `${args.concepto} · ${args.proveedor_nombre ?? 'sin proveedor'}`,
+      quien_nombre: args.solicitante_nombre ?? null,
+      nota: tipo === 'reembolso'
+        ? `${args.concepto} · reembolso a ${args.solicitante_nombre ?? 'quien lo pidió'}`
+        : `${args.concepto} · ${args.proveedor_nombre ?? 'sin proveedor'}`,
     });
-    this.avisar({ t: 'orden.nueva', id, folio, monto } as unknown as Aviso, 'dinero');
+    this.avisar({ t: 'orden.nueva', id, folio, monto, tipo } as unknown as Aviso, 'dinero');
     return this.leerInterna('ordenes', id)!;
   }
 
@@ -1667,16 +1686,22 @@ export class OrgDB extends DurableObject<Env> {
 
   /** El buzón del contador: lo que vence primero, arriba. Las que ya vencieron
    *  van antes que todo, que es como se lee una bandeja de pagos. */
-  buzon(hoy?: string, negocio_id?: string | null): { filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number } {
+  buzon(hoy?: string, negocio_id?: string | null, tipo?: TipoOrden | null): { filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number } {
     const dia = (hoy ?? ahora()).slice(0, 10);
     // Con `negocio_id`, el buzón y sus TOTALES son de ese negocio. Sin él,
     // de toda la empresa. Los totales tienen que salir de la misma consulta
     // que la lista o el número de arriba contradice a los renglones de
     // abajo, que ya fue un defecto real el 7-sep.
-    const orden = `ORDER BY (fecha_maxima_pago IS NULL), fecha_maxima_pago ASC, creado_at ASC`;
-    const filas = this.leerInternas('ordenes', (negocio_id
-      ? this.sql.exec(`SELECT * FROM ordenes WHERE estado = 'en_buzon' AND negocio_id = ? ${orden}`, negocio_id)
-      : this.sql.exec(`SELECT * FROM ordenes WHERE estado = 'en_buzon' ${orden}`)
+    //
+    // Con `tipo` (0.47.0), sólo las compras o sólo los reembolsos: son las
+    // dos pestañas del buzón, y cada una suma lo suyo. Sin él, todo junto.
+    const condiciones = [`estado = 'en_buzon'`];
+    const valores: SqlStorageValue[] = [];
+    if (negocio_id) { condiciones.push('negocio_id = ?'); valores.push(negocio_id); }
+    if (tipo) { condiciones.push('tipo = ?'); valores.push(tipo); }
+    const filas = this.leerInternas('ordenes', this.sql.exec(
+      `SELECT * FROM ordenes WHERE ${condiciones.join(' AND ')}
+       ORDER BY (fecha_maxima_pago IS NULL), fecha_maxima_pago ASC, creado_at ASC`, ...valores,
     ).toArray() as Fila[]);
     const enOchoDias = new Date(Date.parse(`${dia}T00:00:00Z`) + 7 * 86400000).toISOString().slice(0, 10);
     let total = 0, semana = 0, vencidas = 0;
@@ -1687,6 +1712,24 @@ export class OrgDB extends DurableObject<Env> {
       if (v && v < dia) { vencidas++; semana += m; } else if (v && v <= enOchoDias) semana += m;
     }
     return { filas, total, vence_esta_semana: semana, vencidas };
+  }
+
+  /** Lo que hay en el buzón, en dos números: cuánto en compras y cuánto en
+   *  reembolsos (0.47.0). Es para el inicio de dash101, que Mike pidió con
+   *  «el total de reembolsos pendientes en la pantalla inicial junto con los
+   *  otros totales», y que resta esa suma del capital de la empresa. Lo lee
+   *  quien ve dinero, no sólo quien paga: es una cifra del tablero, no el
+   *  buzón —los renglones no salen por aquí. */
+  pendientesDeOrdenes(negocio_id?: string | null): { compras: { total: number; cuantas: number }; reembolsos: { total: number; cuantas: number } } {
+    const filas = (negocio_id
+      ? this.sql.exec(`SELECT tipo, COUNT(*) AS n, COALESCE(SUM(monto), 0) AS suma FROM ordenes WHERE estado = 'en_buzon' AND negocio_id = ? GROUP BY tipo`, negocio_id)
+      : this.sql.exec(`SELECT tipo, COUNT(*) AS n, COALESCE(SUM(monto), 0) AS suma FROM ordenes WHERE estado = 'en_buzon' GROUP BY tipo`)
+    ).toArray() as Array<{ tipo: string; n: number; suma: number }>;
+    const de = (t: TipoOrden) => {
+      const f = filas.find((x) => x.tipo === t);
+      return { total: Number(f?.suma ?? 0), cuantas: Number(f?.n ?? 0) };
+    };
+    return { compras: de('compra'), reembolsos: de('reembolso') };
   }
 
   /** Una orden con toda su historia y sus archivos. */
@@ -1735,6 +1778,15 @@ export class OrgDB extends DurableObject<Env> {
     const t = ahora();
     const fecha = (args.fecha ?? t).slice(0, 10);
     let partida_id = orden.partida_id ? String(orden.partida_id) : null;
+    /* Un reembolso se le paga a quien puso el dinero, no a un proveedor: la
+     * contraparte del egreso es esa persona, y la categoría dice
+     * `reembolso` para que en movimientos se distinga de un gasto. Son
+     * salidas de dinero las dos (Mike, 28-sep), y por eso el resto —cuenta,
+     * proyecto, partida, fiscal— va igual. */
+    const reembolso = orden.tipo === 'reembolso';
+    const contraparte = reembolso
+      ? { tipo: orden.solicitante_id ? 'personal' : 'otro', id: orden.solicitante_id ?? null, nombre: orden.solicitante_nombre ?? orden.solicitante_correo ?? null }
+      : { tipo: orden.proveedor_id ? 'proveedor' : 'otro', id: orden.proveedor_id ?? null, nombre: orden.proveedor_nombre ?? null };
 
     this.ctx.storage.transactionSync(() => {
       /* Con proyecto y sin partida que le quede, se crea la partida por el
@@ -1747,7 +1799,7 @@ export class OrgDB extends DurableObject<Env> {
         this.sql.exec(
           `INSERT INTO partidas (id, proyecto_id, proveedor_id, proveedor_nombre, concepto, monto_acordado, creado_at)
            VALUES (?,?,?,?,?,?,?)`,
-          partida_id, orden.proyecto_id, orden.proveedor_id ?? null, orden.proveedor_nombre ?? null,
+          partida_id, orden.proyecto_id, contraparte.id, contraparte.nombre,
           orden.concepto, Number(orden.monto), t,
         );
         this.sql.exec(`UPDATE ordenes SET partida_id = ? WHERE id = ?`, partida_id, args.id);
@@ -1759,8 +1811,8 @@ export class OrgDB extends DurableObject<Env> {
           facturado, requiere_factura, subtotal, iva, tasa_iva)
          VALUES (?,?,'egreso',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         mov_id, orden.negocio_id, Number(orden.monto), fecha, args.cuenta_id, orden.proyecto_id ?? null,
-        orden.proveedor_id ? 'proveedor' : 'otro', orden.proveedor_id ?? null, orden.proveedor_nombre ?? null,
-        `${orden.folio} · ${orden.concepto}`, 'orden_de_compra', args.quien_usuario_id, t,
+        contraparte.tipo, contraparte.id, contraparte.nombre,
+        `${orden.folio} · ${orden.concepto}`, reembolso ? 'reembolso' : 'orden_de_compra', args.quien_usuario_id, t,
         /* `facturado` arranca en 0 aunque la orden diga «con factura»: la
          * marca dice que YA LLEGÓ el CFDI, no que se espera. La factura casi
          * siempre llega después, y es justo lo que persigue la lista de
