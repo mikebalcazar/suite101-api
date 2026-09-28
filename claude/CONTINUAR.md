@@ -369,6 +369,22 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   huérfanos primero. Lo que NO está hecho todavía: devolver lo huérfano a un
   negocio. Eso es una escritura en producción y la decide Mike al ver los
   números.
+- **Reembolsos: la misma orden, de otro tipo (28-sep, contrato 0.47.0).**
+  Mike: «un módulo para reembolsos (…) podría ser el mismo portal de supply,
+  pero poner una opción en el tipo de orden si es reembolso o compra».
+  Migración org 0020: `ordenes.tipo` (compra | reembolso), folios `RE-`,
+  todo lo que existía queda compra. Al pagar un reembolso el egreso lleva
+  `categoria: 'reembolso'` y la contraparte es quien lo pidió. Rutas nuevas:
+  `buzon?tipo=`, `resumen` (compras y reembolsos pendientes, para el inicio
+  de dash101, que los RESTA del capital total) y `permisos`. La regla de
+  0.42.0 cambió en un punto: en supply101, sin la llave `supply` la puerta
+  ya no se cierra —se entra sólo a reembolsos y pedir una compra da 403
+  `compras_no_autorizadas`—; en las demás apps sigue igual. dash101 #88:
+  selector en el formulario, pestañas en el buzón, tarjeta en el inicio,
+  supply101 con el mismo selector. Lo que NO se hizo: las compras
+  pendientes NO restan del capital (Mike sólo pidió los reembolsos); un
+  reembolso con proyecto crea partida igual que una compra, a nombre de la
+  persona.
 - **workers.dev manda al dominio: redirigir, no apagar (25-sep, sin cambio
   de contrato).** Mike preguntó si ya se apagaban las direcciones viejas;
   escogió redirigir. En cada app, `DOMINIO_PROPIO` (sólo producción) hace que
