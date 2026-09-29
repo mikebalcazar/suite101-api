@@ -65,6 +65,58 @@ export async function huellaDeClave(env: Env, clave: string): Promise<string> {
  *  una licencia de otra. Cuatro de doce no sirven para adivinar el resto. */
 export const pistaDeClave = (clave: string): string => clave.slice(-4);
 
+/* Las claves que quedaron en claro, a huella, SIN QUE NADIE LO PIDA.
+ *
+ * La primera versión de esto era una ruta que Mike llamaba una vez tras el
+ * despliegue. Se cambió por dos razones, y la segunda es la que importa:
+ *
+ *   · quien escribió el código no alcanza la API desde su sesión —el proxy
+ *     rechaza *.workers.dev y api.taller101.com—, así que no podía llamarla ni
+ *     comprobar que hubiera corrido;
+ *   · y una migración que depende de que alguien se acuerde de apretar un
+ *     botón no es una migración: es una nota en un cuaderno. El día que se
+ *     olvide, las claves siguen en claro y nadie se entera, porque todo
+ *     funciona igual.
+ *
+ * Así que corre sola, una vez por isolate, la primera vez que alguien toca
+ * `/licencias/*` o `/nube/*`. Es baratísima: una consulta que normalmente
+ * devuelve cero filas. Y es idempotente por construcción —una huella no tiene
+ * la forma `T101-…`, así que no se puede volver a migrar—.
+ *
+ * Lo que NO alcanza y conviene decirlo: las copias de seguridad de D1 (el
+ * «Time Travel» de Cloudflare guarda 30 días). Durante ese mes las claves
+ * viejas siguen siendo recuperables desde ahí, y después no.
+ */
+let yaRevisadas = false;
+
+export async function asegurarClaves(env: Env): Promise<number> {
+  if (yaRevisadas) return 0;
+  yaRevisadas = true;   // se marca ANTES: si falla, no se reintenta en bucle
+  try {
+    const filas = (await env.MASTER.prepare(
+      `SELECT id, clave FROM suscripciones WHERE clave LIKE 'T101-%'`,
+    ).all<{ id: string; clave: string }>()).results;
+    let hechas = 0;
+    for (const f of filas) {
+      const clave = String(f.clave).trim().toUpperCase();
+      if (!/^T101-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(clave)) continue;
+      await env.MASTER.prepare(`UPDATE suscripciones SET clave = ?, clave_pista = ? WHERE id = ?`)
+        .bind(await huellaDeClave(env, clave), pistaDeClave(clave), f.id).run();
+      hechas++;
+    }
+    return hechas;
+  } catch (e) {
+    // Que no tumbe la petición: si esto falla, el puente de `porClave` sigue
+    // encontrando las claves por sus letras y nadie se queda fuera.
+    yaRevisadas = false;
+    console.warn('no se pudieron migrar las claves:', (e as Error).message);
+    return 0;
+  }
+}
+
+/** Sólo para las pruebas: vuelve a armar el disparador de una sola vez. */
+export const olvidarQueYaSeRevisaron = (): void => { yaRevisadas = false; };
+
 /* ─────────────── los archivos ─────────────── */
 
 /** Dónde vive un archivo en R2. La versión va en la ruta, no encima de la
