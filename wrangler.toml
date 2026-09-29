@@ -87,6 +87,9 @@ URL_PUBLICA = "https://suite101-api.mike-929.workers.dev"
 # Desde el 25-sep-2026 workshop101 vive en su dominio propio; la de
 # workers.dev sigue viva, pero manda para allá. Los correos llevan la buena.
 URL_PANEL_DIRECTOR = "https://workshop101.taller101.com"
+# supply101, a donde manda el correo de «orden pagada» (29-sep-2026: antes
+# apuntaba a esta API y salía `sin_sesion`).
+URL_SUPPLY = "https://supply101.taller101.com"
 CORREO_QUELL = "quell101 <bitacora@envios.taller101.mx>"
 CORREO_ROSTER = "roster101 <expedientes@envios.taller101.mx>"
 
@@ -136,5 +139,6 @@ CORREO_BAJA = "info@forespot.com"
 ORIGENES = "*"
 URL_PUBLICA = "https://suite101-api-staging.mike-929.workers.dev"
 URL_PANEL_DIRECTOR = "https://workshop101-staging.mike-929.workers.dev"
+URL_SUPPLY = "https://supply101-staging.mike-929.workers.dev"
 CORREO_QUELL = "quell101 <bitacora@envios.taller101.mx>"
 CORREO_ROSTER = "roster101 <expedientes@envios.taller101.mx>"

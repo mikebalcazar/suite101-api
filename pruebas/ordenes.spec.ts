@@ -234,6 +234,11 @@ describe('19 · órdenes de compra (los casos del encargo)', () => {
     expect(pago.estado).toBe(200);
     expect(pago.data.correo.para, 'va al correo copiado en la orden').toBe(GENTE.ana.correo);
     expect(pago.data.correo.enviado, 'en pruebas NO sale: rebotes y reputación del dominio').toBe(false);
+    /* Mike, 29-sep: «cuando le doy click en “ver comprobante” me manda a una
+     * URL que despliega {"ok":false,"error":"sin_sesion"}». La liga iba a la
+     * API; tiene que ir a supply101, donde sí hay sesión y se ve la orden. */
+    expect(pago.data.correo.url, 'la liga del correo va a supply101, a la orden').toMatch(/^https:\/\/[^/]+\/#\/orden\/[A-Za-z0-9_-]+$/);
+    expect(pago.data.correo.url).not.toContain('/orgs/');
     expect(['correo_apagado_fuera_de_produccion', 'correo_no_configurado']).toContain(pago.data.correo.motivo);
   });
 

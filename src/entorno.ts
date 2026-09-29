@@ -34,6 +34,12 @@ export interface Env {
   URL_PUBLICA?: string;
   /** El panel del director (workshop101): a donde lo manda el correo de bienvenida. */
   URL_PANEL_DIRECTOR?: string;
+  /** supply101, a donde manda el correo de «orden pagada / devuelta /
+   *  rechazada». Hasta el 29-sep la liga apuntaba a ESTA API (URL_PUBLICA +
+   *  /orgs/…/ordenes/…): un JSON, y además `sin_sesion`, porque la cookie
+   *  vive en el dominio de la app, no en el de la API. Sin esta variable el
+   *  correo sale sin liga: mejor ninguna que una rota. */
+  URL_SUPPLY?: string;
   /** El remitente de los correos de quell101 (invitaciones y avisos de obra). */
   CORREO_QUELL?: string;
   /** El remitente de los correos de roster101 cuando el Worker de la empresa
