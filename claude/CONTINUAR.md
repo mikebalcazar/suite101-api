@@ -377,6 +377,23 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   al cambiar el plano con componentes puestos se ofrece «Reubicarlos uno
   por uno» o «Se quedan donde están». quote101 #69, dos pruebas nuevas,
   115/115. Muro 2026-09-29-1100.
+- **Proveedor con datos para pagarle; supply101 lo da de alta (29-sep,
+  contrato 0.54.0).** Mike: «dar de alta a un nuevo proveedor (…) nombre,
+  RFC, número de cuenta (CLABE y banco y beneficiario), email de
+  contacto, teléfono de contacto, ubicación (…) de Google Maps».
+  Migración org 0022 (clabe, banco, beneficiario, direccion, maps_url);
+  supply101 escribe proveedores por el CRUD; la API revisa CLABE (con
+  verificador), RFC, correo y liga de Maps al crear o cambiar. API #165
+  (611/611), dash101 #98 (formulario dentro de «Pedir», «📍 Aquí» con
+  la ubicación del teléfono; prueba el-proveedor-nuevo.mjs). PENDIENTE
+  natural: ver/editar la ficha del proveedor en supply101, y que dash101
+  enseñe cuenta y ubicación. Muro 2026-09-29-1500. Al publicar dash101
+  #98 se cayó dos veces: primero mi prueba nueva corría antes de
+  `playwright install` (#99 la movió), y luego navegador.spec.mjs
+  contra staging («la orden trae folio»: la pantalla de la orden seguía
+  en «Cargando…» al segundo); nada del diff la toca, y al repetir la
+  corrida una vez pasó completa. Si vuelve a salir, ese `waitForTimeout
+  (1000)` en pruebas/navegador.spec.mjs es corto para un staging frío.
 - **roster101: equipos de trabajo (29-sep, API 0.53.0 + portal 0.14.0).**
   Mike: «agrupar por equipo de trabajo (…) esos equipos los doy de alta
   yo, y ellos sólo seleccionan cuál de los disponibles es el suyo, o no
