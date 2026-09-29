@@ -34,7 +34,9 @@ import {
   CLAVE_FORMA, DIA, abrirToken, cargaDe, claveNueva, firmarToken, hastaDe, idNuevo, llavePublica, normalizaClave, vigencia,
 } from '../licencias';
 import { asegurarClaves, huellaDeClave, pistaDeClave } from '../nube';
-import type { SuscripcionFila } from '../../schema/suscripcion-nube';
+// `SuscripcionFila` era `Suscripcion` más las tres columnas de la nube (0021);
+// desde el 29-sep las tres viven en `Suscripcion` y el archivo aparte se fue.
+type SuscripcionFila = Suscripcion;
 import { TIPOS_LICENCIA } from '../../schema/tipos';
 import type { Activacion, EstadoSuscripcion, OrigenPago, RenglonBitacoraLicencia, Suscripcion, TipoLicencia } from '../../schema/tipos';
 

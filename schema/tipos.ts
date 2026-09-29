@@ -836,8 +836,21 @@ export const NOMBRE_TIPO_LICENCIA: Record<TipoLicencia, string> = {
 
 export interface Suscripcion {
   id: string;
-  /** T101-XXXX-XXXX-XXXX. Es lo que el cliente teclea al instalar. */
+  /** T101-XXXX-XXXX-XXXX. Es lo que el cliente teclea al instalar. Desde la
+   *  0.22.0 la columna guarda su HUELLA (HMAC con un secreto de `config`), no
+   *  la clave: se ve una sola vez, al crearla. */
   clave: string;
+  /* 0021 (nube de draw101, 0.22.0). Vivieron en schema/suscripcion-nube.ts
+   * mientras nadie tocaba este archivo; se mudaron aquí el 29-sep. */
+  /** Las últimas cuatro letras de la clave, para reconocerla en master101.
+   *  Cuatro de doce no sirven para adivinar el resto. */
+  clave_pista: string | null;
+  /** La llave maestra de la cuenta, ya cifrada con lo que sale de su clave
+   *  T101. El servidor la guarda y no puede abrirla: nace en la máquina del
+   *  dueño. El panel no la devuelve nunca. */
+  llave_envuelta: string | null;
+  /** La sal del PBKDF2 con que se envolvió. Tampoco sale por el panel. */
+  llave_sal: string | null;
   programa: string;
   cliente: string;
   correo: string | null;
