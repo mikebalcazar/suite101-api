@@ -369,6 +369,21 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   huérfanos primero. Lo que NO está hecho todavía: devolver lo huérfano a un
   negocio. Eso es una escritura en producción y la decide Mike al ver los
   números.
+- **Batería en móvil, paso 2: el plano de quell101 (29-sep).** Mike escogió
+  seguir por el plano. bitacora-obra #87: durante el gesto la vista vive en
+  un ref y la capa de los pines se mueve con `style.transform` directo, una
+  vez por cuadro; los pines se mantienen de tamaño con una sola variable
+  CSS (`--k`, sólo se toca si cambió >2 %); `setV` una vez al soltar. Nuevo
+  `web/src/plano.js`: la hoja del PDF con margen (1.75×, tope 8 MP) y se
+  vuelve a pedir sólo si el zoom cambió ±25 %, se salió o cambió el tamaño;
+  450 ms de espera. App.jsx: el reintento de 60 s sólo visible y con algo
+  por subir; `revisaSenal()` al arrancar. Medido con toques CDP a 390×844 y
+  80 pines: pinch 2400 → 0 escrituras en pines, script 38 → 13 ms, tareas
+  ~200 → ~140; arrastre script 48 → 20, tareas ~217 → ~134.
+  `pruebas/el-plano-no-repinta.mjs` (35). Muro 2026-09-29-0700. PENDIENTE
+  DE MIKE: sentirlo en el teléfono y escoger lo que sigue (pdf.js sólo al
+  acercarse, Firebase fuera de dash101, la cámara de roster101, supply101
+  comprimir). Densidad del lienzo sigue en 2 a propósito.
 - **Batería en móvil: quote101 G103 sin ambiente, y el análisis de las
   demás (29-sep).** Mike: «reducir el consumo de recursos de las apps en
   MÓVIL. Es crítico. Empezando por quote (…) quitar los efectos del fondo y
