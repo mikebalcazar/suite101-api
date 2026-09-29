@@ -387,7 +387,12 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   toca). Apagar no quita a nadie; borrar suelta a su gente. Portal:
   select en el formulario, tarjeta de equipos y «Por equipo de trabajo»
   en la lista. API #159 (603/603), portal #28 (0117). Muro
-  2026-09-29-1200.
+  2026-09-29-1200. Luego, el mismo día: Mike no encontró dónde asignar
+  («no puedo asignar trabajadores») y pidió filtrar, no sólo agrupar →
+  API 0.53.1 (#162): PUT /admin/trabajadores/:id/equipo; portal 0.14.1
+  (#30): selector en cada renglón y filtro «Todos / Sin equipo / cada
+  equipo». El campo del expediente del trabajador se queda (Mike: «con el
+  tiempo eso es lo más eficiente»). Muro 2026-09-29-1300.
 - **DEFECTO: la liga «ver comprobante» del correo de orden pagada
   (29-sep, 0.52.1).** Mike: «me manda a una URL que despliega sin_sesion».
   La liga iba a la API (URL_PUBLICA + /orgs/…): JSON y sin sesión, porque
