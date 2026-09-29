@@ -1419,7 +1419,7 @@ export const TABLAS_INTERNAS = [
   'quell_element_docs', 'quell_doc_marcas',
   // roster101 (0007): las usa el motor de los expedientes por /roster/:o/api/*.
   'roster_trabajadores', 'roster_documentos', 'roster_codigos', 'roster_bitacora', 'roster_consentimientos',
-  'roster_papelera', 'roster_administradores',
+  'roster_papelera', 'roster_administradores', 'roster_equipos',
   /* Órdenes de compra y fiscal (0008 y 0009). NO salen por el CRUD genérico, y
    * es a propósito: el CRUD genérico entrega la tabla entera a quien puede
    * leerla, y aquí un miembro tiene que ver SÓLO SUS órdenes (decisión de

@@ -356,7 +356,7 @@ describe('equipos de trabajo (0.53.0)', () => {
    * roster. Que la gente ponga en qué equipo de trabajo está, pero esos
    * equipos los doy de alta yo, y ellos sólo seleccionan cuál de los
    * disponibles es el suyo, o "no tengo equipo".» */
-  let eban = '', inst = '', idJuan = '';
+  let eban = '', inst = '', idPedro = ''; // Juan ya no existe aquí: lo borró la prueba de la papelera
   it('los da de alta quien puede capturar (consulta no); el nombre no se repite ni con otras mayúsculas', async () => {
     expect((await r('mira', '/api/admin/equipos', { method: 'POST', json: { nombre: 'Ebanistería' } })).estado).toBe(403);
     const a = await r('fer', '/api/admin/equipos', { method: 'POST', json: { nombre: '  Ebanistería  ' } });
@@ -369,29 +369,29 @@ describe('equipos de trabajo (0.53.0)', () => {
     const lista = await r('mira', '/api/admin/equipos');
     expect(lista.equipos.map((e: any) => e.nombre)).toEqual(['Ebanistería', 'Instalación']);
   });
-  it('el trabajador ve los prendidos y escoge el suyo; uno que no existe no se acepta', async () => {
-    const eqs = await r('juan', '/api/equipos');
+  it('el trabajador (Pedro) ve los prendidos y escoge el suyo; uno que no existe no se acepta', async () => {
+    const eqs = await r('pedro', '/api/equipos');
     expect(eqs.estado).toBe(200);
     expect(eqs.equipos.map((e: any) => e.nombre)).toEqual(['Ebanistería', 'Instalación']);
-    const mal = await r('juan', '/api/yo', { method: 'PUT', json: { ...expediente(1), equipo_id: 'no-existe' } });
+    const mal = await r('pedro', '/api/yo', { method: 'PUT', json: { ...expediente(2), equipo_id: 'no-existe' } });
     expect(mal.estado).toBe(422);
     expect(mal.errores.equipo_id).toMatch(/No tengo equipo/);
-    const bien = await r('juan', '/api/yo', { method: 'PUT', json: { ...expediente(1), equipo_id: inst } });
+    const bien = await r('pedro', '/api/yo', { method: 'PUT', json: { ...expediente(2), equipo_id: inst } });
     expect(bien.estado, JSON.stringify(bien)).toBe(200);
     expect(bien.trabajador.equipo_id).toBe(inst);
     // Sin mandar equipo_id, se queda el que tenía.
-    const sinTocar = await r('juan', '/api/yo', { method: 'PUT', json: expediente(1) });
+    const sinTocar = await r('pedro', '/api/yo', { method: 'PUT', json: expediente(2) });
     expect(sinTocar.trabajador.equipo_id).toBe(inst);
-    expect((await r('juan', '/api/yo')).trabajador.equipo_id).toBe(inst);
+    expect((await r('pedro', '/api/yo')).trabajador.equipo_id).toBe(inst);
   });
   it('el panel ve el equipo de cada quien, y el catálogo con cuántos hay en cada uno', async () => {
     const lista = await r('fer', '/api/admin/trabajadores');
-    const juan = lista.trabajadores.find((t: any) => t.email === 'juan@ejemplo.mx');
-    idJuan = juan.id;
+    const juan = lista.trabajadores.find((t: any) => t.email === 'pedro@ejemplo.mx');
+    idPedro = juan.id;
     expect(juan.equipo_nombre).toBe('Instalación');
     expect(lista.equipos.find((e: any) => e.id === inst).cuantos).toBe(1);
     expect(lista.equipos.find((e: any) => e.id === eban).cuantos).toBe(0);
-    const uno = await r('mira', `/api/admin/trabajadores/${idJuan}`);
+    const uno = await r('mira', `/api/admin/trabajadores/${idPedro}`);
     const campo = uno.campos.find((c: any) => c.campo === 'equipo_id');
     expect(campo.opciones.map((o: any) => o.texto)).toEqual(['Ebanistería', 'Instalación']);
     expect(uno.trabajador.equipo_nombre).toBe('Instalación');
@@ -406,22 +406,22 @@ describe('equipos de trabajo (0.53.0)', () => {
     expect(ren.equipo.nombre).toBe('Instalaciones');
     expect((await r('fer', `/api/admin/equipos/${eban}`, { method: 'PUT', json: { nombre: 'instalaciones' } })).estado).toBe(409);
     expect((await r('fer', `/api/admin/equipos/${inst}`, { method: 'PUT', json: { activo: false } })).estado).toBe(200);
-    expect((await r('juan', '/api/equipos')).equipos.map((e: any) => e.nombre)).toEqual(['Ebanistería']);
-    expect((await r('juan', '/api/yo')).trabajador.equipo_id, 'sigue en el suyo aunque lo apagaron').toBe(inst);
-    const apagado = await r('juan', '/api/yo', { method: 'PUT', json: { ...expediente(1), equipo_id: inst } });
+    expect((await r('pedro', '/api/equipos')).equipos.map((e: any) => e.nombre)).toEqual(['Ebanistería']);
+    expect((await r('pedro', '/api/yo')).trabajador.equipo_id, 'sigue en el suyo aunque lo apagaron').toBe(inst);
+    const apagado = await r('pedro', '/api/yo', { method: 'PUT', json: { ...expediente(2), equipo_id: inst } });
     expect(apagado.estado, 'pero ya no se puede escoger').toBe(422);
-    const uno = await r('fer', `/api/admin/trabajadores/${idJuan}`);
+    const uno = await r('fer', `/api/admin/trabajadores/${idPedro}`);
     expect(uno.campos.find((c: any) => c.campo === 'equipo_id').opciones.map((o: any) => o.texto)).toEqual(['Ebanistería', 'Instalaciones (apagado)']);
-    const cap = await r('fer', `/api/admin/trabajadores/${idJuan}`, { method: 'PUT', json: { ...expediente(1), equipo_id: '' } });
+    const cap = await r('fer', `/api/admin/trabajadores/${idPedro}`, { method: 'PUT', json: { ...expediente(2), equipo_id: '' } });
     expect(cap.estado, JSON.stringify(cap)).toBe(200);
     expect(cap.trabajador.equipo_id).toBeNull();
-    expect((await r('fer', `/api/admin/trabajadores/${idJuan}`, { method: 'PUT', json: { ...expediente(1), equipo_id: eban } })).trabajador.equipo_id).toBe(eban);
+    expect((await r('fer', `/api/admin/trabajadores/${idPedro}`, { method: 'PUT', json: { ...expediente(2), equipo_id: eban } })).trabajador.equipo_id).toBe(eban);
   });
   it('borrar un equipo suelta a su gente, y queda en la bitácora', async () => {
     const b = await r('fer', `/api/admin/equipos/${eban}`, { method: 'DELETE' });
     expect(b.estado).toBe(200);
     expect(b.soltados).toBe(1);
-    expect((await r('juan', '/api/yo')).trabajador.equipo_id).toBeNull();
+    expect((await r('pedro', '/api/yo')).trabajador.equipo_id).toBeNull();
     expect((await r('fer', `/api/admin/equipos/${eban}`, { method: 'DELETE' })).estado).toBe(404);
     const bit = await r('fer', '/api/admin/bitacora?acciones=equipo_alta,equipo_cambio,equipo_baja&dias=1');
     expect(bit.renglones.length).toBeGreaterThanOrEqual(4);

@@ -1023,9 +1023,10 @@ app.delete('/api/admin/equipos/:id', exigeAdmin, exigePermiso('capturar'), async
   const id = c.req.param('id');
   const e = await c.env.DB.prepare('SELECT * FROM roster_equipos WHERE id = ?').bind(id).first();
   if (!e) return err(c, 'Ese equipo ya no existe.', 404);
-  const soltados = await c.env.DB.prepare('UPDATE roster_trabajadores SET equipo_id = NULL WHERE equipo_id = ?').bind(id).run();
+  // Se cuenta antes (y sólo a los vivos): `meta.changes` del OrgDB no es de fiar.
+  const n = Number((await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM roster_trabajadores WHERE equipo_id = ? AND ${SOLO_VIVOS}`).bind(id).first())?.n ?? 0);
+  await c.env.DB.prepare('UPDATE roster_trabajadores SET equipo_id = NULL WHERE equipo_id = ?').bind(id).run();
   await c.env.DB.prepare('DELETE FROM roster_equipos WHERE id = ?').bind(id).run();
-  const n = Number(soltados?.meta?.changes ?? 0);
   await registra(c.env, quienAdmin(c), 'equipo_baja', `${e.nombre}${n ? ` (${n} sin equipo)` : ''}`);
   return c.json({ ok: true, soltados: n });
 });
