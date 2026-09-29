@@ -35,6 +35,17 @@
   .nota { color:var(--suave); font-size:13px; }
   .sep { border:0; border-top:1px solid var(--linea); margin:18px 0; }
   .dato { font:500 15px 'Fira Sans',sans-serif; font-variant-numeric:tabular-nums; }
+  /* La lista de equipos (0.21.4): un renglón por computadora, con su ícono,
+     su nombre y cuándo se usó. Cabe en los 420 px de la ventana. */
+  .equipo { display:flex; align-items:center; gap:12px; padding:12px 0; border-top:1px solid var(--linea); }
+  .equipo:first-of-type { border-top:0; }
+  .equipo .icono { flex:0 0 34px; height:34px; display:flex; align-items:center; justify-content:center;
+                   border-radius:8px; background:var(--fondo); color:var(--suave); }
+  .equipo .quien { flex:1; min-width:0; }
+  .equipo .como { font-weight:600; font-size:15px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .equipo .cuando { color:var(--suave); font-size:12.5px; }
+  .equipo .aqui { color:var(--azul); font-weight:600; font-size:12.5px; }
+  .equipo .btn { width:auto; margin:0; padding:8px 12px; font-size:14px; flex:0 0 auto; }
   [hidden] { display:none !important; }
 </style>
 </head>
@@ -94,6 +105,14 @@
     <p class="nota">Ya puedes cerrar esta ventana.</p>
   </div>
 
+  <div id="v-equipos" hidden>
+    <p class="err" id="p-equipos"></p>
+    <p class="nota" id="p-equipos-nota"></p>
+    <div id="lista-equipos"></div>
+    <hr class="sep">
+    <button class="liga" type="button" id="b-equipos-volver">Cancelar</button>
+  </div>
+
   <div id="v-problema" hidden>
     <p class="err" id="p-problema"></p>
     <hr class="sep">
@@ -116,6 +135,11 @@ const PROGRAMA = (P.get('programa') || '').toLowerCase();
 const HUELLA = P.get('huella') || '';
 const VERSION = P.get('version') || '';
 const NOMBRE = P.get('app') || PROGRAMA || 'la app';
+/* Cómo se llama esta computadora y en qué sistema va (0.21.4). Se mandan al
+ * activar para que la lista de equipos se pueda leer desde el primer día. La
+ * huella sigue siendo un azar: esto es etiqueta, no identidad. */
+const EQUIPO = P.get('equipo') || '';
+const SISTEMA = P.get('sistema') || '';
 
 const ERRORES = {
   codigo_invalido: 'Ese código no es. Revisa tu correo y vuelve a intentar.',
@@ -150,7 +174,7 @@ async function pedir(ruta, cuerpo) {
   return d.data;
 }
 
-const ver = (cual) => { for (const v of ['v-cargando','v-correo','v-clave','v-codigo','v-nueva','v-listo','v-problema','v-clave-licencia']) $(v).hidden = v !== cual; };
+const ver = (cual) => { for (const v of ['v-cargando','v-correo','v-clave','v-codigo','v-nueva','v-listo','v-problema','v-clave-licencia','v-equipos']) $(v).hidden = v !== cual; };
 let correo = '';
 
 const diaLegible = (d) => {
@@ -175,9 +199,11 @@ async function activar() {
   }
 
   try {
-    const r = await pedir('/licencias/mia', { programa: PROGRAMA, huella: HUELLA, version: VERSION || undefined });
+    const r = await pedir('/licencias/mia', { programa: PROGRAMA, huella: HUELLA, version: VERSION || undefined, nombre: EQUIPO || undefined, sistema: SISTEMA || undefined });
     lista(r, yo.usuario?.correo ?? correo);
   } catch (e) {
+    // Sin lugar ya no es un callejón: se enseñan los equipos para soltar uno.
+    if (e.cual === 'sin_lugares') { await verEquipos(e.detalle, { programa: PROGRAMA }); return; }
     $('p-quien').textContent = `Entraste como ${yo.usuario?.correo ?? correo}.`;
     $('p-problema').textContent =
       e.cual === 'sin_licencia' ? `Esta cuenta no tiene licencia de ${NOMBRE}. Si la compraste con otro correo, entra con ése.`
@@ -187,6 +213,110 @@ async function activar() {
       : e.message;
     ver('v-problema');
   }
+}
+
+/* ───────────── La lista de equipos  ·  Mike, 28-sep-2026 ─────────────
+ *
+ * «Un panel de selección de licencias en los equipos, similar a como le hace
+ * adobe. Te abre una lista (con íconos) de los equipos en los que tienes
+ * registrada la licencia y puedes escoger dar de baja uno. Son licencias
+ * flotantes, la cantidad de equipos son lo que son simultáneos».
+ *
+ * Aparece cuando la licencia no tiene lugar libre. Hasta hoy eso era un
+ * callejón: la pantalla decía «ya están ocupados» y ahí se acababa, porque la
+ * única forma de soltar un lugar era desde la computadora que lo tenía — que
+ * es justamente a la que uno ya no tiene enfrente. Le pasó a Mike con su
+ * laptop el 28-sep.
+ *
+ * Después de soltar uno NO se pide volver a empezar: se reintenta la
+ * activación sola. Quien llegó hasta aquí quería entrar, no administrar.
+ */
+const ICONOS = {
+  windows: '<svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 2.3 6.5 1.4v6.1H0zm7.3-1L16 0v7.4H7.3zM0 8.4h6.5v6.2L0 13.7zm7.3 0H16V16l-8.7-1.2z"/></svg>',
+  mac: '<svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M11 1.4c0 .9-.4 1.7-1 2.3-.6.6-1.4 1-2.1.9-.1-.9.4-1.8.9-2.3.6-.6 1.5-1 2.2-1zM13.6 11.6c-.4.9-.6 1.3-1.1 2.1-.7 1.1-1.7 2.4-2.9 2.4-1.1 0-1.4-.7-2.9-.7s-1.8.7-2.9.7c-1.2 0-2.1-1.2-2.8-2.2C-.9 10.9-1.1 6.8.6 4.6c.9-1.1 2.2-1.8 3.4-1.8 1.3 0 2.1.7 3.1.7 1 0 1.6-.7 3.1-.7 1.1 0 2.3.6 3.1 1.7-2.7 1.5-2.3 5.4.3 6.4z"/></svg>',
+  linux: '<svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C5.8 0 5 1.9 5 3.4c0 1.2-.2 2-.8 2.9C3.3 7.6 2 9.3 2 11.5c0 .8.3 1.3.9 1.6-.1.5.1 1 .6 1.3.6.4 1.6.5 2.7.2.6-.1 1.1-.1 1.8-.1s1.2 0 1.8.1c1.1.3 2.1.2 2.7-.2.5-.3.7-.8.6-1.3.6-.3.9-.8.9-1.6 0-2.2-1.3-3.9-2.2-5.2-.6-.9-.8-1.7-.8-2.9C11 1.9 10.2 0 8 0zm-1.2 3c.4 0 .7.4.7.9s-.3.9-.7.9-.7-.4-.7-.9.3-.9.7-.9zm2.4 0c.4 0 .7.4.7.9s-.3.9-.7.9-.7-.4-.7-.9.3-.9.7-.9zM8 5.6c.7 0 1.6.4 1.6.8 0 .2-.3.4-.7.6-.3.2-.6.4-.9.4s-.6-.2-.9-.4c-.4-.2-.7-.4-.7-.6 0-.4.9-.8 1.6-.8z"/></svg>',
+  otro: '<svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="1" y="2.5" width="14" height="9" rx="1.2"/><path d="M5 14h6"/></svg>',
+};
+
+const hace = (iso) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'sin señales';
+  const dias = Math.floor((Date.now() - d.getTime()) / 86400000);
+  if (dias <= 0) return 'usado hoy';
+  if (dias === 1) return 'usado ayer';
+  if (dias < 30) return `usado hace ${dias} días`;
+  const meses = Math.floor(dias / 30);
+  return meses === 1 ? 'usado hace un mes' : `usado hace ${meses} meses`;
+};
+
+/** Cómo llamarle a un equipo que todavía no mandó su nombre: las versiones
+ *  anteriores a la 0.21.4 no lo mandaban, y lo pondrán en su próximo latido.
+ *  Mientras tanto, su huella recortada — fea, pero no miente. */
+const comoSeLlama = (e) =>
+  e.nombre
+  // La de aquí sabe cómo se llama aunque el servidor todavía no: viene en la
+  // dirección. Sin esto, la computadora que tienes enfrente es la única de la
+  // lista que sale sin nombre, que es justo al revés de lo útil.
+  || (e.es_de_aqui && EQUIPO)
+  || `Equipo ${e.huella.slice(0, 8)}…`;
+
+let soltando = false;
+
+async function verEquipos(detalle, cuerpoAuth) {
+  ver('v-cargando');
+  let d;
+  try { d = await pedir('/licencias/equipos', { ...cuerpoAuth, huella: HUELLA }); }
+  catch (e) { $('p-problema').textContent = e.message; ver('v-problema'); return; }
+
+  const fila = (d.licencias || []).find((l) => l.equipos.length) || d.licencias?.[0];
+  if (!fila) { $('p-problema').textContent = 'No se encontró la licencia.'; ver('v-problema'); return; }
+
+  $('p-equipos').textContent =
+    `Tu licencia permite ${fila.lugares.total} equipo${fila.lugares.total === 1 ? '' : 's'} a la vez, y ya ${fila.lugares.total === 1 ? 'está ocupado' : 'están ocupados'}.`;
+  $('p-equipos-nota').textContent = 'Da de baja el que ya no uses y esta computadora entra en su lugar. El que des de baja puede volver a activarse cuando quieras.';
+
+  const caja = $('lista-equipos');
+  caja.innerHTML = '';
+  for (const e of fila.equipos) {
+    const div = document.createElement('div');
+    div.className = 'equipo';
+    div.innerHTML =
+      `<div class="icono">${ICONOS[e.sistema] || ICONOS.otro}</div>`
+      + `<div class="quien"><div class="como"></div><div class="cuando"></div></div>`;
+    // El nombre se pone con textContent y no en el HTML: viene de cómo alguien
+    // bautizó su computadora, y eso es texto de fuera.
+    div.querySelector('.como').textContent = comoSeLlama(e);
+    div.querySelector('.cuando').textContent =
+      hace(e.ultimo_latido_at) + (e.version ? ` · ${NOMBRE} ${e.version}` : '');
+    if (e.es_de_aqui) {
+      const yo = document.createElement('div');
+      yo.className = 'aqui';
+      yo.textContent = 'esta computadora';
+      div.appendChild(yo);
+    } else {
+      const b = document.createElement('button');
+      b.className = 'btn suave';
+      b.type = 'button';
+      b.textContent = 'Dar de baja';
+      b.onclick = async () => {
+        if (soltando) return;
+        soltando = true;
+        b.disabled = true; b.textContent = 'Dando de baja…';
+        try {
+          await pedir('/licencias/soltar', { ...cuerpoAuth, huella: e.huella });
+          // Y se vuelve a intentar solo: a eso vino quien está aquí.
+          if (cuerpoAuth.clave) await activarConClave(cuerpoAuth.clave);
+          else await activar();
+        } catch (err) {
+          $('p-equipos').textContent = err.message;
+          b.disabled = false; b.textContent = 'Dar de baja';
+        } finally { soltando = false; }
+      };
+      div.appendChild(b);
+    }
+    caja.appendChild(div);
+  }
+  ver('v-equipos');
 }
 
 /** Lo mismo para los dos caminos, el de cuenta y el de clave: la app sólo
@@ -205,26 +335,41 @@ function lista(r, quien) {
 
 /* El camino de la clave tecleada, que Mike decidió conservar: sin cuenta y
  * sin sesión, contra la misma `/licencias/activar` de siempre. */
+/* Cancelar desde la lista: se vuelve a donde estaba, sin soltar nada. Quien
+ * llegó por clave regresa a la clave; quien llegó por cuenta, al aviso. */
+$('b-equipos-volver').onclick = () => {
+  if ($('clave-lic').value.trim()) { ver('v-clave-licencia'); return; }
+  $('p-problema').textContent = $('p-equipos').textContent;
+  ver('v-problema');
+};
+
 $('b-tengo-clave').onclick = () => {
   $('clave-lic').value = ''; $('err-clave-lic').textContent = '';
   ver('v-clave-licencia'); $('clave-lic').focus();
 };
 $('b-mejor-cuenta').onclick = () => { $('err-correo').textContent = ''; ver('v-correo'); $('correo').focus(); };
-$('b-clave-lic').onclick = async () => {
+/** El camino de la clave, aparte para poder reintentarlo después de dar de
+ *  baja un equipo. */
+async function activarConClave(v) {
   $('err-clave-lic').textContent = '';
-  const v = $('clave-lic').value.trim().toUpperCase();
-  if (!v) { $('err-clave-lic').textContent = 'Escribe la clave.'; return; }
   $('b-clave-lic').disabled = true;
   try {
-    const r = await pedir('/licencias/activar', { clave: v, huella: HUELLA, version: VERSION || undefined });
+    const r = await pedir('/licencias/activar', { clave: v, huella: HUELLA, version: VERSION || undefined, nombre: EQUIPO || undefined, sistema: SISTEMA || undefined });
     lista(r, null);
   } catch (e) {
+    // Sin lugar no se acaba el camino: se enseñan los equipos para soltar uno.
+    if (e.cual === 'sin_lugares') { await verEquipos(e.detalle, { clave: v }); return; }
     $('err-clave-lic').textContent =
       e.cual === 'sin_pago' ? `Esa licencia no está al corriente${e.detalle?.paga_hasta ? ` (pagada hasta ${diaLegible(e.detalle.paga_hasta)})` : ''}.`
       : e.cual === 'suspendida' ? 'Esa licencia está suspendida.'
-      : e.cual === 'sin_lugares' ? `Esa licencia permite ${e.detalle?.lugares} equipo(s) a la vez y ya están ocupados.`
       : e.message;
+    ver('v-clave-licencia');
   } finally { $('b-clave-lic').disabled = false; }
+}
+$('b-clave-lic').onclick = async () => {
+  const v = $('clave-lic').value.trim().toUpperCase();
+  if (!v) { $('err-clave-lic').textContent = 'Escribe la clave.'; return; }
+  await activarConClave(v);
 };
 $('clave-lic').onkeydown = (e) => { if (e.key === 'Enter') $('b-clave-lic').click(); };
 

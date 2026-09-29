@@ -17,7 +17,23 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.47.0 (REEMBOLSOS: LA MISMA ORDEN, DE OTRO TIPO.
+ * Versión del contrato: 0.48.0 (LOS EQUIPOS DE TU LICENCIA. Mike, 28-sep-2026:
+ * «un panel de selección de licencias en los equipos, similar a como le hace
+ * adobe. Te abre una lista (con íconos) de los equipos en los que tienes
+ * registrada la licencia y puedes escoger dar de baja uno».
+ *   · D1 master 0009: `activaciones.nombre` y `activaciones.sistema`, etiqueta
+ *     para reconocer la computadora; la huella sigue siendo un azar.
+ *   · `POST /licencias/activar`, `/licencias/mia` y `/licencias/latido`
+ *     aceptan `nombre` y `sistema` (windows | mac | linux) y los guardan.
+ *   · `POST /licencias/equipos {programa} | {clave}` lista los equipos que
+ *     ocupan lugar, con `es_de_aqui` si se manda `huella`.
+ *   · `POST /licencias/soltar {huella, programa | clave}` da de baja uno, el
+ *     que sea, y lo apunta con el correo de quien lo hizo. Soltar lo que ya
+ *     está libre contesta `ya_estaba: true`, no un error.
+ *   · La pantalla de activación (`/licencias/entrar`) enseña esa lista cuando
+ *     no hay lugar, y al soltar uno reintenta sola. Trabajo del chat de
+ *     draw101, aplicado por jr desde su parche.)
+ * Antes: 0.47.0 (REEMBOLSOS: LA MISMA ORDEN, DE OTRO TIPO.
  * Mike, 28-sep-2026: «Necesito en dash un módulo para reembolsos. Que el
  * trabajador pueda pedir reembolsos y en dash le aparezcan (similar a las
  * Órdenes de compra). De hecho podría ser el mismo portal de supply, pero
@@ -717,7 +733,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.47.0';
+export const VERSION_CONTRATO = '0.48.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -779,6 +795,12 @@ export interface Activacion {
   alta_at: string;
   ultimo_latido_at: string;
   activa: 0 | 1;
+  /** Cómo se llama la computadora (el nombre de Windows) y en qué sistema va.
+   *  Etiqueta para que su dueño la reconozca en su lista; la huella sigue sin
+   *  salir de aquí (ver migración 0009). Nulos en las activadas antes de la
+   *  0.21.4: se llenan solas en el siguiente latido. */
+  nombre: string | null;
+  sistema: string | null;
 }
 
 export interface RenglonBitacoraLicencia {

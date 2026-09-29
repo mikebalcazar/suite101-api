@@ -2502,6 +2502,89 @@ describe('18 · licencias por suscripción (0.13.0; tipo y perpetua desde 0.19.0
     expect(sinLugar.error).toBe('sin_lugares');
   });
 
+  /* La lista de equipos, para dar de baja uno desde donde estés  ·  0.21.4.
+   *
+   * Mike (28-sep-2026): «un panel de selección de licencias en los equipos,
+   * similar a como le hace adobe… puedes escoger dar de baja uno. Son
+   * licencias flotantes».
+   *
+   * Lo que esto arregla: hasta hoy `desactivar` sólo soltaba la máquina que
+   * preguntaba. Desde una computadora nueva no había forma de liberar la
+   * vieja, así que «ya están ocupados» era un callejón sin salida. Le pasó a
+   * Mike el 28-sep con su laptop. */
+  it('los equipos de mi licencia se listan con su nombre, y se da de baja el que sea', async () => {
+    await comoSuper();
+    const AQUI = 'maquina-c-0123456789abcdef';   // la que ya activó arriba
+    const OTRA = 'maquina-f-0123456789abcdef';
+
+    // Dos lugares para tener dos equipos que mirar.
+    await pedir(`/licencias/${porCuenta.id}`, { method: 'PATCH', body: JSON.stringify({ lugares: 2 }) });
+    const dos = await pedir('/licencias/mia', { method: 'POST', body: JSON.stringify({ programa: 'nest101', huella: OTRA, version: '1.1.0', nombre: 'LAPTOP-TALLER', sistema: 'Windows' }) });
+    expect(dos.estado).toBe(201);
+
+    const lista = await pedir('/licencias/equipos', { method: 'POST', body: JSON.stringify({ programa: 'nest101', huella: AQUI }) });
+    expect(lista.estado).toBe(200);
+    const fila = lista.data.licencias[0];
+    expect(fila.lugares).toEqual({ usados: 2, total: 2 });
+    expect(fila.equipos.length).toBe(2);
+
+    const laOtra = fila.equipos.find((e: any) => e.huella === OTRA);
+    expect(laOtra.nombre, 'el nombre que mandó la app, para poder escoger').toBe('LAPTOP-TALLER');
+    expect(laOtra.sistema).toBe('windows');
+    expect(laOtra.version).toBe('1.1.0');
+    expect(laOtra.es_de_aqui, 'ésa no es desde la que estoy preguntando').toBe(false);
+    expect(fila.equipos.find((e: any) => e.huella === AQUI).es_de_aqui,
+      'y la de aquí sale marcada, para no darse de baja uno solo sin querer').toBe(true);
+
+    // Dar de baja la otra, desde ésta. Esto es lo que no se podía.
+    const suelta = await pedir('/licencias/soltar', { method: 'POST', body: JSON.stringify({ programa: 'nest101', huella: OTRA }) });
+    expect(suelta.estado).toBe(200);
+    expect(suelta.data.liberada).toBe(true);
+    expect(suelta.data.lugares).toEqual({ usados: 1, total: 2 });
+    expect(suelta.data.equipo.nombre).toBe('LAPTOP-TALLER');
+
+    const despues = await pedir('/licencias/equipos', { method: 'POST', body: JSON.stringify({ programa: 'nest101' }) });
+    expect(despues.data.licencias[0].equipos.map((e: any) => e.huella)).toEqual([AQUI]);
+
+    // Queda apuntado con el correo de quien lo hizo, no con «app»: quitarle el
+    // lugar a otra computadora es algo que alguien decidió.
+    const det = await pedir(`/licencias/${porCuenta.id}`);
+    const renglon = det.data.bitacora.find((b: any) => b.accion === 'desactivar');
+    expect(renglon.quien).toBe(CORREO);
+    expect(JSON.parse(renglon.detalle).nombre).toBe('LAPTOP-TALLER');
+
+    // Soltar dos veces no truena: si alguien lo soltó desde otra pestaña, el
+    // lugar ya está libre y eso es lo que se quería.
+    const otraVez = await pedir('/licencias/soltar', { method: 'POST', body: JSON.stringify({ programa: 'nest101', huella: OTRA }) });
+    expect(otraVez.estado).toBe(200);
+    expect(otraVez.data.ya_estaba).toBe(true);
+
+    await pedir(`/licencias/${porCuenta.id}`, { method: 'PATCH', body: JSON.stringify({ lugares: 1 }) });
+  });
+
+  it('la lista de equipos es del dueño: sin sesión no se ve, y con otra cuenta tampoco', async () => {
+    galleta = '';
+    const sinSesion = await pedir('/licencias/equipos', { method: 'POST', body: JSON.stringify({ programa: 'nest101' }) });
+    expect(sinSesion.estado, 'sin sesión y sin clave, nada').toBe(401);
+    expect(sinSesion.error).toBe('sin_sesion');
+
+    const soltarSinSesion = await pedir('/licencias/soltar', { method: 'POST', body: JSON.stringify({ programa: 'nest101', huella: 'maquina-c-0123456789abcdef' }) });
+    expect(soltarSinSesion.estado, 'y menos soltar').toBe(401);
+
+    // Con la clave sí: quien la tiene es el dueño, y es con lo que se activa.
+    await comoSuper();
+    const conClave = await pedir('/licencias/equipos', { method: 'POST', body: JSON.stringify({ clave: perpetua.clave }) });
+    galleta = '';
+    const conClaveSinSesion = await pedir('/licencias/equipos', { method: 'POST', body: JSON.stringify({ clave: perpetua.clave }) });
+    expect(conClaveSinSesion.estado, 'la clave basta, como para activar').toBe(200);
+    expect(conClave.estado).toBe(200);
+
+    // Una clave que no existe no dice cuáles sí: contesta lo mismo que nada.
+    const inventada = await pedir('/licencias/equipos', { method: 'POST', body: JSON.stringify({ clave: 'T101-ZZZZ-ZZZZ-ZZZZ' }) });
+    expect(inventada.estado).toBe(404);
+    expect(inventada.error).toBe('clave_inexistente');
+  });
+
   it('sin sesión no se activa por cuenta, y una cuenta sin licencia de ese programa lo dice con su nombre', async () => {
     await comoSuper();
     const deOtro = await pedir('/licencias/mia', { method: 'POST', body: JSON.stringify({ programa: 'draw101', huella: 'maquina-e-0123456789abcdef' }) });

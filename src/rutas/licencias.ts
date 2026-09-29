@@ -65,6 +65,35 @@ async function apunta(env: Env, r: { suscripcion_id: string | null; quien: strin
 const huellaValida = (h: unknown): h is string => typeof h === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(h);
 const versionDe = (v: unknown): string | null => (typeof v === 'string' && v.length <= 40 ? v : null);
 
+/* Cómo se llama el equipo y en qué sistema va (0.21.4). Son ETIQUETA, no
+ * identidad: sirven para que su dueño reconozca su computadora en su propia
+ * lista al dar una de baja. La huella sigue siendo un azar y no sale de
+ * aquí. Se recortan y se limpian antes de guardarse: lo que llega es un
+ * nombre de Windows, no un campo libre, y nadie quiere un renglón de tres mil
+ * letras en la lista. */
+const nombreDeEquipo = (v: unknown): string | null => {
+  if (typeof v !== 'string') return null;
+  const t = v.replace(/[\u0000-\u001F\u007F]/g, '').trim().slice(0, 60);
+  return t || null;
+};
+const SISTEMAS = ['windows', 'mac', 'linux'] as const;
+const sistemaDe = (v: unknown): string | null =>
+  (typeof v === 'string' && (SISTEMAS as readonly string[]).includes(v.toLowerCase()) ? v.toLowerCase() : null);
+
+/** Un equipo, como lo ve su dueño en la lista para dar de baja. La huella
+ *  entera viaja porque es con lo que se pide soltarlo. */
+const paraLaLista = (a: Activacion, huellaDeAqui = '') => ({
+  huella: a.huella,
+  nombre: a.nombre,
+  sistema: a.sistema,
+  version: a.version,
+  alta_at: a.alta_at,
+  ultimo_latido_at: a.ultimo_latido_at,
+  /** Si es la computadora desde la que se está preguntando. Se marca para que
+   *  nadie se dé de baja a sí mismo creyendo que suelta otra. */
+  es_de_aqui: !!huellaDeAqui && a.huella === huellaDeAqui,
+});
+
 /** Lo que se le cuenta a la app de su licencia: sin correo ni notas. */
 const paraLaApp = (s: Suscripcion) => ({ id: s.id, programa: s.programa, cliente: s.cliente, plan: s.plan, lugares: s.lugares, tipo: s.tipo, perpetua: s.perpetua === 1, paga_hasta: s.paga_hasta });
 
@@ -92,10 +121,12 @@ rutas.post('/activar', async (c) => {
   const t = ahora();
   const version = versionDe(b.version);
   if (ya) {
-    await c.env.MASTER.prepare(`UPDATE activaciones SET activa = 1, version = ?, ultimo_latido_at = ? WHERE id = ?`).bind(version, t, ya.id).run();
+    await c.env.MASTER.prepare(`UPDATE activaciones SET activa = 1, version = ?, ultimo_latido_at = ?, nombre = COALESCE(?, nombre), sistema = COALESCE(?, sistema) WHERE id = ?`)
+      .bind(version, t, nombreDeEquipo((b as { nombre?: unknown }).nombre), sistemaDe((b as { sistema?: unknown }).sistema), ya.id).run();
   } else {
-    await c.env.MASTER.prepare(`INSERT INTO activaciones (id, suscripcion_id, huella, version, alta_at, ultimo_latido_at, activa) VALUES (?,?,?,?,?,?,1)`)
-      .bind(idNuevo(), s.id, huella, version, t, t).run();
+    await c.env.MASTER.prepare(`INSERT INTO activaciones (id, suscripcion_id, huella, version, alta_at, ultimo_latido_at, activa, nombre, sistema) VALUES (?,?,?,?,?,?,1,?,?)`)
+      .bind(idNuevo(), s.id, huella, version, t, t,
+            nombreDeEquipo((b as { nombre?: unknown }).nombre), sistemaDe((b as { sistema?: unknown }).sistema)).run();
   }
   if (!ya || ya.activa === 0) await apunta(c.env, { suscripcion_id: s.id, quien: 'app', accion: 'activar', detalle: { huella, version } });
 
@@ -122,8 +153,11 @@ rutas.post('/latido', async (c) => {
     await apunta(c.env, { suscripcion_id: s.id, quien: 'app', accion: 'latido_negado', detalle: { huella: b.huella, motivo: v.motivo } });
     return err(c, v.motivo, v.motivo === 'sin_pago' ? 402 : 403, { paga_hasta: s.paga_hasta, licencia: paraLaApp(s) });
   }
-  await c.env.MASTER.prepare(`UPDATE activaciones SET ultimo_latido_at = ?, version = COALESCE(?, version) WHERE id = ?`)
-    .bind(ahora(), versionDe(b.version), act.id).run();
+  /* El latido refresca también el nombre: una computadora se renombra, y una
+   * activada antes de la 0.21.4 no tiene ninguno. Como es diario, la lista se
+   * llena sola sin que nadie vuelva a activar. */
+  await c.env.MASTER.prepare(`UPDATE activaciones SET ultimo_latido_at = ?, version = COALESCE(?, version), nombre = COALESCE(?, nombre), sistema = COALESCE(?, sistema) WHERE id = ?`)
+    .bind(ahora(), versionDe(b.version), nombreDeEquipo((b as { nombre?: unknown }).nombre), sistemaDe((b as { sistema?: unknown }).sistema), act.id).run();
   const nueva = cargaDe(s, b.huella);
   return ok(c, { token: await firmarToken(c.env, nueva), hasta: nueva.hasta, licencia: paraLaApp(s) });
 });
@@ -215,10 +249,12 @@ rutas.post('/mia', async (c) => {
   const t = ahora();
   const version = versionDe(b.version);
   if (ya) {
-    await c.env.MASTER.prepare(`UPDATE activaciones SET activa = 1, version = ?, ultimo_latido_at = ? WHERE id = ?`).bind(version, t, ya.id).run();
+    await c.env.MASTER.prepare(`UPDATE activaciones SET activa = 1, version = ?, ultimo_latido_at = ?, nombre = COALESCE(?, nombre), sistema = COALESCE(?, sistema) WHERE id = ?`)
+      .bind(version, t, nombreDeEquipo((b as { nombre?: unknown }).nombre), sistemaDe((b as { sistema?: unknown }).sistema), ya.id).run();
   } else {
-    await c.env.MASTER.prepare(`INSERT INTO activaciones (id, suscripcion_id, huella, version, alta_at, ultimo_latido_at, activa) VALUES (?,?,?,?,?,?,1)`)
-      .bind(idNuevo(), s.id, huella, version, t, t).run();
+    await c.env.MASTER.prepare(`INSERT INTO activaciones (id, suscripcion_id, huella, version, alta_at, ultimo_latido_at, activa, nombre, sistema) VALUES (?,?,?,?,?,?,1,?,?)`)
+      .bind(idNuevo(), s.id, huella, version, t, t,
+            nombreDeEquipo((b as { nombre?: unknown }).nombre), sistemaDe((b as { sistema?: unknown }).sistema)).run();
   }
   // Quién activó queda apuntado con su correo, no con «app»: por aquí se
   // entra con cuenta, y saber quién fue es la mitad de para qué sirve.
@@ -227,6 +263,104 @@ rutas.post('/mia', async (c) => {
   const carga = cargaDe(s, huella);
   const token = await firmarToken(c.env, carga);
   return ok(c, { token, hasta: carga.hasta, licencia: paraLaApp(s), lugares: { usados: usados + 1, total: s.lugares } }, yaActivada ? 200 : 201);
+});
+
+/* ─────────────── los equipos de tu licencia (0.21.4) ───────────────
+ *
+ * Mike (28-sep-2026): «podemos agregar un panel de selección de licencias en
+ * los equipos, similar a como le hace adobe. Te abre una lista (con íconos) de
+ * los equipos en los que tienes registrada la licencia y puedes escoger dar de
+ * baja uno. Son licencias flotantes, la cantidad de equipos son lo que son
+ * simultáneos».
+ *
+ * Esto es lo que faltaba para que «ya están ocupados» tenga salida sin ir a
+ * pedirle a nadie: hasta hoy, `desactivar` sólo sabía soltar la máquina que
+ * preguntaba, así que desde una computadora nueva no había forma de liberar la
+ * vieja. La persona quedaba fuera de su propia licencia.
+ *
+ * Quién puede ver y soltar: el dueño, probado de una de dos formas —la sesión
+ * de la cuenta a la que está la licencia, o su clave T101—. Las mismas dos
+ * formas con las que se activa, y ninguna nueva. Con sesión sólo se ven las
+ * licencias de ESE correo: la consulta filtra por correo, no por id recibido,
+ * para que mandar el id de otro no sirva de nada.
+ */
+
+/** Las licencias de este correo para este programa, o la de esta clave. */
+async function licenciasDe(c: Ctx, b: { programa?: unknown; clave?: unknown }): Promise<
+  { licencias: Suscripcion[] } | { error: string; estado: 400 | 401 | 404; detalle?: unknown }
+> {
+  const clave = b.clave === undefined ? '' : normalizaClave(b.clave);
+  if (clave) {
+    if (!CLAVE_FORMA.test(clave)) return { error: 'datos_invalidos', estado: 400, detalle: { campo: 'clave' } };
+    const s = await porClave(c.env, clave);
+    return s ? { licencias: [s] } : { error: 'clave_inexistente', estado: 404 };
+  }
+  const sesion = c.get('sesion');
+  if (!sesion) return { error: 'sin_sesion', estado: 401 };
+  const programa = String(b.programa ?? '').trim().toLowerCase();
+  if (!/^[a-z0-9]{2,20}$/.test(programa)) return { error: 'datos_invalidos', estado: 400, detalle: { campo: 'programa' } };
+  const correo = normalizaCorreo(sesion.correo);
+  const suyas = (await c.env.MASTER.prepare(`SELECT * FROM suscripciones WHERE correo = ? AND programa = ? ORDER BY creado_at`)
+    .bind(correo, programa).all<Suscripcion>()).results;
+  return suyas.length ? { licencias: suyas } : { error: 'sin_licencia', estado: 404, detalle: { correo, programa } };
+}
+
+const equiposDe = async (env: Env, sid: string) =>
+  (await env.MASTER.prepare(`SELECT * FROM activaciones WHERE suscripcion_id = ? AND activa = 1 ORDER BY ultimo_latido_at DESC`)
+    .bind(sid).all<Activacion>()).results;
+
+/** Los equipos que hoy ocupan lugar, para escoger cuál dar de baja. */
+rutas.post('/equipos', async (c) => {
+  const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const r = await licenciasDe(c, b);
+  if ('error' in r) return err(c, r.error, r.estado, r.detalle);
+  const aqui = huellaValida(b.huella) ? b.huella : '';
+  const filas = [];
+  for (const s of r.licencias) {
+    const eq = await equiposDe(c.env, s.id);
+    filas.push({
+      licencia: paraLaApp(s),
+      vigente: vigencia(s).vigente,
+      lugares: { usados: eq.length, total: s.lugares },
+      equipos: eq.map((a) => paraLaLista(a, aqui)),
+    });
+  }
+  return ok(c, { licencias: filas });
+});
+
+/** Dar de baja un equipo —el que sea— de una licencia propia.
+ *
+ *  `desactivar` sigue existiendo para que una máquina suelte SU lugar al
+ *  desinstalarse; esto es lo otro: soltar el de otra, desde donde estés. Deja
+ *  su renglón en la bitácora con el correo de quien lo hizo, no con «app»:
+ *  quitarle el lugar a una computadora ajena es algo que alguien decidió. */
+rutas.post('/soltar', async (c) => {
+  const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  if (!huellaValida(b.huella)) return err(c, 'datos_invalidos', 400, { falta: 'huella' });
+  const r = await licenciasDe(c, b);
+  if ('error' in r) return err(c, r.error, r.estado, r.detalle);
+
+  for (const s of r.licencias) {
+    const act = await activacionDe(c.env, s.id, b.huella);
+    if (!act || act.activa !== 1) continue;
+    await c.env.MASTER.prepare(`UPDATE activaciones SET activa = 0 WHERE id = ?`).bind(act.id).run();
+    const sesion = c.get('sesion');
+    await apunta(c.env, {
+      suscripcion_id: s.id,
+      quien: sesion ? normalizaCorreo(sesion.correo) : 'clave',
+      accion: 'desactivar',
+      detalle: { huella: b.huella, nombre: act.nombre, por: sesion ? 'lista de equipos' : 'lista de equipos con clave' },
+    });
+    const eq = await equiposDe(c.env, s.id);
+    return ok(c, { liberada: true, equipo: paraLaLista(act), lugares: { usados: eq.length, total: s.lugares } });
+  }
+  /* No estaba activo en ninguna licencia tuya. Puede ser que alguien lo
+   * soltara desde otra pestaña mientras mirabas la lista, y en ese caso el
+   * lugar YA está libre: decir que no se encontró sería alarmar por algo que
+   * salió bien. Se contesta como si se hubiera soltado, sin apuntar nada. */
+  const s = r.licencias[0]!;
+  const eq = await equiposDe(c.env, s.id);
+  return ok(c, { liberada: true, ya_estaba: true, lugares: { usados: eq.length, total: s.lugares } });
 });
 
 /* ─────────────── lo que usa el panel (superadmin) ─────────────── */
@@ -343,7 +477,7 @@ function leerCampos(b: Record<string, unknown>, sobre: Partial<Suscripcion> = {}
 }
 
 rutas.post('/', async (c) => {
-  const b = await c.req.json<Record<string, unknown>>().catch(() => ({}));
+  const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
   const leido = leerCampos(b);
   if ('error' in leido) return err(c, leido.error, 400, leido.detalle);
   const ch = leido.cambios;
@@ -387,7 +521,7 @@ rutas.get('/:id', async (c) => {
 rutas.patch('/:id', async (c) => {
   const s = await porId(c.env, c.req.param('id')!);
   if (!s) return err(c, 'licencia_desconocida', 404);
-  const b = await c.req.json<Record<string, unknown>>().catch(() => ({}));
+  const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
   const leido = leerCampos(b, s);
   if ('error' in leido) return err(c, leido.error, 400, leido.detalle);
   const ch = leido.cambios;
