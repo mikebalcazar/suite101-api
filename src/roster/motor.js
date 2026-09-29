@@ -1031,6 +1031,24 @@ app.delete('/api/admin/equipos/:id', exigeAdmin, exigePermiso('capturar'), async
   return c.json({ ok: true, soltados: n });
 });
 
+/* Cambiar SÓLO el equipo de un trabajador desde la lista del panel (0.53.1).
+ * Mike, 29-sep: «Ya creé los equipos pero ahora no puedo asignar
+ * trabajadores». Capturar el expediente completo para eso es demasiado: aquí
+ * va un solo campo, con las mismas reglas (vacío = sin equipo; apagado o
+ * inexistente = 422). */
+app.put('/api/admin/trabajadores/:id/equipo', exigeAdmin, exigePermiso('capturar'), async (c) => {
+  const id = c.req.param('id');
+  const t = await c.env.DB.prepare(`SELECT id, email, equipo_id FROM roster_trabajadores WHERE id = ? AND ${SOLO_VIVOS}`).bind(id).first();
+  if (!t) return err(c, 'Ese trabajador ya no está en la lista.', 404);
+  const cuerpo = await c.req.json().catch(() => ({}));
+  const eq = await equipoValido(c.env, cuerpo.equipo_id);
+  if (eq.error) return err(c, eq.error, 422, { errores: { equipo_id: eq.error } });
+  await c.env.DB.prepare('UPDATE roster_trabajadores SET equipo_id = ?, actualizado_en = ? WHERE id = ?').bind(eq.id, ahora(), id).run();
+  const nombre = eq.id ? (await c.env.DB.prepare('SELECT nombre FROM roster_equipos WHERE id = ?').bind(eq.id).first())?.nombre ?? null : null;
+  if ((t.equipo_id || null) !== eq.id) await registra(c.env, t.email, 'equipo_asignado', nombre ? `a ${nombre}` : 'sin equipo');
+  return c.json({ ok: true, equipo_id: eq.id, equipo_nombre: nombre });
+});
+
 app.get('/api/admin/papelera', exigeAdmin, async (c) => {
   await vaciaVencidos(c.env);
   const { results } = await c.env.DB.prepare(
@@ -1121,6 +1139,7 @@ const ACCIONES_BITACORA = [
   { accion: 'equipo_alta', capa: 'empresa', grupo: 'Equipos', corto: 'Dio de alta un equipo', dice: 'Dio de alta un equipo de trabajo', tono: '' },
   { accion: 'equipo_cambio', capa: 'empresa', grupo: 'Equipos', corto: 'Cambió un equipo', dice: 'Renombró, apagó o prendió un equipo de trabajo', tono: '' },
   { accion: 'equipo_baja', capa: 'empresa', grupo: 'Equipos', corto: 'Borró un equipo', dice: 'Borró un equipo de trabajo', tono: 'mal' },
+  { accion: 'equipo_asignado', capa: 'empresa', grupo: 'Equipos', corto: 'Le cambiaron el equipo', dice: 'Administración le cambió el equipo de trabajo', tono: '' },
   { accion: 'documento_subido', capa: 'empresa', grupo: 'Expedientes', corto: 'Subió un documento', dice: 'Subió un documento', tono: '' },
   { accion: 'aviso_aceptado', capa: 'empresa', grupo: 'Expedientes', corto: 'Aceptó el aviso', dice: 'Aceptó el aviso de privacidad', tono: '' },
   // Este sí es del expediente, no del panel: es alguien escribiendo en la hoja

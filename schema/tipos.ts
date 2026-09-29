@@ -17,7 +17,10 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.53.0 (EQUIPOS DE TRABAJO en roster101. Mike,
+ * Versión del contrato: 0.53.1 (roster101: PUT /roster/:o/api/admin/
+ * trabajadores/:id/equipo {equipo_id} cambia sólo el equipo, desde la lista
+ * del panel; permiso de capturar. Mike, 29-sep: «no puedo asignar
+ * trabajadores»). Antes: 0.53.0 (EQUIPOS DE TRABAJO en roster101. Mike,
  * 29-sep-2026: «agrupar por equipo de trabajo (…) esos equipos los doy de alta
  * yo, y ellos sólo seleccionan cuál de los disponibles es el suyo, o no tengo
  * equipo». Migración org 0021: `roster_equipos` y `roster_trabajadores.
@@ -793,7 +796,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.53.0';
+export const VERSION_CONTRATO = '0.53.1';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
