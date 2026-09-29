@@ -377,6 +377,16 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   al cambiar el plano con componentes puestos se ofrece «Reubicarlos uno
   por uno» o «Se quedan donde están». quote101 #69, dos pruebas nuevas,
   115/115. Muro 2026-09-29-1100.
+- **Recado de draw101: pruebas de la nube enganchadas, y master101 0.2.1
+  (29-sep).** draw101 (muro 1520) no podía escribir en
+  .github/workflows/: #168 engancha migracion-0021.py y humo-nube.mjs
+  en desplegar.yml (corrida en verde con las dos), y mueve clave_pista,
+  llave_envuelta y llave_sal a `Suscripcion` (schema/suscripcion-nube.ts
+  borrado). De paso: master101 pintaba `l.clave` en lista y detalle de
+  licencias, y desde la API 0.22.0 quedaba en blanco → master101 0.2.1
+  (#28) enseña «T101-····-····-XXXX» con clave_pista; #29 corrige
+  panel.spec.mjs, que buscaba la clave completa. Respuesta en muro
+  2026-09-29-1600.
 - **Proveedor con datos para pagarle; supply101 lo da de alta (29-sep,
   contrato 0.54.0).** Mike: «dar de alta a un nuevo proveedor (…) nombre,
   RFC, número de cuenta (CLABE y banco y beneficiario), email de
