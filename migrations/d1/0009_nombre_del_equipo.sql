@@ -1,0 +1,26 @@
+-- 0009 · cómo se llama cada equipo, para poder escoger cuál dar de baja.
+--
+-- Mike (28-sep-2026): «podemos agregar un panel de selección de licencias en
+-- los equipos, similar a como le hace adobe. Te abre una lista (con íconos) de
+-- los equipos en los que tienes registrada la licencia y puedes escoger dar de
+-- baja uno. Son licencias flotantes, la cantidad de equipos son lo que son
+-- simultáneos».
+--
+-- Para escoger hay que poder distinguir, y hasta hoy de cada equipo sólo se
+-- guardaba su huella —un azar— con su versión y sus fechas. Una lista de
+-- «7cbcc89a…» no se escoge: se adivina.
+--
+-- Qué nombre, preguntado y contestado el mismo día: «que ponga el nombre del
+-- equipo como lo tiene en su windows. Cada quien sabrá qué computadora es».
+--
+-- Ojo con lo que esto NO deshace: en la 0.21.1 se quitó el nombre de la
+-- máquina y el del usuario de la HUELLA, para que la huella no identificara a
+-- nadie. Eso sigue igual. El nombre se guarda aparte, como etiqueta para que
+-- su dueño reconozca su propia computadora en su propia lista. Nadie más ve
+-- esta lista: se pide con la sesión de la cuenta dueña o con su clave.
+--
+-- Las dos columnas nacen vacías y se llenan solas: un equipo ya activado las
+-- pone en su siguiente latido, que es diario. Nada se rompe mientras tanto —
+-- la lista enseña la huella recortada, como hoy.
+ALTER TABLE activaciones ADD COLUMN nombre  TEXT;
+ALTER TABLE activaciones ADD COLUMN sistema TEXT;
