@@ -17,7 +17,7 @@ import type { Env } from '../entorno';
 import { ahora, ulid } from '../lib';
 import { abrirToken } from '../licencias';
 import type { TokenLicencia } from '../../schema/tipos';
-import { TOPE_BYTES, VERSIONES_GUARDADAS, paraLaApp, rutaEnR2, tokenValido, type ArchivoNube } from '../nube';
+import { TOPE_BYTES, VERSIONES_GUARDADAS, asegurarClaves, paraLaApp, rutaEnR2, tokenValido, type ArchivoNube } from '../nube';
 
 const rutas = new Hono<{ Bindings: Env; Variables: Vars }>();
 
@@ -30,6 +30,7 @@ type LlaveGuardada = { llave_envuelta: string | null; llave_sal: string | null }
  *  fecha: un token vencido es de una licencia que dejó de pagarse, y la nube
  *  no es un rincón por el que colarse cuando la app ya no abre. */
 rutas.use('/*', async (c, next) => {
+  await asegurarClaves(c.env);
   const cab = c.req.header('Authorization') ?? '';
   const token = cab.startsWith('Bearer ') ? cab.slice(7).trim() : '';
   const carga = await abrirToken(c.env, token);
