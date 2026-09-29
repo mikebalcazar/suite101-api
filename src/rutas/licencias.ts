@@ -33,10 +33,21 @@ import { soySuper } from './admin';
 import {
   CLAVE_FORMA, DIA, abrirToken, cargaDe, claveNueva, firmarToken, hastaDe, idNuevo, llavePublica, normalizaClave, vigencia,
 } from '../licencias';
+import { asegurarClaves, huellaDeClave, pistaDeClave } from '../nube';
+import type { SuscripcionFila } from '../../schema/suscripcion-nube';
 import { TIPOS_LICENCIA } from '../../schema/tipos';
 import type { Activacion, EstadoSuscripcion, OrigenPago, RenglonBitacoraLicencia, Suscripcion, TipoLicencia } from '../../schema/tipos';
 
 const rutas = new Hono<{ Bindings: Env; Variables: Vars }>();
+
+/* Lo primero que pasa aquí: que ninguna clave siga guardada en claro. Corre
+ * una sola vez por isolate y normalmente no encuentra nada (ver
+ * `asegurarClaves` en src/nube.ts, que explica por qué no es una ruta que
+ * alguien tenga que llamar). */
+rutas.use('/*', async (c, next) => {
+  await asegurarClaves(c.env);
+  await next();
+});
 
 /** La pantalla que la app abre para activarse con la cuenta de la suite.
  *  Se sirve desde el mismo origen que la API a propósito: así la galleta de
@@ -48,8 +59,28 @@ export const paginaLicencia = (c: Ctx): Response =>
 
 const porId = (env: Env, id: string) =>
   env.MASTER.prepare(`SELECT * FROM suscripciones WHERE id = ?`).bind(id).first<Suscripcion>();
-const porClave = (env: Env, clave: string) =>
-  env.MASTER.prepare(`SELECT * FROM suscripciones WHERE clave = ?`).bind(clave).first<Suscripcion>();
+/* La clave YA NO SE GUARDA EN CLARO  ·  Mike, 29-sep-2026: de ella sale la
+ * llave que cifra los planos en la nube, así que guardarla aquí sería dejar la
+ * llave debajo del tapete. Se guarda su huella (HMAC con el secreto del
+ * Worker, que vive en `config`) y se busca por ella: es determinista, así que
+ * el índice único hace el mismo trabajo que antes.
+ *
+ * El respaldo por `clave` es el puente: una suscripción que todavía no se ha
+ * migrado se encuentra por sus letras y se le calcula la huella ahí mismo. En
+ * cuanto `asegurarClaves` barre la tabla, deja de hacer falta. Se busca la
+ * huella PRIMERO para que, una vez migrada, las letras no se consulten nunca. */
+async function porClave(env: Env, clave: string): Promise<SuscripcionFila | null> {
+  const huella = await huellaDeClave(env, clave);
+  const porHuella = await env.MASTER.prepare(`SELECT * FROM suscripciones WHERE clave = ?`).bind(huella).first<SuscripcionFila>();
+  if (porHuella) return porHuella;
+  // El puente: una que todavía guarda sus letras se encuentra por ellas, y se
+  // convierte aquí mismo. Se queda por si alguna se quedó atrás del barrido.
+  const vieja = await env.MASTER.prepare(`SELECT * FROM suscripciones WHERE clave = ?`).bind(clave).first<SuscripcionFila>();
+  if (!vieja || !CLAVE_FORMA.test(vieja.clave)) return null;
+  await env.MASTER.prepare(`UPDATE suscripciones SET clave = ?, clave_pista = ? WHERE id = ?`)
+    .bind(huella, pistaDeClave(clave), vieja.id).run();
+  return { ...vieja, clave: huella, clave_pista: pistaDeClave(clave) };
+}
 const activacionDe = (env: Env, sid: string, huella: string) =>
   env.MASTER.prepare(`SELECT * FROM activaciones WHERE suscripcion_id = ? AND huella = ?`).bind(sid, huella).first<Activacion>();
 async function ocupados(env: Env, sid: string, sinHuella = ''): Promise<number> {
@@ -373,7 +404,25 @@ rutas.use('/*', async (c, next) => {
 });
 const quien = (c: Ctx) => c.get('sesion').correo;
 
-const conVigencia = (s: Suscripcion) => ({ ...s, perpetua: (s.perpetua ? 1 : 0) as 0 | 1, vigente: vigencia(s).vigente });
+/* Lo que ve el panel de Mike. Se QUITAN a propósito tres cosas:
+ *
+ *   · `clave`, que desde 0.22.0 guarda la HUELLA: con ella y un volcado se
+ *     podrían probar claves a fuerza bruta fuera de línea (doce letras de 32
+ *     no son tantas);
+ *   · `llave_envuelta` y `llave_sal`, porque son la llave de los planos de esa
+ *     cuenta, esperando nada más a que alguien acierte la clave.
+ *
+ * Juntas son justo el par que hace falta para abrir los archivos de alguien
+ * sin su permiso. Que no salgan del Worker no es celo de más: es lo que Mike
+ * pidió el 29-sep —«ni siquiera nosotros como dueños»— aplicado al único sitio
+ * donde se nos podría olvidar, que es nuestra propia pantalla.
+ *
+ * `clave_pista` sí sale: son cuatro letras para distinguir una licencia de
+ * otra en una lista. */
+const conVigencia = (s: Suscripcion) => {
+  const { llave_envuelta: _e, llave_sal: _l, clave: _c, ...resto } = s as SuscripcionFila;
+  return { ...resto, clave: '', perpetua: (s.perpetua ? 1 : 0) as 0 | 1, vigente: vigencia(s).vigente };
+};
 
 /* La lista, con filtros. Los tres primeros los resuelve SQLite; `vigentes` no,
  * porque ser vigente depende de la fecha de hoy y de `estado`, y eso ya lo
@@ -483,9 +532,18 @@ rutas.post('/', async (c) => {
   const ch = leido.cambios;
   if (!ch.cliente) return err(c, 'datos_invalidos', 400, { falta: 'cliente' });
   const t = ahora();
-  const s: Suscripcion = {
+  // La clave se ve UNA VEZ, aquí, en la respuesta. Después ya no: de ella sale
+  // la llave que cifra los planos de esa cuenta, y guardarla sería dejar la
+  // llave debajo del tapete. Si se pierde, se emite otra —y los archivos que
+  // esa cuenta tuviera en la nube se pierden con ella. Es lo que significa
+  // cifrar de verdad, y Mike lo escogió sabiéndolo (29-sep-2026).
+  const claveEnClaro = claveNueva();
+  const s: SuscripcionFila = {
     id: idNuevo(),
-    clave: claveNueva(),
+    clave: await huellaDeClave(c.env, claveEnClaro),
+    clave_pista: pistaDeClave(claveEnClaro),
+    llave_envuelta: null,
+    llave_sal: null,
     programa: ch.programa ?? 'draw101',
     cliente: ch.cliente,
     correo: ch.correo ?? null,
@@ -503,11 +561,16 @@ rutas.post('/', async (c) => {
     actualizado_at: t,
   };
   await c.env.MASTER.prepare(
-    `INSERT INTO suscripciones (id, clave, programa, cliente, correo, plan, lugares, estado, origen, tipo, perpetua, paga_hasta, notas, creado_at, actualizado_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-  ).bind(s.id, s.clave, s.programa, s.cliente, s.correo, s.plan, s.lugares, s.estado, s.origen, s.tipo, s.perpetua, s.paga_hasta, s.notas, s.creado_at, s.actualizado_at).run();
+    `INSERT INTO suscripciones (id, clave, clave_pista, programa, cliente, correo, plan, lugares, estado, origen, tipo, perpetua, paga_hasta, notas, creado_at, actualizado_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  ).bind(s.id, s.clave, s.clave_pista, s.programa, s.cliente, s.correo, s.plan, s.lugares, s.estado, s.origen, s.tipo, s.perpetua, s.paga_hasta, s.notas, s.creado_at, s.actualizado_at).run();
   await apunta(c.env, { suscripcion_id: s.id, quien: quien(c), accion: 'crear', detalle: { cliente: s.cliente, programa: s.programa, lugares: s.lugares, tipo: s.tipo, perpetua: s.perpetua, paga_hasta: s.paga_hasta } });
-  return ok(c, { ...conVigencia(s), activaciones: 0 }, 201);
+  // `clave` y el aviso van sólo en ESTA respuesta, la de creación.
+  return ok(c, {
+    ...conVigencia(s), activaciones: 0,
+    clave: claveEnClaro,
+    aviso: 'Cópiala ahora: no se guarda y no se puede volver a ver. Si se pierde hay que emitir otra, y los archivos que esa cuenta tenga en la nube se pierden con ella.',
+  }, 201);
 });
 
 rutas.get('/:id', async (c) => {
@@ -576,17 +639,36 @@ rutas.post('/:id/desactivar', async (c) => {
   return ok(c, { liberada: true, lugares: { usados: await ocupados(c.env, s.id), total: s.lugares } });
 });
 
-/** Borrar una suscripción. Se van sus activaciones; la bitácora se queda,
- *  que para eso es. */
+/** Borrar una suscripción. Se van sus activaciones y su índice de la nube; la
+ *  bitácora se queda, que para eso es.
+ *
+ *  Lo de la nube no es opcional: `archivos_nube` referencia `suscripciones`, y
+ *  D1 corre con las llaves foráneas encendidas, así que borrar una licencia
+ *  con archivos fallaría sin decir por qué.
+ *
+ *  Los bultos de R2 se quedan huérfanos a propósito. Borrarlos aquí sería
+ *  tirar los planos de alguien como efecto secundario de dar de baja su
+ *  suscripción —que muchas veces es un trámite, no un adiós— y además nadie
+ *  podría deshacerlo: están cifrados con una llave que se fue con la clave.
+ *  Ocupan centavos; limpiarlos es una decisión aparte y a propósito. */
 rutas.delete('/:id', async (c) => {
   const s = await porId(c.env, c.req.param('id')!);
   if (!s) return err(c, 'licencia_desconocida', 404);
+  const archivos = await c.env.MASTER.prepare(`SELECT COUNT(*) AS n FROM archivos_nube WHERE suscripcion_id = ?`)
+    .bind(s.id).first<{ n: number }>();
   await c.env.MASTER.batch([
+    c.env.MASTER.prepare(`DELETE FROM archivos_nube WHERE suscripcion_id = ?`).bind(s.id),
     c.env.MASTER.prepare(`DELETE FROM activaciones WHERE suscripcion_id = ?`).bind(s.id),
     c.env.MASTER.prepare(`DELETE FROM suscripciones WHERE id = ?`).bind(s.id),
   ]);
-  await apunta(c.env, { suscripcion_id: s.id, quien: quien(c), accion: 'borrar', detalle: { clave: s.clave, cliente: s.cliente } });
-  return ok(c, { borrada: s.id });
+  // En la bitácora va la PISTA, nunca `s.clave`: desde 0.22.0 esa columna
+  // guarda la huella, y apuntarla aquí la dejaría en una tabla que el panel
+  // sí devuelve — deshaciendo en un renglón todo lo demás.
+  await apunta(c.env, {
+    suscripcion_id: s.id, quien: quien(c), accion: 'borrar',
+    detalle: { clave_pista: (s as SuscripcionFila).clave_pista, cliente: s.cliente, archivos_en_la_nube: archivos?.n ?? 0 },
+  });
+  return ok(c, { borrada: s.id, archivos_soltados: archivos?.n ?? 0 });
 });
 
 export default rutas;

@@ -13,6 +13,7 @@ import auth, { conSesion, yo } from './rutas/auth';
 import orgs from './rutas/orgs';
 import admin from './rutas/admin';
 import licencias, { paginaLicencia } from './rutas/licencias';
+import nube from './rutas/nube';
 import importar, { paginaImportar } from './rutas/importar';
 import roster from './rutas/roster';
 import { err, ok, type Vars } from './http';
@@ -91,7 +92,7 @@ app.get('/', (c) =>
     servicio: 'suite101-api',
     que_es: 'La unica puerta a los datos de la suite 101. Ninguna app toca una base directo.',
     contrato: VERSION_CONTRATO,
-    empieza_en: ['/salud', '/auth/codigo', '/yo', '/orgs/:org', '/licencias/llave', '/licencias/entrar'],
+    empieza_en: ['/salud', '/auth/codigo', '/yo', '/orgs/:org', '/licencias/llave', '/licencias/entrar', '/nube/indice'],
     manda: 'la cookie de sesion (o Authorization: Bearer, para una app empacada) y la cabecera X-App',
   }),
 );
@@ -122,6 +123,11 @@ app.get('/admin/importar', paginaImportar);
  * abre quien compró la licencia, que no es superadmin de nada. */
 app.get('/licencias/entrar', paginaLicencia);
 app.route('/licencias', licencias);
+
+/* /nube — los archivos de draw101 (0.22.0). Entra la app instalada con su
+ * token de licencia, no con la cookie de la suite: es un programa, no una
+ * pestaña. Todo lo que guarda va cifrado desde la máquina del dueño. */
+app.route('/nube', nube);
 
 app.route('/admin', admin);
 app.route('/admin', importar);
