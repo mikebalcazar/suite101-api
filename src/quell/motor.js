@@ -240,12 +240,20 @@ const soloUbicacion = (e) => ({ id: e.id, plan_id: e.plan_id, project_id: e.proj
  *
  * Una pieza SIN ítem va dentro: es trabajo de la obra que nadie cotizó, y
  * esconderla del plano por no tener renglón en dash sería borrarla de la
- * obra por una razón de contabilidad. */
+ * obra por una razón de contabilidad.
+ *
+ * Y un REQUERIMIENTO pendiente también va dentro (0.49.0). Desde que nace
+ * como ítem cotizado —para caer en el borrador de quote101— su ítem dice
+ * `no_aprobado`, y esa palabra en esta pantalla significa «escondido salvo
+ * en la vista de fuera de alcance». Mike, 22-sep: el requerimiento «sí
+ * aparece en mapa, sí aparece en ítems»; su propio tipo ya dice que está
+ * pendiente. Si se descarta, sí se va: descartado es descartado. */
 const ALCANCE_SQL = `CASE
     WHEN it.id IS NULL THEN 'dentro'
     WHEN it.estado = 'cancelado' AND it.aprobado_at IS NOT NULL THEN 'cancelado'
     WHEN it.estado = 'cancelado' THEN 'descartado'
     WHEN it.estado = 'vendido' THEN 'dentro'
+    WHEN lower(trim(e.type)) = 'requerimiento' THEN 'dentro'
     ELSE 'no_aprobado'
   END AS alcance`;
 
@@ -924,7 +932,19 @@ export async function atender(req, env, url, path) {
         await env.DB.prepare(`INSERT INTO quell_elements (id, plan_id, project_id, code, type, name, resp, x, y, created_by, item_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
           .bind(id, seg[1], pid, codigo, tipo, b.name, b.resp || '', +b.x, +b.y, user.id, itemId).run();
         await apunta(env, b.op_id);
-        return json({ ok: true, id, code: codigo, item_id: itemId });
+        /* 0.49.0 · Mike, 29-sep: «los requerimientos generados me deberían
+         * generar un borrador en quote dentro del proyecto». Si la obra está
+         * ligada a un proyecto, el requerimiento nace también como ítem
+         * cotizado y cae en el borrador de requerimientos de quote101; la
+         * suite hace las dos cosas (org-db.ts). Sin liga, se queda como
+         * pieza y se vuelve ítem al ligar, como siempre. */
+        let cotizacionId = null;
+        if (esRequerimiento(tipo) && !itemId && typeof env.LEVANTAR_REQUERIMIENTO === 'function') {
+          const r = await env.LEVANTAR_REQUERIMIENTO({ element_id: id, obra_id: pid, code: codigo, name: b.name });
+          itemId = r?.item_id || null;
+          cotizacionId = r?.cotizacion_id || null;
+        }
+        return json({ ok: true, id, code: codigo, item_id: itemId, cotizacion_id: cotizacionId });
       }, codigo);
       return alta;
     }

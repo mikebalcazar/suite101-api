@@ -224,24 +224,30 @@ rutas.post('/:o/items/exportar', async (c) => {
   return ok(c, r, 201);
 });
 
-/** POST /orgs/:o/cotizaciones/:id/aprobar {proyecto_id, lineas[]} (0.46.0)
+/** POST /orgs/:o/cotizaciones/:id/aprobar {proyecto_id, lineas[], partida?} (0.46.0, 0.49.0)
  *
  *  Mike, 23-sep: los ítems de una cotización se crean AL APROBARLA. Crea una
  *  pieza vendida por cada unidad de cada línea, en el proyecto, amarradas por
  *  su producto cuando son varias (ver `aprobarCotizacion`). La cotización
- *  queda `aceptada` y ya no se edita: lo aprobado es lo que se vendió. */
+ *  queda `aceptada` y ya no se edita: lo aprobado es lo que se vendió.
+ *
+ *  0.49.0: las piezas nacen en la partida `partida` o, sin ella, en la del
+ *  nombre de la cotización (cada cotización aprobada es una pestaña en
+ *  dash101). Una línea con `item_id` no crea nada: aprueba ese ítem —el
+ *  requerimiento que cayó en el borrador— con su tipo, su precio y su código
+ *  nuevos. */
 rutas.post('/:o/cotizaciones/:id/aprobar', async (c) => {
   const quien = c.get('quien');
   if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'aprobar una cotización lo hace quien es de la empresa' });
   const app = c.get('app');
-  const permiso = revisarEscritura('items', app, ['nombre', 'monto', 'cantidad', 'estado', 'proyecto_id', 'origen']);
+  const permiso = revisarEscritura('items', app, ['nombre', 'monto', 'cantidad', 'estado', 'proyecto_id', 'origen', 'partida']);
   if (!permiso.ok) return err(c, permiso.error, 403, permiso.detalle);
-  const cuerpo = await c.req.json<{ proyecto_id?: string; lineas?: LineaAprobada[] }>().catch(() => ({}) as never);
+  const cuerpo = await c.req.json<{ proyecto_id?: string; lineas?: LineaAprobada[]; partida?: string | null }>().catch(() => ({}) as never);
   if (!cuerpo.proyecto_id) return err(c, 'datos_invalidos', 400, { falta: 'proyecto_id' });
   if (!Array.isArray(cuerpo.lineas) || !cuerpo.lineas.length) return err(c, 'datos_invalidos', 400, { falta: 'lineas' });
   const r = await stub(c).aprobarCotizacion({
     cotizacion_id: c.req.param('id')!, proyecto_id: cuerpo.proyecto_id, lineas: cuerpo.lineas,
-    usuario_id: quien.usuario_id, app,
+    usuario_id: quien.usuario_id, app, partida: cuerpo.partida ?? null,
   });
   if (!r.ok) {
     const estado = r.error === 'no_encontrado' ? 404 : r.error === 'ya_aprobada' ? 409 : 400;

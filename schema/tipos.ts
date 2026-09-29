@@ -17,7 +17,29 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.48.0 (LOS EQUIPOS DE TU LICENCIA. Mike, 28-sep-2026:
+ * Versión del contrato: 0.49.0 (PARTIDAS POR COTIZACIÓN Y EL BORRADOR DE LOS
+ * REQUERIMIENTOS. Mike, 29-sep-2026: «dividir por partidas (grupos de
+ * cotizaciones) los ítems (…) pestañas, tipo los libros de Excel», «los
+ * requerimientos generados me deberían generar un borrador en quote dentro
+ * del proyecto para poder enviarla al cliente a que me autorice» y «al
+ * aprobarse los requerimientos cambia su código a alguno de mueble, puerta
+ * etc.».
+ *   · `POST /orgs/:o/cotizaciones/:id/aprobar` acepta `partida`; sin ella,
+ *     las piezas nacen en la partida del nombre de la cotización. Cada
+ *     cotización aprobada es una pestaña en dash101.
+ *   · Una línea con `item_id` no crea una pieza: aprueba ESE ítem (el
+ *     requerimiento) con su nombre, tipo, precio, cantidad y partida; su
+ *     pieza del plano cambia de tipo y estrena código con el prefijo del
+ *     tipo (PT-, MW-…), el mismo que queda en `items.clave`.
+ *   · Un requerimiento levantado en quell en una obra ligada a un proyecto
+ *     nace como ítem `cotizado` (tipo `requerimiento`, en cero, no suma) y
+ *     cae como renglón «a mano» en el borrador «Requerimientos» del
+ *     proyecto en quote101 (`datos.de_requerimientos = true`, uno abierto
+ *     por proyecto; al aprobarse, el siguiente abre otro). Descartarlo o
+ *     aprobarlo desde dash lo saca del borrador. La respuesta de alta de la
+ *     pieza trae `item_id` y `cotizacion_id`. Sin obra ligada, nada cambia.
+ *   · cotizador101 puede escribir `items.partida`). Antes:
+ * 0.48.0 (LOS EQUIPOS DE TU LICENCIA. Mike, 28-sep-2026:
  * «un panel de selección de licencias en los equipos, similar a como le hace
  * adobe. Te abre una lista (con íconos) de los equipos en los que tienes
  * registrada la licencia y puedes escoger dar de baja uno».
@@ -733,7 +755,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.48.0';
+export const VERSION_CONTRATO = '0.49.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

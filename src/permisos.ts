@@ -16,7 +16,9 @@ type Campos = readonly string[] | '*';
 
 export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = {
   items: {
-    cotizador101: ['nombre', 'descripcion', 'tipo', 'monto', 'cantidad', 'moneda', 'estado', 'proyecto_id', 'cliente_id', 'negocio_id', 'origen'],
+    // `partida` la gana cotizador101 el 29-sep (0.49.0): cada cotización
+    // aprobada es una pestaña en dash101, y sus piezas nacen en ella.
+    cotizador101: ['nombre', 'descripcion', 'tipo', 'monto', 'cantidad', 'moneda', 'estado', 'proyecto_id', 'cliente_id', 'negocio_id', 'origen', 'partida'],
     dash101: ['nombre', 'descripcion', 'tipo', 'monto', 'cantidad', 'moneda', 'estado', 'proyecto_id', 'cliente_id', 'negocio_id', 'fecha_entrega', 'partida', 'orden'],
     /* `estado` lo gana quell101 el 20-sep, por encargo de Mike: «se debe
      * poder cancelar algún ítem ya sea desde quell o desde dash, y se
