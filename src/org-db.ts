@@ -113,6 +113,18 @@ export type ResultadoAprobar =
   | { ok: false; error: string; detalle?: Record<string, any> };
 
 /** Lo que devuelve borrar un cliente o un proyecto con todo lo suyo (0.51.0). */
+/** Fusionar dos proyectos (0.52.0): el que se va le deja todo al que se queda. */
+export interface ResultadoFusionProyectos {
+  ok: true;
+  seco: boolean;
+  queda: Fila;
+  se_va: { id: string; nombre: string; cliente_id: string | null };
+  /** Cuántas filas cambiaron de proyecto, por tabla (sólo las que tenían algo). */
+  movidos: Record<string, number>;
+  /** La obra de quell del que se va, si el que se queda ya tenía la suya: se queda sin proyecto, no se toca. */
+  obra_suelta: boolean;
+}
+
 export interface ResultadoBorrarConTodo {
   ok: true;
   modo: 'seco' | 'borrar';
@@ -263,6 +275,7 @@ export interface ApiOrgDB {
    *  qué no (dinero o historia). `seco` sólo cuenta. */
   borrarClienteConTodo(cliente_id: string, modo: 'seco' | 'borrar'): Promise<ResultadoBorrarConTodo | { error: string; detalle?: unknown }>;
   borrarProyectoConTodo(proyecto_id: string, modo: 'seco' | 'borrar'): Promise<ResultadoBorrarConTodo | { error: string; detalle?: unknown }>;
+  fusionarProyectos(queda_id: string, se_va_id: string, seco: boolean): Promise<ResultadoFusionProyectos | { error: string; detalle?: unknown }>;
   /** 0.50.0: un solo negocio por empresa. Todo lo de los demás negocios pasa
    *  al que se queda y los demás se borran. Con `seco` sólo cuenta. */
   fusionarNegocios(queda_id: string, seco: boolean): Promise<ResultadoFusionNegocios | { error: string; detalle?: unknown }>;
@@ -2625,6 +2638,70 @@ export class OrgDB extends DurableObject<Env> {
 
     this.sql.exec(`DELETE FROM clientes WHERE id = ?`, se_va_id);
     return { ok: true, cliente: this.obtener('clientes', queda_id) as Fila, movidos };
+  }
+
+  /* ─────────────── fusionar dos proyectos (0.52.0) ───────────────
+   *
+   * Mike, 29-sep: «No puedo fusionar el proyecto, solo el cliente. Y quiero
+   * fusionar proyectos.» Le pasó con «Sanje CC37»: capturado dos veces, con
+   * 11 movimientos en uno, y borrar no se puede con dinero (0.51.0).
+   *
+   * Misma forma que fusionar clientes: `queda` se queda con TODO lo del que
+   * se va —ítems (con su partida), partidas, dinero, órdenes, cotizaciones,
+   * archivos— y el que se va desaparece. Las tablas con `proyecto_id` se
+   * descubren del esquema, como al fusionar negocios, para que una tabla
+   * nueva no se quede atrás sin que nadie lo note. Lo que no es una columna:
+   *   · las cotizaciones de quote101 apuntan al proyecto dentro de `datos`
+   *     (`datos.proyecto_id`): se cambia ahí;
+   *   · los archivos cuelgan por (`de_tabla`, `de_id`);
+   *   · la obra de quell es una por proyecto (índice único): si el que se
+   *     queda ya tiene la suya, la del que se va queda suelta y se dice.
+   * Los ítems que llegan toman el cliente del proyecto que se queda: un ítem
+   * con el cliente de un proyecto que ya no existe es un renglón huérfano en
+   * el estado de cuenta. Con `seco` sólo se cuenta.
+   */
+  fusionarProyectos(queda_id: string, se_va_id: string, seco: boolean): ResultadoFusionProyectos | { error: string; detalle?: unknown } {
+    if (queda_id === se_va_id) return { error: 'datos_invalidos', detalle: { motivo: 'son el mismo proyecto' } };
+    const queda = this.obtener('proyectos', queda_id);
+    if (!queda) return { error: 'no_encontrado', detalle: { que: 'el proyecto que se queda', id: queda_id } };
+    const seVa = this.obtener('proyectos', se_va_id);
+    if (!seVa) return { error: 'no_encontrado', detalle: { que: 'el proyecto que se fusiona', id: se_va_id } };
+
+    const cuantos = (sql: string, ...args: SqlStorageValue[]) => Number((this.sql.exec(sql, ...args).toArray()[0] as Fila).n);
+    const tablas = (this.sql
+      .exec(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('proyectos', 'quell_projects') AND name NOT LIKE 'sqlite_%' AND sql LIKE '%proyecto_id%' ORDER BY name`)
+      .toArray() as Fila[]).map((t) => String(t.name));
+    const movidos: Record<string, number> = {};
+    for (const t of tablas) {
+      const n = cuantos(`SELECT COUNT(*) AS n FROM "${t}" WHERE proyecto_id = ?`, se_va_id);
+      if (n) movidos[t] = n;
+    }
+    const cotizaciones = cuantos(`SELECT COUNT(*) AS n FROM cotizaciones WHERE json_extract(datos, '$.proyecto_id') = ?`, se_va_id);
+    if (cotizaciones) movidos.cotizaciones = cotizaciones;
+    const archivos = cuantos(`SELECT COUNT(*) AS n FROM archivos WHERE de_tabla = 'proyectos' AND de_id = ?`, se_va_id);
+    if (archivos) movidos.archivos = archivos;
+    const obraQueda = cuantos(`SELECT COUNT(*) AS n FROM quell_projects WHERE proyecto_id = ?`, queda_id) > 0;
+    const obraSeVa = cuantos(`SELECT COUNT(*) AS n FROM quell_projects WHERE proyecto_id = ?`, se_va_id) > 0;
+    if (obraSeVa && !obraQueda) movidos.obras = 1;
+    const obra_suelta = obraSeVa && obraQueda;
+    const se_va = { id: se_va_id, nombre: String(seVa.nombre ?? ''), cliente_id: (seVa.cliente_id as string) ?? null };
+    if (seco) return { ok: true, seco: true, queda, se_va, movidos, obra_suelta };
+
+    const itemIds = (this.sql.exec(`SELECT id FROM items WHERE proyecto_id = ?`, se_va_id).toArray() as Fila[]).map((f) => String(f.id));
+    this.ctx.storage.transactionSync(() => {
+      for (const t of tablas) this.sql.exec(`UPDATE "${t}" SET proyecto_id = ? WHERE proyecto_id = ?`, queda_id, se_va_id);
+      if (queda.cliente_id) this.sql.exec(`UPDATE items SET cliente_id = ? WHERE proyecto_id = ?`, String(queda.cliente_id), queda_id);
+      this.sql.exec(`UPDATE cotizaciones SET datos = json_set(datos, '$.proyecto_id', ?) WHERE json_extract(datos, '$.proyecto_id') = ?`, queda_id, se_va_id);
+      this.sql.exec(`UPDATE archivos SET de_id = ? WHERE de_tabla = 'proyectos' AND de_id = ?`, queda_id, se_va_id);
+      if (obraSeVa) {
+        if (obraQueda) this.sql.exec(`UPDATE quell_projects SET proyecto_id = NULL WHERE proyecto_id = ?`, se_va_id);
+        else this.sql.exec(`UPDATE quell_projects SET proyecto_id = ? WHERE proyecto_id = ?`, queda_id, se_va_id);
+      }
+      this.sql.exec(`DELETE FROM proyectos WHERE id = ?`, se_va_id);
+    });
+    this.recalcularProyecto(queda_id);
+    for (const id of itemIds) this.avisar({ t: 'item.cambio', id }, 'todos');
+    return { ok: true, seco: false, queda: this.obtener('proyectos', queda_id)!, se_va, movidos, obra_suelta };
   }
 
   /* ─────────────── obras de quell101 y proyectos de dash101 (0010) ───────────────
