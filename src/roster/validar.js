@@ -121,6 +121,9 @@ export const CAMPOS_EXPEDIENTE = [
   { campo: 'apellido_materno', nombre: 'Apellido materno', seccion: 'Datos personales' },
   { campo: 'celular', nombre: 'Celular', seccion: 'Datos personales', pista: '10 dígitos' },
   { campo: 'puesto', nombre: 'Puesto', seccion: 'Datos personales', opcional: true },
+  // Las opciones las pone el motor al abrir un expediente (son los equipos
+  // de la empresa); el trabajador sólo escoge uno o «No tengo equipo» (0.53.0).
+  { campo: 'equipo_id', nombre: 'Equipo de trabajo', seccion: 'Datos personales', opcional: true, opciones: [], vacio: 'No tiene equipo' },
   { campo: 'nss', nombre: 'NSS', seccion: 'Datos personales', pista: '11 dígitos' },
   { campo: 'curp', nombre: 'CURP', seccion: 'Datos personales', pista: '18 caracteres', mayusculas: true },
   { campo: 'rfc', nombre: 'RFC', seccion: 'Datos personales', opcional: true, mayusculas: true },
