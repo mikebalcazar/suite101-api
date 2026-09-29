@@ -80,7 +80,7 @@ const enPlano = async () => {
 beforeAll(async () => {
   const c = await pedir('mike', '/auth/codigo', { method: 'POST', json: { correo: CORREO }, app: '' });
   await pedir('mike', '/auth/entrar', { method: 'POST', json: { correo: CORREO, codigo: c.data.codigo_prueba }, app: '' });
-  await pedir('mike', '/admin/orgs', { method: 'POST', json: { id: ORG, nombre: 'Alcance', apps: { dash: true, quell: true } }, app: '' });
+  await pedir('mike', '/admin/orgs', { method: 'POST', json: { id: ORG, nombre: 'Alcance', apps: { dash: true, quell: true, cotizador: true } }, app: '' });
 
   negocio = (await o('mike', '/negocios', { method: 'POST', json: { nombre: 'Taller' } })).data.id;
   cliente = (await o('mike', '/clientes', { method: 'POST', json: { negocio_id: negocio, nombre: 'Familia' } })).data.id;
@@ -284,5 +284,156 @@ describe('una pieza sin ítem sigue dentro', () => {
       method: 'POST', json: { op_id: crypto.randomUUID(), name: 'Remate sin cotizar', type: 'Otro', x: 0.8, y: 0.8 },
     });
     expect((await enPlano())['Remate sin cotizar']).toBe('dentro');
+  });
+});
+
+/* ─────────────── 0.49.0 · el requerimiento cae en un borrador de quote101 ───────────────
+ *
+ * Mike, 29-sep: «los requerimientos generados me deberían generar un borrador
+ * en quote dentro del proyecto para poder enviarla al cliente a que me
+ * autorice», y decidió que fuera solo, al levantarlos. Y después: «al
+ * aprobarse los requerimientos cambia su código a alguno de mueble, puerta
+ * etc.».
+ *
+ * Lo que se cuida: que el requerimiento sea UN solo ítem de principio a fin
+ * —nace cotizado, cae en el borrador, y al aprobar el borrador ese mismo
+ * queda vendido—, que no sume hasta que se apruebe, y que al aprobarse la
+ * pieza del plano cambie de tipo y estrene código con el prefijo del tipo.
+ */
+describe('0.49.0 · el requerimiento nace como ítem y cae en el borrador de quote101', () => {
+  let rq1 = '', it1 = '', it2 = '', borrador = '';
+  const C = { app: 'cotizador101' } as const;
+  const levantar = (name: string, plano_ = plano) => q('mike', `/plans/${plano_}/elements`, {
+    method: 'POST', json: { op_id: crypto.randomUUID(), name, type: 'Requerimiento', x: 0.6, y: 0.6 },
+  });
+  const borradores = async () =>
+    ((await o('mike', `/cotizaciones?negocio_id=${negocio}`, C)).data.filas as any[])
+      .filter((c) => c.estado === 'borrador' && c.datos?.de_requerimientos === true && c.datos?.proyecto_id === proyecto);
+
+  it('al levantarlo en una obra ligada ya es ítem cotizado del proyecto, con su código RQ-, y no suma', async () => {
+    const v = await venta();
+    const r = await levantar('Barra de la cocina');
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    rq1 = r.id; it1 = r.item_id; borrador = r.cotizacion_id;
+    expect(it1, 'la pieza sale con su ítem').toBeTruthy();
+    expect(borrador, 'y con el borrador donde cayó').toBeTruthy();
+    const item = (await o('mike', `/items/${it1}`)).data;
+    expect(item).toMatchObject({ proyecto_id: proyecto, estado: 'cotizado', tipo: 'requerimiento', monto: 0, cantidad: 1, alcance: 'no_aprobado' });
+    expect(item.clave, 'el mismo código que la pieza').toMatch(/^RQ-\d+$/);
+    expect(await venta(), 'un cotizado no mueve la venta').toBe(v);
+    /* En el plano sigue DENTRO: un requerimiento pendiente no se esconde
+     * (Mike, 22-sep: «sí aparece en mapa»); su tipo ya dice lo que es. */
+    expect((await enPlano())['Barra de la cocina']).toBe('dentro');
+  });
+
+  it('el borrador es UNO por proyecto y se llama «Requerimientos»: el segundo cae en el mismo', async () => {
+    const r = await levantar('Repisa del baño');
+    expect(r.cotizacion_id).toBe(borrador);
+    it2 = r.item_id;
+    const lista = await borradores();
+    expect(lista.length).toBe(1);
+    expect(lista[0].id).toBe(borrador);
+    expect(lista[0].datos.nombre).toBe('Requerimientos');
+    const muebles = lista[0].datos.versiones[0].muebles;
+    expect(muebles.map((m: any) => m.item_id)).toEqual([it1, it2]);
+    expect(muebles[0], 'en la forma de un renglón «a mano» de quote101, en pesos').toMatchObject({ manual: true, nombre: 'Barra de la cocina', qty: 1, precio: 0 });
+    expect(muebles[0].codigo).toMatch(/^RQ-\d+$/);
+  });
+
+  it('descartar un requerimiento lo saca del borrador', async () => {
+    const r = await o('mike', `/items/${it2}/cancelar`, { method: 'POST', json: { motivo: 'el cliente ya no lo quiso' } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.alcance).toBe('descartado');
+    expect((await borradores())[0].datos.versiones[0].muebles.map((m: any) => m.item_id)).toEqual([it1]);
+    expect((await enPlano())['Repisa del baño'], 'y en el plano queda como descartado').toBe('descartado');
+  });
+
+  it('aprobar el borrador aprueba ESE ítem —precio, tipo, código nuevo, pestaña— y no duplica nada', async () => {
+    const antes = (await o('mike', `/items?proyecto_id=${proyecto}`)).data.filas as any[];
+    const v = await venta();
+    const r = await o('mike', `/cotizaciones/${borrador}/aprobar`, { ...C, method: 'POST', json: {
+      proyecto_id: proyecto,
+      lineas: [{ item_id: it1, nombre: 'Barra de la cocina', descripcion: 'Encino, 2.40 m', tipo: 'puerta', cantidad: 1, precio: 150000 }],
+    } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    expect(r.data.items).toBe(1);
+    expect(r.data.cotizacion.estado).toBe('aceptada');
+
+    const despues = (await o('mike', `/items?proyecto_id=${proyecto}`)).data.filas as any[];
+    expect(despues.length, 'ninguna pieza de más: se aprobó la que ya estaba').toBe(antes.length);
+    const item = despues.find((i) => i.id === it1);
+    expect(item).toMatchObject({ estado: 'vendido', tipo: 'puerta', monto: 150000, cantidad: 1, partida: 'Requerimientos', descripcion: 'Encino, 2.40 m' });
+    expect(item.aprobado_at).toBeTruthy();
+    expect(item.clave, 'estrena el prefijo de su tipo').toMatch(/^PT-\d+$/);
+    expect(await venta(), 'ahora sí suma').toBe(v + 150000);
+
+    const det = await q('mike', `/elements/${rq1}`);
+    expect(det.element.type, 'la pieza del plano cambió de tipo').toBe('Puerta');
+    expect(det.element.code, 'y de código, el mismo que el ítem').toBe(item.clave);
+    expect((await enPlano())['Barra de la cocina']).toBe('dentro');
+  });
+
+  it('aprobada ya no es borrador: el siguiente requerimiento abre otro', async () => {
+    const r = await levantar('Zoclo de la sala');
+    expect(r.cotizacion_id).toBeTruthy();
+    expect(r.cotizacion_id).not.toBe(borrador);
+    expect((await borradores()).length).toBe(1);
+    await o('mike', `/items/${r.item_id}/cancelar`, { method: 'POST', json: {} });
+  });
+
+  it('aprobar desde dash también lo saca del borrador: ya no está pendiente del cliente', async () => {
+    const r = await levantar('Cenefa');
+    const ap = await o('mike', `/items/${r.item_id}/aprobar`, { method: 'POST' });
+    expect(ap.estado).toBe(200);
+    expect((await borradores())[0].datos.versiones[0].muebles.map((m: any) => m.item_id)).not.toContain(r.item_id);
+  });
+
+  it('en una obra sin proyecto ligado la pieza se levanta igual, y nada más', async () => {
+    const obra2 = (await q('mike', '/projects', { method: 'POST', json: { name: 'Obra suelta', client: 'Nadie' } })).id;
+    const fd = new FormData();
+    fd.append('name', 'Planta'); fd.append('file_name', 'p.pdf'); fd.append('width', '1000'); fd.append('height', '800');
+    fd.append('image', new File([PNG], 'plan.png', { type: 'image/png' }));
+    const plano2 = (await q('mike', `/projects/${obra2}/plans`, { method: 'POST', body: fd })).id;
+    const r = await levantar('Sin proyecto', plano2);
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.code).toBe('RQ-01');
+    expect(r.item_id).toBeNull();
+    expect(r.cotizacion_id).toBeNull();
+  });
+});
+
+/* ─────────────── 0.49.0 · cada cotización aprobada es una pestaña ───────────────
+ *
+ * Mike, 29-sep: «dividir por partidas (grupos de cotizaciones) los ítems (…)
+ * pestañas, tipo los libros de Excel». Las piezas nacen con la partida de la
+ * cotización que las vendió, o con la que se pida. */
+describe('0.49.0 · las piezas de una cotización aprobada nacen en su partida', () => {
+  const C = { app: 'cotizador101' } as const;
+  const cotizacion = async (nombre: string) =>
+    (await o('mike', '/cotizaciones', { ...C, method: 'POST', json: { negocio_id: negocio, cliente_id: cliente, total: 0, datos: { nombre, proyecto_id: proyecto, versiones: [] } } })).data.id as string;
+
+  it('con el nombre de la cotización cuando no se dice otra cosa', async () => {
+    const c = await cotizacion('Corrida 3');
+    const r = await o('mike', `/cotizaciones/${c}/aprobar`, { ...C, method: 'POST', json: { proyecto_id: proyecto, lineas: [{ nombre: 'Mesa de la corrida 3', cantidad: 2, precio: 1000 }] } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    const mesas = ((await o('mike', `/items?proyecto_id=${proyecto}`)).data.filas as any[]).filter((i) => i.nombre === 'Mesa de la corrida 3');
+    expect(mesas.length).toBe(2);
+    expect(mesas.every((i) => i.partida === 'Corrida 3')).toBe(true);
+  });
+
+  it('o con la partida que se pida', async () => {
+    const c = await cotizacion('Corrida 4');
+    const r = await o('mike', `/cotizaciones/${c}/aprobar`, { ...C, method: 'POST', json: { proyecto_id: proyecto, partida: 'Etapa 2', lineas: [{ nombre: 'Silla de la corrida 4', cantidad: 1, precio: 500 }] } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    const silla = ((await o('mike', `/items?proyecto_id=${proyecto}`)).data.filas as any[]).find((i) => i.nombre === 'Silla de la corrida 4');
+    expect(silla.partida).toBe('Etapa 2');
+  });
+
+  it('un item_id que no es del proyecto se rechaza sin escribir nada', async () => {
+    const c = await cotizacion('Corrida 5');
+    const r = await o('mike', `/cotizaciones/${c}/aprobar`, { ...C, method: 'POST', json: { proyecto_id: proyecto, lineas: [{ nombre: 'Buena', cantidad: 1, precio: 100 }, { item_id: 'no-existe', nombre: 'Mala', cantidad: 1, precio: 100 }] } });
+    expect(r.estado).toBe(404);
+    expect(((await o('mike', `/items?proyecto_id=${proyecto}`)).data.filas as any[]).some((i) => i.nombre === 'Buena')).toBe(false);
+    expect((await o('mike', `/cotizaciones/${c}`, C)).data.estado).not.toBe('aceptada');
   });
 });

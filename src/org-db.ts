@@ -34,6 +34,12 @@ import ivaDelProyecto from '../migrations/org/0018_iva_del_proyecto.sql';
 import docsDelItem from '../migrations/org/0019_docs_del_item.sql';
 import reembolsos from '../migrations/org/0020_reembolsos.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
+import { PREFIJOS, siguienteCodigo } from './quell/codigos.js';
+
+/** El tipo del ítem (minúsculas, como lo guarda `items.tipo`) dicho como lo
+ *  escribe quell en `quell_elements.type`, que es lo que decide el prefijo
+ *  del código de la pieza. */
+const TIPO_EN_QUELL: Record<string, string> = { mueble: 'Mueble', puerta: 'Puerta', acabado: 'Acabado', servicio: 'Servicio' };
 import { atender as atenderRoster, type DatosEmpresaRoster, type SesionRoster } from './roster/motor.js';
 import { invitarClienteEnSuite } from './clientes';
 import { secretoDe } from './maestro';
@@ -91,9 +97,16 @@ export interface Sujeto {
 export interface LineaAprobada {
   nombre: string; descripcion?: string | null; codigo?: string | null; tipo?: string | null;
   cantidad: number; precio: number; producto_id?: string | null;
+  /** 0.49.0: el renglón ES un ítem que ya existe —un requerimiento levantado
+   *  en la obra—. Al aprobar se aprueba ése, con su tipo y su precio nuevos,
+   *  en vez de crear otro. */
+  item_id?: string | null;
 }
 export interface AprobarCotizacion {
   cotizacion_id: string; proyecto_id: string; lineas: LineaAprobada[]; usuario_id: string; app: string;
+  /** 0.49.0: la partida (pestaña) en la que caen las piezas. Sin ella, el
+   *  nombre de la cotización. */
+  partida?: string | null;
 }
 export type ResultadoAprobar =
   | { ok: true; cotizacion: Fila; proyecto: Fila; items: number; productos_nuevos: number }
@@ -138,6 +151,9 @@ export interface ApiOrgDB {
     item_ids: string[]; proyecto_id?: string | null; nombre_proyecto?: string; app: string; usuario_id: string;
   }): Promise<{ ok: true; proyecto: Fila; items: Fila[] } | { ok: false; error: string; detalle?: Record<string, any> }>;
   aprobarCotizacion(args: AprobarCotizacion): Promise<ResultadoAprobar>;
+  /** 0.49.0: un requerimiento levantado en la obra nace como ítem cotizado del
+   *  proyecto ligado y cae en el borrador de requerimientos de quote101. */
+  levantarRequerimiento(d: { element_id: string; obra_id: string; code: string; name: string; usuario_id: string }): Promise<{ item_id: string | null; cotizacion_id: string | null }>;
   registrarArchivo(datos: {
     id: string; r2_key: string; nombre: string; mime: string | null; bytes: number;
     de_tabla: string; de_id: string; subido_por: string;
@@ -1133,6 +1149,25 @@ export class OrgDB extends DurableObject<Env> {
     }
     if (piezas > MAX_PIEZAS) return { ok: false, error: 'datos_invalidos', detalle: { piezas, maximo: MAX_PIEZAS } };
 
+    /* 0.49.0 · un renglón puede SER un ítem que ya existe: el requerimiento
+     * que se levantó en la obra y cayó en este borrador. Se revisa antes de
+     * escribir, como todo lo demás: todo o nada. */
+    for (const [i, l] of args.lineas.entries()) {
+      if (!l.item_id) continue;
+      const it = this.sql.exec(`SELECT id, proyecto_id FROM items WHERE id = ?`, String(l.item_id)).toArray()[0] as Fila | undefined;
+      if (!it) return { ok: false, error: 'no_encontrado', detalle: { linea: i + 1, item_id: l.item_id } };
+      if (String(it.proyecto_id ?? '') !== args.proyecto_id) {
+        return { ok: false, error: 'datos_invalidos', detalle: { linea: i + 1, item_id: l.item_id, motivo: 'ese ítem no es de este proyecto' } };
+      }
+    }
+
+    /* 0.49.0 · LA PARTIDA. Mike, 29-sep: «dividir por partidas (grupos de
+     * cotizaciones) los ítems (…) pestañas, tipo los libros de Excel». Cada
+     * cotización aprobada abre su pestaña: sus piezas nacen con la partida
+     * que se pida o, si no, con el nombre de la cotización. */
+    const datosCot = (cot.datos ?? {}) as Record<string, any>;
+    const partida = String(args.partida ?? datosCot.nombre ?? cot.folio ?? '').trim().slice(0, 80);
+
     const negocio_id = String(proyecto.negocio_id ?? cot.negocio_id);
     const contexto = { app: args.app, usuario_id: args.usuario_id };
     let creados = 0;
@@ -1141,6 +1176,29 @@ export class OrgDB extends DurableObject<Env> {
       args.lineas.forEach((l, i) => {
         const n = Number(l.cantidad);
         const codigo = String(l.codigo ?? '').trim();
+        if (l.item_id) {
+          /* El requerimiento se aprueba a sí mismo: mismo renglón, con el
+           * tipo que se le puso al cotizarlo, su precio, y la partida. Mike,
+           * 29-sep: «al aprobarse los requerimientos cambia su código a
+           * alguno de mueble, puerta etc.»: la pieza del plano cambia de tipo
+           * y estrena código con el prefijo que le toca. */
+          const id = String(l.item_id);
+          const tipo = String(l.tipo || 'mueble').trim().toLowerCase();
+          const recodificada = this.recodificarPiezas(id, tipo, codigo);
+          const clave = recodificada ?? (codigo || null);
+          this.sql.exec(
+            `UPDATE items SET nombre = ?, descripcion = ?, tipo = ?, clave = COALESCE(?, clave), monto = ?, cantidad = ?,
+                    producto_id = COALESCE(?, producto_id), partida = ?, estado = 'vendido',
+                    aprobado_at = COALESCE(aprobado_at, ?), cancelado_at = NULL, cancelado_motivo = NULL, actualizado_at = ?
+              WHERE id = ?`,
+            String(l.nombre).trim(), l.descripcion ?? null, tipo, clave, Number(l.precio) * n, n,
+            l.producto_id ? String(l.producto_id) : null, partida, ahora(), ahora(), id,
+          );
+          this.quitarDelBorrador(id);
+          this.avisar({ t: 'item.cambio', id }, 'todos');
+          creados++;
+          return;
+        }
         let producto_id: string | null = l.producto_id ? String(l.producto_id) : null;
         if (!producto_id && n > 1) {
           /* El código del producto es único dentro del negocio. Si ya lo usa
@@ -1161,7 +1219,7 @@ export class OrgDB extends DurableObject<Env> {
             negocio_id, cliente_id: proyecto.cliente_id, proyecto_id: args.proyecto_id,
             nombre: String(l.nombre).trim(), descripcion: l.descripcion ?? null, tipo: l.tipo || 'mueble',
             clave: codigo || null, monto: Number(l.precio), cantidad: 1, moneda: 'MXN', estado: 'vendido',
-            producto_id, origen: { app: 'cotizador101', cotizacion_id: args.cotizacion_id, linea: i + 1 },
+            producto_id, partida, origen: { app: 'cotizador101', cotizacion_id: args.cotizacion_id, linea: i + 1 },
           }, contexto);
           creados++;
         }
@@ -1175,6 +1233,146 @@ export class OrgDB extends DurableObject<Env> {
     });
     const p = this.recalcularProyecto(args.proyecto_id)!;
     return { ok: true, cotizacion: this.obtener('cotizaciones', args.cotizacion_id)!, proyecto: p, items: creados, productos_nuevos: productosNuevos };
+  }
+
+  /* ─────────────── los requerimientos y su borrador (0.49.0) ───────────────
+   *
+   * Mike, 29-sep: «los requerimientos generados me deberían generar un
+   * borrador en quote dentro del proyecto para poder enviarla al cliente a
+   * que me autorice». Y decidió que fuera solo: cada requerimiento que se
+   * levanta en quell cae en el borrador abierto del proyecto.
+   *
+   * Hasta hoy un requerimiento era SÓLO una pieza del plano: no tenía
+   * renglón en `items` hasta que alguien ligaba la obra y aceptaba la
+   * propuesta. Ahora, si la obra ya está ligada a un proyecto, nace también
+   * como ítem cotizado (no suma: `precio_venta` sólo cuenta vendidos) y
+   * entra como renglón «a mano» en el borrador «Requerimientos» de quote101.
+   * Ahí se le pone precio y tipo, se manda al cliente, y al aprobar la
+   * cotización el MISMO ítem queda vendido, en su pestaña, con el código del
+   * tipo que le tocó. Nada se duplica.
+   *
+   * Sin obra ligada no hay proyecto, y sin proyecto no hay dónde cotizar:
+   * la pieza se levanta igual y se convierte en ítem al ligar, como antes.
+   */
+
+  /** Un requerimiento recién levantado en la obra: su ítem y su renglón en
+   *  el borrador. Lo llama el motor de quell al dar de alta la pieza. */
+  levantarRequerimiento(d: { element_id: string; obra_id: string; code: string; name: string; usuario_id: string }): { item_id: string | null; cotizacion_id: string | null } {
+    const obra = this.sql.exec(`SELECT proyecto_id FROM quell_projects WHERE id = ?`, d.obra_id).toArray()[0] as Fila | undefined;
+    if (!obra?.proyecto_id) return { item_id: null, cotizacion_id: null };
+    const proyecto = this.obtener('proyectos', String(obra.proyecto_id));
+    if (!proyecto) return { item_id: null, cotizacion_id: null };
+    const contexto = { app: 'quell101', usuario_id: d.usuario_id };
+
+    const item = this.crear('items', {
+      negocio_id: proyecto.negocio_id, proyecto_id: proyecto.id, cliente_id: proyecto.cliente_id,
+      clave: d.code || '', nombre: String(d.name).trim() || 'Requerimiento', tipo: 'requerimiento',
+      monto: 0, cantidad: 1, moneda: 'MXN', estado: 'cotizado',
+      descripcion: 'Requerimiento levantado en la obra. Falta cotizarlo.',
+      origen: { de: 'quell', element_id: d.element_id, obra_id: d.obra_id, requerimiento: true },
+    } as unknown as Fila, contexto);
+    this.sql.exec(`UPDATE quell_elements SET item_id = ? WHERE id = ?`, String(item.id), d.element_id);
+
+    const cot = this.borradorDeRequerimientos(proyecto, contexto);
+    const datos = { ...((cot.datos ?? {}) as Record<string, any>) };
+    const versiones: Array<Record<string, any>> = Array.isArray(datos.versiones) && datos.versiones.length
+      ? datos.versiones : [{ fecha: ahora(), muebles: [], totalFinal: 0 }];
+    /* El renglón, en la forma que quote101 guarda los escritos a mano:
+     * `manual: true`, precio en PESOS (así vive `datos`), y `item_id` para
+     * que al aprobar se sepa que es éste y no uno nuevo. */
+    const mueble = {
+      id: String(item.id), manual: true, item_id: String(item.id), tipo: 'mueble',
+      codigo: d.code || '', nombre: String(item.nombre), descripcion: '',
+      qty: 1, precio: 0, total: 0, componentes: [], imagenes: [],
+    };
+    const primera = { ...versiones[0], muebles: [...(Array.isArray(versiones[0].muebles) ? versiones[0].muebles : []), mueble] };
+    datos.versiones = [primera, ...versiones.slice(1)];
+    this.sql.exec(`UPDATE cotizaciones SET datos = ?, actualizado_at = ? WHERE id = ?`, JSON.stringify(datos), ahora(), String(cot.id));
+    return { item_id: String(item.id), cotizacion_id: String(cot.id) };
+  }
+
+  /** El borrador de requerimientos del proyecto: uno abierto por proyecto.
+   *  Cuando se aprueba deja de ser borrador, y el siguiente requerimiento
+   *  abre otro. */
+  private borradorDeRequerimientos(proyecto: Fila, contexto: { app: string; usuario_id: string }): Fila {
+    const abiertas = this.sql
+      .exec(`SELECT id, datos FROM cotizaciones WHERE estado = 'borrador' AND negocio_id = ? ORDER BY creado_at`, String(proyecto.negocio_id))
+      .toArray() as Fila[];
+    for (const c of abiertas) {
+      let datos: Record<string, any> = {};
+      try { datos = typeof c.datos === 'string' ? JSON.parse(c.datos) : ((c.datos ?? {}) as Record<string, any>); } catch { datos = {}; }
+      if (datos.de_requerimientos === true && String(datos.proyecto_id ?? '') === String(proyecto.id)) return this.obtener('cotizaciones', String(c.id))!;
+    }
+    return this.crear('cotizaciones', {
+      negocio_id: proyecto.negocio_id, cliente_id: proyecto.cliente_id, total: 0, moneda: 'MXN', estado: 'borrador',
+      datos: {
+        nombre: 'Requerimientos', proyecto_id: proyecto.id, de_requerimientos: true,
+        versiones: [{ fecha: ahora(), muebles: [], totalFinal: 0 }],
+      },
+    } as unknown as Fila, contexto);
+  }
+
+  /** Saca un ítem de los borradores de requerimientos donde ande: se
+   *  descartó, o se aprobó por otro camino y ya no está pendiente del
+   *  cliente. Lo aprobado en quote101 ya no es borrador y no se toca. */
+  private quitarDelBorrador(item_id: string): number {
+    const item = this.sql.exec(`SELECT negocio_id FROM items WHERE id = ?`, item_id).toArray()[0] as Fila | undefined;
+    if (!item) return 0;
+    const abiertas = this.sql
+      .exec(`SELECT id, datos FROM cotizaciones WHERE estado = 'borrador' AND negocio_id = ?`, String(item.negocio_id))
+      .toArray() as Fila[];
+    let quitados = 0;
+    for (const c of abiertas) {
+      let datos: Record<string, any> = {};
+      try { datos = typeof c.datos === 'string' ? JSON.parse(c.datos) : ((c.datos ?? {}) as Record<string, any>); } catch { continue; }
+      if (datos.de_requerimientos !== true || !Array.isArray(datos.versiones)) continue;
+      let toco = false;
+      datos.versiones = datos.versiones.map((v: Record<string, any>) => {
+        if (!Array.isArray(v.muebles)) return v;
+        const quedan = v.muebles.filter((m: Record<string, any>) => String(m?.item_id ?? '') !== item_id);
+        if (quedan.length !== v.muebles.length) toco = true;
+        return { ...v, muebles: quedan };
+      });
+      if (!toco) continue;
+      this.sql.exec(`UPDATE cotizaciones SET datos = ?, actualizado_at = ? WHERE id = ?`, JSON.stringify(datos), ahora(), String(c.id));
+      quitados++;
+    }
+    return quitados;
+  }
+
+  /** Las piezas del plano de un ítem que se aprueba con un tipo: cambian de
+   *  tipo y, si venían como requerimiento (o si el tipo cambió), estrenan
+   *  código con el prefijo del tipo, propuesto por obra con la misma regla
+   *  de siempre. Devuelve el código de la primera pieza (para `items.clave`)
+   *  o null si el ítem no tiene pieza en ningún plano. */
+  private recodificarPiezas(item_id: string, tipo: string, codigoPedido: string): string | null {
+    const piezas = this.sql
+      .exec(`SELECT id, project_id, code, type FROM quell_elements WHERE item_id = ? ORDER BY code`, item_id)
+      .toArray() as Fila[];
+    if (!piezas.length) return null;
+    const tipoQuell = TIPO_EN_QUELL[tipo] ?? 'Otro';
+    let primera: string | null = null;
+    for (const pz of piezas) {
+      const obra = String(pz.project_id);
+      const mismoTipo = String(pz.type ?? '') === tipoQuell;
+      let nuevo = String(pz.code ?? '');
+      if (codigoPedido && piezas.length === 1) nuevo = codigoPedido;
+      else if (!mismoTipo && PREFIJOS[tipoQuell]) {
+        const delaObra = this.sql.exec(`SELECT code FROM quell_elements WHERE project_id = ?`, obra).toArray() as Array<{ code?: string }>;
+        nuevo = siguienteCodigo(delaObra, tipoQuell) || nuevo;
+      }
+      try {
+        this.sql.exec(`UPDATE quell_elements SET code = ?, type = ? WHERE id = ?`, nuevo, tipoQuell, String(pz.id));
+      } catch {
+        /* El código pedido ya lo tiene otra pieza de la obra: se propone
+         * uno con la regla de siempre en vez de reventar la aprobación. */
+        const delaObra = this.sql.exec(`SELECT code FROM quell_elements WHERE project_id = ?`, obra).toArray() as Array<{ code?: string }>;
+        nuevo = siguienteCodigo(delaObra, tipoQuell) || String(pz.code ?? '');
+        this.sql.exec(`UPDATE quell_elements SET code = ?, type = ? WHERE id = ?`, nuevo, tipoQuell, String(pz.id));
+      }
+      if (primera === null) primera = nuevo;
+    }
+    return primera;
   }
 
   /** Alta de un archivo ya subido a R2. Va aparte del CRUD genérico porque el
@@ -3351,6 +3549,8 @@ export class OrgDB extends DurableObject<Env> {
       ahora(), ahora(), id,
     );
     void contexto;
+    // Aprobado desde dash o quell: ya no está pendiente del cliente (0.49.0).
+    if (era === 'cotizado') this.quitarDelBorrador(id);
     if (item.proyecto_id) this.recalcularProyecto(String(item.proyecto_id));
     this.avisar({ t: 'item.cambio', id }, 'todos');
     return { ok: true, item: this.obtener('items', id)!, era };
@@ -3378,6 +3578,8 @@ export class OrgDB extends DurableObject<Env> {
       this.sql.exec(`UPDATE items SET cancelado_motivo = ?, actualizado_at = ? WHERE id = ?`, String(args.motivo).trim(), ahora(), id);
     }
     void contexto;
+    // Un requerimiento descartado sale del borrador que iba al cliente (0.49.0).
+    if (!item.aprobado_at) this.quitarDelBorrador(id);
     if (item.proyecto_id) this.recalcularProyecto(String(item.proyecto_id));
     this.avisar({ t: 'item.cambio', id }, 'todos');
     const ya = this.obtener('items', id)!;
@@ -4174,6 +4376,8 @@ export class OrgDB extends DurableObject<Env> {
         // pide después de revisar que quien invita sea el dueño de la obra.
         INVITAR_EN_SUITE: (correo: string, nombre: string) =>
           invitarClienteEnSuite(e, org, { ...sesion.quien, negocios: [], ve_dinero: true, ve_costos: true } as Quien, this as unknown as ApiOrgDB, 'quell101', correo, nombre),
+        // 0.49.0: el requerimiento nace como ítem y cae en el borrador de quote101.
+        LEVANTAR_REQUERIMIENTO: (d) => this.levantarRequerimiento({ ...d, usuario_id: sesion.quien.usuario_id }),
       }, url, url.pathname);
     }
     // roster101: igual que quell101, pero la sesión de la suite puede venir
