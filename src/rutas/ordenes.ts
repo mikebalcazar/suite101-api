@@ -371,9 +371,16 @@ async function avisar(
   orden: Record<string, unknown>,
   que: 'pagada' | 'devuelta' | 'rechazada',
   extra: { cuenta?: string; movimiento_id?: string; nota?: string },
-): Promise<{ enviado: boolean; motivo?: string; para?: string }> {
+): Promise<{ enviado: boolean; motivo?: string; para?: string; url?: string }> {
   const para = String(orden.solicitante_correo ?? '').trim();
   if (!para) return { enviado: false, motivo: 'la_orden_no_trae_correo' };
+  /* La liga va a supply101, que es donde quien pidió ve su orden y el
+   * comprobante, y que le habla a esta API con su propia cookie. Mike,
+   * 29-sep: «cuando le doy click en “ver comprobante” me manda a una URL
+   * que despliega {"ok":false,"error":"sin_sesion"}»: la liga apuntaba a
+   * la API (URL_PUBLICA), donde el navegador no tiene sesión. */
+  const supply = (c.env.URL_SUPPLY || '').replace(/\/+$/, '');
+  const url = supply ? `${supply}/#/orden/${encodeURIComponent(String(orden.id))}` : '';
   const datos = {
     folio: String(orden.folio),
     proveedor: String(orden.proveedor_nombre ?? (orden.tipo === 'reembolso' ? 'reembolso' : 'sin proveedor')),
@@ -383,9 +390,9 @@ async function avisar(
     fecha: String(orden.pagada_at ?? '').slice(0, 10),
     cuenta: extra.cuenta ?? '',
     nota: extra.nota ?? '',
-    url: `${(c.env.URL_PUBLICA || '').replace(/\/+$/, '')}/orgs/${c.get('org_id')}/ordenes/${String(orden.id)}`,
+    url,
   };
   const msg = que === 'pagada' ? correoOrdenPagada(datos) : correoOrdenResuelta(que, datos);
   const r = await enviarCorreo(c.env, { para, ...msg, conBaja: true });
-  return { ...r, para };
+  return { ...r, para, url };
 }

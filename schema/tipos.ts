@@ -17,7 +17,9 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.52.0 (FUSIONAR DOS PROYECTOS. Mike, 29-sep-2026:
+ * Versión del contrato: 0.52.1 (la liga del correo de «orden pagada» va a
+ * supply101 —`URL_SUPPLY`/#/orden/:id—, no a esta API: ahí el navegador no
+ * tiene sesión y veía `sin_sesion`. Mike, 29-sep-2026). 0.52.0 (FUSIONAR DOS PROYECTOS. Mike, 29-sep-2026:
  * «No puedo fusionar el proyecto, solo el cliente. Y quiero fusionar
  * proyectos». `POST /orgs/:o/proyectos/:id/fusionar {se_va_id, seco?}`: el
  * que se va le deja al que se queda ítems (que toman su cliente), partidas,
@@ -782,7 +784,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.52.0';
+export const VERSION_CONTRATO = '0.52.1';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
