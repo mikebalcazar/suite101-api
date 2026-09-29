@@ -5,7 +5,13 @@
 --   · «Jr. ni nadie puede accesar a los archivos, ni siquiera nosotros como
 --     dueños. Sólo el usuario de la licencia con la que se generó y se guardó»;
 --   · cifrado de verdad, sin llave maestra del taller;
---   · la llave sale de la clave T101 «y dejamos de guardarla en claro».
+--   · y «dejamos de guardarla en claro», hablando de la clave T101.
+--
+-- OJO CON LA PRIMERA VIÑETA: es lo que Mike dijo, y ese punto lo cambió el
+-- mismo día. La llave la da el servidor, así que hoy el servidor SÍ puede abrir
+-- los archivos; Jr. y cualquier otra cuenta, no. Se deja la cita porque es la
+-- que explica por qué existe todo esto, pero no describe lo que corre hoy: eso
+-- está abajo, donde se crean las columnas de la llave.
 --
 -- LA CLAVE.  La columna `clave` deja de guardar las letras y pasa a guardar su
 -- HUELLA: un HMAC-SHA256 con el secreto del Worker, que vive en `config` y no
@@ -31,10 +37,20 @@
 -- adivinar el resto.
 ALTER TABLE suscripciones ADD COLUMN clave_pista TEXT;
 
--- LA LLAVE DEL CIFRADO.  Cada suscripción tiene una llave maestra de 32 bytes
--- que NACE EN LA MÁQUINA del dueño, nunca aquí. Lo que se guarda es esa llave
--- ya cifrada (`llave_envuelta`) con lo que sale de la clave T101 más la sal
--- (`llave_sal`), por PBKDF2. El Worker guarda el bulto y no puede abrirlo.
+-- LA LLAVE DEL CIFRADO.  Cada suscripción tiene una llave maestra de 32 bytes.
+-- Lo que se guarda aquí es esa llave ya cifrada (`llave_envuelta`) con el nonce
+-- que la acompaña (`llave_sal`).
+--
+-- CORRECCIÓN DEL 29-SEP-2026, y es sobre quién puede abrirla: cuando se escribió
+-- esta migración, la llave nacía en la máquina del dueño y se envolvía con su
+-- clave T101, así que el servidor guardaba un bulto que no podía abrir. Mike lo
+-- cambió a propósito el mismo día, sabiendo lo que cambiaba: **el servidor
+-- genera la llave y puede abrirla**, envuelta con un secreto de la propia API.
+-- La razón es que las máquinas con cuenta de suite nunca teclean una clave T101,
+-- así que con el diseño anterior simplemente no habrían podido bajar sus
+-- archivos; y además nadie se queda sin sus planos por olvidar una clave.
+-- Frente a quien se meta a la base de datos el cifrado sigue sirviendo; frente a
+-- nosotros, no. Las columnas son las mismas, por eso esta migración no cambió.
 --
 -- Hay una llave maestra —y no se cifra con la clave directamente— para que
 -- cambiar la clave T101 sea volver a envolver 32 bytes y no volver a cifrar

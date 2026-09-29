@@ -20,7 +20,10 @@
  */
 
 const STAGING = process.env.STAGING || '';
-const CORREO = 'mike@forespot.com';
+// El superadmin con el que se entra a STAGING, igual que en humo.mjs y
+// configurable por la misma variable. No se toca la org `forespot` ni ninguna
+// otra: esta prueba crea sus dos licencias, las usa y las borra (OPERAR §8).
+const CORREO = process.env.CORREO_SUPERADMIN || 'mike@forespot.com';
 const ORG = Date.now().toString().slice(-8);
 
 let galleta = '';
@@ -134,16 +137,15 @@ async function main() {
   const inventado = await pedir('/nube/indice', { token: 'v1.aaaa.bbbb' });
   rev(inventado.estado === 401, 'con un token inventado, tampoco');
 
-  /* ── la llave envuelta: una vez y sólo una ── */
-  const vacia = await pedir('/nube/llave', { token: A.token });
-  rev(vacia.estado === 200 && vacia.data?.envuelta === null, 'una cuenta nueva no tiene llave todavía');
-  const put1 = await pedir('/nube/llave', { method: 'PUT', token: A.token, body: { envuelta: 'envuelta-de-A', sal: 'sal-de-A' } });
-  rev(put1.estado === 200 && put1.data?.envuelta === 'envuelta-de-A' && put1.data?.era_mia === true,
-    'la cuenta A deja su llave envuelta', `${put1.estado} ${put1.error ?? ''}`);
-  const put2 = await pedir('/nube/llave', { method: 'PUT', token: A.token, body: { envuelta: 'otra-distinta', sal: 'otra-sal' } });
-  rev(put2.data?.envuelta === 'envuelta-de-A' && put2.data?.era_mia === false,
-    'y la segunda máquina recibe la de la primera, no la suya (si no, dejaría ilegibles los planos de la primera)',
-    `quedó ${put2.data?.envuelta}`);
+  /* ── la llave de la cuenta ── */
+  const una = await pedir('/nube/llave', { token: A.token });
+  rev(una.estado === 200 && typeof una.data?.llave === 'string' && una.data.llave.length > 40,
+    'la cuenta A recibe su llave, que nace sola', `${una.estado} ${una.error ?? ''}`);
+  const otra = await pedir('/nube/llave', { token: A.token });
+  rev(otra.data?.llave === una.data?.llave,
+    'y pedirla otra vez da LA MISMA (si cambiara, lo ya subido quedaría ilegible sin aviso)');
+  const llaveDeB = await pedir('/nube/llave', { token: B.token });
+  rev(llaveDeB.data?.llave !== una.data?.llave, 'la de B no es la de A, y B nunca ve la de A');
 
   /* ── subir bytes de verdad a R2 y bajarlos idénticos ── */
   const doc = tokenDeDoc(`humo${ORG}`);
@@ -200,8 +202,6 @@ async function main() {
       Buffer.from(await deAotraVez.arrayBuffer()).equals(otros),
     'ni lo pisa subiendo encima: el archivo de A queda intacto');
 
-  const llaveAjena = await pedir('/nube/llave', { token: B.token });
-  rev(llaveAjena.data?.envuelta !== 'envuelta-de-A', 'y B no recibe la llave de cifrado de A', `${llaveAjena.data?.envuelta}`);
 
   /* ── quitar ── */
   const quita = await fetch(`${STAGING}/nube/archivo/${doc}`, { method: 'DELETE', headers: { Authorization: `Bearer ${A.token}` } });
