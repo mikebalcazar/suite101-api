@@ -1187,9 +1187,58 @@ rutas.post('/:o/:tabla', async (c) => {
   const malDinero = revisarDinero(tabla, datos);
   if (malDinero) return err(c, 'dinero_no_entero', 400, malDinero);
 
+  const malProveedor = tabla === 'proveedores' ? revisarProveedor(datos) : null;
+  if (malProveedor) return err(c, 'datos_invalidos', 400, { errores: malProveedor });
+
   const fila = await stub(c).crear(tabla, datos, { app: c.get('app'), usuario_id: quien.usuario_id });
   return ok(c, podar(quien, tabla, fila), 201);
 });
+
+/* 0.54.0 · Los datos con los que se le PAGA a un proveedor se revisan al
+ * escribirlos, no cuando ya rebotó la transferencia. La CLABE lleva su dígito
+ * verificador (pesos 3, 7, 1); el RFC son 12 (moral) o 13 (física); el correo
+ * tiene arroba y punto. Vacío se acepta: son opcionales. Se normalizan (sin
+ * espacios; RFC en mayúsculas) para que dos altas del mismo proveedor no
+ * difieran por un espacio. */
+export function clabeValida(c: string): boolean {
+  if (!/^\d{18}$/.test(c)) return false;
+  const pesos = [3, 7, 1];
+  let suma = 0;
+  for (let i = 0; i < 17; i++) suma += (Number(c[i]) * pesos[i % 3]) % 10;
+  return (10 - (suma % 10)) % 10 === Number(c[17]);
+}
+export function revisarProveedor(datos: Record<string, unknown>): Record<string, string> | null {
+  const errores: Record<string, string> = {};
+  const texto = (k: string) => (datos[k] === undefined || datos[k] === null ? undefined : String(datos[k]).trim());
+  const clabe = texto('clabe');
+  if (clabe !== undefined) {
+    const limpia = clabe.replace(/[\s-]/g, '');
+    if (limpia && !clabeValida(limpia)) errores.clabe = 'La CLABE son 18 dígitos y no cuadra su dígito verificador.';
+    datos.clabe = limpia || null;
+  }
+  const rfc = texto('rfc');
+  if (rfc !== undefined) {
+    const limpio = rfc.toUpperCase().replace(/[\s-]/g, '');
+    if (limpio && !/^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/.test(limpio)) errores.rfc = 'El RFC son 12 o 13 caracteres: letras, fecha y homoclave.';
+    datos.rfc = limpio || null;
+  }
+  const correo = texto('correo');
+  if (correo !== undefined) {
+    const limpio = correo.toLowerCase();
+    if (limpio && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(limpio)) errores.correo = 'Escribe un correo válido.';
+    datos.correo = limpio || null;
+  }
+  const maps = texto('maps_url');
+  if (maps !== undefined) {
+    if (maps && !/^https:\/\/(www\.google\.[a-z.]+\/maps|maps\.google\.[a-z.]+|maps\.app\.goo\.gl|goo\.gl\/maps|www\.waze\.com)/i.test(maps)) errores.maps_url = 'Pega la liga que comparte Google Maps (empieza con https://maps.app.goo.gl o https://www.google.com/maps).';
+    datos.maps_url = maps || null;
+  }
+  for (const k of ['banco', 'beneficiario', 'direccion', 'telefono', 'nombre']) {
+    const v = texto(k);
+    if (v !== undefined) datos[k] = v || (k === 'nombre' ? v : null);
+  }
+  return Object.keys(errores).length ? errores : null;
+}
 
 rutas.patch('/:o/:tabla/:id', async (c) => {
   const tabla = c.req.param('tabla')!;
@@ -1211,6 +1260,9 @@ rutas.patch('/:o/:tabla/:id', async (c) => {
 
   const malDinero = revisarDinero(tabla, datos);
   if (malDinero) return err(c, 'dinero_no_entero', 400, malDinero);
+
+  const malProveedor = tabla === 'proveedores' ? revisarProveedor(datos) : null;
+  if (malProveedor) return err(c, 'datos_invalidos', 400, { errores: malProveedor });
 
   /* 0.46.0 · Una cotización aprobada es lo que se vendió: sus piezas ya están
    * en el proyecto. Si se pudiera seguir editando, el papel y la obra dirían

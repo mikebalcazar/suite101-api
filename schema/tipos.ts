@@ -17,7 +17,16 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.53.1 (roster101: PUT /roster/:o/api/admin/
+ * Versión del contrato: 0.54.0 (PROVEEDOR CON DATOS PARA PAGARLE. Mike,
+ * 29-sep, para supply101: «dar de alta a un nuevo proveedor (…) nombre, RFC,
+ * número de cuenta (CLABE y banco y beneficiario), email de contacto,
+ * teléfono de contacto, ubicación (…) de Google Maps». Migración org 0022:
+ * `proveedores.clabe`, `banco`, `beneficiario`, `direccion`, `maps_url`.
+ * supply101 escribe proveedores por el CRUD genérico (nombre, rfc, correo,
+ * telefono, clabe, banco, beneficiario, direccion, maps_url, notas). La API
+ * revisa CLABE (18 dígitos y verificador), RFC (12 o 13) y correo al crear o
+ * cambiar un proveedor: 400 `datos_invalidos` con `errores` por campo).
+ * Antes: 0.53.1 (roster101: PUT /roster/:o/api/admin/
  * trabajadores/:id/equipo {equipo_id} cambia sólo el equipo, desde la lista
  * del panel; permiso de capturar. Mike, 29-sep: «no puedo asignar
  * trabajadores»). Antes: 0.53.0 (EQUIPOS DE TRABAJO en roster101. Mike,
@@ -796,7 +805,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.53.1';
+export const VERSION_CONTRATO = '0.54.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1097,6 +1106,14 @@ export interface Proveedor {
   telefono: string | null;
   terminos_pago: string | null;
   notas: string | null;
+  /* 0022 · la cuenta para pagarle y dónde está (0.54.0). La CLABE son 18
+   * dígitos con su dígito verificador; el RFC, 12 o 13 caracteres. La API
+   * los revisa al escribir. `maps_url` es la liga que Google Maps comparte. */
+  clabe: string | null;
+  banco: string | null;
+  beneficiario: string | null;
+  direccion: string | null;
+  maps_url: string | null;
   creado_en_app: string;
   creado_at: string;
 }
