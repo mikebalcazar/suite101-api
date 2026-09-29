@@ -369,6 +369,13 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   huérfanos primero. Lo que NO está hecho todavía: devolver lo huérfano a un
   negocio. Eso es una escritura en producción y la decide Mike al ver los
   números.
+- **DEFECTO: la liga «ver comprobante» del correo de orden pagada
+  (29-sep, 0.52.1).** Mike: «me manda a una URL que despliega sin_sesion».
+  La liga iba a la API (URL_PUBLICA + /orgs/…): JSON y sin sesión, porque
+  la cookie vive en el dominio de la app. API #156: `URL_SUPPLY` en
+  wrangler.toml (prod y staging) y la liga es `URL_SUPPLY/#/orden/:id`;
+  la respuesta del pago trae `correo.url`. Regla: una liga en un correo va
+  a una app, nunca a la API. Muro 2026-09-29-1000.
 - **Fusionar dos proyectos que son el mismo (29-sep, contrato 0.52.0).**
   Mike, con la captura de quote101 («“Sanje CC37” tiene 11 movimientos…
   fusiónalo con el otro cliente»): «No puedo fusionar el proyecto, solo el
