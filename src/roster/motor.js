@@ -88,6 +88,35 @@ async function registra(env, quien, accion, detalle = '') {
 const DIAS_PAPELERA = 30;
 const SOLO_VIVOS = 'id NOT IN (SELECT trabajador_id FROM roster_papelera)';
 
+/* ─────────────── equipos de trabajo (0.53.0) ───────────────
+ * Mike, 29-sep-2026: «Quiero poder agrupar por "equipo de trabajo" en roster.
+ * Que la gente ponga en qué equipo de trabajo está, pero esos equipos los doy
+ * de alta yo, y ellos sólo seleccionan cuál de los disponibles es el suyo, o
+ * "no tengo equipo".» El catálogo es de la empresa (lo maneja el panel con el
+ * permiso de capturar); el trabajador apunta a uno prendido o a ninguno. */
+async function equiposDe(env, todos = false) {
+  const { results } = await env.DB.prepare(
+    `SELECT e.*, (SELECT COUNT(*) FROM roster_trabajadores t WHERE t.equipo_id = e.id AND t.id NOT IN (SELECT trabajador_id FROM roster_papelera)) AS cuantos
+       FROM roster_equipos e ${todos ? '' : 'WHERE e.activo = 1'}
+      ORDER BY e.orden, e.nombre COLLATE NOCASE`
+  ).all();
+  return results || [];
+}
+/** Qué equipo se guarda. Vacío o nulo es «no tengo equipo»; uno que no existe
+ *  o está apagado no se acepta: se dice y se deja el que tenía. */
+async function equipoValido(env, equipo_id) {
+  const id = String(equipo_id ?? '').trim();
+  if (!id) return { id: null };
+  const e = await env.DB.prepare('SELECT id, activo FROM roster_equipos WHERE id = ?').bind(id).first();
+  if (!e) return { error: 'Ese equipo ya no existe. Escoge otro, o «No tengo equipo».' };
+  if (!e.activo) return { error: 'Ese equipo ya no está disponible. Escoge otro, o «No tengo equipo».' };
+  return { id };
+}
+const quienAdmin = (c) => {
+  const s = c.get('sesion') || c.get('admin') || c.get('cuenta') || {};
+  return s.email || s.correo || 'panel';
+};
+
 // Borra de verdad a un trabajador: primero los archivos, luego los renglones.
 // Si un archivo ya no está en R2 no importa: lo que se busca es que no quede.
 async function borraDeVerdad(env, id) {
@@ -382,6 +411,11 @@ app.post('/api/aviso', exigeTrabajador, async (c) => {
   return c.json({ ok: true, version, aceptado_en: ahora() });
 });
 
+app.get('/api/equipos', exigeTrabajador, async (c) => {
+  const equipos = (await equiposDe(c.env)).map((e) => ({ id: e.id, nombre: e.nombre }));
+  return c.json({ equipos });
+});
+
 app.get('/api/yo', exigeTrabajador, async (c) => {
   const s = c.get('trabajador');
   const t = await c.env.DB.prepare('SELECT * FROM roster_trabajadores WHERE id = ?').bind(s.id).first();
@@ -397,7 +431,11 @@ app.put('/api/yo', exigeTrabajador, exigeAviso, async (c) => {
   const { errores, limpio, ok } = revisaExpediente(cuerpo);
   const parcial = cuerpo.__parcial === true;
 
-  if (!ok && !parcial) return err(c, 'Revisa los datos marcados.', 422, { errores });
+  const eq = await equipoValido(c.env, cuerpo.equipo_id);
+  if (eq.error) errores.equipo_id = eq.error;
+  if ((!ok || eq.error) && !parcial) return err(c, 'Revisa los datos marcados.', 422, { errores });
+  // Sin `equipo_id` en el cuerpo no se toca; con uno malo, tampoco (a medias).
+  const tocaEquipo = cuerpo.equipo_id !== undefined && !eq.error ? 1 : 0;
 
   const choques = await choquesDe(c.env, s.id, limpio);
   const avisoChoque = choques.length
@@ -423,11 +461,13 @@ app.put('/api/yo', exigeTrabajador, exigeAviso, async (c) => {
   await c.env.DB.prepare(
     `UPDATE roster_trabajadores SET nombre=?, apellido_paterno=?, apellido_materno=?, celular=?, nss=?, curp=?, rfc=?,
      banco=?, clabe=?, beneficiario=?, emerg_nombre=?, emerg_parentesco=?, emerg_telefono=?, emerg_email=?, puesto=?,
+     equipo_id=CASE WHEN ? THEN ? ELSE equipo_id END,
      estado=?, actualizado_en=?, confirmado_en=COALESCE(confirmado_en, ?) WHERE id=?`
   ).bind(
     limpio.nombre, limpio.apellido_paterno, limpio.apellido_materno, limpio.celular, limpio.nss,
     limpio.curp, limpio.rfc, limpio.banco, limpio.clabe, limpio.beneficiario,
     limpio.emerg_nombre, limpio.emerg_parentesco, limpio.emerg_telefono, limpio.emerg_email, limpio.puesto,
+    tocaEquipo, eq.id ?? null,
     estado, ahora(), ok && !choques.length ? ahora() : null, s.id
   ).run();
 
@@ -805,7 +845,9 @@ app.get('/api/admin/duplicados', exigeAdmin, async (c) => {
 app.get('/api/admin/trabajadores', exigeAdmin, async (c) => {
   await vaciaVencidos(c.env);
   const { results } = await c.env.DB.prepare(
-    `SELECT * FROM roster_trabajadores WHERE ${SOLO_VIVOS} ORDER BY apellido_paterno, apellido_materno, nombre`
+    `SELECT t.*, e.nombre AS equipo_nombre FROM roster_trabajadores t
+     LEFT JOIN roster_equipos e ON e.id = t.equipo_id
+     WHERE t.${SOLO_VIVOS} ORDER BY t.apellido_paterno, t.apellido_materno, t.nombre`
   ).all();
   const docs = await c.env.DB.prepare('SELECT id, trabajador_id, tipo, etiqueta, nombre_archivo, mime, tamano FROM roster_documentos').all();
   const porTrab = {};
@@ -814,7 +856,9 @@ app.get('/api/admin/trabajadores', exigeAdmin, async (c) => {
     const ds = porTrab[t.id] || [];
     return { ...t, documentos: ds, faltantes: faltantesDe(ds), faltan_campos: faltantesCampos(t) };
   });
-  return c.json({ trabajadores: lista, nombres_doc: NOMBRES_DOC });
+  // El catálogo completo va con la lista: el panel agrupa por equipo con él
+  // (los apagados también, por si alguien sigue en uno).
+  return c.json({ trabajadores: lista, equipos: await equiposDe(c.env, true), nombres_doc: NOMBRES_DOC });
 });
 
 // El expediente de una persona, como ella lo ve. Sirve para abrirlo desde el
@@ -827,13 +871,18 @@ app.get('/api/admin/trabajadores/:id', exigeAdmin, async (c) => {
   const t = await c.env.DB.prepare('SELECT * FROM roster_trabajadores WHERE id = ?').bind(c.req.param('id')).first();
   if (!t) return err(c, 'Ese trabajador ya no está.', 404);
   const docs = await documentosDe(c.env, t.id);
+  // Las opciones del equipo son los prendidos, más el suyo si ya lo apagaron:
+  // el formulario no puede enseñarle a la persona un equipo que no está en la lista.
+  const equipos = await equiposDe(c.env, true);
+  const opcionesEquipo = equipos.filter((e) => e.activo || e.id === t.equipo_id).map((e) => ({ valor: e.id, texto: e.nombre + (e.activo ? '' : ' (apagado)') }));
+  const campos = CAMPOS_EXPEDIENTE.map((ca) => (ca.campo === 'equipo_id' ? { ...ca, opciones: opcionesEquipo } : ca));
   return c.json({
-    trabajador: t,
+    trabajador: { ...t, equipo_nombre: equipos.find((e) => e.id === t.equipo_id)?.nombre ?? null },
     documentos: docs,
     faltantes: faltantesDe(docs),
     faltan_campos: faltantesCampos(t),
     aviso: await consentimientoDe(c.env, t.id),
-    campos: CAMPOS_EXPEDIENTE,
+    campos,
     nombres_doc: NOMBRES_DOC,
     obligatorios: DOCS_OBLIGATORIOS,
   });
@@ -855,7 +904,10 @@ app.put('/api/admin/trabajadores/:id', exigeAdmin, exigePermiso('capturar'), asy
   const cuerpo = await c.req.json().catch(() => ({}));
   const parcial = cuerpo.__parcial === true;
   const { errores, limpio, ok } = revisaExpediente(cuerpo);
-  if (!ok && !parcial) return err(c, 'Revisa los datos marcados.', 422, { errores });
+  const eq = await equipoValido(c.env, cuerpo.equipo_id);
+  if (eq.error) errores.equipo_id = eq.error;
+  if ((!ok || eq.error) && !parcial) return err(c, 'Revisa los datos marcados.', 422, { errores });
+  const tocaEquipo = cuerpo.equipo_id !== undefined && !eq.error ? 1 : 0;
 
   // Un dato repetido frena aunque se esté capturando a medias. Cuando alguien
   // escribe por otra persona, una CURP que ya existe casi siempre quiere decir
@@ -875,11 +927,13 @@ app.put('/api/admin/trabajadores/:id', exigeAdmin, exigePermiso('capturar'), asy
   await c.env.DB.prepare(
     `UPDATE roster_trabajadores SET nombre=?, apellido_paterno=?, apellido_materno=?, celular=?, nss=?, curp=?, rfc=?,
      banco=?, clabe=?, beneficiario=?, emerg_nombre=?, emerg_parentesco=?, emerg_telefono=?, emerg_email=?, puesto=?,
+     equipo_id=CASE WHEN ? THEN ? ELSE equipo_id END,
      estado=?, actualizado_en=? WHERE id=?`
   ).bind(
     limpio.nombre, limpio.apellido_paterno, limpio.apellido_materno, limpio.celular, limpio.nss,
     limpio.curp, limpio.rfc, limpio.banco, limpio.clabe, limpio.beneficiario,
     limpio.emerg_nombre, limpio.emerg_parentesco, limpio.emerg_telefono, limpio.emerg_email, limpio.puesto,
+    tocaEquipo, eq.id ?? null,
     estado, ahora(), id
   ).run();
 
@@ -915,6 +969,68 @@ app.delete('/api/admin/trabajadores/:id', exigeAdmin, exigePermiso('baja'), asyn
 });
 
 // Lo que está en la papelera, con los días que le quedan.
+/* ─────────────── el catálogo de equipos (panel) ───────────────
+ * Verlo puede cualquiera del panel; darlos de alta, renombrarlos, apagarlos
+ * o borrarlos, quien puede capturar (dueño y admin). El nombre es único sin
+ * importar mayúsculas: dos «Ebanistería» son un error de dedo, no dos equipos. */
+app.get('/api/admin/equipos', exigeAdmin, async (c) => {
+  return c.json({ equipos: await equiposDe(c.env, true) });
+});
+
+const nombreDeEquipo = (v) => String(v ?? '').trim().replace(/\s+/g, ' ').slice(0, 60);
+async function equipoRepetido(env, nombre, menosId = '') {
+  const e = await env.DB.prepare('SELECT id FROM roster_equipos WHERE lower(nombre) = lower(?) AND id <> ?').bind(nombre, menosId).first();
+  return !!e;
+}
+
+app.post('/api/admin/equipos', exigeAdmin, exigePermiso('capturar'), async (c) => {
+  const cuerpo = await c.req.json().catch(() => ({}));
+  const nombre = nombreDeEquipo(cuerpo.nombre);
+  if (!nombre) return err(c, 'Escribe el nombre del equipo.', 422, { errores: { nombre: 'Escribe el nombre del equipo.' } });
+  if (await equipoRepetido(c.env, nombre)) return err(c, `Ya hay un equipo que se llama «${nombre}».`, 409, { errores: { nombre: 'Ya existe.' } });
+  const id = uuid();
+  const cuantos = Number((await c.env.DB.prepare('SELECT COUNT(*) AS n FROM roster_equipos').first())?.n ?? 0);
+  await c.env.DB.prepare('INSERT INTO roster_equipos (id, nombre, activo, orden, creado_en, actualizado_en) VALUES (?,?,1,?,?,?)')
+    .bind(id, nombre, cuantos, ahora(), ahora()).run();
+  await registra(c.env, quienAdmin(c), 'equipo_alta', nombre);
+  return c.json({ ok: true, equipo: { id, nombre, activo: 1, orden: cuantos, cuantos: 0 } });
+});
+
+app.put('/api/admin/equipos/:id', exigeAdmin, exigePermiso('capturar'), async (c) => {
+  const id = c.req.param('id');
+  const e = await c.env.DB.prepare('SELECT * FROM roster_equipos WHERE id = ?').bind(id).first();
+  if (!e) return err(c, 'Ese equipo ya no existe.', 404);
+  const cuerpo = await c.req.json().catch(() => ({}));
+  const cambio = {};
+  if (cuerpo.nombre !== undefined) {
+    const nombre = nombreDeEquipo(cuerpo.nombre);
+    if (!nombre) return err(c, 'Escribe el nombre del equipo.', 422, { errores: { nombre: 'Escribe el nombre del equipo.' } });
+    if (await equipoRepetido(c.env, nombre, id)) return err(c, `Ya hay un equipo que se llama «${nombre}».`, 409, { errores: { nombre: 'Ya existe.' } });
+    cambio.nombre = nombre;
+  }
+  if (cuerpo.activo !== undefined) cambio.activo = cuerpo.activo ? 1 : 0;
+  if (cuerpo.orden !== undefined && Number.isFinite(Number(cuerpo.orden))) cambio.orden = Number(cuerpo.orden);
+  if (!Object.keys(cambio).length) return c.json({ ok: true, equipo: e });
+  const sets = Object.keys(cambio).map((k) => `${k} = ?`).join(', ');
+  await c.env.DB.prepare(`UPDATE roster_equipos SET ${sets}, actualizado_en = ? WHERE id = ?`).bind(...Object.values(cambio), ahora(), id).run();
+  const detalle = cambio.nombre && cambio.nombre !== e.nombre ? `${e.nombre} → ${cambio.nombre}` : cambio.activo !== undefined ? `${e.nombre}: ${cambio.activo ? 'prendido' : 'apagado'}` : e.nombre;
+  await registra(c.env, quienAdmin(c), 'equipo_cambio', detalle);
+  const nuevo = (await equiposDe(c.env, true)).find((x) => x.id === id);
+  return c.json({ ok: true, equipo: nuevo });
+});
+
+app.delete('/api/admin/equipos/:id', exigeAdmin, exigePermiso('capturar'), async (c) => {
+  const id = c.req.param('id');
+  const e = await c.env.DB.prepare('SELECT * FROM roster_equipos WHERE id = ?').bind(id).first();
+  if (!e) return err(c, 'Ese equipo ya no existe.', 404);
+  // Se cuenta antes (y sólo a los vivos): `meta.changes` del OrgDB no es de fiar.
+  const n = Number((await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM roster_trabajadores WHERE equipo_id = ? AND ${SOLO_VIVOS}`).bind(id).first())?.n ?? 0);
+  await c.env.DB.prepare('UPDATE roster_trabajadores SET equipo_id = NULL WHERE equipo_id = ?').bind(id).run();
+  await c.env.DB.prepare('DELETE FROM roster_equipos WHERE id = ?').bind(id).run();
+  await registra(c.env, quienAdmin(c), 'equipo_baja', `${e.nombre}${n ? ` (${n} sin equipo)` : ''}`);
+  return c.json({ ok: true, soltados: n });
+});
+
 app.get('/api/admin/papelera', exigeAdmin, async (c) => {
   await vaciaVencidos(c.env);
   const { results } = await c.env.DB.prepare(
@@ -1002,6 +1118,9 @@ const ACCIONES_BITACORA = [
   { accion: 'codigo_repetido', capa: 'empresa', grupo: 'Accesos', corto: 'Pidió otro muy seguido', dice: 'Pidió otro código muy seguido', tono: '' },
 
   { accion: 'expediente_guardado', capa: 'empresa', grupo: 'Expedientes', corto: 'Guardó sus datos', dice: 'Guardó su expediente', tono: '' },
+  { accion: 'equipo_alta', capa: 'empresa', grupo: 'Equipos', corto: 'Dio de alta un equipo', dice: 'Dio de alta un equipo de trabajo', tono: '' },
+  { accion: 'equipo_cambio', capa: 'empresa', grupo: 'Equipos', corto: 'Cambió un equipo', dice: 'Renombró, apagó o prendió un equipo de trabajo', tono: '' },
+  { accion: 'equipo_baja', capa: 'empresa', grupo: 'Equipos', corto: 'Borró un equipo', dice: 'Borró un equipo de trabajo', tono: 'mal' },
   { accion: 'documento_subido', capa: 'empresa', grupo: 'Expedientes', corto: 'Subió un documento', dice: 'Subió un documento', tono: '' },
   { accion: 'aviso_aceptado', capa: 'empresa', grupo: 'Expedientes', corto: 'Aceptó el aviso', dice: 'Aceptó el aviso de privacidad', tono: '' },
   // Este sí es del expediente, no del panel: es alguien escribiendo en la hoja

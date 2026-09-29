@@ -9,6 +9,7 @@ const COLUMNAS = [
   ['apellido_materno', 'Apellido materno'],
   ['nombre', 'Nombre(s)'],
   ['puesto', 'Puesto'],
+  ['equipo_nombre', 'Equipo de trabajo'],
   ['celular', 'Celular'],
   ['email', 'Correo'],
   ['nss', 'NSS'],
@@ -39,9 +40,10 @@ export function carpetaDe(t) {
 
 async function leerTodo(env) {
   const { results: trabajadores } = await env.DB.prepare(
-    `SELECT * FROM roster_trabajadores
-     WHERE id NOT IN (SELECT trabajador_id FROM roster_papelera)
-     ORDER BY apellido_paterno, apellido_materno, nombre`
+    `SELECT t.*, e.nombre AS equipo_nombre FROM roster_trabajadores t
+     LEFT JOIN roster_equipos e ON e.id = t.equipo_id
+     WHERE t.id NOT IN (SELECT trabajador_id FROM roster_papelera)
+     ORDER BY t.apellido_paterno, t.apellido_materno, t.nombre`
   ).all();
   const { results: docs } = await env.DB.prepare('SELECT * FROM roster_documentos ORDER BY tipo, subido_en').all();
   const porTrab = {};

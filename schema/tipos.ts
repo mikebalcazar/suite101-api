@@ -17,7 +17,16 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.52.1 (la liga del correo de «orden pagada» va a
+ * Versión del contrato: 0.53.0 (EQUIPOS DE TRABAJO en roster101. Mike,
+ * 29-sep-2026: «agrupar por equipo de trabajo (…) esos equipos los doy de alta
+ * yo, y ellos sólo seleccionan cuál de los disponibles es el suyo, o no tengo
+ * equipo». Migración org 0021: `roster_equipos` y `roster_trabajadores.
+ * equipo_id`. Panel: GET/POST/PUT/DELETE /roster/:o/api/admin/equipos (alta,
+ * renombrar, apagar y borrar, con permiso de capturar); la lista trae
+ * `equipo_nombre` y el catálogo; el detalle trae las opciones. Trabajador:
+ * GET /api/equipos (los prendidos) y `equipo_id` en PUT /api/yo (vacío = sin
+ * equipo; uno apagado o inexistente = 422). CSV con columna Equipo). Antes:
+ * 0.52.1 (la liga del correo de «orden pagada» va a
  * supply101 —`URL_SUPPLY`/#/orden/:id—, no a esta API: ahí el navegador no
  * tiene sesión y veía `sin_sesion`. Mike, 29-sep-2026). 0.52.0 (FUSIONAR DOS PROYECTOS. Mike, 29-sep-2026:
  * «No puedo fusionar el proyecto, solo el cliente. Y quiero fusionar
@@ -784,7 +793,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.52.1';
+export const VERSION_CONTRATO = '0.53.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1410,7 +1419,7 @@ export const TABLAS_INTERNAS = [
   'quell_element_docs', 'quell_doc_marcas',
   // roster101 (0007): las usa el motor de los expedientes por /roster/:o/api/*.
   'roster_trabajadores', 'roster_documentos', 'roster_codigos', 'roster_bitacora', 'roster_consentimientos',
-  'roster_papelera', 'roster_administradores',
+  'roster_papelera', 'roster_administradores', 'roster_equipos',
   /* Órdenes de compra y fiscal (0008 y 0009). NO salen por el CRUD genérico, y
    * es a propósito: el CRUD genérico entrega la tabla entera a quien puede
    * leerla, y aquí un miembro tiene que ver SÓLO SUS órdenes (decisión de
