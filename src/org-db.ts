@@ -112,6 +112,20 @@ export type ResultadoAprobar =
   | { ok: true; cotizacion: Fila; proyecto: Fila; items: number; productos_nuevos: number }
   | { ok: false; error: string; detalle?: Record<string, any> };
 
+/** Lo que devuelve fusionar los negocios de una empresa en uno (0.50.0). */
+export interface ResultadoFusionNegocios {
+  ok: true;
+  queda: Fila;
+  /** Los negocios que se vaciaron y se borraron (o se borrarían, en seco). */
+  se_fueron: Fila[];
+  /** Cuántas filas cambian de negocio, por tabla. */
+  movidos: Record<string, number>;
+  /** Productos del catálogo con el mismo código en dos negocios: quedó uno
+   *  y sus piezas apuntan a él. */
+  productos_fusionados: number;
+  seco: boolean;
+}
+
 export interface ApiOrgDB {
   version(): Promise<number>;
   /** Puerta de servicio: borra TODO y vuelve a migrar. Solo DELETE /admin/orgs/:o fuera de producción. */
@@ -228,6 +242,9 @@ export interface ApiOrgDB {
    * los dos que ya se crearon. */
   clientesParecidos(nombre: string, negocio_id?: string | null): Promise<Fila[]>;
   fusionarClientes(queda_id: string, se_va_id: string): Promise<{ ok: true; cliente: Fila; movidos: Record<string, number> } | { error: string; detalle?: unknown }>;
+  /** 0.50.0: un solo negocio por empresa. Todo lo de los demás negocios pasa
+   *  al que se queda y los demás se borran. Con `seco` sólo cuenta. */
+  fusionarNegocios(queda_id: string, seco: boolean): Promise<ResultadoFusionNegocios | { error: string; detalle?: unknown }>;
 
   /* La obra de quell101 ligada al proyecto de dash101 (0010). */
   obras(args?: { sueltas?: boolean }): Promise<Fila[]>;
@@ -2380,6 +2397,59 @@ export class OrgDB extends DurableObject<Env> {
    *  al portal— se lo lleva del que se va. Fusionar no puede perder datos: el
    *  que se va casi siempre es el que se capturó en la otra app, y a veces es
    *  el único que trae el correo. */
+  /* ─────────────── un solo negocio (0.50.0) ───────────────
+   *
+   * Mike, 29-sep: «borres de dash (y de todas las plataformas) la opción de
+   * agregar diferentes negocios. Ya no vamos a tener esa funcionalidad (los
+   * otros negocios son como TUYS y vibehome). Todo es para un negocio nada
+   * más.» Y escogió, con botones, FUSIONAR lo que ya existe en uno.
+   *
+   * Aquí está la fusión. La tabla `negocios` se queda —`negocio_id` cuelga de
+   * doce tablas y quitarlo sería reescribir la base para ganar una columna—;
+   * lo que cambia es que hay UNO. Las pantallas ya no dejan crear ni cambiar.
+   *
+   * Las tablas se descubren leyendo el esquema, no de una lista escrita a
+   * mano: una tabla nueva con `negocio_id` entra sola, y una lista a mano es
+   * justo la que se olvida de actualizar.
+   */
+  fusionarNegocios(queda_id: string, seco: boolean): ResultadoFusionNegocios | { error: string; detalle?: unknown } {
+    const queda = this.obtener('negocios', queda_id);
+    if (!queda) return { error: 'no_encontrado', detalle: { que: 'negocio', id: queda_id } };
+    const otros = this.sql.exec(`SELECT * FROM negocios WHERE id <> ? ORDER BY creado_at`, queda_id).toArray() as Fila[];
+    if (!otros.length) return { ok: true, queda, se_fueron: [], movidos: {}, productos_fusionados: 0, seco };
+
+    const tablas = (this.sql
+      .exec(`SELECT name FROM sqlite_master WHERE type = 'table' AND name <> 'negocios' AND name NOT LIKE 'sqlite_%' AND sql LIKE '%negocio_id%' ORDER BY name`)
+      .toArray() as Fila[]).map((t) => String(t.name));
+    const movidos: Record<string, number> = {};
+    for (const t of tablas) {
+      const n = Number((this.sql.exec(`SELECT COUNT(*) AS n FROM "${t}" WHERE negocio_id <> ?`, queda_id).one() as Fila).n);
+      if (n) movidos[t] = n;
+    }
+    /* El código del producto es único por negocio: dos negocios pueden tener
+     * cada uno su «PT-STD». Al juntarlos gana el del negocio que se queda y
+     * las piezas del otro pasan a apuntarle; el repetido se borra. */
+    const repetidos = this.sql
+      .exec(
+        `SELECT o.id AS se_va, q.id AS queda FROM productos o
+           JOIN productos q ON q.negocio_id = ? AND q.codigo = o.codigo AND o.codigo <> ''
+          WHERE o.negocio_id <> ?`,
+        queda_id, queda_id,
+      )
+      .toArray() as Fila[];
+    if (seco) return { ok: true, queda, se_fueron: otros, movidos, productos_fusionados: repetidos.length, seco: true };
+
+    this.ctx.storage.transactionSync(() => {
+      for (const r of repetidos) {
+        this.sql.exec(`UPDATE items SET producto_id = ? WHERE producto_id = ?`, String(r.queda), String(r.se_va));
+        this.sql.exec(`DELETE FROM productos WHERE id = ?`, String(r.se_va));
+      }
+      for (const t of tablas) this.sql.exec(`UPDATE "${t}" SET negocio_id = ? WHERE negocio_id <> ?`, queda_id, queda_id);
+      this.sql.exec(`DELETE FROM negocios WHERE id <> ?`, queda_id);
+    });
+    return { ok: true, queda: this.obtener('negocios', queda_id)!, se_fueron: otros, movidos, productos_fusionados: repetidos.length, seco: false };
+  }
+
   fusionarClientes(queda_id: string, se_va_id: string): { ok: true; cliente: Fila; movidos: Record<string, number> } | { error: string; detalle?: unknown } {
     if (queda_id === se_va_id) return { error: 'datos_invalidos', detalle: { motivo: 'son el mismo cliente' } };
     const queda = this.sql.exec(`SELECT * FROM clientes WHERE id = ?`, queda_id).toArray()[0] as Fila | undefined;

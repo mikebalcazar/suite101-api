@@ -1090,6 +1090,30 @@ rutas.get('/:o/:tabla/:id', async (c) => {
   return ok(c, podar(quien, tabla as Tabla, fila));
 });
 
+/** POST /orgs/:o/negocios/fusionar {queda_id, seco?} (0.50.0)
+ *
+ *  Mike, 29-sep: «todo es para un negocio nada más», y escogió fusionar lo
+ *  que ya existe. Todo lo de los demás negocios (clientes, proyectos,
+ *  ítems, cuentas, movimientos, cotizaciones, productos, órdenes, facturas,
+ *  rayas, conciliaciones, gastos fijos) pasa al que se queda y los demás se
+ *  borran. Con `seco: true` sólo dice qué se movería. Lo hace quien dirige
+ *  la empresa. Los miembros acotados a un negocio quedan en «todos»: ya
+ *  sólo hay uno. Va antes que el CRUD genérico porque comparte prefijo. */
+rutas.post('/:o/negocios/fusionar', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro' || (quien.rol !== 'owner' && quien.rol !== 'admin')) {
+    return err(c, 'sin_permiso', 403, { motivo: 'fusionar los negocios lo hace quien dirige la empresa' });
+  }
+  const b = await c.req.json<{ queda_id?: string; seco?: boolean }>().catch(() => ({}) as never);
+  if (!b.queda_id) return err(c, 'datos_invalidos', 400, { falta: 'queda_id' });
+  const r = await stub(c).fusionarNegocios(String(b.queda_id), b.seco === true);
+  if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 400, r.detalle);
+  if (!r.seco && r.se_fueron.length) {
+    await c.env.MASTER.prepare(`UPDATE miembros SET negocios = '[]' WHERE org_id = ? AND negocios <> '[]'`).bind(c.get('org_id')).run();
+  }
+  return ok(c, r);
+});
+
 rutas.post('/:o/:tabla', async (c) => {
   const tabla = c.req.param('tabla')!;
   if (!esTabla(tabla)) return err(c, 'tabla_desconocida', 404, { tabla, tablas: Object.keys(DEFS) });
