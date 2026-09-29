@@ -369,6 +369,30 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   huérfanos primero. Lo que NO está hecho todavía: devolver lo huérfano a un
   negocio. Eso es una escritura en producción y la decide Mike al ver los
   números.
+- **Los equipos de tu licencia (29-sep, contrato 0.48.0) y las cuatro cosas
+  del chat de draw101.** Mike trajo un documento con cuatro cambios probados
+  por otra sesión y sin publicar. Sólo llegaron dos parches; el resto se
+  reconstruyó desde la descripción. (1) API #147: parche aplicado tal cual:
+  D1 master 0009 (`activaciones.nombre`, `sistema`), `POST /licencias/
+  equipos` y `/licencias/soltar` (con sesión o con clave), la pantalla de
+  activación enseña la lista cuando no hay lugar y reintenta sola;
+  `pruebas/pantalla-equipos.mjs` con navegador (no está en el flujo: pide
+  Chromium). (2) draw101 0.21.4: ya estaba en `claude/arreglo-flujo-0.20.20`
+  con su parche en APLICAR.txt; se disparó con la rama
+  `claude/publicar-0.21.4` DESPUÉS de la API y el manifiesto de descargas
+  ya dice 0.21.4. La cadena de parches se aplicó en seco antes de disparar
+  (trampa 3 del documento). (3) master101 #26, reconstruido: un solo
+  «Guardar cambios», acuse de cuánto a cuánto tras recargar, máquinas
+  dormidas (>30 días) marcadas sin liberarlas, rutas de licencias en el
+  banco falso y `pruebas/licencias.spec.mjs` en el flujo. (4) quote101 G99,
+  reconstruido: casilla «Desglosar componentes» junto al PDF del cliente,
+  viaja con la cotización, las viejas salen desglosadas. Lo que dejó dicho
+  ese chat y sigue pendiente: `main` de draw101 sigue con el árbol mutilado
+  de la 0.21.0 (hay que aplanar la cadena y comparar contra el instalador
+  publicado); nest101 lleva el mismo módulo de puerta y hay que revisar si
+  tiene el mismo error de carpeta y huella; y cuando Fer o Alex pasen de
+  0.20.x a 0.21.x su máquina se registra otra vez y les come su único
+  lugar: con el panel de equipos ya pueden salir solos.
 - **Reembolsos: la misma orden, de otro tipo (28-sep, contrato 0.47.0).**
   Mike: «un módulo para reembolsos (…) podría ser el mismo portal de supply,
   pero poner una opción en el tipo de orden si es reembolso o compra».
