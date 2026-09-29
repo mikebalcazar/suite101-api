@@ -17,7 +17,18 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.49.0 (PARTIDAS POR COTIZACIÓN Y EL BORRADOR DE LOS
+ * Versión del contrato: 0.50.0 (UN SOLO NEGOCIO. Mike, 29-sep-2026: «borres
+ * de dash (y de todas las plataformas) la opción de agregar diferentes
+ * negocios (…) Todo es para un negocio nada más», y escogió fusionar lo que
+ * ya existe. `POST /orgs/:o/negocios/fusionar {queda_id, seco?}` (dueño o
+ * administración): todo lo de los demás negocios pasa al que se queda —las
+ * tablas con `negocio_id` se descubren del esquema—, los productos con el
+ * mismo código se juntan en el del que se queda, los demás negocios se
+ * borran y los miembros acotados a un negocio quedan en «todos». En seco
+ * sólo cuenta. La tabla `negocios` y la columna `negocio_id` se quedan:
+ * lo que cambia es que hay uno, y las pantallas ya no crean ni cambian de
+ * negocio). Antes:
+ * 0.49.0 (PARTIDAS POR COTIZACIÓN Y EL BORRADOR DE LOS
  * REQUERIMIENTOS. Mike, 29-sep-2026: «dividir por partidas (grupos de
  * cotizaciones) los ítems (…) pestañas, tipo los libros de Excel», «los
  * requerimientos generados me deberían generar un borrador en quote dentro
@@ -755,7 +766,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.49.0';
+export const VERSION_CONTRATO = '0.50.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
