@@ -369,6 +369,21 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   huérfanos primero. Lo que NO está hecho todavía: devolver lo huérfano a un
   negocio. Eso es una escritura en producción y la decide Mike al ver los
   números.
+- **Un solo negocio por empresa (29-sep, contrato 0.50.0).** Mike: «borres
+  de dash (y de todas las plataformas) la opción de agregar diferentes
+  negocios (…) los otros negocios son como TUYS y vibehome. Todo es para un
+  negocio nada más». Escogió fusionar lo que hay. API #149: `POST
+  /orgs/:o/negocios/fusionar {queda_id, seco?}` mueve todo lo de los demás
+  negocios al que se queda (tablas con `negocio_id` descubiertas del
+  esquema), junta productos con el mismo código, borra los demás y deja a
+  los miembros acotados en «todos»; en seco sólo cuenta. dash101 #92: barra
+  sin desplegable ni «crear», menú «Negocio», /negocios con la pantalla de
+  fusión cuando hay varios, alta sólo del primero, supply101 sin picker.
+  quote101 G101 (#63): sin desplegable. `negocios`/`negocio_id` se quedan
+  en la base. La demo de staging tiene varios negocios A PROPÓSITO (Taller
+  Demo + uno por prueba): no se fusiona. PENDIENTE DE MIKE: correr la
+  fusión en forespot desde dash101 («Negocio»), escogiendo cuál se queda;
+  irreversible, con su sesión. Muro 2026-09-29-0400.
 - **Partidas por cotización, el borrador de requerimientos y EL ÍTEM COMO
   OBJETO BASE (29-sep, contrato 0.49.0).** Principio de Mike, textual:
   «Cliente, proyecto e ítems existen en quote, quell, peek y dash. Ítems es
