@@ -369,6 +369,20 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   huérfanos primero. Lo que NO está hecho todavía: devolver lo huérfano a un
   negocio. Eso es una escritura en producción y la decide Mike al ver los
   números.
+- **Batería en móvil, paso 3: dash101, roster101 y supply101 (29-sep).**
+  Mike, tras probar: «Mejoró. Veamos otras mientras y regresamos a quell y
+  quote para mejorar más». dash101 #94: con FUENTE≠firestore, next.config
+  apunta firebase/app|auth|firestore a `lib/sin-firebase.ts` (mismos
+  nombres, pesan nada, Timestamp con la misma cara); arranque 763 → 363 KB
+  construido, login vivo 860 → 486 KB; `npm run peso` y tope 450 KB en
+  pruebas.yml; `pruebas/sin-firebase.spec.ts`. roster101 #27: cámara y
+  escáner a 1280×960, se apagan al irse al fondo y vuelven solos, los
+  setInterval de 20 s sólo mientras haya algo por guardar;
+  `pruebas/0116-la-camara-descansa.mjs`. supply101 (dash101 #95, #96):
+  `publico/imagen.js` achica la foto a 1600 antes de subir (239 → 31 KB
+  en la prueba), papel con lazy; `pruebas/la-foto-se-achica.mjs`. Muro
+  2026-09-29-0800. NO hecho: borrar la rama firestore de lib/ (decisión de
+  Mike). Lo que sigue para volver a quell y quote está en el muro §4.
 - **Batería en móvil, paso 2: el plano de quell101 (29-sep).** Mike escogió
   seguir por el plano. bitacora-obra #87: durante el gesto la vista vive en
   un ref y la capa de los pines se mueve con `style.transform` directo, una
