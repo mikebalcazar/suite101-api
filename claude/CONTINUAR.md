@@ -369,6 +369,32 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   huérfanos primero. Lo que NO está hecho todavía: devolver lo huérfano a un
   negocio. Eso es una escritura en producción y la decide Mike al ver los
   números.
+- **Partidas por cotización, el borrador de requerimientos y EL ÍTEM COMO
+  OBJETO BASE (29-sep, contrato 0.49.0).** Principio de Mike, textual:
+  «Cliente, proyecto e ítems existen en quote, quell, peek y dash. Ítems es
+  el bloque base de toda la plataforma (…) todo lo demás es para
+  administrarlos o pegarles información (…) es lo que movemos, creamos o
+  cancelamos/borramos». Un ítem es UNO de principio a fin y las apps lo
+  enseñan, no lo copian. Lo hecho: (1) API #148: aprobar una cotización
+  pone `partida` (la del cuerpo o el nombre de la cotización) a sus piezas;
+  una línea con `item_id` aprueba ESE ítem —tipo, precio, partida— y su
+  pieza del plano cambia de tipo y estrena código con el prefijo del tipo;
+  un requerimiento levantado en quell en obra ligada nace como ítem
+  cotizado y cae en el borrador «Requerimientos» del proyecto en quote101
+  (`datos.de_requerimientos`), uno abierto por proyecto; descartarlo o
+  aprobarlo desde dash lo saca; en el plano sigue `dentro`. (2) quote101
+  G100 (#62): reconoce el renglón de la obra, selector de tipo en los
+  renglones a mano, manda `item_id` y `tipo` al aprobar. (3) dash101 #91:
+  pestañas siempre a la vista, «+ Partida», renombrar, mover ítem o
+  producto entero, ítem nuevo en la pestaña, partida en el editor de la
+  lista sin borrarla al guardar. Muro 2026-09-29-0300. PENDIENTES QUE MIKE
+  PIDIÓ HOY: (a) un solo negocio: quitar de dash y de todas las apps la
+  opción de agregar o cambiar de negocio («los otros negocios son como TUYS
+  y vibehome; todo es para un negocio nada más»); antes, decidir con él qué
+  pasa con los negocios que ya existen en forespot. (b) Batería en móviles
+  (quell y quote): «eficientar y minimizar la demanda de recursos de
+  procesamiento del teléfono. Empecemos por gráficos. En quote de entrada
+  hay que quitar las animaciones y el look transparencia».
 - **Los equipos de tu licencia (29-sep, contrato 0.48.0) y las cuatro cosas
   del chat de draw101.** Mike trajo un documento con cuatro cambios probados
   por otra sesión y sin publicar. Sólo llegaron dos parches; el resto se
