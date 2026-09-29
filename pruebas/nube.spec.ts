@@ -1,9 +1,15 @@
 /* La nube de draw101 · 0.22.0
  *
  * Mike, 29-sep-2026, escogiendo con botones: «Jr. ni nadie puede accesar a los
- * archivos, ni siquiera nosotros como dueños. Sólo el usuario de la licencia
- * con la que se generó y se guardó», y cifrado de verdad — la llave sale de la
- * clave T101 «y dejamos de guardarla en claro».
+ * archivos (...) Sólo el usuario de la licencia con la que se generó y se
+ * guardó», y cifrado de verdad, con la clave T101 que «dejamos de guardar en
+ * claro».
+ *
+ * Ese mismo día cambió de dónde sale la LLAVE del cifrado, y lo confirmó a
+ * propósito después de que se le dijera que deshacía su decisión anterior: «que
+ * el servidor pueda — nadie pierde nada nunca». O sea que hoy el servidor la
+ * genera y puede abrir los archivos; ninguna otra cuenta, no. En src/nube.ts
+ * está dicho sin adornos qué se gana y qué se deja de ganar con eso.
  *
  * LO QUE DE VERDAD APORTAN ESTAS PRUEBAS, que es lo que se rompería sin que
  * nadie lo note:
@@ -18,10 +24,13 @@
  *     guardarla y romper la activación de las siete licencias que ya existen
  *     también.
  *
- *   · QUE LA LLAVE ENVUELTA SE ESCRIBA UNA SOLA VEZ. Si dos máquinas estrenan
- *     la nube a la vez y cada una deja la suya, la segunda deja ilegibles los
- *     archivos de la primera. No hay error, no hay aviso: se abren los planos
- *     y salen basura.
+ *   · QUE LA LLAVE DE UNA CUENTA NO CAMBIE NUNCA. Si cambiara —porque se
+ *     genere dos veces, o porque dos máquinas la pidan al mismo tiempo y cada
+ *     una reciba una—, los archivos subidos con la anterior quedan ilegibles.
+ *     No hay error, no hay aviso: se abren los planos y salen basura. Lo que de
+ *     verdad lo protege no es el `if` de `llaveDeLaCuenta`, sino el
+ *     `AND llave_envuelta IS NULL` de su UPDATE; se comprobó rompiendo ese, no
+ *     el `if`, porque rompiendo el `if` la prueba seguía pasando.
  *
  *   · QUE UN TOKEN VENCIDO NO ENTRE. La nube no puede ser el rincón por donde
  *     se cuela una licencia que dejó de pagarse.
@@ -31,6 +40,7 @@ import { SELF, env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Env } from '../src/entorno';
 import { olvidarQueYaSeRevisaron } from '../src/nube';
+import { firmarToken } from '../src/licencias';
 
 const e = env as unknown as Env;
 const CORREO = 'mike@forespot.com';
@@ -128,28 +138,106 @@ describe('la nube de draw101', () => {
     expect(r.estado).toBe(401);
   });
 
-  /* ─────────── la llave envuelta ─────────── */
+  /* UN TOKEN VENCIDO NO ENTRA. La nube no puede ser el rincón por donde se
+   * cuela una licencia que dejó de pagarse: la app ya no abre, pero si /nube/*
+   * siguiera contestando, los archivos seguirían subiendo y bajando.
+   *
+   * Se firma con la MISMA llave del servidor y se le pone una fecha pasada. Por
+   * la API no se puede llegar a esto —una suscripción sin pagar no alcanza a
+   * activar, así que nunca emite un token ya vencido—, y la firma buena es justo
+   * lo que hace que la prueba mida el vencimiento y no la firma. */
+  it('un token BIEN FIRMADO pero vencido no entra a la nube', async () => {
+    const vencido = await firmarToken(e, {
+      programa: 'draw101',
+      licencia: mike.id,
+      cliente: 'Mike Balcázar',
+      plan: 'mensual',
+      lugares: 2,
+      maquina: 'maquina-de-mike-0001',
+      emitido: '2026-08-01T00:00:00.000Z',
+      hasta: '2026-08-31T23:59:59.000Z',
+    });
 
-  it('la llave envuelta se escribe UNA vez: la segunda máquina recibe la primera', async () => {
-    const vacia = await pedir('/nube/llave', { headers: conToken(mike.token) });
-    expect(vacia.data.envuelta).toBeNull();
+    const r = await pedir('/nube/indice', { headers: conToken(vencido) });
+    expect(r.estado).toBe(401);
+    expect(r.error).toBe('token_vencido');
 
-    const primera = await pedir('/nube/llave', { method: 'PUT', headers: conToken(mike.token), body: JSON.stringify({ envuelta: 'LA-PRIMERA', sal: 'sal-1' }) });
-    expect(primera.data.envuelta).toBe('LA-PRIMERA');
-    expect(primera.data.era_mia).toBe(true);
+    // Y no sólo el índice: tampoco baja ni sube nada con él.
+    expect((await crudo(`/nube/llave`, { headers: conToken(vencido) })).status).toBe(401);
+    expect((await crudo(`/nube/archivo/${docNuevo('01VENCIDO0000000000000')}`, {
+      method: 'PUT', headers: conToken(vencido, { 'X-Nombre': 'x' }), body: new Uint8Array([1]),
+    })).status).toBe(401);
 
-    const segunda = await pedir('/nube/llave', { method: 'PUT', headers: conToken(mike.token), body: JSON.stringify({ envuelta: 'LA-SEGUNDA', sal: 'sal-2' }) });
-    expect(segunda.data.envuelta).toBe('LA-PRIMERA');
-    expect(segunda.data.sal).toBe('sal-1');
-    expect(segunda.data.era_mia).toBe(false);
+    // CONTROL: el mismo token, con la misma firma y fecha buena, SÍ entra. Sin
+    // esto, la prueba pasaría igual si lo que fallara fuera la firma.
+    const bueno = await firmarToken(e, {
+      programa: 'draw101',
+      licencia: mike.id,
+      cliente: 'Mike Balcázar',
+      plan: 'mensual',
+      lugares: 2,
+      maquina: 'maquina-de-mike-0001',
+      emitido: new Date().toISOString(),
+      hasta: new Date(Date.now() + 86400_000).toISOString(),
+    });
+    expect((await pedir('/nube/indice', { headers: conToken(bueno) })).estado).toBe(200);
   });
 
-  it('y cada cuenta tiene la suya', async () => {
-    await pedir('/nube/llave', { method: 'PUT', headers: conToken(fer.token), body: JSON.stringify({ envuelta: 'LA-DE-FER', sal: 'sal-fer' }) });
+  it('y un token de OTRO programa tampoco: la nube es de draw101', async () => {
+    const deQuote = await firmarToken(e, {
+      programa: 'quote101',
+      licencia: mike.id,
+      cliente: 'Mike Balcázar',
+      plan: 'mensual',
+      lugares: 2,
+      maquina: 'maquina-de-mike-0001',
+      emitido: new Date().toISOString(),
+      hasta: new Date(Date.now() + 86400_000).toISOString(),
+    });
+    const r = await pedir('/nube/indice', { headers: conToken(deQuote) });
+    expect(r.estado).toBe(403);
+    expect(r.error).toBe('programa_sin_nube');
+  });
+
+  /* ─────────── la llave de la cuenta ─────────── */
+
+  it('la llave nace sola y NO CAMBIA: pedirla dos veces da la misma', async () => {
+    const una = await pedir('/nube/llave', { headers: conToken(mike.token) });
+    expect(una.estado).toBe(200);
+    expect(typeof una.data.llave).toBe('string');
+    expect(una.data.llave.length).toBeGreaterThan(40);   // 32 bytes en base64url
+
+    // Ésta es LA comprobación que importa. Si la llave cambiara entre dos
+    // peticiones, los archivos subidos con la anterior quedarían ilegibles
+    // —sin error y sin aviso: se abren y salen basura—.
+    const otra = await pedir('/nube/llave', { headers: conToken(mike.token) });
+    expect(otra.data.llave).toBe(una.data.llave);
+
+    // Y desde la SEGUNDA máquina de la misma cuenta, también la misma: es de
+    // lo que depende que un plano guardado aquí se abra allá.
+    // La 0002 ya está activada (la licencia tiene dos lugares); volver a
+    // activarla devuelve su token sin gastar uno nuevo.
+    const dosMaquinas = await pedir('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: mike.clave, huella: 'maquina-de-mike-0002' }) });
+    expect(dosMaquinas.estado).toBe(200);
+    const laOtraMaquina = await pedir('/nube/llave', { headers: conToken(dosMaquinas.data.token) });
+    expect(laOtraMaquina.data.llave).toBe(una.data.llave);
+  });
+
+  it('y la de Fernando NO es la de Mike', async () => {
     const dema = await pedir('/nube/llave', { headers: conToken(mike.token) });
     const defer = await pedir('/nube/llave', { headers: conToken(fer.token) });
-    expect(dema.data.envuelta).toBe('LA-PRIMERA');
-    expect(defer.data.envuelta).toBe('LA-DE-FER');
+    expect(defer.data.llave).not.toBe(dema.data.llave);
+    expect(typeof defer.data.llave).toBe('string');
+  });
+
+  it('en la base NO está en claro: se guarda envuelta, con su nonce', async () => {
+    const enClaro = (await pedir('/nube/llave', { headers: conToken(mike.token) })).data.llave;
+    const fila = await e.MASTER.prepare(`SELECT llave_envuelta, llave_sal FROM suscripciones WHERE id = ?`).bind(mike.id).first<any>();
+    expect(fila.llave_envuelta).toBeTruthy();
+    expect(fila.llave_sal).toBeTruthy();
+    // Un volcado de D1 no basta: lo guardado no es la llave.
+    expect(fila.llave_envuelta).not.toBe(enClaro);
+    expect(fila.llave_envuelta).not.toContain(enClaro.slice(0, 16));
   });
 
   /* ─────────── subir, listar, bajar ─────────── */
@@ -289,7 +377,8 @@ describe('lo que el panel de Mike NO debe ver', () => {
     const laHuella = (await e.MASTER.prepare(`SELECT clave FROM suscripciones WHERE id = ?`).bind(mikeId).first<any>()).clave;
     expect(texto).not.toContain(laHuella);
     expect(texto).not.toContain('llave_envuelta');
-    expect(texto).not.toContain('LA-PRIMERA');
+    const laLlave = (await e.MASTER.prepare(`SELECT llave_envuelta FROM suscripciones WHERE id = ?`).bind(mikeId).first<any>()).llave_envuelta;
+    if (laLlave) expect(texto).not.toContain(laLlave);
     // Y la pista sí, que para eso está.
     expect(texto).toContain('clave_pista');
   });
