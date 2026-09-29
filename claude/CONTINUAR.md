@@ -392,7 +392,12 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   API 0.53.1 (#162): PUT /admin/trabajadores/:id/equipo; portal 0.14.1
   (#30): selector en cada renglón y filtro «Todos / Sin equipo / cada
   equipo». El campo del expediente del trabajador se queda (Mike: «con el
-  tiempo eso es lo más eficiente»). Muro 2026-09-29-1300.
+  tiempo eso es lo más eficiente»). Muro 2026-09-29-1300. Y luego:
+  «bloquea el poder editar los datos (…) al menos que actives el modo de
+  edición (…) mouse over (…) click (…) se copia al portapapeles» →
+  portal 0.14.2 (#31): el expediente del panel abre en consulta, cada
+  dato se copia con un clic, «✎ Editar datos» prende la captura. Muro
+  2026-09-29-1400.
 - **DEFECTO: la liga «ver comprobante» del correo de orden pagada
   (29-sep, 0.52.1).** Mike: «me manda a una URL que despliega sin_sesion».
   La liga iba a la API (URL_PUBLICA + /orgs/…): JSON y sin sesión, porque
