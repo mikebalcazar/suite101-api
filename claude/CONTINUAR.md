@@ -369,6 +369,17 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   huérfanos primero. Lo que NO está hecho todavía: devolver lo huérfano a un
   negocio. Eso es una escritura en producción y la decide Mike al ver los
   números.
+- **Borrar un cliente o un proyecto con todo lo suyo (29-sep, contrato
+  0.51.0).** Mike: «no puedo borrar clientes de quote101». API #150: `POST
+  /orgs/:o/clientes/:id/borrar` y `/proyectos/:id/borrar` (409
+  `tiene_dinero` / `tiene_historia`, `modo: 'seco'`); quote101 G102 (#65)
+  las usa y el aviso dice la razón con el nombre. dash101 #93: el negocio se
+  edita en Configuración (/settings existe por fin) y «Negocio» salió del
+  menú. quote101 #64: las pruebas entran a editar con reintento medido
+  (`pruebas/editar.mjs`) por el clic perdido del corredor. PENDIENTE: pasar
+  `deleteProyecto` de dash101 a la ruta nueva; cazar en la app el clic
+  perdido de «Editar cotización» si las líneas «entró al intento N» crecen.
+  Muro 2026-09-29-0500.
 - **Un solo negocio por empresa (29-sep, contrato 0.50.0).** Mike: «borres
   de dash (y de todas las plataformas) la opción de agregar diferentes
   negocios (…) los otros negocios son como TUYS y vibehome. Todo es para un
