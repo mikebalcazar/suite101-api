@@ -33,12 +33,21 @@ import { soySuper } from './admin';
 import {
   CLAVE_FORMA, DIA, abrirToken, cargaDe, claveNueva, firmarToken, hastaDe, idNuevo, llavePublica, normalizaClave, vigencia,
 } from '../licencias';
-import { huellaDeClave, pistaDeClave } from '../nube';
+import { asegurarClaves, huellaDeClave, pistaDeClave } from '../nube';
 import type { SuscripcionFila } from '../../schema/suscripcion-nube';
 import { TIPOS_LICENCIA } from '../../schema/tipos';
 import type { Activacion, EstadoSuscripcion, OrigenPago, RenglonBitacoraLicencia, Suscripcion, TipoLicencia } from '../../schema/tipos';
 
 const rutas = new Hono<{ Bindings: Env; Variables: Vars }>();
+
+/* Lo primero que pasa aquí: que ninguna clave siga guardada en claro. Corre
+ * una sola vez por isolate y normalmente no encuentra nada (ver
+ * `asegurarClaves` en src/nube.ts, que explica por qué no es una ruta que
+ * alguien tenga que llamar). */
+rutas.use('/*', async (c, next) => {
+  await asegurarClaves(c.env);
+  await next();
+});
 
 /** La pantalla que la app abre para activarse con la cuenta de la suite.
  *  Se sirve desde el mismo origen que la API a propósito: así la galleta de
@@ -58,16 +67,14 @@ const porId = (env: Env, id: string) =>
  *
  * El respaldo por `clave` es el puente: una suscripción que todavía no se ha
  * migrado se encuentra por sus letras y se le calcula la huella ahí mismo. En
- * cuanto corre `/licencias/migrar-claves` (o se activa una vez), deja de
- * hacer falta. Se busca la huella PRIMERO para que, una vez migrada, las
- * letras no se consulten nunca. */
+ * cuanto `asegurarClaves` barre la tabla, deja de hacer falta. Se busca la
+ * huella PRIMERO para que, una vez migrada, las letras no se consulten nunca. */
 async function porClave(env: Env, clave: string): Promise<SuscripcionFila | null> {
   const huella = await huellaDeClave(env, clave);
   const porHuella = await env.MASTER.prepare(`SELECT * FROM suscripciones WHERE clave = ?`).bind(huella).first<SuscripcionFila>();
   if (porHuella) return porHuella;
   // El puente: una que todavía guarda sus letras se encuentra por ellas, y se
-  // convierte aquí mismo. En cuanto corre `/licencias/migrar-claves` deja de
-  // hacer falta, pero se queda por si alguna se quedó atrás.
+  // convierte aquí mismo. Se queda por si alguna se quedó atrás del barrido.
   const vieja = await env.MASTER.prepare(`SELECT * FROM suscripciones WHERE clave = ?`).bind(clave).first<SuscripcionFila>();
   if (!vieja || !CLAVE_FORMA.test(vieja.clave)) return null;
   await env.MASTER.prepare(`UPDATE suscripciones SET clave = ?, clave_pista = ? WHERE id = ?`)
@@ -416,40 +423,6 @@ const conVigencia = (s: Suscripcion) => {
   const { llave_envuelta: _e, llave_sal: _l, clave: _c, ...resto } = s as SuscripcionFila;
   return { ...resto, clave: '', perpetua: (s.perpetua ? 1 : 0) as 0 | 1, vigente: vigencia(s).vigente };
 };
-
-/* Las claves que ya existían, a huella, de un golpe  ·  0.22.0
- *
- * El puente de `porClave` convierte cada clave la primera vez que se usa, pero
- * una licencia que nadie activa se quedaría en claro para siempre. Esto las
- * pasa todas de una vez, y se llama UNA vez tras el despliegue.
- *
- * No hace falta que nadie vuelva a activar: la clave no cambia, cambia dónde
- * está guardada. Lo que queda fuera del alcance de esta ruta son las copias de
- * seguridad de D1 (el «Time Travel» de Cloudflare guarda 30 días): durante ese
- * mes las claves viejas siguen siendo recuperables desde ahí, y después no.
- */
-rutas.post('/migrar-claves', async (c) => {
-  // Las que todavía guardan letras: una huella no tiene la forma T101-…, así
-  // que se reconocen solas y migrar dos veces no hace nada.
-  const todas = (await c.env.MASTER.prepare(`SELECT id, clave FROM suscripciones`).all<{ id: string; clave: string }>()).results;
-  const pendientes = todas.filter((s) => CLAVE_FORMA.test(normalizaClave(s.clave)));
-
-  let hechas = 0;
-  for (const s of pendientes) {
-    const clave = normalizaClave(s.clave);
-    if (!CLAVE_FORMA.test(clave)) continue;
-    await c.env.MASTER.prepare(`UPDATE suscripciones SET clave = ?, clave_pista = ? WHERE id = ?`)
-      .bind(await huellaDeClave(c.env, clave), pistaDeClave(clave), s.id).run();
-    hechas++;
-  }
-  // Se vuelve a contar DESPUÉS, leyendo de la base: decir «migradas: 7» y
-  // dar por hecho que quedan cero sería reportar la intención, no el
-  // resultado. Si algo falló a medias, aquí se ve.
-  const restantes = (await c.env.MASTER.prepare(`SELECT clave FROM suscripciones`).all<{ clave: string }>()).results;
-  const quedan = restantes.filter((r) => CLAVE_FORMA.test(normalizaClave(r.clave))).length;
-  await apunta(c.env, { suscripcion_id: null, quien: quien(c), accion: 'cambiar', detalle: { migrar_claves: hechas, quedan } });
-  return ok(c, { migradas: hechas, en_claro_todavia: quedan });
-});
 
 /* La lista, con filtros. Los tres primeros los resuelve SQLite; `vigentes` no,
  * porque ser vigente depende de la fecha de hoy y de `estado`, y eso ya lo
