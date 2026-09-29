@@ -112,6 +112,23 @@ export type ResultadoAprobar =
   | { ok: true; cotizacion: Fila; proyecto: Fila; items: number; productos_nuevos: number }
   | { ok: false; error: string; detalle?: Record<string, any> };
 
+/** Lo que devuelve borrar un cliente o un proyecto con todo lo suyo (0.51.0). */
+export interface ResultadoBorrarConTodo {
+  ok: true;
+  modo: 'seco' | 'borrar';
+  cliente: Fila | null;
+  proyectos: number;
+  items: number;
+  cotizaciones: number;
+  partidas: number;
+  /** Órdenes de compra que apuntaban al proyecto y quedan como gasto general. */
+  ordenes_sueltas: number;
+  /** Piezas del plano que se quedan sin ítem (la pieza es de quell y no se toca). */
+  piezas_sin_item: number;
+  /** Obras de quell que se quedan sin proyecto (la obra no se toca). */
+  obras_sueltas: number;
+}
+
 /** Lo que devuelve fusionar los negocios de una empresa en uno (0.50.0). */
 export interface ResultadoFusionNegocios {
   ok: true;
@@ -242,6 +259,10 @@ export interface ApiOrgDB {
    * los dos que ya se crearon. */
   clientesParecidos(nombre: string, negocio_id?: string | null): Promise<Fila[]>;
   fusionarClientes(queda_id: string, se_va_id: string): Promise<{ ok: true; cliente: Fila; movidos: Record<string, number> } | { error: string; detalle?: unknown }>;
+  /** 0.51.0: borrar un cliente o un proyecto CON TODO lo suyo, o decir por
+   *  qué no (dinero o historia). `seco` sólo cuenta. */
+  borrarClienteConTodo(cliente_id: string, modo: 'seco' | 'borrar'): Promise<ResultadoBorrarConTodo | { error: string; detalle?: unknown }>;
+  borrarProyectoConTodo(proyecto_id: string, modo: 'seco' | 'borrar'): Promise<ResultadoBorrarConTodo | { error: string; detalle?: unknown }>;
   /** 0.50.0: un solo negocio por empresa. Todo lo de los demás negocios pasa
    *  al que se queda y los demás se borran. Con `seco` sólo cuenta. */
   fusionarNegocios(queda_id: string, seco: boolean): Promise<ResultadoFusionNegocios | { error: string; detalle?: unknown }>;
@@ -2448,6 +2469,119 @@ export class OrgDB extends DurableObject<Env> {
       this.sql.exec(`DELETE FROM negocios WHERE id <> ?`, queda_id);
     });
     return { ok: true, queda: this.obtener('negocios', queda_id)!, se_fueron: otros, movidos, productos_fusionados: repetidos.length, seco: false };
+  }
+
+  /* ─────────────── borrar un cliente o un proyecto con todo lo suyo (0.51.0) ───────────────
+   *
+   * Mike, 29-sep: «no puedo borrar clientes de quote101, me aparece este
+   * error [Error al guardar]». Lo que pasaba: quote101 borra de abajo hacia
+   * arriba —cotización, proyecto, cliente— y el proyecto no se iba porque
+   * sus ítems le cuelgan (llave foránea); la pantalla lo tapaba con un aviso
+   * de conexión. Un cliente con proyecto no se podía borrar desde ninguna
+   * app.
+   *
+   * La regla, en dos líneas:
+   *   · CON DINERO no se borra. Un movimiento que apunte a sus proyectos, a
+   *     sus ítems o al cliente como contraparte lo detiene entero: se
+   *     contesta `tiene_dinero` con la cuenta. Ese cliente se fusiona o su
+   *     proyecto se cierra; borrarlo dejaría cobros sin dueño.
+   *   · CON HISTORIA tampoco: un ítem con avances de obra, archivos o un
+   *     compromiso con proveedor de otro proyecto se queda, y se dice cuál
+   *     (`tiene_historia`, como en «borrar los cancelados», §117).
+   *   · Sin nada de eso, se va TODO: partidas, ítems (aquí sí se borran: sin
+   *     dinero ni historia son renglones capturados), proyectos, y con el
+   *     cliente sus cotizaciones. Las piezas del plano y las obras de quell
+   *     se quedan, sueltas, y se cuentan. Las órdenes sin pagar del proyecto
+   *     quedan como gasto general.
+   *   · `seco` contesta lo mismo sin escribir.
+   */
+  borrarClienteConTodo(cliente_id: string, modo: 'seco' | 'borrar'): ResultadoBorrarConTodo | { error: string; detalle?: unknown } {
+    return this.borrarConTodo({ cliente_id }, modo);
+  }
+
+  borrarProyectoConTodo(proyecto_id: string, modo: 'seco' | 'borrar'): ResultadoBorrarConTodo | { error: string; detalle?: unknown } {
+    return this.borrarConTodo({ proyecto_id }, modo);
+  }
+
+  private borrarConTodo(que: { cliente_id?: string; proyecto_id?: string }, modo: 'seco' | 'borrar'): ResultadoBorrarConTodo | { error: string; detalle?: unknown } {
+    let cliente: Fila | null = null;
+    let proyectos: Fila[];
+    if (que.cliente_id) {
+      cliente = this.obtener('clientes', que.cliente_id);
+      if (!cliente) return { error: 'no_encontrado', detalle: { que: 'cliente', id: que.cliente_id } };
+      proyectos = this.sql.exec(`SELECT id, nombre FROM proyectos WHERE cliente_id = ?`, que.cliente_id).toArray() as Fila[];
+    } else {
+      const p = this.obtener('proyectos', String(que.proyecto_id));
+      if (!p) return { error: 'no_encontrado', detalle: { que: 'proyecto', id: que.proyecto_id } };
+      proyectos = [p];
+    }
+    const pids = proyectos.map((p) => String(p.id));
+    const lista = (ids: string[]) => (ids.length ? `(${ids.map(() => '?').join(',')})` : '(NULL)');
+
+    const items = (que.cliente_id
+      ? this.sql.exec(`SELECT id, clave, nombre FROM items WHERE cliente_id = ?`, que.cliente_id).toArray()
+      : this.sql.exec(`SELECT id, clave, nombre FROM items WHERE proyecto_id IN ${lista(pids)}`, ...pids).toArray()) as Fila[];
+    const iids = items.map((i) => String(i.id));
+    const cuantos = (sql: string, ...args: SqlStorageValue[]) => Number((this.sql.exec(sql, ...args).one() as Fila).n);
+
+    /* Dinero: lo detiene todo. */
+    let movimientos = cuantos(`SELECT COUNT(*) AS n FROM movimientos WHERE proyecto_id IN ${lista(pids)} OR item_id IN ${lista(iids)}`, ...pids, ...iids);
+    if (que.cliente_id) {
+      movimientos += cuantos(
+        `SELECT COUNT(*) AS n FROM movimientos WHERE contraparte_tipo = 'cliente' AND contraparte_id = ? AND (proyecto_id IS NULL OR proyecto_id NOT IN ${lista(pids)}) AND (item_id IS NULL OR item_id NOT IN ${lista(iids)})`,
+        que.cliente_id, ...pids, ...iids,
+      );
+    }
+    if (movimientos > 0) {
+      return { error: 'tiene_dinero', detalle: { movimientos, motivo: 'con dinero registrado no se borra: el proyecto se cierra, o el cliente se fusiona con otro' } };
+    }
+
+    /* Historia por ítem, y archivos colgados del proyecto o del cliente. */
+    const detenidos: Array<{ id: string; clave: string | null; nombre: string; porque: string[] }> = [];
+    for (const it of items) {
+      const id = String(it.id);
+      const c = {
+        cobros: 0,
+        avances: cuantos(`SELECT COUNT(*) AS n FROM avances WHERE item_id = ?`, id),
+        compromisos: cuantos(`SELECT COUNT(*) AS n FROM partidas WHERE item_id = ? AND proyecto_id NOT IN ${lista(pids)}`, id, ...pids),
+        archivos: cuantos(`SELECT COUNT(*) AS n FROM archivos WHERE de_tabla = 'items' AND de_id = ?`, id),
+      };
+      const porque = this.loQueDetiene(c);
+      if (porque.length) detenidos.push({ id, clave: (it.clave as string | null) ?? null, nombre: String(it.nombre ?? ''), porque });
+    }
+    const archivosDeArriba = cuantos(
+      `SELECT COUNT(*) AS n FROM archivos WHERE (de_tabla = 'proyectos' AND de_id IN ${lista(pids)}) OR (de_tabla = 'clientes' AND de_id = ?)`,
+      ...pids, que.cliente_id ?? '',
+    );
+    if (detenidos.length || archivosDeArriba) {
+      return { error: 'tiene_historia', detalle: { items: detenidos, archivos: archivosDeArriba, motivo: 'traen avances de obra, archivos o compromisos con proveedor: eso no se borra solo' } };
+    }
+
+    const cuenta: ResultadoBorrarConTodo = {
+      ok: true, modo, cliente,
+      proyectos: pids.length, items: iids.length,
+      cotizaciones: que.cliente_id ? cuantos(`SELECT COUNT(*) AS n FROM cotizaciones WHERE cliente_id = ?`, que.cliente_id) : 0,
+      partidas: cuantos(`SELECT COUNT(*) AS n FROM partidas WHERE proyecto_id IN ${lista(pids)}`, ...pids),
+      ordenes_sueltas: cuantos(`SELECT COUNT(*) AS n FROM ordenes WHERE proyecto_id IN ${lista(pids)}`, ...pids),
+      piezas_sin_item: cuantos(`SELECT COUNT(*) AS n FROM quell_elements WHERE item_id IN ${lista(iids)}`, ...iids),
+      obras_sueltas: cuantos(`SELECT COUNT(*) AS n FROM quell_projects WHERE proyecto_id IN ${lista(pids)}`, ...pids),
+    };
+    if (modo === 'seco') return cuenta;
+
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(`UPDATE ordenes SET proyecto_id = NULL WHERE proyecto_id IN ${lista(pids)}`, ...pids);
+      this.sql.exec(`DELETE FROM partidas WHERE proyecto_id IN ${lista(pids)}`, ...pids);
+      this.sql.exec(`UPDATE quell_elements SET item_id = NULL WHERE item_id IN ${lista(iids)}`, ...iids);
+      this.sql.exec(`DELETE FROM items WHERE id IN ${lista(iids)}`, ...iids);
+      this.sql.exec(`UPDATE quell_projects SET proyecto_id = NULL WHERE proyecto_id IN ${lista(pids)}`, ...pids);
+      this.sql.exec(`DELETE FROM proyectos WHERE id IN ${lista(pids)}`, ...pids);
+      if (que.cliente_id) {
+        this.sql.exec(`DELETE FROM cotizaciones WHERE cliente_id = ?`, que.cliente_id);
+        this.sql.exec(`DELETE FROM clientes WHERE id = ?`, que.cliente_id);
+      }
+    });
+    for (const id of iids) this.avisar({ t: 'item.cambio', id }, 'todos');
+    return cuenta;
   }
 
   fusionarClientes(queda_id: string, se_va_id: string): { ok: true; cliente: Fila; movidos: Record<string, number> } | { error: string; detalle?: unknown } {

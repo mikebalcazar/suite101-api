@@ -17,7 +17,16 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.50.0 (UN SOLO NEGOCIO. Mike, 29-sep-2026: «borres
+ * Versión del contrato: 0.51.0 (BORRAR UN CLIENTE O UN PROYECTO CON TODO LO
+ * SUYO. Mike, 29-sep-2026: «no puedo borrar clientes de quote101». `POST
+ * /orgs/:o/clientes/:id/borrar {modo?}` y `POST /orgs/:o/proyectos/:id/borrar
+ * {modo?}`: se van partidas, ítems, proyectos y, con el cliente, sus
+ * cotizaciones y su acceso al portal; las piezas y obras de quell se quedan
+ * sueltas y se cuentan; las órdenes sin pagar quedan como gasto general. 409
+ * `tiene_dinero` si hay movimientos; 409 `tiene_historia` si un ítem trae
+ * avances, archivos o compromisos de otro proyecto, o hay archivos del
+ * proyecto o del cliente. `modo: 'seco'` sólo cuenta). Antes:
+ * 0.50.0 (UN SOLO NEGOCIO. Mike, 29-sep-2026: «borres
  * de dash (y de todas las plataformas) la opción de agregar diferentes
  * negocios (…) Todo es para un negocio nada más», y escogió fusionar lo que
  * ya existe. `POST /orgs/:o/negocios/fusionar {queda_id, seco?}` (dueño o
@@ -766,7 +775,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.50.0';
+export const VERSION_CONTRATO = '0.51.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

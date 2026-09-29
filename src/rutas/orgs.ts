@@ -408,6 +408,34 @@ rutas.post('/:o/clientes/:id/fusionar', async (c) => {
   return ok(c, { cliente: r.cliente, movidos: r.movidos });
 });
 
+/** POST /orgs/:o/clientes/:id/borrar {modo?} y POST /orgs/:o/proyectos/:id/borrar {modo?} (0.51.0)
+ *
+ *  Mike, 29-sep: «no puedo borrar clientes de quote101». Borrar CON TODO lo
+ *  suyo, o decir por qué no: 409 `tiene_dinero` (hay movimientos) o 409
+ *  `tiene_historia` (ítems con avances, archivos o compromisos). Con
+ *  `modo: 'seco'` sólo cuenta. Lo abre cualquiera de la empresa, como el
+ *  DELETE de siempre; lo que cambia es que éste sí se lleva lo que cuelga y
+ *  explica cuando no puede. Al borrar un cliente se le quita el acceso al
+ *  portal, si lo tenía. */
+async function borrarConTodo(c: Ctx, que: 'cliente' | 'proyecto') {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403);
+  const b = await c.req.json<{ modo?: string }>().catch(() => ({}) as { modo?: string });
+  const modo = b.modo === 'seco' ? 'seco' : 'borrar';
+  const id = c.req.param('id')!;
+  const r = que === 'cliente' ? await stub(c).borrarClienteConTodo(id, modo) : await stub(c).borrarProyectoConTodo(id, modo);
+  if ('error' in r) {
+    const estado = r.error === 'no_encontrado' ? 404 : r.error === 'tiene_dinero' || r.error === 'tiene_historia' ? 409 : 400;
+    return err(c, r.error, estado, r.detalle);
+  }
+  if (que === 'cliente' && modo === 'borrar') {
+    await c.env.MASTER.prepare(`DELETE FROM accesos WHERE org_id = ? AND tipo = 'cliente' AND ref_id = ?`).bind(c.get('org_id'), id).run();
+  }
+  return ok(c, r);
+}
+rutas.post('/:o/clientes/:id/borrar', (c) => borrarConTodo(c, 'cliente'));
+rutas.post('/:o/proyectos/:id/borrar', (c) => borrarConTodo(c, 'proyecto'));
+
 /* ─────────────── aprobar y cancelar un ítem (§106) ───────────────
  *
  * Mike, 20-sep: «se debe poder cancelar algún ítem ya sea desde quell o
