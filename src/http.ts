@@ -5,6 +5,7 @@
 import type { Context } from 'hono';
 import type { App } from '../schema/tipos';
 import type { Env } from './entorno';
+import type { TokenLicencia } from '../schema/tipos';
 import type { Miembro } from './maestro';
 
 export interface Sesion {
@@ -32,7 +33,10 @@ export interface Quien {
   sin_compras?: boolean;
 }
 
-export type Vars = { sesion: Sesion; app: App; quien: Quien; org_id: string };
+/** `carga` es del enrutador de /nube: la app instalada no trae cookie de
+ *  sesión, trae su token de licencia, y la puerta de /nube lo abre y lo deja
+ *  aquí. Opcional porque en el resto de la API no existe. */
+export type Vars = { sesion: Sesion; app: App; quien: Quien; org_id: string; carga?: TokenLicencia };
 export type Ctx = Context<{ Bindings: Env; Variables: Vars }>;
 
 /* Se arma la Response a mano en vez de con c.json(): el tipado de Hono para el

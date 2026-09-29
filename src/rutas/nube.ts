@@ -16,10 +16,13 @@ import { err, ok, type Ctx, type Vars } from '../http';
 import type { Env } from '../entorno';
 import { ahora, ulid } from '../lib';
 import { abrirToken } from '../licencias';
-import type { Suscripcion, TokenLicencia } from '../../schema/tipos';
+import type { TokenLicencia } from '../../schema/tipos';
 import { TOPE_BYTES, VERSIONES_GUARDADAS, paraLaApp, rutaEnR2, tokenValido, type ArchivoNube } from '../nube';
 
 const rutas = new Hono<{ Bindings: Env; Variables: Vars }>();
+
+/** Lo que se lee de `suscripciones` cuando sólo interesa la llave. */
+type LlaveGuardada = { llave_envuelta: string | null; llave_sal: string | null };
 
 /* ─────────────── la puerta ─────────────── */
 
@@ -54,7 +57,7 @@ const laMaquina = (c: Ctx): string => c.get('carga')!.maquina;
  * el PUT devuelve siempre la que quedó guardada, sea la suya o no. */
 rutas.get('/llave', async (c) => {
   const s = await c.env.MASTER.prepare(`SELECT llave_envuelta, llave_sal FROM suscripciones WHERE id = ?`)
-    .bind(laCuenta(c)).first<Pick<Suscripcion, 'llave_envuelta' | 'llave_sal'>>();
+    .bind(laCuenta(c)).first<LlaveGuardada>();
   if (!s) return err(c, 'licencia_desconocida', 404);
   return ok(c, { envuelta: s.llave_envuelta, sal: s.llave_sal });
 });
@@ -72,7 +75,7 @@ rutas.put('/llave', async (c) => {
   await c.env.MASTER.prepare(`UPDATE suscripciones SET llave_envuelta = ?, llave_sal = ? WHERE id = ? AND llave_envuelta IS NULL`)
     .bind(envuelta, sal, cuenta).run();
   const s = await c.env.MASTER.prepare(`SELECT llave_envuelta, llave_sal FROM suscripciones WHERE id = ?`)
-    .bind(cuenta).first<Pick<Suscripcion, 'llave_envuelta' | 'llave_sal'>>();
+    .bind(cuenta).first<LlaveGuardada>();
   if (!s) return err(c, 'licencia_desconocida', 404);
   return ok(c, { envuelta: s.llave_envuelta, sal: s.llave_sal, era_mia: s.llave_envuelta === envuelta });
 });
