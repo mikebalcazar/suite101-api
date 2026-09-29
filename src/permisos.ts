@@ -70,7 +70,15 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
    * de la tabla: si una app pudiera mandarlo, podría firmar un ajuste con el
    * nombre de otra. */
   ajustes: Object.fromEntries(APPS.map((a) => [a, ['clave', 'valor'] as const])),
-  proveedores: { dash101: '*', cotizador101: ['nombre', 'nombre_norm', 'correo', 'telefono'] },
+  /* 0.54.0 · supply101 da de alta proveedores desde el teléfono de quien
+   * compra (Mike, 29-sep): nombre, RFC, cuenta, contacto y ubicación. Lo que
+   * NO escribe: `categoria`, `terminos_pago` y `creado_en_app`, que son de
+   * administración (dash101) o los pone la API. */
+  proveedores: {
+    dash101: '*',
+    cotizador101: ['nombre', 'nombre_norm', 'correo', 'telefono'],
+    supply101: ['nombre', 'rfc', 'correo', 'telefono', 'clabe', 'banco', 'beneficiario', 'direccion', 'maps_url', 'notas'],
+  },
   estaciones: { quell101: '*' },
   // Las escribe la ruta POST /orgs/:o/conciliaciones, no el CRUD genérico:
   // aquí está para que quede dicho de quién son, y para el 403 con la lista.
