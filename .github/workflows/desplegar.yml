@@ -69,6 +69,7 @@ jobs:
           python3 pruebas/migracion-0018.py
           python3 pruebas/migracion-0019.py
           python3 pruebas/migracion-0020.py
+          python3 pruebas/migracion-0021.py
           python3 pruebas/migracion-0008-master.py
           python3 pruebas/config-correo.py
       - name: Pruebas contra el Durable Object y el D1 de verdad
@@ -221,6 +222,9 @@ jobs:
           echo "Prueba de humo — suite101-api"
           sleep 10   # el Worker recién publicado tarda unos segundos en servir
           node pruebas/humo.mjs
+          # La nube de draw101 (0.22.0) va en su propio archivo; ver el
+          # comentario de arriba de pruebas/humo-nube.mjs.
+          node pruebas/humo-nube.mjs
 
       # Aquí está el canal de vuelta. El log de Actions no sirve: descargarlo
       # redirige a un host que el proxy del chat también rechaza.
