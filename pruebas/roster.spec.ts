@@ -417,6 +417,20 @@ describe('equipos de trabajo (0.53.0)', () => {
     expect(cap.trabajador.equipo_id).toBeNull();
     expect((await r('fer', `/api/admin/trabajadores/${idPedro}`, { method: 'PUT', json: { ...expediente(2), equipo_id: eban } })).trabajador.equipo_id).toBe(eban);
   });
+  it('desde la lista se cambia sólo el equipo (0.53.1): consulta no, vacío es sin equipo, apagado no se acepta', async () => {
+    expect((await r('mira', `/api/admin/trabajadores/${idPedro}/equipo`, { method: 'PUT', json: { equipo_id: '' } })).estado).toBe(403);
+    const sin = await r('fer', `/api/admin/trabajadores/${idPedro}/equipo`, { method: 'PUT', json: { equipo_id: '' } });
+    expect(sin.estado, JSON.stringify(sin)).toBe(200);
+    expect(sin.equipo_id).toBeNull();
+    expect((await r('pedro', '/api/yo')).trabajador.equipo_id).toBeNull();
+    expect((await r('fer', `/api/admin/trabajadores/${idPedro}/equipo`, { method: 'PUT', json: { equipo_id: 'no-existe' } })).estado).toBe(422);
+    expect((await r('fer', `/api/admin/trabajadores/${idPedro}/equipo`, { method: 'PUT', json: { equipo_id: inst } })).estado, 'apagado').toBe(422);
+    const a = await r('fer', `/api/admin/trabajadores/${idPedro}/equipo`, { method: 'PUT', json: { equipo_id: eban } });
+    expect(a.estado).toBe(200);
+    expect(a.equipo_nombre).toBe('Ebanistería');
+    expect((await r('fer', '/api/admin/trabajadores')).trabajadores.find((t: any) => t.id === idPedro).equipo_nombre).toBe('Ebanistería');
+    expect((await r('fer', '/api/admin/trabajadores/no-existe/equipo', { method: 'PUT', json: { equipo_id: eban } })).estado).toBe(404);
+  });
   it('borrar un equipo suelta a su gente, y queda en la bitácora', async () => {
     const b = await r('fer', `/api/admin/equipos/${eban}`, { method: 'DELETE' });
     expect(b.estado).toBe(200);
