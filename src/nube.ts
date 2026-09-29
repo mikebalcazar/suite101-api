@@ -1,26 +1,34 @@
 /* draw101 en la nube — lo que el servidor puede hacer, que es a propósito poco.
  *
- * Mike, 29-sep-2026: «Jr. ni nadie puede accesar a los archivos, ni siquiera
- * nosotros como dueños. Sólo el usuario de la licencia con la que se generó y
- * se guardó», y escogió cifrado de verdad y no sólo control de acceso.
+ * Mike, 29-sep-2026: «Jr. ni nadie puede accesar a los archivos (...) Sólo el
+ * usuario de la licencia con la que se generó y se guardó». Eso se cumple:
+ * cada cuenta ve lo suyo y nada más, medido desde las dos puntas.
  *
- * DE AHÍ SALE TODO EL DISEÑO, y conviene decir en voz alta lo que el servidor
- * NO sabe, porque es el punto:
+ * SOBRE LA LLAVE, Mike cambió de parecer el mismo día y lo confirmó a
+ * propósito, después de que se le dijera que deshacía su decisión anterior:
+ * «que el servidor pueda — nadie pierde nada nunca». Primero había escogido
+ * cifrado sin llave maestra; al toparse con que las máquinas que entran con
+ * cuenta nunca teclean la clave T101, prefirió que la llave la dé el servidor.
  *
- *   · no sabe cómo se llama un archivo (el nombre viaja cifrado);
+ * ASÍ QUE ESTO ES LO QUE HAY, dicho sin adornos: **quien controle este Worker
+ * puede abrir los archivos de cualquiera.** No es el diseño de «ni siquiera
+ * nosotros»; es el otro, el de «nadie ve lo ajeno, pero el dueño del taller
+ * puede recuperar». A cambio, nadie se queda sin sus planos por perder una
+ * clave.
+ *
+ * LO QUE SÍ SE GANA, y por eso se cifra igual:
+ *
+ *   · el servidor no sabe cómo se llama un archivo (el nombre viaja cifrado);
  *   · no sabe qué hay dentro (el contenido también);
- *   · no puede averiguarlo, porque la llave nace en la máquina del dueño y lo
- *     que se guarda aquí es esa llave YA CIFRADA con lo que sale de su clave
- *     T101.
+ *   · un volcado del bucket R2 no abre un solo plano, porque la llave no está
+ *     ahí;
+ *   · y un volcado de D1 tampoco, porque la llave se guarda ENVUELTA con un
+ *     secreto que vive en `config`. Hacen falta las dos cosas, y saber cómo
+ *     se juntan.
  *
- * Lo único que sabe: que la cuenta X tiene N archivos, de tanto peso, tocados
- * tal día. Eso hace falta para decidir cuál copia es más nueva sin bajarla.
- *
- * DONDE SÍ PASA LA CLAVE EN CLARO: por `/licencias/activar`, un momento, para
- * poder buscarla. No se guarda —se guarda su huella— pero tampoco hay que
- * prometer más de lo que hay: quien controlara este Worker podría apuntarla al
- * vuelo. Lo que este diseño sí garantiza es que un volcado de la base, del
- * bucket, o los dos juntos, no abren un solo plano.
+ * Lo único que el servidor sí sabe en claro: que la cuenta X tiene N archivos,
+ * de tanto peso, tocados tal día. Eso hace falta para decidir cuál copia es
+ * más nueva sin bajarla, que es justo lo que no se quiere hacer.
  */
 
 import type { Env } from './entorno';
@@ -116,6 +124,64 @@ export async function asegurarClaves(env: Env): Promise<number> {
 
 /** Sólo para las pruebas: vuelve a armar el disparador de una sola vez. */
 export const olvidarQueYaSeRevisaron = (): void => { yaRevisadas = false; };
+
+/* ─────────────── la llave de la cuenta ─────────────── */
+
+/* La llave la genera y la guarda ESTE servidor, y draw101 se la pide (por qué,
+ * y qué se gana y qué no, está arriba en la cabecera del archivo).
+ *
+ * Lo que sigue es la mecánica: se guarda ENVUELTA con un secreto que vive en
+ * `config`, no en `suscripciones`. Así un volcado de la tabla no alcanza, y la
+ * columna se llama `llave_envuelta` porque de verdad lo está. Lo que cambió
+ * respecto del plan original no es eso, sino QUIÉN tiene con qué desenvolverla:
+ * antes la clave T101 del dueño, ahora el Worker. */
+
+const LLAVE_CONFIG = 'nube_llave_secreto';
+let cacheLlaveSecreto: CryptoKey | null = null;
+
+async function secretoQueEnvuelve(env: Env): Promise<CryptoKey> {
+  if (cacheLlaveSecreto) return cacheLlaveSecreto;
+  let fila = await env.MASTER.prepare(`SELECT valor FROM config WHERE llave = ?`).bind(LLAVE_CONFIG).first<{ valor: string }>();
+  if (!fila?.valor) {
+    await env.MASTER.prepare(`INSERT OR IGNORE INTO config (llave, valor) VALUES (?, ?)`)
+      .bind(LLAVE_CONFIG, b64url(crypto.getRandomValues(new Uint8Array(32)))).run();
+    fila = await env.MASTER.prepare(`SELECT valor FROM config WHERE llave = ?`).bind(LLAVE_CONFIG).first<{ valor: string }>();
+  }
+  cacheLlaveSecreto = await crypto.subtle.importKey('raw', deB64url(fila!.valor), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+  return cacheLlaveSecreto;
+}
+
+/** La llave de esta cuenta, en claro, para dársela a su propia app.
+ *
+ *  Nace la primera vez que alguien la pide y NO cambia nunca: si cambiara, los
+ *  archivos subidos con la anterior quedarían ilegibles —sin error y sin
+ *  aviso, se abrirían y saldrían basura—. Por eso el INSERT va con la
+ *  condición en el WHERE y después se vuelve a leer: dos máquinas pidiéndola
+ *  al mismo tiempo tienen que recibir la MISMA. */
+export async function llaveDeLaCuenta(env: Env, suscripcion: string): Promise<string | null> {
+  const secreto = await secretoQueEnvuelve(env);
+
+  const leer = () => env.MASTER.prepare(`SELECT llave_envuelta, llave_sal FROM suscripciones WHERE id = ?`)
+    .bind(suscripcion).first<{ llave_envuelta: string | null; llave_sal: string | null }>();
+
+  let fila = await leer();
+  if (!fila) return null;                       // no existe esa suscripción
+
+  if (!fila.llave_envuelta || !fila.llave_sal) {
+    const cruda = crypto.getRandomValues(new Uint8Array(32));
+    const nonce = crypto.getRandomValues(new Uint8Array(12));
+    const envuelta = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, secreto, cruda);
+    await env.MASTER.prepare(
+      `UPDATE suscripciones SET llave_envuelta = ?, llave_sal = ? WHERE id = ? AND llave_envuelta IS NULL`,
+    ).bind(b64url(envuelta), b64url(nonce), suscripcion).run();
+    fila = await leer();                        // gana quien haya llegado primero
+    if (!fila?.llave_envuelta || !fila.llave_sal) return null;
+  }
+
+  const cruda = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: deB64url(fila.llave_sal) }, secreto, deB64url(fila.llave_envuelta));
+  return b64url(cruda);
+}
 
 /* ─────────────── los archivos ─────────────── */
 

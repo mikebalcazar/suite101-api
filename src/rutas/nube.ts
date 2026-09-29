@@ -6,9 +6,12 @@
  * máquina, y eso basta —y es lo único que hace falta— para saber qué archivos
  * son suyos.
  *
- * QUÉ NO PUEDE HACER ESTE ARCHIVO, que es el punto (ver src/nube.ts): leer un
- * nombre, leer un contenido, ni derivar la llave. Todo lo que guarda ya viene
- * cifrado de la máquina del dueño.
+ * QUÉ GUARDA Y QUÉ NO SABE: todo lo que llega ya viene cifrado de la máquina
+ * del dueño —el contenido y también el nombre—, así que estas rutas mueven
+ * bultos sin poder leerlos. La llave con la que se cifraron sí la tiene este
+ * servidor, y se la entrega a la app de esa cuenta cuando la pide: es lo que
+ * Mike escogió el 29-sep («que el servidor pueda — nadie pierde nada nunca»),
+ * y en src/nube.ts está dicho qué se gana y qué se deja de ganar con eso.
  */
 
 import { Hono } from 'hono';
@@ -17,12 +20,9 @@ import type { Env } from '../entorno';
 import { ahora, ulid } from '../lib';
 import { abrirToken } from '../licencias';
 import type { TokenLicencia } from '../../schema/tipos';
-import { TOPE_BYTES, VERSIONES_GUARDADAS, asegurarClaves, paraLaApp, rutaEnR2, tokenValido, type ArchivoNube } from '../nube';
+import { TOPE_BYTES, VERSIONES_GUARDADAS, asegurarClaves, llaveDeLaCuenta, paraLaApp, rutaEnR2, tokenValido, type ArchivoNube } from '../nube';
 
 const rutas = new Hono<{ Bindings: Env; Variables: Vars }>();
-
-/** Lo que se lee de `suscripciones` cuando sólo interesa la llave. */
-type LlaveGuardada = { llave_envuelta: string | null; llave_sal: string | null };
 
 /* ─────────────── la puerta ─────────────── */
 
@@ -46,39 +46,24 @@ rutas.use('/*', async (c, next) => {
 const laCuenta = (c: Ctx): string => c.get('carga')!.licencia;
 const laMaquina = (c: Ctx): string => c.get('carga')!.maquina;
 
-/* ─────────────── la llave envuelta ─────────────── */
+/* ─────────────── la llave de la cuenta ─────────────── */
 
-/* La llave maestra de la cuenta: 32 bytes que NACEN EN LA MÁQUINA del dueño y
- * llegan aquí ya cifrados con lo que sale de su clave T101. Este Worker las
- * guarda y no las puede abrir.
+/* La llave con la que draw101 cifra y descifra SUS archivos. La genera y la
+ * guarda este servidor (Mike, 29-sep-2026, confirmándolo a propósito: «que el
+ * servidor pueda — nadie pierde nada nunca»), así que nadie teclea nada de más
+ * y perder una clave ya no cuesta los planos.
  *
- * Se escribe UNA SOLA VEZ. Si dos máquinas estrenan la nube a la vez, las dos
- * generan una llave distinta; gana la primera y la segunda tiene que usar la
- * que ya está, o los archivos de una quedarían ilegibles para la otra. Por eso
- * el PUT devuelve siempre la que quedó guardada, sea la suya o no. */
+ * Viaja en claro por TLS a una app que ya probó ser de esa cuenta con su token
+ * firmado. Lo que no viaja nunca es la de OTRA cuenta: la suscripción sale del
+ * token, no de nada que mande quien llama.
+ *
+ * Nace la primera vez que se pide y no cambia nunca. Si cambiara, los archivos
+ * subidos con la anterior quedarían ilegibles sin error y sin aviso: se
+ * abrirían y saldrían basura. */
 rutas.get('/llave', async (c) => {
-  const s = await c.env.MASTER.prepare(`SELECT llave_envuelta, llave_sal FROM suscripciones WHERE id = ?`)
-    .bind(laCuenta(c)).first<LlaveGuardada>();
-  if (!s) return err(c, 'licencia_desconocida', 404);
-  return ok(c, { envuelta: s.llave_envuelta, sal: s.llave_sal });
-});
-
-rutas.put('/llave', async (c) => {
-  const b = await c.req.json<{ envuelta?: unknown; sal?: unknown }>().catch(() => ({}) as never);
-  const envuelta = typeof b.envuelta === 'string' ? b.envuelta : '';
-  const sal = typeof b.sal === 'string' ? b.sal : '';
-  if (!envuelta || !sal || envuelta.length > 1024 || sal.length > 256) return err(c, 'datos_invalidos', 400, { falta: 'envuelta y sal' });
-
-  const cuenta = laCuenta(c);
-  // Sólo si todavía no hay ninguna: la condición va en el WHERE y no en un
-  // `if` previo, para que dos máquinas a la vez no se pisen entre la lectura
-  // y la escritura.
-  await c.env.MASTER.prepare(`UPDATE suscripciones SET llave_envuelta = ?, llave_sal = ? WHERE id = ? AND llave_envuelta IS NULL`)
-    .bind(envuelta, sal, cuenta).run();
-  const s = await c.env.MASTER.prepare(`SELECT llave_envuelta, llave_sal FROM suscripciones WHERE id = ?`)
-    .bind(cuenta).first<LlaveGuardada>();
-  if (!s) return err(c, 'licencia_desconocida', 404);
-  return ok(c, { envuelta: s.llave_envuelta, sal: s.llave_sal, era_mia: s.llave_envuelta === envuelta });
+  const llave = await llaveDeLaCuenta(c.env, laCuenta(c));
+  if (!llave) return err(c, 'licencia_desconocida', 404);
+  return ok(c, { llave });
 });
 
 /* ─────────────── el índice ─────────────── */
