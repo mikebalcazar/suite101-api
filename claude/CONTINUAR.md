@@ -369,6 +369,25 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   huérfanos primero. Lo que NO está hecho todavía: devolver lo huérfano a un
   negocio. Eso es una escritura en producción y la decide Mike al ver los
   números.
+- **quote101 G105: reubicar los componentes en el plano (29-sep).** Mike:
+  «cuando quito un plano los componentes pierden su ubicación […] cuando
+  meto un plano nuevo, necesito que me dé la opción de reubicar los
+  componentes». Tira azul con los componentes sin lugar: «Ponerlos en el
+  plano» y cada toque es el lugar del activo, que pasa solo al siguiente;
+  al cambiar el plano con componentes puestos se ofrece «Reubicarlos uno
+  por uno» o «Se quedan donde están». quote101 #69, dos pruebas nuevas,
+  115/115. Muro 2026-09-29-1100.
+- **roster101: equipos de trabajo (29-sep, EN CURSO, sin publicar).**
+  Mike: «agrupar por equipo de trabajo (…) esos equipos los doy de alta
+  yo, y ellos sólo seleccionan cuál de los disponibles es el suyo, o no
+  tengo equipo». La API está a medias en la rama
+  `claude/equipos-de-trabajo` de este repo (commit WIP: migración org
+  0021 `roster_equipos` + `equipo_id`, rutas /admin/equipos, GET
+  /api/equipos, `equipo_id` en PUT /api/yo y en la captura del panel,
+  CSV con Equipo, contrato 0.53.0): 4 de las 5 pruebas nuevas del
+  describe «equipos de trabajo» en roster.spec.ts están en rojo (el POST
+  de `mira` daba 403 donde se esperaba 422; el resto arrastra). El portal
+  no tiene nada escrito. Se interrumpió por el encargo de quote101 G105.
 - **DEFECTO: la liga «ver comprobante» del correo de orden pagada
   (29-sep, 0.52.1).** Mike: «me manda a una URL que despliega sin_sesion».
   La liga iba a la API (URL_PUBLICA + /orgs/…): JSON y sin sesión, porque
