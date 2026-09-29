@@ -369,6 +369,19 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   huérfanos primero. Lo que NO está hecho todavía: devolver lo huérfano a un
   negocio. Eso es una escritura en producción y la decide Mike al ver los
   números.
+- **Fusionar dos proyectos que son el mismo (29-sep, contrato 0.52.0).**
+  Mike, con la captura de quote101 («“Sanje CC37” tiene 11 movimientos…
+  fusiónalo con el otro cliente»): «No puedo fusionar el proyecto, solo el
+  cliente. Y quiero fusionar proyectos». API #154: `POST
+  /orgs/:o/proyectos/:id/fusionar {se_va_id, seco?}`, tablas con
+  `proyecto_id` descubiertas del esquema + cotizaciones (datos.proyecto_id),
+  archivos y obra de quell (`obra_suelta` si el que se queda ya tenía);
+  los ítems toman el cliente del que se queda; cachés recalculados; sólo
+  dueño/admin. dash101 #97: bloque «¿Está repetido?» en el proyecto, con
+  cuenta en seco antes de confirmar (`components/fusionar-proyecto.tsx`).
+  quote101 G104 (#68): el aviso manda ahí. Muro 2026-09-29-0900. PENDIENTE
+  DE MIKE: juntar «Sanje CC37» con su repetido desde dash101 (producción,
+  irreversible, con su sesión).
 - **Batería en móvil, paso 3: dash101, roster101 y supply101 (29-sep).**
   Mike, tras probar: «Mejoró. Veamos otras mientras y regresamos a quell y
   quote para mejorar más». dash101 #94: con FUENTE≠firestore, next.config
