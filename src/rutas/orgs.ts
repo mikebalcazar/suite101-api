@@ -408,6 +408,25 @@ rutas.post('/:o/clientes/:id/fusionar', async (c) => {
   return ok(c, { cliente: r.cliente, movidos: r.movidos });
 });
 
+/** POST /orgs/:o/proyectos/:id/fusionar {se_va_id, seco?} — los dos son el mismo proyecto (0.52.0).
+ *
+ *  Mike, 29-sep: «No puedo fusionar el proyecto, solo el cliente. Y quiero
+ *  fusionar proyectos.» `:id` es el que se queda; `se_va_id` desaparece y le
+ *  deja ítems, partidas, dinero, órdenes, cotizaciones, archivos y su obra
+ *  de quell si el que se queda no tenía. Con `seco` sólo cuenta. Como con
+ *  los clientes, no se deshace: la hacen el dueño y la administración. */
+rutas.post('/:o/proyectos/:id/fusionar', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro' || (quien.rol !== 'owner' && quien.rol !== 'admin')) {
+    return err(c, 'sin_permiso', 403, { motivo: 'fusionar dos proyectos no se puede deshacer: lo hacen el dueño y la administración' });
+  }
+  const b = await c.req.json<{ se_va_id?: string; seco?: boolean }>().catch(() => ({}) as { se_va_id?: string; seco?: boolean });
+  if (!b.se_va_id) return err(c, 'datos_invalidos', 400, { falta: 'se_va_id' });
+  const r = await stub(c).fusionarProyectos(c.req.param('id'), b.se_va_id, b.seco === true);
+  if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 400, r.detalle);
+  return ok(c, r);
+});
+
 /** POST /orgs/:o/clientes/:id/borrar {modo?} y POST /orgs/:o/proyectos/:id/borrar {modo?} (0.51.0)
  *
  *  Mike, 29-sep: «no puedo borrar clientes de quote101». Borrar CON TODO lo
