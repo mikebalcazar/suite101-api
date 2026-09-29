@@ -369,6 +369,28 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   huérfanos primero. Lo que NO está hecho todavía: devolver lo huérfano a un
   negocio. Eso es una escritura en producción y la decide Mike al ver los
   números.
+- **Batería en móvil: quote101 G103 sin ambiente, y el análisis de las
+  demás (29-sep).** Mike: «reducir el consumo de recursos de las apps en
+  MÓVIL. Es crítico. Empezando por quote (…) quitar los efectos del fondo y
+  las animaciones de ambiente. Solo dejar las animaciones de la interfase».
+  quote101 #66 (G103): fuera la aurora animada, las dos capas de
+  partículas, los tres orbes con blur y mezcla, y el `backdrop-filter` de
+  tarjetas, botones, cabeceras y velos (24 estilos + `.frost`; regla global
+  lo apaga). Queda el fondo azul quieto en capa fija; los fondos
+  translúcidos suben a .90–.95. Se quedan neón, pin activo, despliegues,
+  vacuum y splash. `pruebas/el-ambiente.spec.mjs` (3) lo vigila; suite
+  112/112. Análisis leído del código de las otras siete apps: NINGUNA tiene
+  ambiente pesado; lo que gasta es el plano de quell101 (React repinta
+  todos los pines en cada pointermove, `PlanCanvas.jsx:76-81,253-272,315`;
+  el PDF se redibuja completo a los 200 ms de cada pausa, `:182-231`;
+  intervalo de 60 s que repinta toda la app, `App.jsx:34`), el Firebase
+  muerto en el layout de dash101 (~385 KB, `lib/auth-context.tsx:22-30`,
+  `lib/firebase.ts:1-3`) y la cámara de roster101 a 1920×1440/2560×1920
+  que no se apaga en segundo plano (`app.js:719`, `escaner.js:122`).
+  peek/workshop/master: nada. Orden sugerido y arreglos concretos en el
+  muro 2026-09-29-0600. PENDIENTE DE MIKE: escoger por dónde seguir
+  (recomendado: el plano de quell101). NO medido: el consumo real en un
+  teléfono; aquí no hay uno.
 - **Borrar un cliente o un proyecto con todo lo suyo (29-sep, contrato
   0.51.0).** Mike: «no puedo borrar clientes de quote101». API #150: `POST
   /orgs/:o/clientes/:id/borrar` y `/proyectos/:id/borrar` (409
