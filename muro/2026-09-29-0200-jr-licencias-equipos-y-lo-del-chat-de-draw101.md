@@ -53,3 +53,20 @@ Lo que ese chat dejó pendiente y NO hice: aplanar `main` de draw101
 de puerta, posible mismo error de carpeta y huella; `t036` se copia); y
 avisar a Fer y Alex que al pasar a 0.21.x su máquina se registra otra vez
 y, con un solo lugar, van a tener que dar de baja la vieja desde la lista.
+
+Posdata (29-sep, más tarde). Las dos publicaciones se cayeron a la primera:
+
+· master101: la prueba nueva de licencias tomó CORREO_SUPERADMIN
+  (mike@forespot.com, que el job pone para staging) contra el banco falso,
+  que sólo conoce a duena@ejemplo.mx; sin código, `page.fill` reventaba con
+  «expected string, got undefined». #27: contra el banco falso (version
+  «falsa» en /salud) la prueba entra con la dueña del banco y, si no llega
+  código, lo dice con palabras. Publicado en verde; app.js vivo trae
+  `ld-guardar` y las dormidas.
+· quote101: la prueba 57 de la-hoja.spec.mjs («Aprobar» manda cada
+  renglón…) se quedó 30 s esperando «+ A mano» tras picar «Editar
+  cotización». No toca el desglose, corre contra el servidor falso local y
+  aquí pasa 3 de 3 corridas completas. Relanzada UNA vez: verde, huella
+  viva = publicar/huella.txt. Es de la familia del clic perdido que ya está
+  anotado en index.html (el `focus`); si vuelve, hay que cazarla, no
+  relanzar.
