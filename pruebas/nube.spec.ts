@@ -30,6 +30,7 @@
 import { SELF, env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Env } from '../src/entorno';
+import { olvidarQueYaSeRevisaron } from '../src/nube';
 
 const e = env as unknown as Env;
 const CORREO = 'mike@forespot.com';
@@ -293,8 +294,8 @@ describe('lo que el panel de Mike NO debe ver', () => {
     expect(texto).toContain('clave_pista');
   });
 
-  it('migrar-claves no deja ninguna en claro', async () => {
-    // Se mete una a mano como si viniera de antes de 0.22.0.
+  it('las claves en claro se migran SOLAS, sin que nadie llame a nada', async () => {
+    // Una como las de antes de 0.22.0, metida directo en la base.
     await e.MASTER.prepare(
       `INSERT INTO suscripciones (id, clave, programa, cliente, plan, lugares, estado, origen, perpetua, creado_at, actualizado_at, tipo)
        VALUES ('01VIEJA00000000000000000A', 'T101-AAAA-BBBB-CCCC', 'draw101', 'De antes', 'mensual', 1, 'activa', 'manual', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'cortesia')`,
@@ -302,21 +303,38 @@ describe('lo que el panel de Mike NO debe ver', () => {
     const antes = await e.MASTER.prepare(`SELECT clave FROM suscripciones WHERE id = '01VIEJA00000000000000000A'`).first<any>();
     expect(antes.clave).toBe('T101-AAAA-BBBB-CCCC');
 
-    const r = await pedir2('/licencias/migrar-claves', { method: 'POST' });
+    // Se le olvida al Worker que ya revisó, como si acabara de despertar.
+    olvidarQueYaSeRevisaron();
+
+    // Y AHORA LO IMPORTANTE: no se llama a ninguna ruta de migración. Se hace
+    // una petición cualquiera, como la haría cualquier máquina del taller.
+    const r = await pedir2('/licencias');
     expect(r.estado).toBe(200);
-    expect(r.data.migradas).toBeGreaterThan(0);
-    expect(r.data.en_claro_todavia).toBe(0);
 
-    // Y la vieja sigue entrando con SU clave de siempre: migrar no obliga a
-    // nadie a volver a activar.
-    const act = await pedir2('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: 'T101-AAAA-BBBB-CCCC', huella: 'una-maquina-vieja-01' }) });
-    expect(act.estado).toBe(201);
-    expect(act.data.licencia.id).toBe('01VIEJA00000000000000000A');
-
-    // Y ya no guarda sus letras.
     const despues = await e.MASTER.prepare(`SELECT clave, clave_pista FROM suscripciones WHERE id = '01VIEJA00000000000000000A'`).first<any>();
     expect(despues.clave).not.toContain('T101-');
     expect(despues.clave_pista).toBe('CCCC');
+
+    // Y no queda ni una en claro en toda la base.
+    const enClaro = await e.MASTER.prepare(`SELECT COUNT(*) AS n FROM suscripciones WHERE clave LIKE 'T101-%'`).first<any>();
+    expect(enClaro.n).toBe(0);
+
+    // La prueba de fuego: la vieja sigue entrando con SU clave de siempre.
+    // Migrar no obliga a nadie a volver a activar.
+    const act = await pedir2('/licencias/activar', { method: 'POST', body: JSON.stringify({ clave: 'T101-AAAA-BBBB-CCCC', huella: 'una-maquina-vieja-01' }) });
+    expect(act.estado).toBe(201);
+    expect(act.data.licencia.id).toBe('01VIEJA00000000000000000A');
+  });
+
+  it('y revisar dos veces no hace nada raro: es idempotente por construcción', async () => {
+    olvidarQueYaSeRevisaron();
+    const r = await pedir2('/licencias');
+    expect(r.estado).toBe(200);
+    const enClaro = await e.MASTER.prepare(`SELECT COUNT(*) AS n FROM suscripciones WHERE clave LIKE 'T101-%'`).first<any>();
+    expect(enClaro.n).toBe(0);
+    // Y la que ya se migró sigue con SU huella, no con la huella de su huella.
+    const f = await e.MASTER.prepare(`SELECT clave, clave_pista FROM suscripciones WHERE id = '01VIEJA00000000000000000A'`).first<any>();
+    expect(f.clave_pista).toBe('CCCC');
   });
 });
 
