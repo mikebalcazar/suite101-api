@@ -17,7 +17,19 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.54.2 (EL DIRECTOR EDITA NOMBRE Y CORREO DE UN
+ * Versión del contrato: 0.55.0 (VARIAS CUENTAS BANCARIAS POR PROVEEDOR, CON
+ * ALIAS, Y SUS DOCUMENTOS DE RESPALDO. Mike, 30-sep, para supply101: «se
+ * puedan registrar más de una cuenta bancaria con un ALIAS» y «adjuntar uno
+ * o más documentos de respaldo (carátula bancaria, foto de la tarjeta)».
+ * Migración org 0023: tabla `proveedor_cuentas` (id, proveedor_id, alias,
+ * clabe, banco, beneficiario, notas); la cuenta que ya estaba en columnas de
+ * `proveedores` pasa a ser la fila «Principal» (las columnas se quedan). Va
+ * por el CRUD genérico: supply101 y dash101 escriben; la API revisa la CLABE
+ * como en `proveedores`. Los documentos van en `archivos` con
+ * de_tabla = 'proveedores'; nueva `DELETE /orgs/:o/archivos/:id` (borra el
+ * objeto de R2 y la fila; un cliente no).)
+ *
+ * Antes, 0.54.2 (EL DIRECTOR EDITA NOMBRE Y CORREO DE UN
  * INTEGRANTE. Mike, 30-sep: «quiero editar los datos de un integrante de la
  * empresa». `PATCH /admin/orgs/:o/miembros/:uid` acepta también `nombre` y
  * `correo`. El correo: 400 si no es válido, 409 correo_en_uso si ya es de
@@ -822,7 +834,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.54.2';
+export const VERSION_CONTRATO = '0.55.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1123,6 +1135,22 @@ export interface Cliente {
   usuario_id: string | null; // acceso a peek101
   portal_activo: boolean;
   creado_en_app: string;
+  creado_at: string;
+}
+
+/** Una cuenta bancaria de un proveedor (0023, contrato 0.55.0). Un
+ *  proveedor puede tener varias; el alias es para saber cuál es («Principal»,
+ *  «Nómina»…). La CLABE son 18 dígitos que cuadran; la API los revisa. Los
+ *  documentos de respaldo (carátula, foto de la tarjeta) van en `archivos`
+ *  con de_tabla = 'proveedores' y de_id = el proveedor. */
+export interface ProveedorCuenta {
+  id: string;
+  proveedor_id: string;
+  alias: string;
+  clabe: string;
+  banco: string | null;
+  beneficiario: string | null;
+  notas: string | null;
   creado_at: string;
 }
 
@@ -1428,6 +1456,7 @@ export const TABLAS = [
   'cuentas',
   'clientes',
   'proveedores',
+  'proveedor_cuentas',
   'personal',
   'estaciones',
   'cotizaciones',

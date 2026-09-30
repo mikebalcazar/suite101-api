@@ -66,6 +66,15 @@ export const DEFS: Record<Tabla, Def> = {
     filtros: ['categoria'],
     orden: 'nombre_norm',
   },
+  /* 0023 · Las cuentas bancarias del proveedor, una fila por cuenta y con
+   * alias (Mike, 30-sep-2026: «más de una cuenta bancaria con un ALIAS»).
+   * La CLABE la revisa la API al escribir, igual que en `proveedores`. */
+  proveedor_cuentas: {
+    cols: { ...IDENT, proveedor_id: 'texto', alias: 'texto', clabe: 'texto', banco: 'texto', beneficiario: 'texto', notas: 'texto' },
+    requeridos: ['proveedor_id', 'alias', 'clabe'],
+    filtros: ['proveedor_id'],
+    orden: 'creado_at',
+  },
   personal: {
     cols: {
       ...IDENT, nombre: 'texto', nombre_norm: 'texto', correo: 'texto', puesto: 'texto', activo: 'bool',

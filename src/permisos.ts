@@ -79,6 +79,13 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
     cotizador101: ['nombre', 'nombre_norm', 'correo', 'telefono'],
     supply101: ['nombre', 'rfc', 'correo', 'telefono', 'clabe', 'banco', 'beneficiario', 'direccion', 'maps_url', 'notas'],
   },
+  /* 0.55.0 · Las cuentas del proveedor (0023): las da de alta quien lo da de
+   * alta (supply101) y administración (dash101). `proveedor_id` sí va: es a
+   * quién pertenece la cuenta, y sin él la fila no significa nada. */
+  proveedor_cuentas: {
+    dash101: '*',
+    supply101: ['proveedor_id', 'alias', 'clabe', 'banco', 'beneficiario', 'notas'],
+  },
   estaciones: { quell101: '*' },
   // Las escribe la ruta POST /orgs/:o/conciliaciones, no el CRUD genérico:
   // aquí está para que quede dicho de quién son, y para el 403 con la lista.
