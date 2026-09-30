@@ -377,6 +377,14 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   al cambiar el plano con componentes puestos se ofrece «Reubicarlos uno
   por uno» o «Se quedan donde están». quote101 #69, dos pruebas nuevas,
   115/115. Muro 2026-09-29-1100.
+- **DEFECTO: http:// en el dominio propio rompía «Entrar con Google»
+  (30-sep).** Mike, en un Android nuevo: origen_no_permitido con
+  volver_a http://quell101.taller101.com/. Los siete Workers con
+  DOMINIO_PROPIO contestan 301 a https en lecturas (quell101 #89,
+  master101 #30, peek101 #20, roster101 #32, quote101 #70, dash101 y
+  supply101 #100), verificado con curl. PENDIENTE DE MIKE, si quiere el
+  arreglo de raíz: «Always Use HTTPS» en la zona taller101.com de
+  Cloudflare. Muro 2026-09-30-1000.
 - **quell101: fotos pegadas o arrastradas en la bitácora del ítem
   (30-sep, #88).** Mike: «quiero poder agregar fotos pero solo
   arrastrando o pegando lo que está en el portapapeles». pegar.js
