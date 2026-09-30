@@ -726,6 +726,36 @@ describe('el requerimiento, que está en revisión', () => {
     expect(otro.code).toBe('RQ-02');
   });
 
+  it('0.56.0 · un subítem: nace como requerimiento colgado de la pieza, y su ítem cuelga del ítem de la pieza', async () => {
+    /* Mike, 30-sep: «trabajos o servicios que se le hacen complementarios a
+     * un ítem (…) deben de nacer como requerimientos nuevos, pero ligados
+     * al ítem al que se le aplica». m1 ya es un ítem vendido (se ligó en
+     * «la obra y el proyecto»), así que el requerimiento nuevo debe colgar
+     * de ese ítem, no sólo de la pieza. */
+    const padre = await q('mike', `/elements/${m1}`);
+    expect(padre.estado).toBe(200);
+    expect(padre.element.item_id, 'm1 es un ítem vendido').toBeTruthy();
+    const r = await alta({ name: 'Cajón extra que pidió el cliente', type: 'Requerimiento', x: 0.47, y: 0.47, padre_id: m1 });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.padre_id).toBe(m1);
+    expect(r.code).toBe('RQ-03');
+    expect(r.item_id, 'la obra está ligada: el requerimiento también es ítem').toBeTruthy();
+    const item = await pedir('mike', `/orgs/${ORG}/items/${r.item_id}`, { app: 'dash101' });
+    expect(item.estado).toBe(200);
+    expect(item.data.padre_id, 'el ítem del subítem cuelga del ítem de la pieza padre').toBe(padre.element.item_id);
+    expect(item.data.tipo).toBe('requerimiento');
+    // Los subítems se pueden pedir por padre desde dash101, y viajan con los elementos de la obra.
+    const hijos = await pedir('mike', `/orgs/${ORG}/items?padre_id=${padre.element.item_id}`, { app: 'dash101' });
+    expect(hijos.data.filas.map((x: any) => x.id)).toEqual([r.item_id]);
+    const obra = await q('mike', `/projects/${obraA}`);
+    const pieza = obra.elements.find((e: any) => e.id === r.id);
+    expect(pieza.padre_id).toBe(m1);
+    // Un padre que no es de esta obra (o no existe) no vale.
+    const ajena = await alta({ name: 'Colado', type: 'Requerimiento', x: 0.1, y: 0.1, padre_id: 'pieza-de-otra-obra' });
+    expect(ajena.estado, JSON.stringify(ajena)).toBe(400);
+    expect(ajena.error).toMatch(/padre/);
+  });
+
   it('un servicio también tiene el suyo', async () => {
     const r = await alta({ name: 'Instalación en sitio', type: 'Servicio', x: 0.46, y: 0.46 });
     expect(r.estado, JSON.stringify(r)).toBe(200);

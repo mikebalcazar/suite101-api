@@ -17,7 +17,17 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.55.0 (VARIAS CUENTAS BANCARIAS POR PROVEEDOR, CON
+ * Versión del contrato: 0.56.0 (SUBÍTEMS. Mike, 30-sep: «los ítems puedan
+ * tener subítems (…) trabajos o servicios que se le hacen complementarios a
+ * un ítem (…) deben de nacer como requerimientos nuevos, pero ligados al
+ * ítem al que se le aplica». Migración org 0024: `items.padre_id` y
+ * `quell_elements.padre_id`. `items.padre_id` sale por el CRUD (filtro
+ * `padre_id`; lo escribe dash101). En quell, `POST /plans/:p/elements`
+ * acepta `padre_id` (la pieza padre, de la misma obra); la pieza nace con él
+ * y, si es requerimiento y la obra está ligada, el ítem nuevo cuelga del
+ * ítem de la pieza padre. Los elementos de la obra traen `padre_id`.)
+ *
+ * Antes, 0.55.0 (VARIAS CUENTAS BANCARIAS POR PROVEEDOR, CON
  * ALIAS, Y SUS DOCUMENTOS DE RESPALDO. Mike, 30-sep, para supply101: «se
  * puedan registrar más de una cuenta bancaria con un ALIAS» y «adjuntar uno
  * o más documentos de respaldo (carátula bancaria, foto de la tarjeta)».
@@ -834,7 +844,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.55.0';
+export const VERSION_CONTRATO = '0.56.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1322,6 +1332,12 @@ export interface Item {
   /** A qué producto del catálogo pertenece (0017). NULL = el ítem es su
    *  propio producto único, que es como nacen todos. */
   producto_id: string | null;
+  /** De qué ítem es complemento (0024, contrato 0.56.0): un SUBÍTEM es un
+   *  trabajo o servicio que se le hace a otro ítem. Para el dinero, la
+   *  cotización y las etapas es un ítem más; la liga es lo único que
+   *  cambia. NULL = ítem de primer nivel. En quell nace como requerimiento
+   *  desde la pieza padre. */
+  padre_id: string | null;
   nombre: string;
   descripcion: string | null;
   tipo: 'mueble' | 'servicio' | 'visita' | 'otro';

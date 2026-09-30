@@ -167,9 +167,12 @@ export const DEFS: Record<Tabla, Def> = {
        * precio (ver CACHES en src/permisos.ts). Un PATCH suelto lo dejaría
        * apuntando a un modelo de $9,500 con su precio viejo de $12,000. */
       producto_id: 'texto',
+      /* 0024 · de qué ítem es complemento (subítem). NULL = es un ítem de
+       * primer nivel. Para el dinero y las etapas es un ítem más. */
+      padre_id: 'texto',
     },
     requeridos: ['negocio_id', 'cliente_id', 'nombre'],
-    filtros: ['negocio_id', 'proyecto_id', 'cliente_id', 'estado', 'etapa', 'partida', 'producto_id'],
+    filtros: ['negocio_id', 'proyecto_id', 'cliente_id', 'estado', 'etapa', 'partida', 'producto_id', 'padre_id'],
     orden: 'creado_at',
     fecha: 'fecha_entrega',
   },

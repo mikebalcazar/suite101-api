@@ -36,6 +36,7 @@ import reembolsos from '../migrations/org/0020_reembolsos.sql';
 import rosterEquipos from '../migrations/org/0021_roster_equipos.sql';
 import proveedoresDatos from '../migrations/org/0022_proveedores_datos.sql';
 import proveedorCuentas from '../migrations/org/0023_proveedor_cuentas.sql';
+import subitems from '../migrations/org/0024_subitems.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { PREFIJOS, siguienteCodigo } from './quell/codigos.js';
 
@@ -62,7 +63,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems];
 
 /** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
  *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
@@ -199,7 +200,7 @@ export interface ApiOrgDB {
   aprobarCotizacion(args: AprobarCotizacion): Promise<ResultadoAprobar>;
   /** 0.49.0: un requerimiento levantado en la obra nace como ítem cotizado del
    *  proyecto ligado y cae en el borrador de requerimientos de quote101. */
-  levantarRequerimiento(d: { element_id: string; obra_id: string; code: string; name: string; usuario_id: string }): Promise<{ item_id: string | null; cotizacion_id: string | null }>;
+  levantarRequerimiento(d: { element_id: string; obra_id: string; code: string; name: string; usuario_id: string; padre_item_id?: string | null }): Promise<{ item_id: string | null; cotizacion_id: string | null }>;
   registrarArchivo(datos: {
     id: string; r2_key: string; nombre: string; mime: string | null; bytes: number;
     de_tabla: string; de_id: string; subido_por: string;
@@ -1311,7 +1312,7 @@ export class OrgDB extends DurableObject<Env> {
 
   /** Un requerimiento recién levantado en la obra: su ítem y su renglón en
    *  el borrador. Lo llama el motor de quell al dar de alta la pieza. */
-  levantarRequerimiento(d: { element_id: string; obra_id: string; code: string; name: string; usuario_id: string }): { item_id: string | null; cotizacion_id: string | null } {
+  levantarRequerimiento(d: { element_id: string; obra_id: string; code: string; name: string; usuario_id: string; padre_item_id?: string | null }): { item_id: string | null; cotizacion_id: string | null } {
     const obra = this.sql.exec(`SELECT proyecto_id FROM quell_projects WHERE id = ?`, d.obra_id).toArray()[0] as Fila | undefined;
     if (!obra?.proyecto_id) return { item_id: null, cotizacion_id: null };
     const proyecto = this.obtener('proyectos', String(obra.proyecto_id));
@@ -1324,6 +1325,10 @@ export class OrgDB extends DurableObject<Env> {
       monto: 0, cantidad: 1, moneda: 'MXN', estado: 'cotizado',
       descripcion: 'Requerimiento levantado en la obra. Falta cotizarlo.',
       origen: { de: 'quell', element_id: d.element_id, obra_id: d.obra_id, requerimiento: true },
+      /* 0024 · Si nació como complemento de una pieza que ya es un ítem, el
+       * ítem nuevo cuelga de ése (subítem). Se pone directo y no por el
+       * CRUD: la liga la decide la obra, no la app. */
+      ...(d.padre_item_id ? { padre_id: d.padre_item_id } : {}),
     } as unknown as Fila, contexto);
     this.sql.exec(`UPDATE quell_elements SET item_id = ? WHERE id = ?`, String(item.id), d.element_id);
 

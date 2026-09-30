@@ -937,10 +937,23 @@ export async function atender(req, env, url, path) {
         if (Number(fila.ubicados) >= Number(fila.cantidad || 1)) return err('de ese ítem ya no falta ninguno por ubicar', 409);
         itemId = fila.id;
       }
+      /* 0024 · Subítem: la pieza nace colgada de otra pieza de la misma obra
+       * (Mike, 30-sep: «trabajos o servicios complementarios a un ítem (…)
+       * nacen como requerimientos nuevos, pero ligados al ítem»). Se revisa
+       * que el padre exista y sea de ESTA obra; si el padre ya es un ítem, el
+       * ítem del requerimiento cuelga de ése. */
+      let padreId = null;
+      let padreItemId = null;
+      if (b.padre_id) {
+        const padre = await env.DB.prepare(`SELECT id, item_id FROM quell_elements WHERE id = ? AND project_id = ?`).bind(String(b.padre_id), pid).first();
+        if (!padre) return err('la pieza padre no es de esta obra', 400);
+        padreId = padre.id;
+        padreItemId = padre.item_id || null;
+      }
       // Nace en producción: todavía no hay nada entregado que corregir.
       const alta = await conCodigoUnico(async () => {
-        await env.DB.prepare(`INSERT INTO quell_elements (id, plan_id, project_id, code, type, name, resp, x, y, created_by, item_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-          .bind(id, seg[1], pid, codigo, tipo, b.name, b.resp || '', +b.x, +b.y, user.id, itemId).run();
+        await env.DB.prepare(`INSERT INTO quell_elements (id, plan_id, project_id, code, type, name, resp, x, y, created_by, item_id, padre_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .bind(id, seg[1], pid, codigo, tipo, b.name, b.resp || '', +b.x, +b.y, user.id, itemId, padreId).run();
         await apunta(env, b.op_id);
         /* 0.49.0 · Mike, 29-sep: «los requerimientos generados me deberían
          * generar un borrador en quote dentro del proyecto». Si la obra está
@@ -950,11 +963,11 @@ export async function atender(req, env, url, path) {
          * pieza y se vuelve ítem al ligar, como siempre. */
         let cotizacionId = null;
         if (esRequerimiento(tipo) && !itemId && typeof env.LEVANTAR_REQUERIMIENTO === 'function') {
-          const r = await env.LEVANTAR_REQUERIMIENTO({ element_id: id, obra_id: pid, code: codigo, name: b.name });
+          const r = await env.LEVANTAR_REQUERIMIENTO({ element_id: id, obra_id: pid, code: codigo, name: b.name, padre_item_id: padreItemId });
           itemId = r?.item_id || null;
           cotizacionId = r?.cotizacion_id || null;
         }
-        return json({ ok: true, id, code: codigo, item_id: itemId, cotizacion_id: cotizacionId });
+        return json({ ok: true, id, code: codigo, item_id: itemId, cotizacion_id: cotizacionId, padre_id: padreId });
       }, codigo);
       return alta;
     }
