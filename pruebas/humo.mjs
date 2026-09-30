@@ -29,7 +29,15 @@ const MIGRACIONES_ORG = readdirSync(new URL('../migrations/org/', import.meta.ur
 const STAGING = process.env.STAGING;
 const PROD = process.env.PROD;
 const CORREO = process.env.CORREO_SUPERADMIN || 'mike@forespot.com';
-const ORG = `humo-${process.env.GITHUB_RUN_ID || Date.now()}`.slice(0, 40);
+/* El id de la corrida lleva el intento cuando el job se vuelve a correr
+ * («re-run failed jobs» conserva GITHUB_RUN_ID). Sin esto, el segundo
+ * intento choca con la gente del primero: la empresa de humo se borra al
+ * final, pero las cuentas (socia, clienta, la de contraseña) viven en el D1
+ * maestro y siguen ahí, así que «la socia nunca ha entrado» ya entró y
+ * «todavía no tiene contraseña» ya la tiene (corrida 36765331304, 30-sep:
+ * el primer intento cayó por el WebSocket, el segundo por esto). */
+const INTENTO = Number(process.env.GITHUB_RUN_ATTEMPT || 1) > 1 ? `-${process.env.GITHUB_RUN_ATTEMPT}` : '';
+const ORG = `humo-${process.env.GITHUB_RUN_ID || Date.now()}${INTENTO}`.slice(0, 40);
 
 let fallas = 0;
 let revisadas = 0;
@@ -716,7 +724,7 @@ async function importacion() {
   linea('== Importación (fase 2) ==');
   const entro = await entrarComoMike();
 
-  const ORGI = `imp-${process.env.GITHUB_RUN_ID || Date.now()}`.slice(0, 40);
+  const ORGI = `imp-${process.env.GITHUB_RUN_ID || Date.now()}${INTENTO}`.slice(0, 40);
   const nueva = await pedir(STAGING, '/admin/orgs', { method: 'POST', body: { id: ORGI, nombre: 'Importada' } });
   rev(nueva.estado === 201, `se crea la org ${ORGI}`,
       entro ? `${nueva.estado} ${nueva.error ?? ''}` : 'no se pudo entrar: el freno de códigos no cedió');
@@ -902,7 +910,7 @@ async function limpieza() {
   if (!cod.data?.codigo_prueba) { rev(false, 'entrar para limpiar', `${cod.estado} ${cod.error || ''}`); return; }
   await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO, codigo: cod.data.codigo_prueba } });
   const lista = await pedir(STAGING, '/admin/orgs');
-  const basura = (lista.data?.filas || []).map((o) => o.id).filter((id) => /^(humo|imp)-[0-9]+$/.test(id));
+  const basura = (lista.data?.filas || []).map((o) => o.id).filter((id) => /^(humo|imp)-[0-9]+(-[0-9]+)?$/.test(id)); // «-<intento>» cuando el job se volvió a correr
   let borradas = 0;
   for (const id of basura) {
     const r = await pedir(STAGING, `/admin/orgs/${id}`, { method: 'DELETE' });
