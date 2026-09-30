@@ -377,6 +377,13 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   al cambiar el plano con componentes puestos se ofrece «Reubicarlos uno
   por uno» o «Se quedan donde están». quote101 #69, dos pruebas nuevas,
   115/115. Muro 2026-09-29-1100.
+- **Compras en dash101 (30-sep, API 0.56.1 #183, dash101 #102–#106).**
+  Menú «Compras», circulito con compras+reembolsos del negocio ACTIVO
+  (sin negocio no se pide: sin negocio_id la API cuenta toda la
+  empresa), sección «Por pagar» en el inicio (sólo quien paga), y del
+  movimiento a su orden (GET /ordenes/de-movimiento/:mid). Lo que hay
+  que no romper: la liga va entre las acciones del renglón, no en el
+  concepto (truncate la tapa en el teléfono). Muro 2026-09-30-1700.
 - **Subítems (30-sep, API 0.56.0 #181, quell101 #92).** items.padre_id y
   quell_elements.padre_id (0024). En quell «＋ Subítem» levanta un
   requerimiento colgado de la pieza y de su ítem. Lo que hay que no
