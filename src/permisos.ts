@@ -53,6 +53,9 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
   // están en su lista: son cachés (abajo).
   partidas: { dash101: ['proyecto_id', 'item_id', 'proveedor_id', 'proveedor_nombre', 'concepto', 'monto_acordado'] },
   movimientos: { dash101: '*' },
+  /* 0.57.0 · Los accionistas son del tablero del dinero y de nadie más: los
+   * retiros de utilidades son movimientos de dash101 (Mike, 30-sep-2026). */
+  accionistas: { dash101: '*' },
   cuentas: { dash101: '*' },
   /* El negocio lo maneja dash101. `cotizador101` sólo puede CREARLO —nombre y
    * moneda, nada más— y es por una razón concreta: `cotizaciones.negocio_id`

@@ -17,7 +17,17 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.56.1 (DEL MOVIMIENTO A SU ORDEN. Mike, 30-sep:
+ * Versión del contrato: 0.57.0 (ACCIONISTAS Y RETIROS DE UTILIDADES. Mike,
+ * 30-sep: «un módulo de accionistas donde se registren pagos a los
+ * accionistas como retiro de utilidades». Migración org 0025: tabla
+ * `accionistas` (negocio_id, nombre, rfc, correo, telefono, porcentaje,
+ * notas, activo), por el CRUD genérico; la escribe dash101. El retiro no
+ * tiene tabla: es un egreso en `movimientos` con categoria
+ * 'retiro_utilidades' (CATEGORIA_RETIRO_UTILIDADES) y contraparte_tipo
+ * 'accionista', que se suma al tipo. La API revisa al escribir: nombre,
+ * porcentaje entre 0 y 100, RFC y correo como en proveedores.)
+ *
+ * Antes, 0.56.1 (DEL MOVIMIENTO A SU ORDEN. Mike, 30-sep:
  * las órdenes pagadas «se pasen al movimiento con toda la info que traían».
  * Nueva `GET /orgs/:o/ordenes/de-movimiento/:mid` (quien ve dinero): la
  * orden, sus eventos y sus papeles a partir del egreso que dejó; 404 si el
@@ -850,7 +860,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.56.1';
+export const VERSION_CONTRATO = '0.57.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1170,6 +1180,31 @@ export interface ProveedorCuenta {
   creado_at: string;
 }
 
+/** Un accionista del negocio (0025, contrato 0.57.0). Mike, 30-sep-2026:
+ *  «un módulo de accionistas donde se registren pagos a los accionistas como
+ *  retiro de utilidades». El retiro NO es una tabla: es un `Movimiento` de
+ *  tipo egreso con `categoria` = CATEGORIA_RETIRO_UTILIDADES,
+ *  `contraparte_tipo` = 'accionista' y `contraparte_id` = este id. Así baja
+ *  la cuenta de la que salió y se ve en Movimientos, conciliación y flujo; la
+ *  categoría lo aparta de los gastos. `porcentaje` es la participación (0 a
+ *  100), opcional. Lo escribe dash101 y lo ve quien ve dinero. */
+export interface Accionista {
+  id: string;
+  negocio_id: string;
+  nombre: string;
+  nombre_norm: string;
+  rfc: string | null;
+  correo: string | null;
+  telefono: string | null;
+  porcentaje: number | null;
+  notas: string | null;
+  activo: boolean;
+  creado_at: string;
+}
+
+/** La categoría del egreso que es un retiro de utilidades (0.57.0). */
+export const CATEGORIA_RETIRO_UTILIDADES = 'retiro_utilidades';
+
 export interface Proveedor {
   id: string;
   nombre: string;
@@ -1390,7 +1425,8 @@ export interface Movimiento {
   cuenta_id: string;
   proyecto_id: string | null;
   item_id: string | null;
-  contraparte_tipo: 'cliente' | 'proveedor' | 'personal' | 'otro';
+  /** `accionista` desde 0.57.0: un retiro de utilidades. */
+  contraparte_tipo: 'cliente' | 'proveedor' | 'personal' | 'accionista' | 'otro';
   contraparte_id: string | null;
   contraparte_nombre: string | null;
   transfer_id: string | null;
@@ -1479,6 +1515,7 @@ export const TABLAS = [
   'clientes',
   'proveedores',
   'proveedor_cuentas',
+  'accionistas',
   'personal',
   'estaciones',
   'cotizaciones',
