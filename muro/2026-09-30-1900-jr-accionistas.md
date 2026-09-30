@@ -41,8 +41,12 @@ pruebas/accionistas.spec.ts contra staging (5: pesos de ida y vuelta,
 errores de la API dichos en claro; la baja sin perder lo retirado) y una
 prueba en navegador.spec.mjs a 390×844 (alta, retiro de $1,234.50, el
 egreso en la API, sin barrido horizontal, baja). API en producción con
-contrato 0.57.0; dash101 en cuanto termine su corrida (queda apuntado en
-CONTINUAR).
+contrato 0.57.0; dash101 publicado y verificado (huella 68b38b9).
+
+Lo que costó: la primera corrida de #110 se quedó en staging porque las
+etiquetas del formulario no estaban ligadas a sus campos y Playwright no
+encontró «Participación %». #111: htmlFor/id en cada campo (que además
+es lo que un lector de pantalla necesita).
 
 Lo que NO se hizo, porque Mike no lo pidió: reparto automático de
 utilidades por porcentaje (el porcentaje sólo se enseña), y el retiro
