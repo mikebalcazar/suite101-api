@@ -253,6 +253,8 @@ export interface ApiOrgDB {
   buzon(hoy?: string, negocio_id?: string | null, tipo?: TipoOrden | null): Promise<{ filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number }>;
   pendientesDeOrdenes(negocio_id?: string | null): Promise<{ compras: { total: number; cuantas: number }; reembolsos: { total: number; cuantas: number } }>;
   verOrden(id: string): Promise<{ orden: Fila; eventos: Fila[]; archivos: Fila[] } | null>;
+  /** 0.56.1 · La orden que dejó ese egreso (o null): para que desde el movimiento se llegue a la orden con toda su historia y sus papeles. */
+  ordenDeMovimiento(movimiento_id: string): Promise<{ orden: Fila; eventos: Fila[]; archivos: Fila[] } | null>;
   pagarOrden(args: Record<string, unknown>): Promise<{ ok: true; orden: Fila; movimiento: Fila; partida_id: string | null } | { error: string; detalle?: unknown }>;
   resolverOrden(args: { id: string; que: 'devuelta' | 'rechazada'; nota: string; quien_usuario_id: string; quien_nombre?: string | null }): Promise<Fila | { error: string; detalle?: unknown }>;
   corregirOrden(args: { id: string; quien_usuario_id: string; quien_nombre?: string | null; cambios: Record<string, unknown> }): Promise<Fila | { error: string; detalle?: unknown }>;
@@ -1998,6 +2000,11 @@ export class OrgDB extends DurableObject<Env> {
    *  segundo para reclamarle al proveedor, así que salen juntos, cada uno
    *  diciendo de dónde viene en `de`. Buscarlos por separado obligaría a la
    *  pantalla a saber que el comprobante vive colgado de otra tabla. */
+  ordenDeMovimiento(movimiento_id: string): { orden: Fila; eventos: Fila[]; archivos: Fila[] } | null {
+    const f = this.sql.exec(`SELECT id FROM ordenes WHERE movimiento_id = ? LIMIT 1`, movimiento_id).toArray()[0] as Fila | undefined;
+    return f ? this.verOrden(String(f.id)) : null;
+  }
+
   verOrden(id: string): { orden: Fila; eventos: Fila[]; archivos: Fila[] } | null {
     const orden = this.leerInterna('ordenes', id);
     if (!orden) return null;

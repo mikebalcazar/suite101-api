@@ -74,6 +74,20 @@ export function montarOrdenes(rutas: App): void {
     return ok(c, await stub(c).buzon(undefined, c.req.query('negocio_id') || null, tipo));
   });
 
+  /** 0.56.1 · De un movimiento a su orden. Mike, 30-sep: cuando una orden se
+   *  paga «se pasen al movimiento con toda la info que traían ya». El egreso
+   *  ya lleva folio, concepto, proveedor, proyecto y partida; lo que no cabe
+   *  en un renglón —la historia, los papeles— vive en la orden, y ésta es la
+   *  liga de regreso. La lee quien ve dinero, que es quien ve el movimiento.
+   *  Va antes de `/:id/...` por orden de registro, no por conflicto. */
+  rutas.get('/:o/ordenes/de-movimiento/:mid', async (c) => {
+    const q = c.get('quien');
+    if (q.clase === 'cliente' || !q.ve_dinero) return err(c, 'sin_permiso', 403);
+    const r = await stub(c).ordenDeMovimiento(c.req.param('mid')!);
+    if (!r) return err(c, 'no_encontrado', 404, { movimiento: c.req.param('mid') });
+    return ok(c, r);
+  });
+
   /** Qué puede hacer quien pregunta (0.47.0): pedir compras, o sólo
    *  reembolsos; y si paga. supply101 lo lee al arrancar para bloquear la
    *  opción «compra» y decir por qué, en vez de dejar que el 403 llegue

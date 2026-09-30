@@ -150,6 +150,21 @@ describe('19 · órdenes de compra (los casos del encargo)', () => {
     expect(suma).toBe(1_160_00);
   });
 
+  it('0.56.1 · del egreso se llega a la orden, con su historia y sus papeles', async () => {
+    const pagada = await o('beto', `/ordenes/${oc1}`);
+    expect(pagada.estado, JSON.stringify(pagada)).toBe(200);
+    const mid = pagada.data.orden.movimiento_id;
+    expect(mid, JSON.stringify(pagada.data.orden)).toBeTruthy();
+    const r = await o('mike', `/ordenes/de-movimiento/${mid}`);
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.orden.id).toBe(oc1);
+    expect(r.data.orden.estado).toBe('pagada');
+    expect(Array.isArray(r.data.eventos) && r.data.eventos.some((e: any) => e.que === 'pagada')).toBe(true);
+    expect(Array.isArray(r.data.archivos)).toBe(true);
+    const nada = await o('mike', '/ordenes/de-movimiento/no-es-de-una-orden');
+    expect(nada.estado).toBe(404);
+  });
+
   it('5 · la misma orden no se paga dos veces: nada de dobles egresos', async () => {
     const otra = await o('beto', `/ordenes/${oc1}/pagar`, { method: 'POST', json: { cuenta_id: cuenta } });
     expect(otra.estado).toBe(409);

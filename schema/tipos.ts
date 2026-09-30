@@ -17,7 +17,13 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.56.0 (SUBÍTEMS. Mike, 30-sep: «los ítems puedan
+ * Versión del contrato: 0.56.1 (DEL MOVIMIENTO A SU ORDEN. Mike, 30-sep:
+ * las órdenes pagadas «se pasen al movimiento con toda la info que traían».
+ * Nueva `GET /orgs/:o/ordenes/de-movimiento/:mid` (quien ve dinero): la
+ * orden, sus eventos y sus papeles a partir del egreso que dejó; 404 si el
+ * movimiento no viene de una orden.)
+ *
+ * Antes, 0.56.0 (SUBÍTEMS. Mike, 30-sep: «los ítems puedan
  * tener subítems (…) trabajos o servicios que se le hacen complementarios a
  * un ítem (…) deben de nacer como requerimientos nuevos, pero ligados al
  * ítem al que se le aplica». Migración org 0024: `items.padre_id` y
@@ -844,7 +850,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.56.0';
+export const VERSION_CONTRATO = '0.56.1';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
