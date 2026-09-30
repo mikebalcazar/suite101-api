@@ -377,6 +377,15 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   al cambiar el plano con componentes puestos se ofrece «Reubicarlos uno
   por uno» o «Se quedan donde están». quote101 #69, dos pruebas nuevas,
   115/115. Muro 2026-09-29-1100.
+- **quell101: el contratista entra a la obra desde el ítem (30-sep, API
+  0.54.1 #176, quell101 #91).** Mike en Holcim: «no me deja agregar a un
+  contratista». Escogió un solo paso: PUT contratistas mete a la obra al
+  que no estaba (rol con, correo de acceso, `entraron_a_la_obra`); GET
+  /quell/contratistas lista los de la empresa para el menú. Lo que hay que
+  no romper: sigue siendo 400 quien no es `con` o está de baja; el correo
+  sale DESPUÉS de escribir, como en POST members. Humo #177: ORG lleva
+  «-<intento>» al repetir el job (las cuentas del D1 maestro sobreviven a
+  la limpieza de la empresa). Muro 2026-09-30-1300.
 - **draw101 0.22.0 publicada; el run fallaba por httpx2 (30-sep).** El
   encargo de draw101 (muro 0100): el run de claude/publicar-0.22.0 no
   era cuota, falló en t047 porque el starlette de hoy exige `httpx2`
