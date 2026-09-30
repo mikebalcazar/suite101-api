@@ -377,6 +377,12 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   al cambiar el plano con componentes puestos se ofrece «Reubicarlos uno
   por uno» o «Se quedan donde están». quote101 #69, dos pruebas nuevas,
   115/115. Muro 2026-09-29-1100.
+- **quell101: fotos pegadas o arrastradas en la bitácora del ítem
+  (30-sep, #88).** Mike: «quiero poder agregar fotos pero solo
+  arrastrando o pegando lo que está en el portapapeles». pegar.js
+  (`imagenesDe`, `nombreDePegada`) + `usePegarYSoltar` en Fotos.jsx;
+  la bitácora lo usa; punchlist y dudas quedan a dos líneas si lo pide.
+  Prueba la-foto-pegada.mjs (18). Muro 2026-09-30-0900.
 - **Recado de draw101: pruebas de la nube enganchadas, y master101 0.2.1
   (29-sep).** draw101 (muro 1520) no podía escribir en
   .github/workflows/: #168 engancha migracion-0021.py y humo-nube.mjs
