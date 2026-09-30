@@ -75,6 +75,21 @@ export const DEFS: Record<Tabla, Def> = {
     filtros: ['proveedor_id'],
     orden: 'creado_at',
   },
+  /* 0025 · Los accionistas del negocio (Mike, 30-sep-2026: «un módulo de
+   * accionistas donde se registren pagos a los accionistas como retiro de
+   * utilidades»). El retiro NO tiene tabla: es un egreso en `movimientos` con
+   * categoria 'retiro_utilidades', contraparte_tipo 'accionista' y
+   * contraparte_id el accionista. `porcentaje` es la participación (0-100),
+   * opcional; la API la revisa al escribir (revisarAccionista). */
+  accionistas: {
+    cols: {
+      ...IDENT, negocio_id: 'texto', nombre: 'texto', nombre_norm: 'texto', rfc: 'texto', correo: 'texto',
+      telefono: 'texto', porcentaje: 'real', notas: 'texto', activo: 'bool',
+    },
+    requeridos: ['negocio_id', 'nombre'],
+    filtros: ['negocio_id', 'activo'],
+    orden: 'nombre_norm',
+  },
   personal: {
     cols: {
       ...IDENT, nombre: 'texto', nombre_norm: 'texto', correo: 'texto', puesto: 'texto', activo: 'bool',

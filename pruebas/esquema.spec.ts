@@ -107,8 +107,9 @@ describe('el esquema del OrgDB', () => {
     // posición de un ítem en el plano (0006, quell101), y el segundo par es
     // el de una marca sobre el documento del ítem (0019), también de 0 a 1
     // —relativa, porque el mismo PDF se ve a un ancho en el celular y a otro
-    // en la compu—. Nada más es REAL.
-    expect(reales).toEqual(['avance', 'x', 'y', 'x', 'y']);
+    // en la compu—. `porcentaje` (0025) es la participación de un accionista,
+    // de 0 a 100: lo que le toca, no dinero. Nada más es REAL.
+    expect(reales).toEqual(['avance', 'x', 'y', 'x', 'y', 'porcentaje']);
     for (const col of ['monto', 'total', 'saldo_inicial', 'precio_venta', 'cobrado', 'pagado_prov', 'compromiso', 'monto_acordado', 'monto_pagado']) {
       expect(sinNotas).toMatch(new RegExp(`${col}\\s+INTEGER`));
     }

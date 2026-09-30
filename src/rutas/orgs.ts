@@ -28,7 +28,7 @@ import { APPS, LLAVE_APP, type App, type Tabla } from '../../schema/tipos';
 const rutas = new Hono<{ Bindings: Env; Variables: Vars }>();
 
 /** Tablas con dinero que el personal sin `ve_dinero` no abre. */
-const TABLAS_DINERO: Tabla[] = ['movimientos', 'cuentas', 'opex', 'cotizaciones', 'partidas', 'conciliaciones', 'conciliacion_cuentas'];
+const TABLAS_DINERO: Tabla[] = ['movimientos', 'cuentas', 'opex', 'cotizaciones', 'partidas', 'conciliaciones', 'conciliacion_cuentas', 'accionistas'];
 
 const stub = (c: Ctx): ApiOrgDB => c.env.ORG.get(c.env.ORG.idFromName(c.get('org_id'))) as unknown as ApiOrgDB;
 
@@ -1201,7 +1201,7 @@ rutas.post('/:o/:tabla', async (c) => {
   const malDinero = revisarDinero(tabla, datos);
   if (malDinero) return err(c, 'dinero_no_entero', 400, malDinero);
 
-  const malProveedor = tabla === 'proveedores' ? revisarProveedor(datos) : tabla === 'proveedor_cuentas' ? revisarCuenta(datos) : null;
+  const malProveedor = tabla === 'proveedores' ? revisarProveedor(datos) : tabla === 'proveedor_cuentas' ? revisarCuenta(datos) : tabla === 'accionistas' ? revisarAccionista(datos) : null;
   if (malProveedor) return err(c, 'datos_invalidos', 400, { errores: malProveedor });
 
   const fila = await stub(c).crear(tabla, datos, { app: c.get('app'), usuario_id: quien.usuario_id });
@@ -1271,6 +1271,20 @@ export function revisarProveedor(datos: Record<string, unknown>): Record<string,
   return Object.keys(errores).length ? errores : null;
 }
 
+/** 0.57.0 · Un accionista: nombre con algo, participación entre 0 y 100 si
+ *  viene, y RFC y correo con la misma vara que un proveedor. Normaliza igual
+ *  (RFC en mayúsculas, correo en minúsculas, vacíos a NULL). */
+export function revisarAccionista(datos: Record<string, unknown>): Record<string, string> | null {
+  const errores = revisarProveedor(datos) ?? {};
+  if (datos.nombre !== undefined && !String(datos.nombre).trim()) errores.nombre = 'Escribe el nombre del accionista.';
+  if (datos.porcentaje !== undefined && datos.porcentaje !== null && datos.porcentaje !== '') {
+    const n = Number(datos.porcentaje);
+    if (!Number.isFinite(n) || n < 0 || n > 100) errores.porcentaje = 'La participación es un número entre 0 y 100.';
+    else datos.porcentaje = n;
+  } else if (datos.porcentaje === '') datos.porcentaje = null;
+  return Object.keys(errores).length ? errores : null;
+}
+
 rutas.patch('/:o/:tabla/:id', async (c) => {
   const tabla = c.req.param('tabla')!;
   if (!esTabla(tabla)) return err(c, 'tabla_desconocida', 404, { tabla });
@@ -1292,7 +1306,7 @@ rutas.patch('/:o/:tabla/:id', async (c) => {
   const malDinero = revisarDinero(tabla, datos);
   if (malDinero) return err(c, 'dinero_no_entero', 400, malDinero);
 
-  const malProveedor = tabla === 'proveedores' ? revisarProveedor(datos) : tabla === 'proveedor_cuentas' ? revisarCuenta(datos) : null;
+  const malProveedor = tabla === 'proveedores' ? revisarProveedor(datos) : tabla === 'proveedor_cuentas' ? revisarCuenta(datos) : tabla === 'accionistas' ? revisarAccionista(datos) : null;
   if (malProveedor) return err(c, 'datos_invalidos', 400, { errores: malProveedor });
 
   /* 0.46.0 · Una cotización aprobada es lo que se vendió: sus piezas ya están
