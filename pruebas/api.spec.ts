@@ -790,6 +790,57 @@ describe('11 · workshop101: el administrador de la empresa (contrato 0.6.0)', (
     expect(det.data.apps.dash).toBe(true);
   });
 
+  it('0.54.2 · la administración edita nombre y correo de un integrante; el correo no pisa a otra cuenta', async () => {
+    await entrarComo('admi@ejemplo.mx');
+    const nada = await pedir(`/admin/orgs/${ORG}/miembros/${socia}`, { method: 'PATCH', body: JSON.stringify({}) });
+    expect(nada.estado).toBe(400);
+    const feo = await pedir(`/admin/orgs/${ORG}/miembros/${socia}`, { method: 'PATCH', body: JSON.stringify({ correo: 'sin-arroba' }) });
+    expect(feo.estado).toBe(400);
+    const pisa = await pedir(`/admin/orgs/${ORG}/miembros/${socia}`, { method: 'PATCH', body: JSON.stringify({ correo: 'DUENA@ejemplo.mx' }) });
+    expect(pisa.estado).toBe(409);
+    expect(pisa.error).toBe('correo_en_uso');
+    const cambio = await pedir(`/admin/orgs/${ORG}/miembros/${socia}`, { method: 'PATCH', body: JSON.stringify({ nombre: '  Socia Renombrada ', correo: ' Socia.Nueva@Ejemplo.mx ' }) });
+    expect(cambio.estado, JSON.stringify(cambio)).toBe(200);
+    expect(cambio.data.nombre).toBe('Socia Renombrada');
+    expect(cambio.data.correo).toBe('socia.nueva@ejemplo.mx');
+    expect(cambio.data.rol).toBe('socio');
+    const lista = await pedir(`/admin/orgs/${ORG}/miembros`);
+    const fila = lista.data.filas.find((f: any) => f.usuario_id === socia);
+    expect(fila.correo).toBe('socia.nueva@ejemplo.mx');
+    expect(fila.nombre).toBe('Socia Renombrada');
+    const bit = await pedir(`/admin/orgs/${ORG}/bitacora`);
+    const campos = bit.data.filas.map((f: any) => f.campo);
+    expect(campos).toContain('miembro.nombre');
+    expect(campos).toContain('miembro.correo');
+    // Con el correo nuevo entra; con el viejo ya no hay cuenta.
+    await entrarComo('socia.nueva@ejemplo.mx');
+    const yo = await pedir('/yo');
+    expect(yo.estado).toBe(200);
+    expect(yo.data.usuario.id).toBe(socia);
+    await entrarComo('admi@ejemplo.mx');
+    // Una cuenta que también es de otra empresa no se cambia desde aquí.
+    galleta = galletaMike;
+    const otraOrg = await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: `${ORG}-2`, nombre: 'Otra empresa' }), app: '' });
+    expect([201, 409]).toContain(otraOrg.estado);
+    const enOtra = await pedir(`/admin/orgs/${ORG}-2/miembros`, { method: 'POST', body: JSON.stringify({ correo: 'socia.nueva@ejemplo.mx', rol: 'socio' }), app: '' });
+    expect([200, 201]).toContain(enOtra.estado);
+    await entrarComo('admi@ejemplo.mx');
+    const compartida = await pedir(`/admin/orgs/${ORG}/miembros/${socia}`, { method: 'PATCH', body: JSON.stringify({ correo: 'socia.otra@ejemplo.mx' }) });
+    expect(compartida.estado).toBe(409);
+    expect(compartida.error).toBe('cuenta_compartida');
+    expect(compartida.detalle.empresas).toEqual(['Otra empresa']);
+    // El nombre sí, aunque la cuenta sea compartida.
+    const soloNombre = await pedir(`/admin/orgs/${ORG}/miembros/${socia}`, { method: 'PATCH', body: JSON.stringify({ nombre: 'Socia' }) });
+    expect(soloNombre.estado).toBe(200);
+    expect(soloNombre.data.nombre).toBe('Socia');
+    // Y se deja como estaba para lo que sigue.
+    galleta = galletaMike;
+    await pedir(`/admin/orgs/${ORG}-2/miembros/${socia}`, { method: 'DELETE', app: '' });
+    await entrarComo('admi@ejemplo.mx');
+    const regreso = await pedir(`/admin/orgs/${ORG}/miembros/${socia}`, { method: 'PATCH', body: JSON.stringify({ correo: 'socia@ejemplo.mx' }) });
+    expect(regreso.estado, JSON.stringify(regreso)).toBe(200);
+  });
+
   it('la administración no nombra ni toca dueños, y nadie se toca a sí mismo', async () => {
     await entrarComo('admi@ejemplo.mx');
     const nombra = await pedir(`/admin/orgs/${ORG}/miembros`, { method: 'POST', body: JSON.stringify({ correo: 'otro-dueno@ejemplo.mx', rol: 'owner' }) });
