@@ -378,7 +378,7 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   por uno» o «Se quedan donde están». quote101 #69, dos pruebas nuevas,
   115/115. Muro 2026-09-29-1100.
 - **Accionistas y retiros de utilidades (30-sep, API 0.57.0 #185, dash101
-  #110).** Tabla `accionistas` (0025) por el CRUD, la ve quien ve dinero.
+  #110 y #111).** Tabla `accionistas` (0025) por el CRUD, la ve quien ve dinero.
   El retiro NO es tabla: egreso con categoria 'retiro_utilidades' y
   contraparte_tipo 'accionista'. Lo que hay que no romper: un estado de
   resultados debe excluir esa categoría; dar de baja es activo=false, no
