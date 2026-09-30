@@ -183,10 +183,37 @@ describe('D · contratistas por ítem', () => {
     const dosVeces = await q('mike', `/elements/${m1}/contratistas`, { method: 'PUT', json: { user_ids: [ids.goyo, ids.berna, ids.goyo], op_id: crypto.randomUUID() } });
     expect(dosVeces.contratistas.length).toBe(2);
     expect((await q('mike', `/elements/${m1}/contratistas`, { method: 'PUT', json: { user_ids: [ids.mike], op_id: crypto.randomUUID() } })).estado).toBe(400);
-    const fuera = await q('mike', `/elements/${m1}/contratistas`, { method: 'PUT', json: { user_ids: [ids.goyo, ids.fuera], op_id: crypto.randomUUID() } });
-    expect(fuera.estado).toBe(400);
-    expect(fuera.error).toMatch(/acceso a la obra/);
     expect((await q('goyo', `/elements/${m1}/contratistas`, { method: 'PUT', json: { user_ids: [ids.goyo], op_id: crypto.randomUUID() } })).estado).toBe(403);
+  });
+  it('0.54.1 · un contratista que no está en la obra entra a la obra al asignarlo desde el ítem', async () => {
+    // Antes de 0.54.1 esto era 400 «Primero dale acceso a la obra». Mike
+    // (30-sep, Holcim) escogió que el ítem lo haga en un solo paso.
+    const antes = await q('mike', `/projects/${obraA}`);
+    expect(antes.members.some((x: any) => x.id === ids.fuera)).toBe(false);
+    const fuera = await q('mike', `/elements/${m1}/contratistas`, { method: 'PUT', json: { user_ids: [ids.goyo, ids.berna, ids.fuera], op_id: crypto.randomUUID() } });
+    expect(fuera.estado, JSON.stringify(fuera)).toBe(200);
+    expect(fuera.contratistas.map((c: any) => c.name).sort()).toEqual(['Berna', 'Fuera', 'Goyo']);
+    expect(fuera.entraron_a_la_obra.map((x: any) => x.name)).toEqual(['Fuera']);
+    const despues = await q('mike', `/projects/${obraA}`);
+    const enObra = despues.members.find((x: any) => x.id === ids.fuera);
+    expect(enObra && enObra.rol_obra).toBe('con');
+    // Volverlo a mandar no lo vuelve a meter (ni le manda otro correo).
+    const otraVez = await q('mike', `/elements/${m1}/contratistas`, { method: 'PUT', json: { user_ids: [ids.goyo, ids.berna, ids.fuera], op_id: crypto.randomUUID() } });
+    expect(otraVez.entraron_a_la_obra).toEqual([]);
+    // Y se deja como estaba para lo que sigue: Goyo y Berna nada más.
+    const limpia = await q('mike', `/elements/${m1}/contratistas`, { method: 'PUT', json: { user_ids: [ids.goyo, ids.berna], op_id: crypto.randomUUID() } });
+    expect(limpia.contratistas.length).toBe(2);
+    await q('mike', `/projects/${obraA}/members/${ids.fuera}`, { method: 'DELETE' });
+    expect((await q('mike', `/projects/${obraA}`)).members.some((x: any) => x.id === ids.fuera)).toBe(false);
+  });
+  it('0.54.1 · GET /contratistas: los de la empresa, para quien dirige', async () => {
+    const lista = await q('mike', '/contratistas');
+    expect(lista.estado, JSON.stringify(lista)).toBe(200);
+    const nombres = lista.contratistas.map((c: any) => c.name);
+    expect(nombres).toEqual(expect.arrayContaining(['Goyo', 'Berna', 'Fuera']));
+    expect(nombres).not.toContain('Mike');
+    expect(lista.contratistas[0]).not.toHaveProperty('email');
+    expect((await q('goyo', '/contratistas')).estado).toBe(403);
   });
   it('el contratista ve todo el plano, los suyos completos y los ajenos recortados por el servidor', async () => {
     for (const eid of [m1, m2]) expect((await q('mike', `/elements/${eid}/fase`, { method: 'POST', json: { fase: 'punchlist', op_id: crypto.randomUUID() } })).estado).toBe(200);
