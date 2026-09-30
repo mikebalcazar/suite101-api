@@ -523,6 +523,16 @@ export async function atender(req, env, url, path) {
    */
 
   // ----- users (admin) -----
+  /* 0.54.1 · Los contratistas de la empresa, para el menú «+ asignar…» del
+   * ítem. Lo ve quien dirige la obra (admin e int), no sólo el dueño como
+   * /users: un supervisor asigna contratistas y necesita la lista completa,
+   * no nada más los que ya están en la obra. Sólo los vivos, y sólo lo que
+   * hace falta para escoger: id, nombre, empresa. */
+  if (seg[0] === 'contratistas' && !seg[1] && m === 'GET') {
+    if (!isStaff(user)) return err('Los contratistas los ve quien dirige la obra.', 403);
+    const { results } = await env.DB.prepare(`SELECT id, name, company FROM quell_users WHERE role = 'con' AND active = 1 ORDER BY name`).all();
+    return json({ contratistas: results });
+  }
   if (seg[0] === 'users') {
     if (user.role !== 'admin') return err('sólo administrador', 403);
     if (m === 'GET') {
@@ -1162,24 +1172,43 @@ export async function atender(req, env, url, path) {
       const b = await req.json();
       if (await yaHecha(env, b.op_id)) return json({ ok: true, repetida: true });
       const ids = [...new Set((Array.isArray(b.user_ids) ? b.user_ids : []).map(String).filter(Boolean))];
+      /* 0.54.1 · Mike, 30-sep, en la obra de Holcim: «en este ítem no me deja
+       * agregar a un contratista». La regla era que primero se le daba acceso
+       * a la obra en «Usuarios y accesos» y luego se asignaba al ítem; escogió
+       * que el ítem lo haga en un solo paso. Un contratista de la empresa que
+       * no está en la obra ENTRA a la obra aquí mismo (rol `con`, y le llega
+       * el mismo correo que si lo hubieran agregado desde la pantalla de
+       * accesos). Lo que sigue sin pasar: asignar a quien no es contratista o
+       * está dado de baja. */
+      const entran = [];
       for (const uidC of ids) {
         const q = await env.DB.prepare(
-          `SELECT u.id, u.role, u.active, (SELECT 1 FROM quell_project_members pm WHERE pm.project_id = ? AND pm.user_id = u.id) AS en_obra FROM quell_users u WHERE u.id = ?`,
+          `SELECT u.id, u.email, u.name, u.role, u.active, (SELECT 1 FROM quell_project_members pm WHERE pm.project_id = ? AND pm.user_id = u.id) AS en_obra FROM quell_users u WHERE u.id = ?`,
         ).bind(pid, uidC).first();
         if (!q || !q.active) return err('Ese contratista no existe o está dado de baja.', 400);
         if (q.role !== 'con') return err('Sólo se asignan contratistas (rol con).', 400);
-        if (!q.en_obra) return err('Primero dale acceso a la obra en «Quién entra a cada obra»; luego lo asignas al ítem.', 400);
+        if (!q.en_obra) entran.push(q);
       }
       const ops = [env.DB.prepare(`DELETE FROM quell_element_contratistas WHERE element_id = ?${ids.length ? ` AND user_id NOT IN (${ids.map(() => '?').join(',')})` : ''}`).bind(eid, ...ids)];
+      for (const q of entran) {
+        ops.push(env.DB.prepare(`INSERT INTO quell_project_members (project_id, user_id, rol) VALUES (?,?,'con') ON CONFLICT (project_id, user_id) DO NOTHING`).bind(pid, q.id));
+      }
       for (const uidC of ids) {
         ops.push(env.DB.prepare(`INSERT INTO quell_element_contratistas (element_id, user_id, asignado_por) VALUES (?,?,?) ON CONFLICT (element_id, user_id) DO NOTHING`).bind(eid, uidC, user.id));
       }
       await env.DB.batch(ops);
       await apunta(env, b.op_id);
+      // El correo de «te dieron acceso a la obra» sale después de escribir,
+      // como en POST members: la persona ya quedó adentro aunque no salga.
+      const avisos = [];
+      if (entran.length) {
+        const obra = await env.DB.prepare(`SELECT name, client FROM quell_projects WHERE id = ?`).bind(pid).first();
+        for (const q of entran) { const r = await invita(env, req, q, obra, 'con'); if (!r.ok) avisos.push(`${q.name}: ${r.error}`); }
+      }
       const { results: contratistas } = await env.DB.prepare(
         `SELECT u.id, u.name, u.company, ec.asignado_at FROM quell_element_contratistas ec JOIN quell_users u ON u.id = ec.user_id WHERE ec.element_id = ? ORDER BY u.name`,
       ).bind(eid).all();
-      return json({ ok: true, contratistas });
+      return json({ ok: true, contratistas, entraron_a_la_obra: entran.map((q) => ({ id: q.id, name: q.name })), aviso: avisos.length ? avisos.join(' · ') : null });
     }
     if (!seg[2] && m === 'PATCH') {
       if (!isStaff(user)) return err('El contratista no edita elementos.', 403);

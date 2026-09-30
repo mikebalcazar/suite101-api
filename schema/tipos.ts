@@ -17,7 +17,15 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.54.0 (PROVEEDOR CON DATOS PARA PAGARLE. Mike,
+ * Versión del contrato: 0.54.1 (EL CONTRATISTA ENTRA A LA OBRA DESDE EL ÍTEM.
+ * Mike, 30-sep, en Holcim: «en este ítem no me deja agregar a un
+ * contratista». quell: `PUT /elements/:id/contratistas` ya no rechaza al
+ * contratista que no está en la obra: lo mete a la obra con rol `con` en el
+ * mismo paso, le manda el correo de acceso y contesta `entraron_a_la_obra`.
+ * Nueva `GET /orgs/:o/quell/contratistas` (admin e int): los contratistas
+ * vivos de la empresa, para el menú del ítem.)
+ *
+ * Antes, 0.54.0 (PROVEEDOR CON DATOS PARA PAGARLE. Mike,
  * 29-sep, para supply101: «dar de alta a un nuevo proveedor (…) nombre, RFC,
  * número de cuenta (CLABE y banco y beneficiario), email de contacto,
  * teléfono de contacto, ubicación (…) de Google Maps». Migración org 0022:
@@ -805,7 +813,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.54.0';
+export const VERSION_CONTRATO = '0.54.1';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
