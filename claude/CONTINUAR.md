@@ -377,6 +377,19 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   al cambiar el plano con componentes puestos se ofrece «Reubicarlos uno
   por uno» o «Se quedan donde están». quote101 #69, dos pruebas nuevas,
   115/115. Muro 2026-09-29-1100.
+- **Accionistas y retiros de utilidades (30-sep, API 0.57.0 #185, dash101
+  #110).** Tabla `accionistas` (0025) por el CRUD, la ve quien ve dinero.
+  El retiro NO es tabla: egreso con categoria 'retiro_utilidades' y
+  contraparte_tipo 'accionista'. Lo que hay que no romper: un estado de
+  resultados debe excluir esa categoría; dar de baja es activo=false, no
+  DELETE (lo retirado sigue sumando). Muro 2026-09-30-1900.
+- **Inicio en el teléfono y el letrero de versión nueva (30-sep, dash101
+  #107/#109, y #108, workshop101 #12, master101 #31, peek101 #21,
+  roster101 #33, quell101 #93).** `/huella.txt` lo escribe el despliegue
+  (commit; sha256 del index en quell) y está en .gitignore; el letrero lo
+  pide cada 2 min y al volver la pestaña. Lo que hay que no romper: una
+  prueba que lea la lista entera de la org demo debe pedir `?limite=`
+  (ya pasó de 500 movimientos; #109). Muro 2026-09-30-1800.
 - **Compras en dash101 (30-sep, API 0.56.1 #183, dash101 #102–#106).**
   Menú «Compras», circulito con compras+reembolsos del negocio ACTIVO
   (sin negocio no se pide: sin negocio_id la API cuenta toda la
