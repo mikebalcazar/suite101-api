@@ -39,9 +39,8 @@ que se sirve. Está en .gitignore en todas: nunca se comete a mano. Los
 Workers lo sirven sin sesión, como cualquier archivo de public/.
 
 Verificado en vivo: /huella.txt contesta el commit mezclado en workshop101,
-master101, peek101 y roster101 (taller101.com) y el sha256 en quell101;
-dash101 y supply101 en cuanto termine su corrida (queda apuntado en
-CONTINUAR). Cada app tiene su prueba pruebas/la-version-nueva.mjs en su
+master101, peek101, roster101, dash101 y supply101 (taller101.com) y el
+sha256 en quell101. Cada app tiene su prueba pruebas/la-version-nueva.mjs en su
 cadena, y dash101 pruebas/version-nueva.spec.ts.
 
 Lo que NO se hizo: quote101 ya lo tenía (es el modelo); draw101 y nest101
