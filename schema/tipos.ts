@@ -17,7 +17,16 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.54.1 (EL CONTRATISTA ENTRA A LA OBRA DESDE EL ÍTEM.
+ * Versión del contrato: 0.54.2 (EL DIRECTOR EDITA NOMBRE Y CORREO DE UN
+ * INTEGRANTE. Mike, 30-sep: «quiero editar los datos de un integrante de la
+ * empresa». `PATCH /admin/orgs/:o/miembros/:uid` acepta también `nombre` y
+ * `correo`. El correo: 400 si no es válido, 409 correo_en_uso si ya es de
+ * otra cuenta, 409 cuenta_compartida si la cuenta también es de otra
+ * empresa o es superadmin (se cambia desde esa otra empresa, o desde
+ * master101). Al cambiar el correo se suelta el google_sub. Bitácora:
+ * `miembro.nombre` y `miembro.correo`. La respuesta trae `nombre`.)
+ *
+ * Antes, 0.54.1 (EL CONTRATISTA ENTRA A LA OBRA DESDE EL ÍTEM.
  * Mike, 30-sep, en Holcim: «en este ítem no me deja agregar a un
  * contratista». quell: `PUT /elements/:id/contratistas` ya no rechaza al
  * contratista que no está en la obra: lo mete a la obra con rol `con` en el
@@ -813,7 +822,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.54.1';
+export const VERSION_CONTRATO = '0.54.2';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

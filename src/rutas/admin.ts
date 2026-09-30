@@ -359,8 +359,10 @@ rutas.patch('/orgs/:o/miembros/:uid', async (c) => {
   if (!previo) return err(c, 'no_encontrado', 404, { miembro: uid });
   if (uid === c.get('sesion').usuario_id) return err(c, 'sin_permiso', 403, { motivo: 'a_ti_mismo' });
 
-  const cuerpo = await c.req.json<{ rol?: Rol; apps?: string[] }>().catch(() => ({}) as never);
-  if (cuerpo.rol === undefined && cuerpo.apps === undefined) return err(c, 'datos_invalidos', 400, { falta: 'rol o apps' });
+  const cuerpo = await c.req.json<{ rol?: Rol; apps?: string[]; nombre?: string | null; correo?: string }>().catch(() => ({}) as never);
+  if (cuerpo.rol === undefined && cuerpo.apps === undefined && cuerpo.nombre === undefined && cuerpo.correo === undefined) {
+    return err(c, 'datos_invalidos', 400, { falta: 'rol, apps, nombre o correo' });
+  }
   if (cuerpo.rol !== undefined && !ROLES.includes(cuerpo.rol)) return err(c, 'datos_invalidos', 400, { rol: ROLES });
   const rol = cuerpo.rol ?? previo.rol;
   if ((previo.rol === 'owner' || rol === 'owner') && !nombraDuenos(mando)) return err(c, 'sin_permiso', 403, { motivo: 'solo_un_dueno_toca_duenos' });
@@ -368,7 +370,45 @@ rutas.patch('/orgs/:o/miembros/:uid', async (c) => {
   const apps = cuerpo.apps === undefined ? { ok: true as const, apps: previo.apps } : appsLimpias(cuerpo.apps, empresa);
   if (!apps.ok) return err(c, 'datos_invalidos', 400, apps.detalle);
 
+  /* 0.54.2 · Los datos de la persona (nombre y correo), desde el Director.
+   * Mike, 30-sep: «quiero editar los datos de un integrante de la empresa».
+   * El nombre es libre. El correo es con el que la persona entra a TODA la
+   * suite, así que: normalizado y válido; si ya es de otra cuenta, 409
+   * correo_en_uso (usuarios.correo es UNIQUE, y decirlo es mejor que un
+   * 500); y si la cuenta también es de otra empresa (o es superadmin), no
+   * se cambia desde aquí: 409 cuenta_compartida, con las empresas. Al
+   * cambiarlo se suelta el google_sub: la puerta de Google busca por correo
+   * y volvería a ligar la cuenta de Google del correo nuevo, no la vieja. */
+  const antesU = await usuarioPorId(c.env, uid);
+  if (!antesU) return err(c, 'no_encontrado', 404, { usuario: uid });
+  let nombre: string | null | undefined;
+  if (cuerpo.nombre !== undefined) {
+    nombre = cuerpo.nombre === null ? null : String(cuerpo.nombre).trim().slice(0, 120) || null;
+  }
+  let correo: string | undefined;
+  if (cuerpo.correo !== undefined) {
+    const nuevo = normalizaCorreo(cuerpo.correo);
+    if (!correoValido(nuevo)) return err(c, 'datos_invalidos', 400, { correo: 'invalido' });
+    if (nuevo !== antesU.correo) {
+      const otro = await c.env.MASTER.prepare(`SELECT id FROM usuarios WHERE correo = ? AND id <> ?`).bind(nuevo, uid).first<{ id: string }>();
+      if (otro) return err(c, 'correo_en_uso', 409, { correo: nuevo });
+      const otras = await c.env.MASTER.prepare(`SELECT o.id, o.nombre FROM miembros m JOIN orgs o ON o.id = m.org_id WHERE m.usuario_id = ? AND m.org_id <> ?`)
+        .bind(uid, org_id).all<{ id: string; nombre: string }>();
+      const superadmin = await c.env.MASTER.prepare(`SELECT 1 AS x FROM superadmins WHERE usuario_id = ?`).bind(uid).first();
+      if ((otras.results ?? []).length || superadmin) {
+        return err(c, 'cuenta_compartida', 409, { empresas: (otras.results ?? []).map((o) => o.nombre), superadmin: !!superadmin });
+      }
+      correo = nuevo;
+    }
+  }
+
   await ponerMiembro(c.env, org_id, uid, rol, apps.apps, previo.negocios);
+  if (nombre !== undefined && nombre !== antesU.nombre) {
+    await c.env.MASTER.prepare(`UPDATE usuarios SET nombre = ? WHERE id = ?`).bind(nombre, uid).run();
+  }
+  if (correo !== undefined) {
+    await c.env.MASTER.prepare(`UPDATE usuarios SET correo = ?, google_sub = NULL WHERE id = ?`).bind(correo, uid).run();
+  }
   const u = await usuarioPorId(c.env, uid);
   const yo = quien(c);
   if (rol !== previo.rol) await apuntaAdmin(c.env, { quien: yo, org_id, campo: 'miembro.rol', antes: `${u?.correo ?? uid} (${previo.rol})`, despues: `${u?.correo ?? uid} (${rol})` });
@@ -376,7 +416,13 @@ rutas.patch('/orgs/:o/miembros/:uid', async (c) => {
     const dicho = (l: string[]) => (l.length ? l.join(', ') : 'todas');
     await apuntaAdmin(c.env, { quien: yo, org_id, campo: 'miembro.apps', antes: `${u?.correo ?? uid}: ${dicho(previo.apps)}`, despues: `${u?.correo ?? uid}: ${dicho(apps.apps)}` });
   }
-  return ok(c, { usuario_id: uid, correo: u?.correo ?? null, rol, apps: apps.apps });
+  if (nombre !== undefined && nombre !== antesU.nombre) {
+    await apuntaAdmin(c.env, { quien: yo, org_id, campo: 'miembro.nombre', antes: `${antesU.correo}: ${antesU.nombre ?? '—'}`, despues: `${antesU.correo}: ${nombre ?? '—'}` });
+  }
+  if (correo !== undefined) {
+    await apuntaAdmin(c.env, { quien: yo, org_id, campo: 'miembro.correo', antes: antesU.correo, despues: correo });
+  }
+  return ok(c, { usuario_id: uid, correo: u?.correo ?? null, nombre: u?.nombre ?? null, rol, apps: apps.apps });
 });
 
 rutas.delete('/orgs/:o/miembros/:uid', async (c) => {
