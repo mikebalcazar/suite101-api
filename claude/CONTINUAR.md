@@ -377,6 +377,13 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   al cambiar el plano con componentes puestos se ofrece «Reubicarlos uno
   por uno» o «Se quedan donde están». quote101 #69, dos pruebas nuevas,
   115/115. Muro 2026-09-29-1100.
+- **DEFECTO: quell101 en Android abría como computadora y no se podía
+  usar (30-sep, #90).** Vite 8 (lightningcss) reescribía los @media a
+  sintaxis de rango `(width <= 900px)`, que un Chrome anterior al 104 se
+  salta; pintaba la rejilla de escritorio en 400px. vite.config.js fija
+  la meta en Chrome 87 (y equivalentes) para lightningcss y para el
+  build; `el-css-viejo.mjs` lee el dist y reprueba si vuelve la sintaxis
+  de rango. Verificado en vivo con curl. Muro 2026-09-30-1100.
 - **DEFECTO: http:// en el dominio propio rompía «Entrar con Google»
   (30-sep).** Mike, en un Android nuevo: origen_no_permitido con
   volver_a http://quell101.taller101.com/. Los siete Workers con
