@@ -377,6 +377,21 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   al cambiar el plano con componentes puestos se ofrece «Reubicarlos uno
   por uno» o «Se quedan donde están». quote101 #69, dos pruebas nuevas,
   115/115. Muro 2026-09-29-1100.
+- **Subítems (30-sep, API 0.56.0 #181, quell101 #92).** items.padre_id y
+  quell_elements.padre_id (0024). En quell «＋ Subítem» levanta un
+  requerimiento colgado de la pieza y de su ítem. Lo que hay que no
+  romper: el padre debe ser de la misma obra (400); dash101 y quote101
+  lo tratan como ítem normal, a propósito. Muro 2026-09-30-1600.
+- **Proveedor: varias cuentas con alias y documentos (30-sep, API 0.55.0
+  #180, dash101 #101).** Tabla proveedor_cuentas (0023) por el CRUD; la
+  cuenta vieja en columnas pasa a «Principal»; documentos en archivos
+  (de_tabla proveedores); DELETE /archivos/:id. supply101: alta con N
+  cuentas y documentos, y ficha del proveedor. PENDIENTE: dash101 no
+  enseña cuentas ni documentos del proveedor. Muro 2026-09-30-1500.
+- **Director edita nombre y correo (30-sep, API 0.54.2 #179,
+  workshop101 #11).** PATCH miembros con nombre/correo; 409
+  correo_en_uso y cuenta_compartida; suelta google_sub. Muro
+  2026-09-30-1400.
 - **quell101: el contratista entra a la obra desde el ítem (30-sep, API
   0.54.1 #176, quell101 #91).** Mike en Holcim: «no me deja agregar a un
   contratista». Escogió un solo paso: PUT contratistas mete a la obra al
