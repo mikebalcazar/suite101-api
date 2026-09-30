@@ -986,6 +986,20 @@ rutas.get('/:o/archivos/:id', async (c) => {
   });
 });
 
+/* 0.55.0 · Quitar un archivo: el objeto de R2 y la fila, en ese orden (si el
+ * bucket falla, la fila sigue apuntando a algo que existe; al revés quedaría
+ * un objeto huérfano que nadie encuentra). Nació para los documentos del
+ * proveedor (una carátula que se subió por error), pero es de cualquier
+ * archivo de la empresa. Un cliente no borra nada. */
+rutas.delete('/:o/archivos/:id', async (c) => {
+  if (c.get('quien').clase === 'cliente') return err(c, 'sin_permiso', 403, { motivo: 'un cliente solo abre /peek' });
+  const fila = (await stub(c).obtener('archivos', c.req.param('id')!)) as Record<string, unknown> | null;
+  if (!fila) return err(c, 'no_encontrado', 404);
+  await c.env.ARCHIVOS.delete(String(fila.r2_key));
+  await stub(c).borrar('archivos', c.req.param('id')!);
+  return ok(c, { borrado: true, id: c.req.param('id') });
+});
+
 /* ─────────────── WebSocket (§8) ─────────────── */
 
 rutas.get('/:o/ws', async (c) => {
@@ -1187,7 +1201,7 @@ rutas.post('/:o/:tabla', async (c) => {
   const malDinero = revisarDinero(tabla, datos);
   if (malDinero) return err(c, 'dinero_no_entero', 400, malDinero);
 
-  const malProveedor = tabla === 'proveedores' ? revisarProveedor(datos) : null;
+  const malProveedor = tabla === 'proveedores' ? revisarProveedor(datos) : tabla === 'proveedor_cuentas' ? revisarCuenta(datos) : null;
   if (malProveedor) return err(c, 'datos_invalidos', 400, { errores: malProveedor });
 
   const fila = await stub(c).crear(tabla, datos, { app: c.get('app'), usuario_id: quien.usuario_id });
@@ -1207,6 +1221,23 @@ export function clabeValida(c: string): boolean {
   for (let i = 0; i < 17; i++) suma += (Number(c[i]) * pesos[i % 3]) % 10;
   return (10 - (suma % 10)) % 10 === Number(c[17]);
 }
+/* 0.55.0 · Una cuenta del proveedor (0023): la CLABE se normaliza y se revisa
+ * igual que en `proveedores`; el alias no va vacío. */
+export function revisarCuenta(datos: Record<string, unknown>): Record<string, string> | null {
+  const errores: Record<string, string> = {};
+  if (datos.clabe !== undefined && datos.clabe !== null) {
+    const c = String(datos.clabe).replace(/[\s-]/g, '');
+    datos.clabe = c;
+    if (!clabeValida(c)) errores.clabe = 'La CLABE no cuadra: son 18 dígitos y el último los verifica.';
+  }
+  if (datos.alias !== undefined && datos.alias !== null) {
+    const a = String(datos.alias).trim().slice(0, 60);
+    datos.alias = a;
+    if (!a) errores.alias = 'Ponle un alias a la cuenta para saber cuál es.';
+  }
+  return Object.keys(errores).length ? errores : null;
+}
+
 export function revisarProveedor(datos: Record<string, unknown>): Record<string, string> | null {
   const errores: Record<string, string> = {};
   const texto = (k: string) => (datos[k] === undefined || datos[k] === null ? undefined : String(datos[k]).trim());
@@ -1261,7 +1292,7 @@ rutas.patch('/:o/:tabla/:id', async (c) => {
   const malDinero = revisarDinero(tabla, datos);
   if (malDinero) return err(c, 'dinero_no_entero', 400, malDinero);
 
-  const malProveedor = tabla === 'proveedores' ? revisarProveedor(datos) : null;
+  const malProveedor = tabla === 'proveedores' ? revisarProveedor(datos) : tabla === 'proveedor_cuentas' ? revisarCuenta(datos) : null;
   if (malProveedor) return err(c, 'datos_invalidos', 400, { errores: malProveedor });
 
   /* 0.46.0 · Una cotización aprobada es lo que se vendió: sus piezas ya están

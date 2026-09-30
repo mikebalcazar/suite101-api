@@ -128,3 +128,71 @@ describe('supply101 da de alta un proveedor con todo', () => {
     expect(s.estado).toBe(403);
   });
 });
+
+/* 0.55.0 · Varias cuentas por proveedor, con alias, y sus documentos de
+ * respaldo (Mike, 30-sep-2026). */
+describe('las cuentas del proveedor (0023) y sus documentos', () => {
+  const CLABE2 = clabeDe('00218000998877665');
+  const CLABE3 = clabeDe('01418000112233445');
+  let pv = '';
+  let cuenta = '';
+  let archivo = '';
+  it('supply101 da de alta un proveedor y le cuelga dos cuentas con alias; la CLABE se normaliza y se revisa', async () => {
+    const r = await o('ana', '/proveedores', { method: 'POST', json: { nombre: 'Herrajes del Norte' } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    pv = r.data.id;
+    const una = await o('ana', '/proveedor_cuentas', { method: 'POST', json: { proveedor_id: pv, alias: '  Principal ', clabe: CLABE2.slice(0, 3) + ' ' + CLABE2.slice(3), banco: 'Banorte', beneficiario: 'Herrajes del Norte SA' } });
+    expect(una.estado, JSON.stringify(una)).toBe(201);
+    expect(una.data.alias).toBe('Principal');
+    expect(una.data.clabe).toBe(CLABE2);
+    cuenta = una.data.id;
+    const dos = await o('ana', '/proveedor_cuentas', { method: 'POST', json: { proveedor_id: pv, alias: 'Dólares', clabe: CLABE3, banco: 'BBVA', beneficiario: 'Herrajes del Norte SA' } });
+    expect(dos.estado).toBe(201);
+    const mala = await o('ana', '/proveedor_cuentas', { method: 'POST', json: { proveedor_id: pv, alias: 'Chueca', clabe: CLABE2.slice(0, 17) + String((Number(CLABE2[17]) + 1) % 10) } });
+    expect(mala.estado).toBe(400);
+    expect(mala.detalle.errores.clabe).toMatch(/no cuadra/);
+    const sinAlias = await o('ana', '/proveedor_cuentas', { method: 'POST', json: { proveedor_id: pv, alias: '   ', clabe: CLABE2 } });
+    expect(sinAlias.estado).toBe(400);
+    expect(sinAlias.detalle.errores.alias).toMatch(/alias/);
+    const sinProveedor = await o('ana', '/proveedor_cuentas', { method: 'POST', json: { alias: 'Suelta', clabe: CLABE2 } });
+    expect(sinProveedor.estado).toBe(400);
+  });
+  it('se listan por proveedor, las lee dash101, quote101 no las escribe, y una se quita', async () => {
+    const lista = await o('ana', `/proveedor_cuentas?proveedor_id=${pv}`);
+    expect(lista.estado).toBe(200);
+    expect(lista.data.filas.map((c: any) => c.alias).sort()).toEqual(['Dólares', 'Principal']);
+    const desdeDash = await o('mike', `/proveedor_cuentas?proveedor_id=${pv}`, { app: 'dash101' });
+    expect(desdeDash.data.filas.length).toBe(2);
+    const quote = await o('mike', '/proveedor_cuentas', { method: 'POST', app: 'cotizador101', json: { proveedor_id: pv, alias: 'Otra', clabe: CLABE2 } });
+    expect(quote.estado).toBe(403);
+    const fuera = await o('ana', `/proveedor_cuentas/${cuenta}`, { method: 'DELETE' });
+    expect(fuera.estado, JSON.stringify(fuera)).toBe(200);
+    expect((await o('ana', `/proveedor_cuentas?proveedor_id=${pv}`)).data.filas.map((c: any) => c.alias)).toEqual(['Dólares']);
+  });
+  it('los documentos de respaldo van en archivos, colgados del proveedor, y se pueden quitar', async () => {
+    const forma = new FormData();
+    forma.set('archivo', new File([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34])], 'caratula.pdf', { type: 'application/pdf' }));
+    forma.set('de_tabla', 'proveedores');
+    forma.set('de_id', pv);
+    const subido = await o('ana', '/archivos', { method: 'POST', body: forma });
+    expect(subido.estado, JSON.stringify(subido)).toBe(201);
+    archivo = subido.data.id;
+    expect(subido.data.de_tabla).toBe('proveedores');
+    const lista = await o('ana', `/archivos?de_tabla=proveedores&de_id=${pv}`);
+    expect(lista.estado).toBe(200);
+    expect(lista.data.filas.map((a: any) => a.nombre)).toEqual(['caratula.pdf']);
+    const bajado = await SELF.fetch(`https://api.local/orgs/${ORG}/archivos/${archivo}`, { headers: { 'X-App': 'supply101', Cookie: galletas.ana } });
+    expect(bajado.status).toBe(200);
+    expect(bajado.headers.get('Content-Type')).toBe('application/pdf');
+    const quitado = await o('ana', `/archivos/${archivo}`, { method: 'DELETE' });
+    expect(quitado.estado, JSON.stringify(quitado)).toBe(200);
+    expect((await o('ana', `/archivos?de_tabla=proveedores&de_id=${pv}`)).data.filas.length).toBe(0);
+    expect((await SELF.fetch(`https://api.local/orgs/${ORG}/archivos/${archivo}`, { headers: { 'X-App': 'supply101', Cookie: galletas.ana } })).status).toBe(404);
+  });
+  it('borrar el proveedor se lleva sus cuentas', async () => {
+    const fuera = await o('mike', `/proveedores/${pv}`, { method: 'DELETE', app: 'dash101' });
+    expect(fuera.estado, JSON.stringify(fuera)).toBe(200);
+    expect((await o('ana', `/proveedor_cuentas?proveedor_id=${pv}`)).data.filas.length).toBe(0);
+  });
+});
+
