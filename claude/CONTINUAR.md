@@ -377,6 +377,20 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   al cambiar el plano con componentes puestos se ofrece «Reubicarlos uno
   por uno» o «Se quedan donde están». quote101 #69, dos pruebas nuevas,
   115/115. Muro 2026-09-29-1100.
+- **draw101 0.22.0 publicada; el run fallaba por httpx2 (30-sep).** El
+  encargo de draw101 (muro 0100): el run de claude/publicar-0.22.0 no
+  era cuota, falló en t047 porque el starlette de hoy exige `httpx2`
+  para su TestClient. Commit 7ed7cc8 en esa rama: httpx2 en el pip y
+  Chromium sólo con T101_PRUEBAS_COMPLETAS (4 min 25 s contra 9). El
+  arreglo del workflow está en la RAMA, no en main de draw101: la
+  siguiente claude/publicar-* debe nacer de claude/publicar-0.22.0.
+  PENDIENTES: (a) 2b de draw101, windows-latest → ubuntu-latest con
+  wine, en rama y con workflow_dispatch, cuando Mike decida; (b) 2c,
+  retention-days 14 → 5, junto con (a); (c) revisar que las cabeceras
+  de pruebas/ de la API no prometan cosas que nadie mide (draw101
+  encontró una en nube.spec.ts); (d) DE MIKE: autorizar draw101 y
+  suite101-api en las fuentes de la sesión de draw101 para que empuje
+  por git. Muro 2026-09-30-1200.
 - **DEFECTO: quell101 en Android abría como computadora y no se podía
   usar (30-sep, #90).** Vite 8 (lightningcss) reescribía los @media a
   sintaxis de rango `(width <= 900px)`, que un Chrome anterior al 104 se
