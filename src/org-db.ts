@@ -255,6 +255,9 @@ export interface ApiOrgDB {
   buzon(hoy?: string, negocio_id?: string | null, tipo?: TipoOrden | null): Promise<{ filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number }>;
   /** 0.59.0 · El historial: las órdenes ya pagadas, la más reciente arriba (Mike, 1-oct: «un historial completo de las órdenes de compra ya pagadas»). */
   ordenesPagadas(negocio_id?: string | null, tipo?: TipoOrden | null, limite?: number): Promise<{ filas: Fila[]; total: number }>;
+  /** Quién hay en los expedientes de roster101, para dar de alta un
+   *  accionista jalándolo de ahí (0.60.0). */
+  accionistasDeRoster(): Promise<Array<{ id: string; nombre: string; rfc: string; correo: string; puesto: string }>>;
   pendientesDeOrdenes(negocio_id?: string | null): Promise<{ compras: { total: number; cuantas: number }; reembolsos: { total: number; cuantas: number } }>;
   verOrden(id: string): Promise<{ orden: Fila; eventos: Fila[]; archivos: Fila[] } | null>;
   /** 0.56.1 · La orden que dejó ese egreso (o null): para que desde el movimiento se llegue a la orden con toda su historia y sus papeles. */
@@ -590,12 +593,37 @@ export class OrgDB extends DurableObject<Env> {
     const filas = this.sql
       .exec(`SELECT * FROM ${tabla}${w} ORDER BY ${def.orden} LIMIT ?`, ...args, limite)
       .toArray() as Fila[];
-    return { total, filas: filas.map((f) => this.afuera(tabla, f)!) };
+    return { total, filas: this.conSaldo(tabla, filas).map((f) => this.afuera(tabla, f)!) };
   }
 
   obtener(tabla: Tabla, id: string): Fila | null {
     const f = this.sql.exec(`SELECT * FROM ${tabla} WHERE id = ?`, id).toArray()[0] as Fila | undefined;
-    return this.afuera(tabla, f ?? null);
+    return this.afuera(tabla, f ? this.conSaldo(tabla, [f])[0] : null);
+  }
+
+  /** EL SALDO DE CADA CUENTA LO SUMA LA BASE, no la pantalla (0.60.0).
+   *
+   *  Hasta el 1-oct-2026 `cuentas` salía con su `saldo_inicial` y dash101
+   *  sumaba los movimientos que le llegaban de la lista. La lista tiene tope
+   *  de 500 y salía de la más vieja a la más nueva: en cuanto un negocio
+   *  pasó de 500 movimientos, los últimos egresos ya no entraban a la suma y
+   *  el capital líquido se quedó quieto (Mike: «ya hay movimientos por más
+   *  de 70,000 de egresos y el total sigue sin contarlos»).
+   *
+   *  Aquí es `saldo_inicial` más TODOS los ingresos de la cuenta menos TODOS
+   *  sus egresos, en una sola consulta agrupada; no depende de cuántos
+   *  movimientos haya ni de cuántos se enseñen. Es columna calculada, como
+   *  `alcance` en los ítems: no se guarda y no se escribe desde fuera. */
+  private conSaldo(tabla: Tabla, filas: Fila[]): Fila[] {
+    if (tabla !== 'cuentas' || !filas.length) return filas;
+    const deltas = new Map<string, number>();
+    for (const r of this.sql
+      .exec(`SELECT cuenta_id, SUM(CASE WHEN tipo = 'ingreso' THEN monto ELSE -monto END) AS delta
+             FROM movimientos WHERE cuenta_id IS NOT NULL GROUP BY cuenta_id`)
+      .toArray() as Array<{ cuenta_id: string; delta: number }>) {
+      deltas.set(String(r.cuenta_id), Number(r.delta || 0));
+    }
+    return filas.map((f) => ({ ...f, saldo: Number(f.saldo_inicial || 0) + (deltas.get(String(f.id)) ?? 0) }));
   }
 
   /* ─────────────── el folio de la cotización ───────────────
@@ -1987,6 +2015,24 @@ export class OrgDB extends DurableObject<Env> {
    *  `negocio_id`, las de ese negocio; con `tipo`, sólo compras o sólo
    *  reembolsos. `total` es la suma de lo que se lista. Lo lee quien paga,
    *  como el buzón: es la otra mitad de la misma bandeja. */
+  /** Los expedientes de roster101, resumidos para escoger a uno como
+   *  accionista (0.60.0). Mike, 1-oct: «en el menú de accionistas, se debe
+   *  poder jalar al accionista de la base de datos de roster». El nombre va
+   *  armado; quien todavía no llena su ficha sale con su correo, como en la
+   *  nómina: un renglón vacío en una lista de gente no sirve para escoger. */
+  accionistasDeRoster(): Array<{ id: string; nombre: string; rfc: string; correo: string; puesto: string }> {
+    return (this.sql
+      .exec(`SELECT id, nombre, apellido_paterno, apellido_materno, rfc, email, puesto
+             FROM roster_trabajadores ORDER BY nombre, apellido_paterno, email`)
+      .toArray() as Fila[]).map((t) => {
+      const nombre = [t.nombre, t.apellido_paterno, t.apellido_materno].map((x) => String(x ?? '').trim()).filter(Boolean).join(' ');
+      return {
+        id: String(t.id), nombre: nombre || String(t.email ?? ''), rfc: String(t.rfc ?? ''),
+        correo: String(t.email ?? ''), puesto: String(t.puesto ?? ''),
+      };
+    });
+  }
+
   ordenesPagadas(negocio_id?: string | null, tipo?: TipoOrden | null, limite = 500): { filas: Fila[]; total: number } {
     const condiciones = [`estado = 'pagada'`];
     const valores: SqlStorageValue[] = [];

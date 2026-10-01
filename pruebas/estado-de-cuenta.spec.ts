@@ -158,3 +158,27 @@ describe('el estado de cuenta', () => {
     expect(r.estado).toBe(404);
   });
 });
+
+describe('el excel del estado de cuenta general (0.60.0)', () => {
+  /* Mike, 1-oct: «debo poder exportar su estado de cuenta general y por
+   * proyecto». El de proyecto ya se medía; éste es el del cliente. */
+  const bajar = async (quien: string, cid: string) => {
+    const cabeceras: Record<string, string> = { 'X-App': 'dash101' };
+    if (galletas[quien]) cabeceras.Cookie = galletas[quien];
+    return SELF.fetch(`https://api.local/orgs/${ORG}/clientes/${cid}/estado.xlsx`, { headers: cabeceras });
+  };
+
+  it('baja como archivo, con su tipo y el nombre del cliente', async () => {
+    const r = await bajar('mike', holcim);
+    expect(r.status).toBe(200);
+    expect(r.headers.get('content-type')).toContain('spreadsheetml.sheet');
+    expect(r.headers.get('content-disposition')).toMatch(/attachment; filename="estado-HOLCIM-.*\.xlsx"/);
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    expect(bytes[0], 'empieza con PK: es un ZIP').toBe(0x50);
+    expect(bytes[1]).toBe(0x4b);
+  });
+
+  it('un cliente que no existe da 404', async () => {
+    expect((await bajar('mike', 'no-existe')).status).toBe(404);
+  });
+});

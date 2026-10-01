@@ -185,3 +185,34 @@ describe('la lista por negocio y la baja', () => {
     expect(fuera.estado, JSON.stringify(fuera)).toBe(200);
   });
 });
+
+describe('jalar al accionista de roster101 (0.60.0)', () => {
+  /* Mike, 1-oct: «en el menú de accionistas, se debe poder jalar al
+   * accionista de la base de datos de roster». */
+  const correoSocio = 'socio-roster@ejemplo.mx';
+
+  beforeAll(async () => {
+    /* Entra por su puerta, con su correo y su código, como en la vida real. */
+    const c = await pedir('socio', `/roster/${ORG}/api/codigo`, { method: 'POST', json: { email: correoSocio }, app: 'roster101' });
+    expect(c.estado, JSON.stringify(c)).toBe(200);
+    const e = await pedir('socio', `/roster/${ORG}/api/entrar`, { method: 'POST', json: { email: correoSocio, codigo: c.codigo_prueba }, app: 'roster101' });
+    expect(e.estado, JSON.stringify(e)).toBe(200);
+  });
+
+  it('la lista de expedientes llega con id, nombre, rfc, correo y puesto; sin nombre, sale con su correo', async () => {
+    const r = await o('mike', '/accionistas/de-roster');
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    const socio = r.data.personas.find((p: any) => p.correo === correoSocio);
+    expect(socio, JSON.stringify(r.data)).toBeTruthy();
+    expect(Object.keys(socio).sort()).toEqual(['correo', 'id', 'nombre', 'puesto', 'rfc']);
+    expect(socio.nombre).toBe(correoSocio);
+  });
+
+  it('y con eso se da de alta como accionista, sin teclearlo', async () => {
+    const r = await o('mike', '/accionistas/de-roster');
+    const socio = r.data.personas.find((p: any) => p.correo === correoSocio);
+    const alta = await o('mike', '/accionistas', { method: 'POST', json: { negocio_id: negocio, nombre: socio.nombre, rfc: socio.rfc || undefined, correo: socio.correo, porcentaje: 10 } });
+    expect(alta.estado, JSON.stringify(alta)).toBe(201);
+    expect(alta.data.correo).toBe(correoSocio);
+  });
+});
