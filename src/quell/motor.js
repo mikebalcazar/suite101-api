@@ -146,7 +146,7 @@ async function invitaCliente(env, req, quien, obras) {
     <ol>
       <li>Abre <a href="${sitio}">${sitio}</a></li>
       <li>Escribe este correo: <b>${quien.email}</b> y pica «Continuar».</li>
-      <li>Como todavía no tienes contraseña, pica <b>«Mándame un código»</b>: te
+      <li>Como todavía no tienes contraseña, pica <b>«No tengo contraseña o la olvidé»</b>: te
           llega uno de 6 dígitos y con él pones tu contraseña.</li>
     </ol>
     <p>De ahí en adelante entras con tu correo y tu contraseña. Es la misma
