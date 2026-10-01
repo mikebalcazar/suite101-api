@@ -390,6 +390,48 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   pide cada 2 min y al volver la pestaña. Lo que hay que no romper: una
   prueba que lea la lista entera de la org demo debe pedir `?limite=`
   (ya pasó de 500 movimientos; #109). Muro 2026-09-30-1800.
+- **El punchlist a lo ancho (1-oct, quell101 #96).** `.pend` y `.proc` a
+  secas se le pegaban a `.pi.pend` / `.pi.proc` (120px a la derecha).
+  Quedan `.lrow .pend` y `.barproc .proc`. Lo que hay que no romper: los
+  estados van como clase en .pi, .pill, .dot y .pin; nunca una regla con
+  el estado sin ancestro (pruebas/el-pendiente-a-lo-ancho.mjs lo cuida).
+  Muro 2026-10-01-1845.
+- **El saldo lo suma la base, y lo demás del 1-oct (API 0.60.0 #192,
+  dash101 #115).** El líquido no se movía: dash101 sumaba el saldo de una
+  lista con tope de 500 que salía de la más vieja a la más nueva. Ahora
+  `cuentas.saldo` viene calculado (OrgDB.conSaldo) y `movimientos` sale
+  DESC. Además: orden por día y hora (masRecientePrimero), historial en
+  la cuenta, el cliente abre con su estado de cuenta (+ Excel
+  /clientes/:id/estado.xlsx), gastos generales (CATEGORIA_GASTO_GENERAL,
+  casilla en el egreso, filtro), «Nómina», accionistas de roster
+  (/accionistas/de-roster). Lo que hay que no romper: NUNCA sumar dinero
+  de una lista con tope; un estado de resultados cuenta gasto_general como
+  gasto del negocio y excluye retiro_utilidades. Muro 2026-10-01-1830.
+- **«No tengo contraseña o la olvidé» en las ocho entradas (1-oct, API
+  #191 y siete repos).** El flujo correo → código → contraseña nueva ya
+  existía; sólo se renombró el botón. Las pruebas de entrada buscan el
+  texto nuevo. Muro 2026-10-01-1530.
+- **Dudas de colores en quell101 (1-oct, #94).** `.duda.abierta` rojizo,
+  `.duda.cerrada` verde, historial por created_at desc, «Ver respondidas»
+  (data-respondidas). Muro 2026-10-01-1430.
+- **El correo de dudas con cada duda y «Responder» (1-oct, API 0.59.1
+  #190).** motor.js correoDePuntos → { asunto, html, liga } con
+  `#/p/OBRA/dudas`; avisar-cliente contesta liga y dudas. Lo que hay que
+  no romper: quell.spec.ts se corre entero (con -t da 401). Muro
+  2026-10-01-1330.
+- **Compras: por pagar arriba, pagadas abajo, sin buzón aparte (1-oct,
+  API 0.59.0 #189, dash101 #113).** GET /ordenes/pagadas { filas, total }
+  (ordenesPagadas); /ordenes con secciones por-pagar, devueltas, pagadas,
+  rechazadas. Lo que hay que no romper: pagadas lee su ruta, no filtra la
+  lista genérica. Muro 2026-10-01-1230.
+- **DEFECTO HOLCIM: órdenes pagadas «pendientes» en la partida (1-oct,
+  API 0.58.0 #188).** Migración 0026 `movimientos.partida_id`; pagarOrden
+  lo escribe; recalcularProyecto suma por partida_id y sólo sin él por
+  proveedor. Lo que hay que no romper: un egreso ligado a mano a una
+  partida debe traer partida_id. Muro 2026-10-01-1100.
+- **Comprobante como imagen y el líquido como número grande (1-oct,
+  dash101 #112).** ACEPTA_COMPROBANTE con image/*; data-capital="liquido"
+  arriba, "total" en la tarjeta. Muro 2026-10-01-1000.
 - **Compras en dash101 (30-sep, API 0.56.1 #183, dash101 #102–#106).**
   Menú «Compras», circulito con compras+reembolsos del negocio ACTIVO
   (sin negocio no se pide: sin negocio_id la API cuenta toda la
