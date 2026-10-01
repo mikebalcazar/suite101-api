@@ -6,9 +6,9 @@
  * Lo que se mide: dash101 da de alta un accionista por el CRUD genérico y la
  * API lo normaliza y lo revisa (nombre, participación 0-100, RFC, correo);
  * el retiro es un egreso con categoria 'retiro_utilidades' y contraparte
- * 'accionista' que baja el saldo de la cuenta; la lista sale por negocio y
- * la ve quien ve dinero; quote101 y supply101 no escriben accionistas; y un
- * negocio con accionistas colgados no se borra (409 en_uso), como con todo.
+ * 'accionista' que baja el saldo de la cuenta; la lista es de la empresa
+ * (0.63.0: ya no hay negocios) y la ve quien ve dinero; quote101 y
+ * supply101 no escriben accionistas.
  */
 import { SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -43,18 +43,17 @@ async function entrar(quien: string, correo: string) {
 }
 
 let negocio = '';
-let otroNegocio = '';
 let cuenta = '';
 
 beforeAll(async () => {
   await entrar('mike', CORREO);
   const alta = await pedir('mike', '/admin/orgs', { method: 'POST', json: { id: ORG, nombre: 'Accionistas de prueba', apps: { dash: true, roster: true } }, app: '' });
   expect(alta.estado, JSON.stringify(alta)).toBe(201);
+  // El compat de /negocios contesta la empresa (0.63.0); `negocio` se sigue
+  // mandando en los cuerpos de abajo para medir que la API lo ignora.
   const n = await o('mike', '/negocios', { method: 'POST', json: { nombre: 'Taller', moneda: 'MXN' } });
   expect(n.estado, JSON.stringify(n)).toBe(201);
   negocio = n.data.id;
-  const n2 = await o('mike', '/negocios', { method: 'POST', json: { nombre: 'Otro', moneda: 'MXN' } });
-  otroNegocio = n2.data.id;
   const cta = await o('mike', '/cuentas', { method: 'POST', json: { negocio_id: negocio, nombre: 'Banco', tipo: 'banco', moneda: 'MXN', saldo_inicial: 1_000_000 } });
   expect(cta.estado, JSON.stringify(cta)).toBe(201);
   cuenta = cta.data.id;
@@ -93,11 +92,11 @@ describe('el alta del accionista', () => {
     const correo = await o('mike', '/accionistas', { method: 'POST', json: { negocio_id: negocio, nombre: 'Paco', correo: 'paco-sin-arroba' } });
     expect(correo.estado).toBe(400);
     expect(correo.detalle.errores.correo).toMatch(/correo/);
-    /* Sin negocio_id ya NO es error (0.61.0): la API le pone el de la
-     * empresa. Se borra enseguida para que las listas de abajo no lo vean. */
+    /* Sin negocio_id (0.61.0, y desde 0.63.0 ya no existe la columna). Se
+     * borra enseguida para que las listas de abajo no lo vean. */
     const sinNegocio = await o('mike', '/accionistas', { method: 'POST', json: { nombre: 'Paco' } });
     expect(sinNegocio.estado, JSON.stringify(sinNegocio)).toBe(201);
-    expect(sinNegocio.data.negocio_id).toBeTruthy();
+    expect('negocio_id' in sinNegocio.data).toBe(false);
     expect((await o('mike', `/accionistas/${sinNegocio.data.id}`, { method: 'DELETE' })).estado).toBe(200);
   });
   it('se corrige por PATCH con la misma vara, y la participación vacía queda en null', async () => {
@@ -160,33 +159,26 @@ describe('el retiro de utilidades', () => {
   });
 });
 
-describe('la lista por negocio y la baja', () => {
-  it('cada negocio ve sólo los suyos, y sin negocio_id la API pone el primero del que pregunta', async () => {
-    const enOtro = await o('mike', '/accionistas', { method: 'POST', json: { negocio_id: otroNegocio, nombre: 'Socia del otro' } });
-    expect(enOtro.estado).toBe(201);
-    const uno = await o('mike', `/accionistas?negocio_id=${negocio}`);
-    expect(uno.data.filas.map((a: any) => a.nombre)).toEqual(['Mike Balcázar']);
-    const dos = await o('mike', `/accionistas?negocio_id=${otroNegocio}`);
-    expect(dos.data.filas.map((a: any) => a.nombre)).toEqual(['Socia del otro']);
+describe('la lista de la empresa y la baja', () => {
+  it('la lista es de la empresa: un negocio_id en el cuerpo o en el filtro no aparta a nadie (0.63.0)', async () => {
+    const otra = await o('mike', '/accionistas', { method: 'POST', json: { negocio_id: 'otro-negocio', nombre: 'Socia del otro' } });
+    expect(otra.estado).toBe(201);
+    expect('negocio_id' in otra.data).toBe(false);
+    const todos = await o('mike', '/accionistas');
+    expect(todos.data.filas.map((a: any) => a.nombre)).toEqual(['Mike Balcázar', 'Socia del otro']);
+    const conFiltro = await o('mike', '/accionistas?negocio_id=otro-negocio');
+    expect(conFiltro.data.filas.map((a: any) => a.nombre), 'el filtro se ignora').toEqual(['Mike Balcázar', 'Socia del otro']);
   });
-  it('dar de baja es activo=false y la lista lo filtra; el negocio no se borra con un accionista colgado, y sin él sí', async () => {
-    const dos = await o('mike', `/accionistas?negocio_id=${otroNegocio}`);
-    const id = dos.data.filas[0].id;
+  it('dar de baja es activo=false y la lista lo filtra; borrar lo quita', async () => {
+    const id = (await o('mike', '/accionistas')).data.filas.find((a: any) => a.nombre === 'Socia del otro').id;
     const baja = await o('mike', `/accionistas/${id}`, { method: 'PATCH', json: { activo: false } });
     expect(baja.estado).toBe(200);
     expect(baja.data.activo).toBe(false);
-    expect((await o('mike', `/accionistas?negocio_id=${otroNegocio}&activo=true`)).data.filas.length).toBe(0);
-    expect((await o('mike', `/accionistas?negocio_id=${otroNegocio}`)).data.filas.length).toBe(1);
-    /* El negocio no se borra mientras algo apunte a él (409 en_uso): primero
-     * se quita el accionista, y ya sin nada colgado el negocio se va. */
-    const enUso = await o('mike', `/negocios/${otroNegocio}`, { method: 'DELETE' });
-    expect(enUso.estado).toBe(409);
-    expect(enUso.error).toBe('en_uso');
+    expect((await o('mike', '/accionistas?activo=true')).data.filas.map((a: any) => a.nombre)).toEqual(['Mike Balcázar']);
+    expect((await o('mike', '/accionistas')).data.filas.length).toBe(2);
     const quitado = await o('mike', `/accionistas/${id}`, { method: 'DELETE' });
     expect(quitado.estado, JSON.stringify(quitado)).toBe(200);
-    expect((await o('mike', `/accionistas?negocio_id=${otroNegocio}`)).data.filas.length).toBe(0);
-    const fuera = await o('mike', `/negocios/${otroNegocio}`, { method: 'DELETE' });
-    expect(fuera.estado, JSON.stringify(fuera)).toBe(200);
+    expect((await o('mike', '/accionistas')).data.filas.length).toBe(1);
   });
 });
 

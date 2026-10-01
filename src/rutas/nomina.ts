@@ -36,7 +36,6 @@ import { err, ok, type Ctx, type Vars } from '../http';
 import type { Env } from '../entorno';
 import type { ApiOrgDB } from '../org-db';
 import { miembrosDe } from '../maestro';
-import { negocioDeLaEmpresa } from '../empresa';
 
 type App = Hono<{ Bindings: Env; Variables: Vars }>;
 
@@ -204,28 +203,26 @@ export function montarNomina(rutas: App): void {
 
   /* ─────────────── los cortes ─────────────── */
 
-  /** GET /orgs/:o/nomina/rayas?negocio_id= — los cortes de un negocio. */
+  /** GET /orgs/:o/nomina/rayas — los cortes de la empresa. `?negocio_id=`
+   *  se ignora si viene (0.63.0): ya no hay negocios. */
   rutas.get('/:o/nomina/rayas', async (c) => {
     if (!(await puedeNomina(c))) return err(c, 'sin_permiso', 403, { motivo: 'la raya la ve quien la lleva' });
-    /* Sin `negocio_id` (0.61.0): el de la empresa. */
-    const negocio_id = c.req.query('negocio_id') || await negocioDeLaEmpresa(c);
-    return ok(c, { rayas: await stub(c).rayas(negocio_id) });
+    return ok(c, { rayas: await stub(c).rayas() });
   });
 
   /** POST /orgs/:o/nomina/rayas — abrir un corte, en borrador. */
   rutas.post('/:o/nomina/rayas', async (c) => {
     if (!(await puedeNomina(c))) return err(c, 'sin_permiso', 403, { motivo: 'la raya la lleva quien tiene el permiso' });
     type Cuerpo = {
-      negocio_id?: string; periodo_inicio?: string; periodo_fin?: string; nota?: string;
+      periodo_inicio?: string; periodo_fin?: string; nota?: string;
       pagos?: Array<{ personal_id: string; concepto?: string; sueldo?: number; extras?: number; descuentos?: number; nota?: string }>;
     };
     const b = await c.req.json<Cuerpo>().catch(() => ({}) as Cuerpo);
     if (!b.periodo_inicio || !b.periodo_fin) {
       return err(c, 'datos_invalidos', 400, { falta: 'periodo_inicio y periodo_fin' });
     }
-    if (!b.negocio_id) b.negocio_id = await negocioDeLaEmpresa(c);
     const r = await stub(c).crearRaya(
-      { negocio_id: b.negocio_id, periodo_inicio: b.periodo_inicio, periodo_fin: b.periodo_fin, nota: b.nota, pagos: b.pagos },
+      { periodo_inicio: b.periodo_inicio, periodo_fin: b.periodo_fin, nota: b.nota, pagos: b.pagos },
       { usuario_id: c.get('quien').usuario_id },
     );
     if (esFalla(r)) return err(c, r.error, codigo(r.error), r.detalle);

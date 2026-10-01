@@ -1,18 +1,18 @@
-/* LA EMPRESA ES UNA (0.61.0).
+/* LA EMPRESA ES UNA (0.61.0; tabla `empresa` desde 0.63.0).
  *
  * Mike, 1-oct-2026: «Ya no existe la opción de negocios en dash. Sólo es una
  * empresa/negocio todo. Elimina todas las lógicas que involucran el concepto
- * de "negocio"». Hasta que la tabla `negocios` se vaya de la base (fase D),
- * todo sigue colgado de un `negocio_id`; lo que cambia desde aquí es que ya
- * NADIE lo manda: cualquier ruta que lo necesite lo resuelve con esto. Es el
- * primero por nombre —el mismo que devuelve `GET /negocios` y el mismo que
- * toma dash101— y si la empresa no tiene ninguno, se crea con su nombre. */
+ * de "negocio"». Desde la migración 0027 no hay tabla `negocios` ni columna
+ * `negocio_id`: lo que describía al negocio —nombre, RFC, moneda, día de
+ * conciliación— vive en `empresa`, un solo renglón con id 'empresa'. Esto es
+ * la puerta para las rutas: el renglón, creado con el nombre de la org del D1
+ * la primera vez que alguien lo pide. */
 import type { ApiOrgDB } from './org-db';
 import type { Ctx } from './http';
 import { org } from './maestro';
 
-export async function negocioDeLaEmpresa(c: Ctx): Promise<string> {
+export async function empresaDe(c: Ctx): Promise<Record<string, unknown>> {
   const stub = c.env.ORG.get(c.env.ORG.idFromName(c.get('org_id'))) as unknown as ApiOrgDB;
-  const empresa = await org(c.env, c.get('org_id'));
-  return String((await stub.negocioDeLaEmpresa(empresa?.nombre ?? c.get('org_id'))).id);
+  const enD1 = await org(c.env, c.get('org_id'));
+  return stub.empresa(enD1?.nombre ?? c.get('org_id'));
 }

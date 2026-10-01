@@ -69,16 +69,27 @@ rutas.get('/orgs/:o/quell', async (c) => {
   return ok(c, { org: id, filas });
 });
 
-/* 0.45.0 · lo de quote101 POR NEGOCIO, incluidos los que ya no existen. Sólo
- * lee. Nació de «desapareció mi info de quote» (Mike, 23-sep): ver
- * `conteosQuote` en el OrgDB para por qué un negocio borrado deja datos
- * invisibles sin haberlos borrado. */
+/* 0.45.0 · lo de quote101 de una empresa: clientes, proyectos, cotizaciones
+ * y de cuándo es la última. Sólo lee. Nació como lista por negocio con
+ * huérfanos («desapareció mi info de quote», Mike, 23-sep); desde 0.63.0 no
+ * hay negocios y contesta `{ org, resumen }`. */
 rutas.get('/orgs/:o/quote', async (c) => {
   if (!(await soySuper(c))) return err(c, 'sin_permiso', 403);
   const id = c.req.param('o')!;
   if (!(await org(c.env, id))) return err(c, 'org_desconocida', 404);
-  const negocios = await (c.env.ORG.get(c.env.ORG.idFromName(id)) as unknown as ApiOrgDB).conteosQuote();
-  return ok(c, { org: id, negocios });
+  const resumen = await (c.env.ORG.get(c.env.ORG.idFromName(id)) as unknown as ApiOrgDB).conteosQuote();
+  return ok(c, { org: id, resumen });
+});
+
+/* 0.63.0 · las tablas de la base de una empresa con sus columnas, como las
+ * ve SQLite. Para medir una migración desde afuera —que `negocios` y
+ * `negocio_id` ya no están— sin abrir el Durable Object. Sólo lee. */
+rutas.get('/orgs/:o/esquema', async (c) => {
+  if (!(await soySuper(c))) return err(c, 'sin_permiso', 403);
+  const id = c.req.param('o')!;
+  if (!(await org(c.env, id))) return err(c, 'org_desconocida', 404);
+  const tablas = await (c.env.ORG.get(c.env.ORG.idFromName(id)) as unknown as ApiOrgDB).esquema();
+  return ok(c, { org: id, tablas });
 });
 
 /* 0.17.0 · lo mismo para roster101: cuántos expedientes, documentos, cuentas. */
@@ -143,7 +154,7 @@ rutas.post('/orgs', async (c) => {
   let bienvenida: { enviado: boolean; motivo?: string } | null = null;
   if (directorCorreo) {
     const usuario = await crearUsuario(c.env, directorCorreo, texto(cuerpo.director?.nombre));
-    await ponerMiembro(c.env, id, usuario.id, 'owner', [], []);
+    await ponerMiembro(c.env, id, usuario.id, 'owner', []);
     await apuntaAdmin(c.env, { quien: quien(c), org_id: id, campo: 'miembro', antes: null, despues: `${directorCorreo} (owner) · director` });
     director = { usuario_id: usuario.id, correo: directorCorreo, rol: 'owner' };
     bienvenida = await mandarBienvenida(c, nueva, directorCorreo, texto(cuerpo.director?.nombre));
@@ -329,7 +340,8 @@ rutas.post('/orgs/:o/miembros', async (c) => {
   const empresa = await org(c.env, org_id);
   if (!empresa) return err(c, 'org_desconocida', 404);
 
-  const cuerpo = await c.req.json<{ correo?: string; rol?: Rol; apps?: string[]; negocios?: string[]; nombre?: string }>().catch(() => ({}) as never);
+  // `negocios` ya no se lee del cuerpo (0.63.0): si una pantalla vieja lo manda, se ignora.
+  const cuerpo = await c.req.json<{ correo?: string; rol?: Rol; apps?: string[]; nombre?: string }>().catch(() => ({}) as never);
   const correo = normalizaCorreo(cuerpo.correo);
   if (!correo) return err(c, 'datos_invalidos', 400, { falta: 'correo' });
   if (!cuerpo.rol || !ROLES.includes(cuerpo.rol)) return err(c, 'datos_invalidos', 400, { rol: ROLES });
@@ -343,7 +355,7 @@ rutas.post('/orgs/:o/miembros', async (c) => {
   if (previo?.rol === 'owner' && !nombraDuenos(mando)) return err(c, 'sin_permiso', 403, { motivo: 'solo_un_dueno_toca_duenos' });
   if (previo?.rol === 'owner' && cuerpo.rol !== 'owner' && (await cuentaOwners(c.env, org_id)) <= 1) return err(c, 'ultimo_owner', 409);
 
-  await ponerMiembro(c.env, org_id, usuario.id, cuerpo.rol, apps.apps, cuerpo.negocios ?? previo?.negocios ?? []);
+  await ponerMiembro(c.env, org_id, usuario.id, cuerpo.rol, apps.apps);
   await apuntaAdmin(c.env, { quien: quien(c), org_id, campo: 'miembro', antes: previo ? `${correo} (${previo.rol})` : null, despues: `${correo} (${cuerpo.rol})` });
   return ok(c, { usuario_id: usuario.id, correo, rol: cuerpo.rol, apps: apps.apps }, previo ? 200 : 201);
 });
@@ -402,7 +414,7 @@ rutas.patch('/orgs/:o/miembros/:uid', async (c) => {
     }
   }
 
-  await ponerMiembro(c.env, org_id, uid, rol, apps.apps, previo.negocios);
+  await ponerMiembro(c.env, org_id, uid, rol, apps.apps);
   if (nombre !== undefined && nombre !== antesU.nombre) {
     await c.env.MASTER.prepare(`UPDATE usuarios SET nombre = ? WHERE id = ?`).bind(nombre, uid).run();
   }

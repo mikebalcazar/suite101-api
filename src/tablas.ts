@@ -1,5 +1,5 @@
 /* Qué columna es de qué tipo. El CRUD genérico de §6 (`/orgs/:o/:tabla`) sirve
- * a trece tablas con un solo camino, y para eso necesita saber tres cosas de
+ * a estas tablas con un solo camino, y para eso necesita saber tres cosas de
  * cada columna: si es dinero (entero en centavos, nunca flotante), si es JSON
  * (se guarda como texto y se devuelve ya parseado) o si es booleana (0/1 en
  * SQLite, true/false hacia afuera).
@@ -8,6 +8,13 @@
  * mismo. La prueba `esquema.spec.ts` compara las dos y truena si se separan. */
 
 import type { Tabla } from '../schema/tipos';
+
+/* La tabla `empresa` (0027) NO está aquí a propósito: no entra al CRUD
+ * genérico. Es un solo renglón —nombre, RFC, moneda y día de conciliación—
+ * que se lee y se escribe por `GET`/`PATCH /orgs/:o/empresa` y por
+ * `OrgDB.empresa()` / `actualizarEmpresa()`. Hasta la 0026 eso vivía en
+ * `negocios`, con un `negocio_id` colgado de diez tablas; Mike lo quitó el
+ * 1-oct-2026: «Sólo es una empresa/negocio todo». */
 
 export type Tipo = 'texto' | 'entero' | 'dinero' | 'real' | 'bool' | 'json';
 
@@ -34,25 +41,19 @@ export const DEFS: Record<Tabla, Def> = {
     filtros: ['app', 'clave'],
     orden: 'clave',
   },
-  negocios: {
-    cols: { ...IDENT, nombre: 'texto', rfc: 'texto', moneda: 'texto', dia_conciliacion: 'entero' },
-    requeridos: ['nombre'],
-    filtros: [],
-    orden: 'nombre',
-  },
   cuentas: {
-    cols: { ...IDENT, negocio_id: 'texto', nombre: 'texto', tipo: 'texto', banco: 'texto', moneda: 'texto', saldo_inicial: 'dinero' },
-    requeridos: ['negocio_id', 'nombre', 'tipo'],
-    filtros: ['negocio_id'],
+    cols: { ...IDENT, nombre: 'texto', tipo: 'texto', banco: 'texto', moneda: 'texto', saldo_inicial: 'dinero' },
+    requeridos: ['nombre', 'tipo'],
+    filtros: [],
     orden: 'nombre',
   },
   clientes: {
     cols: {
-      ...IDENT, negocio_id: 'texto', nombre: 'texto', nombre_norm: 'texto', correo: 'texto', telefono: 'texto',
+      ...IDENT, nombre: 'texto', nombre_norm: 'texto', correo: 'texto', telefono: 'texto',
       rfc: 'texto', notas: 'texto', usuario_id: 'texto', portal_activo: 'bool', creado_en_app: 'texto',
     },
     requeridos: ['nombre'],
-    filtros: ['negocio_id', 'usuario_id'],
+    filtros: ['usuario_id'],
     orden: 'nombre_norm',
   },
   proveedores: {
@@ -75,7 +76,7 @@ export const DEFS: Record<Tabla, Def> = {
     filtros: ['proveedor_id'],
     orden: 'creado_at',
   },
-  /* 0025 · Los accionistas del negocio (Mike, 30-sep-2026: «un módulo de
+  /* 0025 · Los accionistas de la empresa (Mike, 30-sep-2026: «un módulo de
    * accionistas donde se registren pagos a los accionistas como retiro de
    * utilidades»). El retiro NO tiene tabla: es un egreso en `movimientos` con
    * categoria 'retiro_utilidades', contraparte_tipo 'accionista' y
@@ -83,11 +84,11 @@ export const DEFS: Record<Tabla, Def> = {
    * opcional; la API la revisa al escribir (revisarAccionista). */
   accionistas: {
     cols: {
-      ...IDENT, negocio_id: 'texto', nombre: 'texto', nombre_norm: 'texto', rfc: 'texto', correo: 'texto',
+      ...IDENT, nombre: 'texto', nombre_norm: 'texto', rfc: 'texto', correo: 'texto',
       telefono: 'texto', porcentaje: 'real', notas: 'texto', activo: 'bool',
     },
-    requeridos: ['negocio_id', 'nombre'],
-    filtros: ['negocio_id', 'activo'],
+    requeridos: ['nombre'],
+    filtros: ['activo'],
     orden: 'nombre_norm',
   },
   personal: {
@@ -119,17 +120,17 @@ export const DEFS: Record<Tabla, Def> = {
   },
   cotizaciones: {
     cols: {
-      ...IDENT, negocio_id: 'texto', cliente_id: 'texto', folio: 'texto', estado: 'texto', total: 'dinero',
+      ...IDENT, cliente_id: 'texto', folio: 'texto', estado: 'texto', total: 'dinero',
       moneda: 'texto', vigencia: 'texto', datos: 'json', actualizado_at: 'texto',
     },
-    requeridos: ['negocio_id'],
-    filtros: ['negocio_id', 'cliente_id', 'estado'],
+    requeridos: [],
+    filtros: ['cliente_id', 'estado'],
     orden: 'creado_at',
     fecha: 'creado_at',
   },
   proyectos: {
     cols: {
-      ...IDENT, negocio_id: 'texto', cliente_id: 'texto', nombre: 'texto', descripcion: 'texto', estado: 'texto',
+      ...IDENT, cliente_id: 'texto', nombre: 'texto', descripcion: 'texto', estado: 'texto',
       fecha_inicio: 'texto', fecha_fin_estimada: 'texto', fecha_cierre: 'texto',
       precio_venta: 'dinero', cobrado: 'dinero', pagado_prov: 'dinero', compromiso: 'dinero', avance: 'real',
       actualizado_at: 'texto',
@@ -141,8 +142,8 @@ export const DEFS: Record<Tabla, Def> = {
        * dice cómo se LEE `precio_venta`. */
       tasa_iva: 'entero', iva_incluido: 'entero',
     },
-    requeridos: ['negocio_id', 'cliente_id', 'nombre'],
-    filtros: ['negocio_id', 'cliente_id', 'estado'],
+    requeridos: ['cliente_id', 'nombre'],
+    filtros: ['cliente_id', 'estado'],
     orden: 'creado_at',
     fecha: 'fecha_inicio',
   },
@@ -151,16 +152,16 @@ export const DEFS: Record<Tabla, Def> = {
    * aquí es el de CATÁLOGO; el de la pieza vive en quell_elements.code. */
   productos: {
     cols: {
-      ...IDENT, negocio_id: 'texto', codigo: 'texto', nombre: 'texto', descripcion: 'texto',
+      ...IDENT, codigo: 'texto', nombre: 'texto', descripcion: 'texto',
       tipo: 'texto', precio: 'dinero', moneda: 'texto', creado_por: 'texto', actualizado_at: 'texto',
     },
-    requeridos: ['negocio_id', 'nombre'],
-    filtros: ['negocio_id', 'codigo', 'tipo'],
+    requeridos: ['nombre'],
+    filtros: ['codigo', 'tipo'],
     orden: 'nombre',
   },
   items: {
     cols: {
-      ...IDENT, negocio_id: 'texto', proyecto_id: 'texto', cliente_id: 'texto', clave: 'texto', nombre: 'texto',
+      ...IDENT, proyecto_id: 'texto', cliente_id: 'texto', clave: 'texto', nombre: 'texto',
       descripcion: 'texto', tipo: 'texto', monto: 'dinero', cantidad: 'entero', moneda: 'texto', estado: 'texto', etapa: 'entero',
       etapa_at: 'texto', etapa_por: 'texto', fecha_entrega: 'texto', asignados: 'json', origen: 'json',
       refs: 'json', creado_por: 'texto', actualizado_at: 'texto',
@@ -186,8 +187,8 @@ export const DEFS: Record<Tabla, Def> = {
        * primer nivel. Para el dinero y las etapas es un ítem más. */
       padre_id: 'texto',
     },
-    requeridos: ['negocio_id', 'cliente_id', 'nombre'],
-    filtros: ['negocio_id', 'proyecto_id', 'cliente_id', 'estado', 'etapa', 'partida', 'producto_id', 'padre_id'],
+    requeridos: ['cliente_id', 'nombre'],
+    filtros: ['proyecto_id', 'cliente_id', 'estado', 'etapa', 'partida', 'producto_id', 'padre_id'],
     orden: 'creado_at',
     fecha: 'fecha_entrega',
   },
@@ -210,7 +211,7 @@ export const DEFS: Record<Tabla, Def> = {
   },
   movimientos: {
     cols: {
-      ...IDENT, negocio_id: 'texto', tipo: 'texto', monto: 'dinero', fecha: 'texto', cuenta_id: 'texto',
+      ...IDENT, tipo: 'texto', monto: 'dinero', fecha: 'texto', cuenta_id: 'texto',
       proyecto_id: 'texto', item_id: 'texto', partida_id: 'texto', contraparte_tipo: 'texto', contraparte_id: 'texto',
       contraparte_nombre: 'texto', transfer_id: 'texto', descripcion: 'texto', categoria: 'texto', creado_por: 'texto',
       /* Fiscal (0009). No hay dos contabilidades: la fiscal es esta misma
@@ -226,11 +227,11 @@ export const DEFS: Record<Tabla, Def> = {
        * —que no tiene orden de compra— no podía estar pendiente nunca. */
       requiere_factura: 'bool',
     },
-    requeridos: ['negocio_id', 'tipo', 'monto', 'fecha', 'cuenta_id'],
-    filtros: ['negocio_id', 'proyecto_id', 'item_id', 'partida_id', 'cuenta_id', 'tipo', 'facturado', 'requiere_factura'],
+    requeridos: ['tipo', 'monto', 'fecha', 'cuenta_id'],
+    filtros: ['proyecto_id', 'item_id', 'partida_id', 'cuenta_id', 'tipo', 'facturado', 'requiere_factura'],
     /* LA MÁS RECIENTE PRIMERO (0.60.0). Hasta el 1-oct-2026 salían de la
      * más vieja a la más nueva, y con el tope de 500 eso quería decir que
-     * en un negocio con más de 500 movimientos los ÚLTIMOS —los de hoy— se
+     * en una empresa con más de 500 movimientos los ÚLTIMOS —los de hoy— se
      * quedaban fuera de la lista: el saldo que dash101 sumaba de ahí no
      * cambiaba aunque se capturaran egresos (Mike, 1-oct: «ya hay
      * movimientos por más de 70,000 de egresos y el total sigue sin
@@ -241,21 +242,21 @@ export const DEFS: Record<Tabla, Def> = {
   },
   opex: {
     cols: {
-      ...IDENT, negocio_id: 'texto', nombre: 'texto', tipo: 'texto', monto: 'dinero', moneda: 'texto',
+      ...IDENT, nombre: 'texto', tipo: 'texto', monto: 'dinero', moneda: 'texto',
       frecuencia: 'texto', dia_semana: 'entero', dia_del_mes: 'entero', fecha_inicio: 'texto', fecha_fin: 'texto',
       cuenta_id: 'texto', categoria: 'texto', activo: 'bool',
     },
-    requeridos: ['negocio_id', 'nombre', 'monto', 'frecuencia', 'fecha_inicio'],
-    filtros: ['negocio_id', 'activo'],
+    requeridos: ['nombre', 'monto', 'frecuencia', 'fecha_inicio'],
+    filtros: ['activo'],
     orden: 'nombre',
   },
   /* La conciliación semanal: una foto por corte. Se escribe con
    * POST /orgs/:o/conciliaciones, en una transacción; por el CRUD genérico
    * sólo se lee (append-only, como `avances`). */
   conciliaciones: {
-    cols: { ...IDENT, negocio_id: 'texto', corte_at: 'texto', hecha_por: 'texto' },
-    requeridos: ['negocio_id', 'corte_at'],
-    filtros: ['negocio_id'],
+    cols: { ...IDENT, corte_at: 'texto', hecha_por: 'texto' },
+    requeridos: ['corte_at'],
+    filtros: [],
     orden: 'corte_at',
     fecha: 'corte_at',
   },

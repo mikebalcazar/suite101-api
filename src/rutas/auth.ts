@@ -418,10 +418,11 @@ export async function yo(c: Ctx) {
     mias.sort((a, b) => Number(b.miembro) - Number(a.miembro)); // estable: dentro de cada grupo sigue por nombre
   } else {
     const r = await c.env.MASTER.prepare(
-      `SELECT m.org_id, m.rol, m.apps, m.negocios, o.nombre FROM miembros m JOIN orgs o ON o.id = m.org_id WHERE m.usuario_id = ?`,
-    ).bind(s.usuario_id).all<{ org_id: string; rol: string; apps: string; negocios: string; nombre: string }>();
+      `SELECT m.org_id, m.rol, m.apps, o.nombre FROM miembros m JOIN orgs o ON o.id = m.org_id WHERE m.usuario_id = ?`,
+    ).bind(s.usuario_id).all<{ org_id: string; rol: string; apps: string; nombre: string }>();
     for (const f of r.results ?? []) {
-      mias.push({ id: f.org_id, nombre: f.nombre, rol: f.rol, apps: JSON.parse(f.apps || '[]'), negocios: JSON.parse(f.negocios || '[]'), miembro: true });
+      // `negocios: []` fijo (0.63.0): ya no hay negocios; se queda en la forma.
+      mias.push({ id: f.org_id, nombre: f.nombre, rol: f.rol, apps: JSON.parse(f.apps || '[]'), negocios: [], miembro: true });
     }
   }
 

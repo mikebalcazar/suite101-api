@@ -50,9 +50,8 @@ const COLECCIONES = [
 interface Cuerpo {
   org?: string;
   modo?: 'seco' | 'escribir';
-  /** El negocio al que se cuelgan los clientes y las cotizaciones de
-   *  `cotizador`. quote101 no sabe que los negocios existen, así que se pide
-   *  aquí en vez de adivinarlo. */
+  /** Hasta 0.62.0 decía a qué negocio colgar lo de `cotizador`. Ya no hay
+   *  negocios (0.63.0): si viene, se ignora. */
   negocio?: string;
   docs?: Record<string, Crudo[]>;
 }
@@ -74,15 +73,7 @@ rutas.post('/importar', async (c) => {
   }
   const desconocidas = Object.keys(docs).filter((k) => !COLECCIONES.includes(k));
 
-  const negocio_id = String(cuerpo.negocio || '').trim();
-  // Que el negocio exista se revisa aquí y no en el mapeo: el mapeo no toca la
-  // base a propósito. Un negocio inventado dejaría clientes colgando de nada.
-  if (docs.cotizador?.length && negocio_id) {
-    const suyo = await (c.env.ORG.get(c.env.ORG.idFromName(org_id)) as unknown as ApiOrgDB).obtener('negocios', negocio_id);
-    if (!suyo) return err(c, 'negocio_desconocido', 404, { negocio: negocio_id, en: org_id });
-  }
-
-  const cosecha = cosechar(docs, undefined, { negocio_id });
+  const cosecha = cosechar(docs);
   const stub = c.env.ORG.get(c.env.ORG.idFromName(org_id)) as unknown as ApiOrgDB;
 
   const antes = await stub.conteos();
@@ -92,7 +83,7 @@ rutas.post('/importar', async (c) => {
 
   // Una misma persona puede venir dos veces: como miembro en `usuarios` y como
   // cliente con portal en `clientes`. Es una sola fila en D1.
-  const porId = new Map<string, { id: string; correo: string; nombre: string | null; miembro?: { rol: 'owner' | 'admin' | 'socio' | 'staff'; negocios: string[] }; acceso?: { tipo: 'cliente' | 'personal'; ref_id: string } }>();
+  const porId = new Map<string, { id: string; correo: string; nombre: string | null; miembro?: { rol: 'owner' | 'admin' | 'socio' | 'staff' }; acceso?: { tipo: 'cliente' | 'personal'; ref_id: string } }>();
   for (const u of cosecha.usuarios) {
     const previo = porId.get(u.id);
     porId.set(u.id, {
@@ -135,7 +126,7 @@ rutas.post('/importar', async (c) => {
     else usuarios.correo_de_otro.push({ uid_firebase: u.id, usuario_id, correo: u.correo });
 
     if (u.miembro) {
-      await ponerMiembro(c.env, org_id, usuario_id, u.miembro.rol, [], u.miembro.negocios);
+      await ponerMiembro(c.env, org_id, usuario_id, u.miembro.rol, []);
       usuarios.miembros++;
     }
     if (u.acceso) {

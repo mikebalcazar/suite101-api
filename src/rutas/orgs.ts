@@ -18,7 +18,7 @@ import { invitarClienteEnSuite } from '../clientes';
 import { crearUsuario } from '../maestro';
 import { guardarPin, normalizaCorreo, pinAceptable, ulid } from '../lib';
 import { TIPO_XLSX, xlsx, type Celda } from '../xlsx';
-import { negocioDeLaEmpresa } from '../empresa';
+import { empresaDe } from '../empresa';
 import { montarOrdenes } from './ordenes';
 import { montarObras } from './obras';
 import { montarNomina } from './nomina';
@@ -33,12 +33,6 @@ const TABLAS_DINERO: Tabla[] = ['movimientos', 'cuentas', 'opex', 'cotizaciones'
 
 const stub = (c: Ctx): ApiOrgDB => c.env.ORG.get(c.env.ORG.idFromName(c.get('org_id'))) as unknown as ApiOrgDB;
 
-/** Filtros que ya amarran la lista a un solo negocio, porque la fila a la
- *  que apuntan pertenece a uno y nada más. Con cualquiera de ellos puesto,
- *  NO se rellena `negocio_id` con el del que pregunta: el negocio ya quedó
- *  decidido, y ponerle otro deja la lista vacía sin decir por qué. */
-const LLAVES_DE_UN_NEGOCIO = ['proyecto_id', 'cliente_id'] as const;
-
 /** Cuánto es lo más que una lista devuelve de una vez, cuando se pide con
  *  `?limite=`. Sin parámetro se quedan las 500 de siempre: ninguna pantalla
  *  que ya funciona cambia de comportamiento. */
@@ -52,6 +46,16 @@ function topeDe(v: string | undefined): number | undefined {
   const n = Number(v);
   if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) return undefined;
   return Math.min(n, TOPE_MAXIMO);
+}
+
+/** `negocio_id` ya no existe (0.63.0). Una app que todavía lo mande al crear
+ *  o al editar no se lleva un 403 campo_no_permitido: se le quita aquí,
+ *  antes de revisar permisos, y lo demás sigue su camino. Es compatibilidad;
+ *  se va cuando ninguna app lo mande. */
+function sinNegocio(datos: Record<string, unknown>): Record<string, unknown> {
+  if (!datos || typeof datos !== 'object' || !('negocio_id' in datos)) return datos;
+  const { negocio_id: _fuera, ...resto } = datos;
+  return resto;
 }
 
 /** Los paneles de control: no aparecen en `orgs.apps` ni en `miembros.apps`. */
@@ -93,23 +97,21 @@ rutas.use('/:o/*', async (c, next) => {
       clase: 'miembro',
       usuario_id: s.usuario_id,
       rol: m.rol,
-      negocios: m.negocios,
       ve_dinero: true,
       ve_costos: m.rol === 'owner' || m.rol === 'admin' || m.rol === 'socio',
     };
   } else if (s.superadmin) {
-    quien = { clase: 'miembro', usuario_id: s.usuario_id, rol: 'owner', negocios: [], ve_dinero: true, ve_costos: true };
+    quien = { clase: 'miembro', usuario_id: s.usuario_id, rol: 'owner', ve_dinero: true, ve_costos: true };
   } else {
     const a = await acceso(c.env, s.usuario_id);
     if (a && a.org_id === org_id) {
       if (a.tipo === 'cliente') {
-        quien = { clase: 'cliente', usuario_id: s.usuario_id, negocios: [], ref_id: a.ref_id, ve_dinero: false, ve_costos: false };
+        quien = { clase: 'cliente', usuario_id: s.usuario_id, ref_id: a.ref_id, ve_dinero: false, ve_costos: false };
       } else {
         const persona = (await stubDe(c, org_id).obtener('personal', a.ref_id)) as Record<string, unknown> | null;
         quien = {
           clase: 'personal',
           usuario_id: s.usuario_id,
-          negocios: [],
           ref_id: a.ref_id,
           ve_dinero: !!persona?.ve_dinero,
           ve_costos: false,
@@ -208,7 +210,7 @@ rutas.post('/:o/items/exportar', async (c) => {
   const permiso = revisarEscritura('items', app, ['nombre', 'monto', 'cantidad', 'estado', 'origen']);
   if (!permiso.ok) return err(c, permiso.error, 403, permiso.detalle);
 
-  const cuerpo = await c.req.json<{ cotizacion_id?: string; lineas?: Array<Record<string, unknown>>; negocio_id?: string; cliente_id?: string }>().catch(() => ({}) as never);
+  const cuerpo = await c.req.json<{ cotizacion_id?: string; lineas?: Array<Record<string, unknown>>; cliente_id?: string }>().catch(() => ({}) as never);
   if (!cuerpo.lineas?.length) return err(c, 'datos_invalidos', 400, { falta: 'lineas' });
   for (const l of cuerpo.lineas) {
     if (l.monto !== undefined && !Number.isInteger(Number(l.monto))) {
@@ -218,7 +220,6 @@ rutas.post('/:o/items/exportar', async (c) => {
   const r = await stub(c).exportarItems({
     cotizacion_id: cuerpo.cotizacion_id ?? '',
     lineas: cuerpo.lineas,
-    negocio_id: cuerpo.negocio_id ?? '',
     cliente_id: cuerpo.cliente_id ?? '',
     usuario_id: c.get('quien').usuario_id,
   });
@@ -354,7 +355,7 @@ rutas.post('/:o/clientes/invitar', async (c) => {
  * que ya se crearon. Las dos rutas van antes del CRUD genérico o `/:o/:tabla`
  * se tragaría `clientes/parecidos` como si fuera una tabla llamada así. */
 
-/** GET /orgs/:o/clientes/parecidos?nombre=&negocio_id= — «¿no te refieres a…?»
+/** GET /orgs/:o/clientes/parecidos?nombre= — «¿no te refieres a…?»
  *
  *  La regla vive en el servidor, y por eso la contesta la API y no cada
  *  pantalla: tres apps con tres ideas de qué se parece a qué es tener tres
@@ -363,7 +364,7 @@ rutas.get('/:o/clientes/parecidos', async (c) => {
   const permiso = puedeLeer(c, 'clientes');
   if (permiso) return permiso;
   const nombre = c.req.query('nombre') || '';
-  const filas = await stub(c).clientesParecidos(nombre, c.req.query('negocio_id') || null);
+  const filas = await stub(c).clientesParecidos(nombre);
   return ok(c, { parecidos: filas });
 });
 
@@ -1121,13 +1122,13 @@ rutas.post('/:o/conciliaciones', async (c) => {
   if (quien.clase !== 'miembro' || (quien.rol !== 'owner' && quien.rol !== 'admin')) {
     return err(c, 'sin_permiso', 403, { motivo: 'sólo owner y admin concilian' });
   }
-  const permiso = revisarEscritura('conciliaciones', c.get('app'), ['negocio_id', 'corte_at']);
+  const permiso = revisarEscritura('conciliaciones', c.get('app'), ['corte_at']);
   if (!permiso.ok) return err(c, permiso.error, 403, permiso.detalle);
 
+  // `negocio_id` ya no existe (0.63.0): si una pantalla vieja lo manda, se ignora.
   const cuerpo = await c.req
-    .json<{ negocio_id?: string; corte_at?: string; saldos?: Array<{ cuenta_id?: string; saldo_real?: unknown }> }>()
+    .json<{ corte_at?: string; saldos?: Array<{ cuenta_id?: string; saldo_real?: unknown }> }>()
     .catch(() => ({}) as never);
-  if (!cuerpo.negocio_id) cuerpo.negocio_id = await negocioDeLaEmpresa(c);
   if (!Array.isArray(cuerpo.saldos) || !cuerpo.saldos.length) return err(c, 'datos_invalidos', 400, { falta: 'saldos' });
 
   const saldos: Array<{ cuenta_id: string; saldo_real: number }> = [];
@@ -1140,7 +1141,6 @@ rutas.post('/:o/conciliaciones', async (c) => {
   }
 
   const r = await stub(c).conciliar({
-    negocio_id: cuerpo.negocio_id,
     corte_at: cuerpo.corte_at || new Date().toISOString(),
     usuario_id: quien.usuario_id,
     saldos,
@@ -1152,9 +1152,7 @@ rutas.post('/:o/conciliaciones', async (c) => {
 rutas.get('/:o/conciliaciones/estadistica', async (c) => {
   const permiso = puedeLeer(c, 'conciliaciones');
   if (permiso) return permiso;
-  const quien = c.get('quien');
-  const negocio_id = c.req.query('negocio_id') || quien.negocios[0] || await negocioDeLaEmpresa(c);
-  return ok(c, await stub(c).estadisticaConciliacion(negocio_id));
+  return ok(c, await stub(c).estadisticaConciliacion());
 });
 
 /* ─────────────── CRUD genérico ─────────────── */
@@ -1162,52 +1160,111 @@ rutas.get('/:o/conciliaciones/estadistica', async (c) => {
 /* Órdenes de compra y contabilidad fiscal (0.21.0). Se montan AQUÍ, antes
  * del CRUD genérico: si fueran después, `/:o/:tabla` se tragaría
  * `/:o/ordenes` como si «ordenes» fuera el nombre de una tabla. */
-/** LA EMPRESA (0.62.0): nombre, RFC, moneda y día de conciliación.
+/** LA EMPRESA (0.62.0; tabla `empresa` desde 0.63.0): nombre, RFC, moneda
+ *  y día de conciliación.
  *
  *  Mike, 1-oct: «Sólo es una empresa/negocio todo». Esto es lo que las
- *  pantallas leen y editan en vez de `negocios`. Hoy es una fachada sobre
- *  el registro de la empresa (negocioDeLaEmpresa); cuando la tabla
- *  `negocios` se vaya (fase D), aquí mismo vive la tabla `empresa` y las
- *  apps no notan el cambio. GET lo abre quien es de la empresa o su
+ *  pantallas leen y editan. Es el único renglón de `empresa` (migración
+ *  0027), con id 'empresa'; si la org es nueva y todavía no lo tiene, se
+ *  crea con su nombre del D1. GET lo abre quien es de la empresa o su
  *  personal; PATCH, quien la dirige. */
-async function empresaDe(c: Ctx): Promise<Record<string, unknown>> {
-  const id = await negocioDeLaEmpresa(c);
-  const n = (await stub(c).obtener('negocios', id)) ?? {};
+function formaDeEmpresa(e: Record<string, unknown>): Record<string, unknown> {
   return {
-    id, nombre: String(n.nombre ?? ''), rfc: (n.rfc as string | null) ?? null,
-    moneda: String(n.moneda ?? 'MXN'), dia_conciliacion: Number(n.dia_conciliacion ?? 1),
+    id: String(e.id ?? 'empresa'), nombre: String(e.nombre ?? ''), rfc: (e.rfc as string | null) ?? null,
+    moneda: String(e.moneda ?? 'MXN'), dia_conciliacion: Number(e.dia_conciliacion ?? 1),
   };
 }
 
-rutas.get('/:o/empresa', async (c) => {
-  if (c.get('quien').clase === 'cliente') return err(c, 'sin_permiso', 403, { motivo: 'un cliente solo abre /peek' });
-  return ok(c, await empresaDe(c));
-});
-
-rutas.patch('/:o/empresa', async (c) => {
-  const quien = c.get('quien');
-  if (quien.clase !== 'miembro' || (quien.rol !== 'owner' && quien.rol !== 'admin')) {
-    return err(c, 'sin_permiso', 403, { motivo: 'los datos de la empresa los cambia quien la dirige' });
-  }
-  const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+/** Lo que una pantalla puede cambiar de la empresa, ya revisado: nombre con
+ *  algo, RFC en mayúsculas o nulo, moneda MXN|USD, día 0-6. Lo usan
+ *  `PATCH /empresa` y el compat `PATCH /negocios/:id`. */
+function datosDeEmpresa(b: Record<string, unknown>): { ok: true; datos: Record<string, unknown> } | { ok: false; error: string; detalle: Record<string, unknown> } {
   const datos: Record<string, unknown> = {};
   if (b.nombre !== undefined) {
     const nombre = String(b.nombre).trim();
-    if (!nombre) return err(c, 'datos_invalidos', 400, { falta: 'nombre' });
+    if (!nombre) return { ok: false, error: 'datos_invalidos', detalle: { falta: 'nombre' } };
     datos.nombre = nombre;
   }
   if (b.rfc !== undefined) datos.rfc = b.rfc === null || String(b.rfc).trim() === '' ? null : String(b.rfc).trim().toUpperCase();
   if (b.moneda !== undefined) {
-    if (b.moneda !== 'MXN' && b.moneda !== 'USD') return err(c, 'datos_invalidos', 400, { campo: 'moneda', permitidas: ['MXN', 'USD'] });
+    if (b.moneda !== 'MXN' && b.moneda !== 'USD') return { ok: false, error: 'datos_invalidos', detalle: { campo: 'moneda', permitidas: ['MXN', 'USD'] } };
     datos.moneda = b.moneda;
   }
   if (b.dia_conciliacion !== undefined) {
     const dia = Number(b.dia_conciliacion);
-    if (!Number.isInteger(dia) || dia < 0 || dia > 6) return err(c, 'datos_invalidos', 400, { campo: 'dia_conciliacion', regla: '0 domingo … 6 sábado' });
+    if (!Number.isInteger(dia) || dia < 0 || dia > 6) return { ok: false, error: 'datos_invalidos', detalle: { campo: 'dia_conciliacion', regla: '0 domingo … 6 sábado' } };
     datos.dia_conciliacion = dia;
   }
-  if (Object.keys(datos).length) await stub(c).actualizar('negocios', await negocioDeLaEmpresa(c), datos);
-  return ok(c, await empresaDe(c));
+  return { ok: true, datos };
+}
+
+const dirige = (c: Ctx): boolean => {
+  const quien = c.get('quien');
+  return quien.clase === 'miembro' && (quien.rol === 'owner' || quien.rol === 'admin');
+};
+
+rutas.get('/:o/empresa', async (c) => {
+  if (c.get('quien').clase === 'cliente') return err(c, 'sin_permiso', 403, { motivo: 'un cliente solo abre /peek' });
+  return ok(c, formaDeEmpresa(await empresaDe(c)));
+});
+
+rutas.patch('/:o/empresa', async (c) => {
+  if (!dirige(c)) return err(c, 'sin_permiso', 403, { motivo: 'los datos de la empresa los cambia quien la dirige' });
+  const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const r = datosDeEmpresa(b);
+  if (!r.ok) return err(c, r.error, 400, r.detalle);
+  await empresaDe(c); // que exista, con el nombre de la org, antes de tocarla
+  if (Object.keys(r.datos).length) await stub(c).actualizarEmpresa(r.datos);
+  return ok(c, formaDeEmpresa(await empresaDe(c)));
+});
+
+/* ─────────────── COMPATIBILIDAD: /negocios (0.63.0) ───────────────
+ *
+ * La tabla `negocios` ya no existe; la empresa es una. Estas cuatro rutas
+ * contestan la empresa CON LA FORMA DE NEGOCIO —id, nombre, rfc, moneda,
+ * dia_conciliacion, creado_at— para que una pantalla que todavía liste
+ * `GET /negocios` y tome `filas[0]` siga encontrando el mismo registro que
+ * antes. SE VAN CUANDO NINGUNA PRUEBA LO PIDA. Van antes del CRUD genérico,
+ * que ya no conoce `negocios` y contestaría 404 tabla_desconocida. */
+const formaDeNegocio = (e: Record<string, unknown>): Record<string, unknown> => ({
+  ...formaDeEmpresa(e), creado_at: String(e.creado_at ?? ''),
+});
+
+rutas.get('/:o/negocios', async (c) => {
+  if (c.get('quien').clase === 'cliente') return err(c, 'sin_permiso', 403, { motivo: 'un cliente solo abre /peek' });
+  return ok(c, { total: 1, filas: [formaDeNegocio(await empresaDe(c))] });
+});
+
+rutas.post('/:o/negocios', async (c) => {
+  /* Antes creaba un negocio; ahora contesta la empresa. El cuerpo se ignora,
+   * salvo nombre y moneda si la empresa todavía no existía: así una app
+   * vieja que «crea su negocio» al arrancar deja la empresa con ese nombre
+   * y no con el id de la org. */
+  if (c.get('quien').clase === 'cliente') return err(c, 'sin_permiso', 403);
+  const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const enD1 = await org(c.env, c.get('org_id'));
+  const nombre = String(b.nombre ?? '').trim() || enD1?.nombre || c.get('org_id');
+  const moneda = b.moneda === 'USD' ? 'USD' : 'MXN';
+  // `empresa()` sólo usa nombre y moneda si todavía no hay renglón.
+  return ok(c, formaDeNegocio(await stub(c).empresa(nombre, moneda)), 201);
+});
+
+rutas.get('/:o/negocios/:id', async (c) => {
+  if (c.get('quien').clase === 'cliente') return err(c, 'sin_permiso', 403, { motivo: 'un cliente solo abre /peek' });
+  const e = await empresaDe(c);
+  if (c.req.param('id') !== String(e.id)) return err(c, 'no_encontrado', 404);
+  return ok(c, formaDeNegocio(e));
+});
+
+rutas.patch('/:o/negocios/:id', async (c) => {
+  if (!dirige(c)) return err(c, 'sin_permiso', 403, { motivo: 'los datos de la empresa los cambia quien la dirige' });
+  const e = await empresaDe(c);
+  if (c.req.param('id') !== String(e.id)) return err(c, 'no_encontrado', 404);
+  const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const r = datosDeEmpresa(b);
+  if (!r.ok) return err(c, r.error, 400, r.detalle);
+  if (Object.keys(r.datos).length) await stub(c).actualizarEmpresa(r.datos);
+  return ok(c, formaDeNegocio(await empresaDe(c)));
 });
 
 montarOrdenes(rutas);
@@ -1226,33 +1283,9 @@ rutas.get('/:o/:tabla', async (c) => {
   // como manera de abrir la lista de precios desde cualquier otra app.
   if (tabla === 'ajustes') filtros.app = c.get('app');
   const quien = c.get('quien');
-  /* «Un negocio a la vez»: a quien tiene negocios asignados y no dijo de
-   * cuál, se le contesta el primero. Sirve para las listas de toda la
-   * empresa —el buzón, los movimientos, lo fiscal—, donde mezclar dos
-   * negocios da cifras que no son de ninguno de los dos.
-   *
-   * PERO NO CUANDO YA SE PREGUNTÓ POR ALGO QUE ES DE UN SOLO NEGOCIO. Un
-   * proyecto pertenece a un negocio y nada más; un cliente también. Si
-   * alguien pide «los ítems del proyecto X», el negocio ya quedó decidido
-   * por X, y rellenarlo con otro no acota: contesta de más o —lo que pasó—
-   * contesta VACÍO.
-   *
-   * Eso es lo que Mike reportó cuatro veces el 20-sep. El detalle de un
-   * proyecto se abre con `GET /proyectos/:id`, que no filtra por negocio, y
-   * su pantalla pedía los ítems sin decir el negocio. Con el proyecto en el
-   * segundo negocio de la empresa, la lista salía en cero: 200, `filas: []`,
-   * ni error ni seña. Se veía «Sin ítems» con el precio de venta correcto al
-   * lado —ése lo suma el servidor con un SUM, sin pasar por aquí—.
-   *
-   * Y explica el defecto desde el principio: al guardar, dash101 pide los
-   * ítems vivos del proyecto para saber cuáles ya existen. Si esa lista
-   * vuelve vacía, TODOS los renglones de la pantalla parecen nuevos y se
-   * crean otra vez. «Los duplica» y «no hay manera de borrar ítems». */
-  const yaEsDeUnNegocio = LLAVES_DE_UN_NEGOCIO.some((k) => filtros[k]);
-  if (quien.negocios.length && !filtros.negocio_id && !yaEsDeUnNegocio
-      && DEFS[tabla as Tabla].filtros.includes('negocio_id')) {
-    filtros.negocio_id = quien.negocios[0];
-  }
+  /* Hasta 0.62.0 aquí se rellenaba `negocio_id` con el del que pregunta
+   * («un negocio a la vez»). Ya no hay negocios: un `?negocio_id=` que
+   * llegue no está en los filtros de ninguna tabla y `listar` lo ignora. */
 
   /* El tope. Toda lista viene topada, y `total` dice cuántas hay de verdad:
    * quien lo ignore se lleva una respuesta 200 con menos renglones y ninguna
@@ -1291,30 +1324,6 @@ rutas.get('/:o/:tabla/:id', async (c) => {
   return ok(c, podar(quien, tabla as Tabla, fila));
 });
 
-/** POST /orgs/:o/negocios/fusionar {queda_id, seco?} (0.50.0)
- *
- *  Mike, 29-sep: «todo es para un negocio nada más», y escogió fusionar lo
- *  que ya existe. Todo lo de los demás negocios (clientes, proyectos,
- *  ítems, cuentas, movimientos, cotizaciones, productos, órdenes, facturas,
- *  rayas, conciliaciones, gastos fijos) pasa al que se queda y los demás se
- *  borran. Con `seco: true` sólo dice qué se movería. Lo hace quien dirige
- *  la empresa. Los miembros acotados a un negocio quedan en «todos»: ya
- *  sólo hay uno. Va antes que el CRUD genérico porque comparte prefijo. */
-rutas.post('/:o/negocios/fusionar', async (c) => {
-  const quien = c.get('quien');
-  if (quien.clase !== 'miembro' || (quien.rol !== 'owner' && quien.rol !== 'admin')) {
-    return err(c, 'sin_permiso', 403, { motivo: 'fusionar los negocios lo hace quien dirige la empresa' });
-  }
-  const b = await c.req.json<{ queda_id?: string; seco?: boolean }>().catch(() => ({}) as never);
-  if (!b.queda_id) return err(c, 'datos_invalidos', 400, { falta: 'queda_id' });
-  const r = await stub(c).fusionarNegocios(String(b.queda_id), b.seco === true);
-  if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 400, r.detalle);
-  if (!r.seco && r.se_fueron.length) {
-    await c.env.MASTER.prepare(`UPDATE miembros SET negocios = '[]' WHERE org_id = ? AND negocios <> '[]'`).bind(c.get('org_id')).run();
-  }
-  return ok(c, r);
-});
-
 rutas.post('/:o/:tabla', async (c) => {
   const tabla = c.req.param('tabla')!;
   if (!esTabla(tabla)) return err(c, 'tabla_desconocida', 404, { tabla, tablas: Object.keys(DEFS) });
@@ -1329,17 +1338,11 @@ rutas.post('/:o/:tabla', async (c) => {
     return err(c, 'sin_permiso', 403, { motivo: 'los ajustes son configuracion de la app: solo miembros de la empresa' });
   }
 
-  const datos = await c.req.json<Record<string, unknown>>().catch(() => ({}) as never);
+  const datos = sinNegocio(await c.req.json<Record<string, unknown>>().catch(() => ({}) as never));
   const campos = Object.keys(datos);
 
   const veredicto = revisarEscritura(tabla, c.get('app'), campos);
   if (!veredicto.ok) return err(c, veredicto.error, 403, veredicto.detalle);
-
-  /* `negocio_id` ya no se pide (0.61.0): si la fila lo lleva y no viene, es
-   * el de la empresa. Las apps dejan de saber que existe. */
-  if (tabla !== 'negocios' && DEFS[tabla].cols.negocio_id && (datos.negocio_id === undefined || datos.negocio_id === null || datos.negocio_id === '')) {
-    datos.negocio_id = await negocioDeLaEmpresa(c);
-  }
 
   const falta = DEFS[tabla].requeridos.filter((r) => datos[r] === undefined || datos[r] === null || datos[r] === '');
   if (falta.length) return err(c, 'datos_invalidos', 400, { falta });
@@ -1445,7 +1448,7 @@ rutas.patch('/:o/:tabla/:id', async (c) => {
   const ajeno = ajusteAjeno(c, tabla, c.req.param('id')!);
   if (ajeno) return ajeno;
 
-  const datos = await c.req.json<Record<string, unknown>>().catch(() => ({}) as never);
+  const datos = sinNegocio(await c.req.json<Record<string, unknown>>().catch(() => ({}) as never));
   const veredicto = revisarEscritura(tabla, c.get('app'), Object.keys(datos));
   if (!veredicto.ok) return err(c, veredicto.error, 403, veredicto.detalle);
 
