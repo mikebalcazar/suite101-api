@@ -222,6 +222,8 @@ export function montarOrdenes(rutas: App): void {
     const persona = (await stub(c).personalDeUsuario(q.usuario_id)) as Record<string, unknown> | null;
     const r = await stub(c).crearOrden({
       ...b,
+      // 0.62.1 rellenaba aquí `negocio_id`; desde 0.63.0 no hay negocios ni
+      // columna: si una pantalla vieja lo manda, `crearOrden` no lo usa.
       // Estos cuatro NO los manda la pantalla: los pone la API. Si los
       // mandara, cualquiera podría pedir una compra a nombre de otro.
       solicitante_usuario_id: q.usuario_id,

@@ -89,6 +89,7 @@ describe('la base ya no sabe de negocios', () => {
     expect((await pedir('mike', `/admin/orgs/${ORG}/esquema`, { app: '' })).estado).toBe(401);
     galletas.mike = antes;
   });
+
 });
 
 describe('la empresa tiene su ruta, sobre la tabla empresa', () => {
@@ -163,6 +164,15 @@ describe('las rutas que lo exigían', () => {
     const e = await o('mike', '/conciliaciones/estadistica');
     expect(e.estado, JSON.stringify(e)).toBe(200);
     expect(e.data.acumulado.cortes).toBe(1);
+  });
+
+  it('una orden de compra se pide sin negocio_id (0.62.1) y la fila ya no lo trae (0.63.0)', async () => {
+    const r = await o('mike', '/ordenes', { method: 'POST', json: { concepto: 'Triplay', monto: 1160_00, proveedor_nombre: 'Maderas' } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    expect(r.data.folio).toMatch(/^OC-/);
+    expect('negocio_id' in r.data).toBe(false);
+    const vieja = await o('mike', '/ordenes', { method: 'POST', json: { negocio_id: 'lo-que-sea', concepto: 'Lijas', monto: 120_00 } });
+    expect(vieja.estado, 'una app vieja que lo manda tampoco truena').toBe(201);
   });
 
   it('la nómina: los cortes se leen y se abren sin negocio_id', async () => {

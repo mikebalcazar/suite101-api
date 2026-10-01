@@ -48,6 +48,8 @@
  *   · `GET /admin/orgs/:o/quote` contesta { org, resumen: ConteoQuote } con
  *     { clientes, proyectos, cotizaciones, ultima_cotizacion } de la
  *     empresa; ya no hay lista por negocio ni huérfanos.
+ *   · `POST /orgs/:o/ordenes` sin negocio_id (0.62.1 lo rellenaba; ya no
+ *     hay qué rellenar) y la fila de `Orden` no lo trae.
  *   · `GET /orgs/:o/ordenes/buzon`, `/pagadas`, `/resumen`, `/ordenes`,
  *     `/fiscal/iva`, `/cuadre`, `/pendientes`, `/cfdi`,
  *     `/clientes/parecidos`, `/conciliaciones/estadistica` y
@@ -65,6 +67,11 @@
  *   · Nuevo `GET /admin/orgs/:o/esquema` (superadmin): { tablas: { nombre:
  *     [columnas] } }, para medir que la base no trae `negocios` ni
  *     `negocio_id`.)
+ *
+ * Antes, 0.62.1 (`POST /orgs/:o/ordenes` SIN negocio_id: la API
+ * le pone el registro de la empresa, como ya hacían cuentas, clientes,
+ * conciliaciones y nómina desde 0.61.0. Faltaba en las órdenes y supply101,
+ * que ya no lo manda, se quedaba sin poder pedir.)
  *
  * Antes, 0.62.0 (LA EMPRESA TIENE SU RUTA. `GET /orgs/:o/empresa`
  * → { id, nombre, rfc, moneda, dia_conciliacion }; `PATCH /orgs/:o/empresa`
