@@ -402,6 +402,28 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   columnas + tabla `empresa` de un renglón + limpieza de API, dash101,
   master101, mocks de workshop101/t101-portal → la org demo de staging a
   un solo registro. Muro 2026-10-01-1930.
+- **Quitar «negocio», fase D completa (1-oct tarde).** API 0.62.0 #196
+  (GET/PATCH /orgs/:o/empresa, registrada antes de montarOrdenes) y
+  0.62.1 #197 (POST /ordenes sin negocio_id: la ruta propia se había
+  quedado fuera de la regla de 0.61.0; 500 NOT NULL en staging). dash101
+  #120 (escribir.ts sin negocio_id en ninguna alta), #121 (lib/empresa.ts
+  sobre /empresa), #122 (se van fusionarNegocios y un-solo-negocio.spec),
+  #123 (la prueba de supply101 paga de la cuenta que exista: supply101 no
+  puede abrir cuentas). Verificado: API 0.62.1 en prod y staging; dash101
+  huella fb78310 con 20 del navegador + 5 de supply101 en verde. API
+  0.63.0 #198: migración 0027 en código (fusiona al primero por nombre,
+  tabla `empresa`, reconstruye cuentas/conciliaciones/rayas/accionistas
+  con defer_foreign_keys, DROP COLUMN en el resto, DROP TABLE negocios;
+  /negocios de compatibilidad; /admin/orgs/:id/quote → {org, resumen});
+  humo #199. master101 #33 (resumen de quote101). dash101 #124: sin
+  lecturas, filtros ni tipos de negocio (useEmpresa, lib/equipo.ts, 246
+  vitest, 20 navegador). Verificado: API 0.63.0 prod y staging (humo
+  200/200), dash101 huella ed67294, master101 7c4cfff. QUEDA: la
+  org demo de staging juntó sus tres registros y trae ~380 proyectos y
+  clientes duplicados; resembrarla es decisión de Mike. Compat que se
+  retira cuando nadie la lea: /negocios, /yo negocios: [], columna
+  miembros.negocios del D1, el bloque `negocio` del estado del proyecto,
+  mocks de workshop101/t101-portal. Muro 2026-10-01-2040.
 - **quell101: el plano pegado y la nota que pregunta (1-oct, #97 y #98).**
   El cuadro «Subir» de DocsItem.jsx toma un PDF o imagen del portapapeles
   (paste en el documento mientras está abierto) o del arrastre encima;
