@@ -202,6 +202,41 @@ describe('19 · órdenes de compra (los casos del encargo)', () => {
 
     const despues = (await o('mike', `/proyectos/${proyecto}`)).data;
     expect(despues.compromiso - antes.compromiso, 'sube exactamente el monto, una vez').toBe(900_00);
+
+    /* EL CASO DE HOLCIM (Mike, 1-oct-2026): proveedor escrito a mano, sin
+     * fila en `proveedores`. La partida nace sin proveedor_id y el egreso con
+     * contraparte «otro»; hasta el 0.58.0 no cuadraban y la partida se
+     * quedaba «pendiente» con $0 ya pagada. */
+    const par = (await o('mike', `/partidas/${pago.data.partida_id}`)).data;
+    expect(par.proveedor_id).toBeNull();
+    expect(par.monto_pagado, 'lo pagado es el monto de la orden').toBe(900_00);
+    expect(par.estado).toBe('pagado');
+    expect(pago.data.movimiento.partida_id, 'el egreso sabe su partida').toBe(pago.data.partida_id);
+    const porPartida = await o('mike', `/movimientos?partida_id=${pago.data.partida_id}`);
+    expect(porPartida.data.filas.map((m: any) => m.id)).toEqual([pago.data.movimiento.id]);
+  });
+
+  it('7b · una partida sin proveedor registrado, escogida al pedir, también queda pagada', async () => {
+    const suelta = await o('mike', '/partidas', { method: 'POST', app: 'dash101', json: {
+      proyecto_id: proyecto, proveedor_nombre: 'Flete Güero', concepto: 'Flete', monto_acordado: 100_00,
+    } });
+    expect(suelta.estado, JSON.stringify(suelta)).toBe(201);
+    const oc = await o('ana', '/ordenes', { method: 'POST', json: {
+      negocio_id: negocio, proveedor_nombre: 'Flete Güero', concepto: 'Flete de la solera', monto: 60_00,
+      proyecto_id: proyecto, partida_id: suelta.data.id,
+    } });
+    expect(oc.estado, JSON.stringify(oc)).toBe(201);
+    const pago = await o('beto', `/ordenes/${oc.data.id}/pagar`, { method: 'POST', json: { cuenta_id: cuenta } });
+    expect(pago.estado, JSON.stringify(pago)).toBe(200);
+    const par = (await o('mike', `/partidas/${suelta.data.id}`)).data;
+    expect(par.monto_pagado).toBe(60_00);
+    expect(par.estado).toBe('parcial');
+    /* Y lo pagado a mano a nombre del proveedor de otra partida no se le
+     * cuelga a ésta: sin proveedor_id, sólo cuentan sus propios egresos. */
+    await o('beto', `/ordenes/${(await o('ana', '/ordenes', { method: 'POST', json: {
+      negocio_id: negocio, proveedor_nombre: 'Flete Güero', concepto: 'Otro flete', monto: 40_00, proyecto_id: proyecto, partida_id: suelta.data.id,
+    } })).data.id}/pagar`, { method: 'POST', json: { cuenta_id: cuenta } });
+    expect((await o('mike', `/partidas/${suelta.data.id}`)).data.estado).toBe('pagado');
   });
 
   it('8 · gasto general: el egreso va sin proyecto y ningún proyecto se mueve', async () => {

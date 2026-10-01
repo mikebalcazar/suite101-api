@@ -38,6 +38,7 @@ import proveedoresDatos from '../migrations/org/0022_proveedores_datos.sql';
 import proveedorCuentas from '../migrations/org/0023_proveedor_cuentas.sql';
 import subitems from '../migrations/org/0024_subitems.sql';
 import accionistas from '../migrations/org/0025_accionistas.sql';
+import movimientoPartida from '../migrations/org/0026_movimiento_partida.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { PREFIJOS, siguienteCodigo } from './quell/codigos.js';
 
@@ -64,7 +65,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida];
 
 /** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
  *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
@@ -984,20 +985,24 @@ export class OrgDB extends DurableObject<Env> {
       .one() as { s: number }).s;
     const avance = venta.n ? venta.e / 7 : 0;
 
-    // Las partidas: lo pagado a cada proveedor sale de los egresos del
-    // proyecto que lo traen como contraparte —igual que lo hacía conta-master—
-    // y de ahí su estado. Son cachés de la partida: los escribe esto y nadie
-    // más. Y lo acordado con todos se suma en `compromiso`, el del proyecto.
+    // Las partidas: lo pagado son los egresos del proyecto QUE SON DE LA
+    // PARTIDA (0026: el egreso de una orden pagada sabe su partida), más
+    // —para lo capturado a mano desde siempre— los egresos a nombre de su
+    // proveedor que no sean de otra partida. Hasta el 1-oct-2026 sólo
+    // contaba lo segundo, y una orden con el proveedor escrito a mano dejaba
+    // la partida en «pendiente» con $0 ya pagada (Mike, HOLCIM). Son cachés
+    // de la partida: los escribe esto y nadie más. Y lo acordado con todos se
+    // suma en `compromiso`, el del proyecto.
     for (const par of this.sql
       .exec(`SELECT id, proveedor_id, monto_acordado FROM partidas WHERE proyecto_id = ?`, proyecto_id)
       .toArray() as Fila[]) {
-      const pagadoProv = par.proveedor_id
-        ? (this.sql
-            .exec(`SELECT COALESCE(SUM(monto),0) AS s FROM movimientos
-                   WHERE proyecto_id = ? AND tipo = 'egreso' AND contraparte_tipo = 'proveedor' AND contraparte_id = ?`,
-                  proyecto_id, par.proveedor_id)
-            .one() as { s: number }).s
-        : 0;
+      const pagadoProv = (this.sql
+        .exec(`SELECT COALESCE(SUM(monto),0) AS s FROM movimientos
+               WHERE proyecto_id = ? AND tipo = 'egreso'
+                 AND (partida_id = ?
+                      OR (partida_id IS NULL AND ? IS NOT NULL AND contraparte_tipo = 'proveedor' AND contraparte_id = ?))`,
+              proyecto_id, par.id, par.proveedor_id ?? null, par.proveedor_id ?? null)
+        .one() as { s: number }).s;
       const acordado = Number(par.monto_acordado || 0);
       const estadoPar = pagadoProv >= acordado && acordado > 0 ? 'pagado' : pagadoProv > 0 ? 'parcial' : 'pendiente';
       this.sql.exec(`UPDATE partidas SET monto_pagado = ?, estado = ? WHERE id = ?`, pagadoProv, estadoPar, par.id);
@@ -2071,11 +2076,11 @@ export class OrgDB extends DurableObject<Env> {
       }
 
       this.sql.exec(
-        `INSERT INTO movimientos (id, negocio_id, tipo, monto, fecha, cuenta_id, proyecto_id,
+        `INSERT INTO movimientos (id, negocio_id, tipo, monto, fecha, cuenta_id, proyecto_id, partida_id,
           contraparte_tipo, contraparte_id, contraparte_nombre, descripcion, categoria, creado_por, creado_at,
           facturado, requiere_factura, subtotal, iva, tasa_iva)
-         VALUES (?,?,'egreso',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        mov_id, orden.negocio_id, Number(orden.monto), fecha, args.cuenta_id, orden.proyecto_id ?? null,
+         VALUES (?,?,'egreso',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        mov_id, orden.negocio_id, Number(orden.monto), fecha, args.cuenta_id, orden.proyecto_id ?? null, partida_id,
         contraparte.tipo, contraparte.id, contraparte.nombre,
         `${orden.folio} · ${orden.concepto}`, reembolso ? 'reembolso' : 'orden_de_compra', args.quien_usuario_id, t,
         /* `facturado` arranca en 0 aunque la orden diga «con factura»: la
