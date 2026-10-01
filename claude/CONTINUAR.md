@@ -402,6 +402,11 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   columnas + tabla `empresa` de un renglón + limpieza de API, dash101,
   master101, mocks de workshop101/t101-portal → la org demo de staging a
   un solo registro. Muro 2026-10-01-1930.
+- **La demo de staging, resembrada limpia (1-oct, decisión de Mike).**
+  DELETE /admin/orgs/demo → POST org con sus apps → los dos miembros
+  (prueba.admin admin, socia socio; el guion NO los crea) →
+  scripts/sembrar-demo.mjs → «Caja de supply101» a mano. lectura-api 15/15,
+  supply101 5/5. Muro 2026-10-01-2140.
 - **DEFECTO: «pagado» por ítem con el tope de 500 (1-oct, dash101 #127).**
   `partesDeProyectos()` pedía movimientos sin `limite`; pasando 500 los
   viejos se caían y un ítem pagado salía en cero (la demo, 701 movimientos
