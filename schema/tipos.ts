@@ -17,7 +17,13 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.58.0 (EL EGRESO SABE SU PARTIDA. Mike, 1-oct, en
+ * Versión del contrato: 0.59.0 (EL HISTORIAL DE LO PAGADO. Mike, 1-oct:
+ * «quiero ver en la pantalla de compras un historial completo de las
+ * órdenes de compra ya pagadas». Nueva `GET /orgs/:o/ordenes/pagadas`
+ * (quien paga): `{ filas, total }`, la más reciente arriba por `pagada_at`;
+ * `?negocio_id=`, `?tipo=` y `?limite=` (500 si no se dice, hasta 5000).)
+ *
+ * Antes, 0.58.0 (EL EGRESO SABE SU PARTIDA. Mike, 1-oct, en
  * HOLCIM: «estos compromisos están pendientes pero son órdenes de compra ya
  * pagadas». Migración org 0026: `movimientos.partida_id`; al pagar una orden
  * el egreso lleva la partida, y lo pagado de una partida son sus egresos
@@ -868,7 +874,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.58.0';
+export const VERSION_CONTRATO = '0.59.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

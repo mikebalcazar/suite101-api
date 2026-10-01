@@ -292,6 +292,25 @@ describe('19 · órdenes de compra (los casos del encargo)', () => {
     expect(['correo_apagado_fuera_de_produccion', 'correo_no_configurado']).toContain(pago.data.correo.motivo);
   });
 
+  it('0.59.0 · el historial de lo pagado: quien paga lo ve, la más reciente arriba, y suma lo que lista', async () => {
+    const r = await o('beto', '/ordenes/pagadas');
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.filas.length).toBeGreaterThanOrEqual(4);
+    expect(r.data.filas.every((f: any) => f.estado === 'pagada')).toBe(true);
+    const fechas = r.data.filas.map((f: any) => String(f.pagada_at));
+    expect([...fechas].sort().reverse(), 'la más reciente arriba').toEqual(fechas);
+    expect(r.data.filas[0].id, 'la última que se pagó (la 10) encabeza').toBe(oc3);
+    expect(r.data.total).toBe(r.data.filas.reduce((s: number, f: any) => s + f.monto, 0));
+    const ana = await o('ana', '/ordenes/pagadas');
+    expect(ana.estado, 'quien no paga no ve el historial de la empresa').toBe(403);
+    const otro = await o('beto', '/ordenes/pagadas?negocio_id=no-existe');
+    expect(otro.data.filas).toEqual([]);
+    const una = await o('beto', '/ordenes/pagadas?limite=1');
+    expect(una.data.filas.length).toBe(1);
+    const mal = await o('beto', '/ordenes/pagadas?tipo=chueco');
+    expect(mal.estado).toBe(400);
+  });
+
   it('11 · los folios no se repiten con dos órdenes creadas a la vez', async () => {
     const cuerpo = { negocio_id: negocio, proveedor_nombre: 'Varios', concepto: 'A la vez', monto: 100_00 };
     const [a, b, d] = await Promise.all([

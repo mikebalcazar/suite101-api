@@ -253,6 +253,8 @@ export interface ApiOrgDB {
   crearOrden(args: Record<string, unknown>): Promise<Fila | { error: string; detalle?: unknown }>;
   misOrdenes(usuario_id: string, negocio_id?: string | null): Promise<Fila[]>;
   buzon(hoy?: string, negocio_id?: string | null, tipo?: TipoOrden | null): Promise<{ filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number }>;
+  /** 0.59.0 · El historial: las órdenes ya pagadas, la más reciente arriba (Mike, 1-oct: «un historial completo de las órdenes de compra ya pagadas»). */
+  ordenesPagadas(negocio_id?: string | null, tipo?: TipoOrden | null, limite?: number): Promise<{ filas: Fila[]; total: number }>;
   pendientesDeOrdenes(negocio_id?: string | null): Promise<{ compras: { total: number; cuantas: number }; reembolsos: { total: number; cuantas: number } }>;
   verOrden(id: string): Promise<{ orden: Fila; eventos: Fila[]; archivos: Fila[] } | null>;
   /** 0.56.1 · La orden que dejó ese egreso (o null): para que desde el movimiento se llegue a la orden con toda su historia y sus papeles. */
@@ -1977,6 +1979,24 @@ export class OrgDB extends DurableObject<Env> {
       if (v && v < dia) { vencidas++; semana += m; } else if (v && v <= enOchoDias) semana += m;
     }
     return { filas, total, vence_esta_semana: semana, vencidas };
+  }
+
+  /** El historial de lo pagado (0.59.0). Mike, 1-oct: «quiero ver en la
+   *  pantalla de compras un historial completo de las órdenes de compra ya
+   *  pagadas». La más reciente arriba, por la fecha en que se pagó. Con
+   *  `negocio_id`, las de ese negocio; con `tipo`, sólo compras o sólo
+   *  reembolsos. `total` es la suma de lo que se lista. Lo lee quien paga,
+   *  como el buzón: es la otra mitad de la misma bandeja. */
+  ordenesPagadas(negocio_id?: string | null, tipo?: TipoOrden | null, limite = 500): { filas: Fila[]; total: number } {
+    const condiciones = [`estado = 'pagada'`];
+    const valores: SqlStorageValue[] = [];
+    if (negocio_id) { condiciones.push('negocio_id = ?'); valores.push(negocio_id); }
+    if (tipo) { condiciones.push('tipo = ?'); valores.push(tipo); }
+    const filas = this.leerInternas('ordenes', this.sql.exec(
+      `SELECT * FROM ordenes WHERE ${condiciones.join(' AND ')}
+       ORDER BY pagada_at DESC, creado_at DESC LIMIT ?`, ...valores, Math.max(1, Math.min(5000, limite)),
+    ).toArray() as Fila[]);
+    return { filas, total: filas.reduce((s, f) => s + Number(f.monto || 0), 0) };
   }
 
   /** Lo que hay en el buzón, en dos números: cuánto en compras y cuánto en
