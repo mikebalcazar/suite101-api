@@ -17,7 +17,12 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.62.0 (LA EMPRESA TIENE SU RUTA. `GET /orgs/:o/empresa`
+ * Versión del contrato: 0.62.1 (`POST /orgs/:o/ordenes` SIN negocio_id: la API
+ * le pone el registro de la empresa, como ya hacían cuentas, clientes,
+ * conciliaciones y nómina desde 0.61.0. Faltaba en las órdenes y supply101,
+ * que ya no lo manda, se quedaba sin poder pedir.)
+ *
+ * Antes, 0.62.0 (LA EMPRESA TIENE SU RUTA. `GET /orgs/:o/empresa`
  * → { id, nombre, rfc, moneda, dia_conciliacion }; `PATCH /orgs/:o/empresa`
  * (owner y admin) cambia nombre, rfc, moneda (MXN|USD) y dia_conciliacion
  * (0-6). Es lo que las pantallas leen y editan en vez de `negocios`, que
@@ -911,7 +916,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.62.0';
+export const VERSION_CONTRATO = '0.62.1';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

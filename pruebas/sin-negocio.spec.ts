@@ -108,6 +108,13 @@ describe('las rutas que lo exigían ya no lo exigen', () => {
     expect(corte.estado, JSON.stringify(corte)).toBe(201);
     expect(corte.data.raya.negocio_id).toBe(negocio);
   });
+
+  it('una orden de compra se pide sin negocio_id y cuelga del de la empresa (0.62.1)', async () => {
+    const r = await o('mike', '/ordenes', { method: 'POST', json: { concepto: 'Triplay', monto: 1160_00, proveedor_nombre: 'Maderas' } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    expect(r.data.negocio_id).toBe(negocio);
+    expect(r.data.folio).toMatch(/^OC-/);
+  });
 });
 
 describe('la empresa tiene su ruta (0.62.0)', () => {
