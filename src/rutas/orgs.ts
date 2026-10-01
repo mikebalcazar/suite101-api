@@ -391,6 +391,98 @@ rutas.get('/:o/clientes/:id/estado-de-cuenta', async (c) => {
   return ok(c, r);
 });
 
+/** GET /orgs/:o/clientes/:id/estado.xlsx — el estado de cuenta completo del
+ *  cliente, en Excel (0.60.0).
+ *
+ *  Mike, 1-oct: «debo poder exportar su estado de cuenta general y por
+ *  proyecto». El de cada proyecto ya existe (`/proyectos/:id/estado.xlsx`);
+ *  éste es el general: una hoja con el saldo de cada proyecto y otra con
+ *  todos los cobros del cliente, los de sus proyectos y los que trajeron su
+ *  nombre sin proyecto. Los números son los mismos de `estado-de-cuenta`,
+ *  porque salen de la misma función; en PESOS y como NÚMERO, por lo mismo
+ *  que el de proyecto. */
+rutas.get('/:o/clientes/:id/estado.xlsx', async (c) => {
+  const permiso = puedeLeer(c, 'clientes');
+  if (permiso) return permiso;
+  if (c.get('quien').clase !== 'miembro') {
+    return err(c, 'sin_permiso', 403, { motivo: 'el estado de cuenta completo es de la empresa; un cliente abre el suyo por peek101' });
+  }
+  const r = await stub(c).estadoDeCuenta(c.req.param('id'));
+  if (!r) return err(c, 'no_encontrado', 404, { que: 'cliente', id: c.req.param('id') });
+
+  const pesos = (centavos: unknown) => Math.round(Number(centavos ?? 0)) / 100;
+  const dia = new Date().toISOString().slice(0, 10);
+  const nombres = new Map((r.proyectos as Array<Record<string, unknown>>).map((p) => [String(p.id), String(p.nombre ?? '')]));
+  const encabezado: Celda[][] = [
+    ['Estado de cuenta'],
+    ['Cliente', String(r.cliente.nombre ?? '')],
+    ['RFC', String(r.cliente.rfc ?? '')],
+    ['Generado el', dia],
+    [],
+  ];
+  const t = r.totales;
+  const cobros = [
+    ...(r.proyectos as Array<Record<string, unknown>>).flatMap((p) => (p.pagos as Array<Record<string, unknown>>)),
+    ...(r.otros_pagos as Array<Record<string, unknown>>),
+  ].sort((a, b) => String(a.fecha ?? '').localeCompare(String(b.fecha ?? '')));
+
+  const libro = xlsx([
+    {
+      nombre: 'Por proyecto',
+      filas: [
+        ...encabezado,
+        ['Proyecto', 'Estado', 'Desde', 'Precio de venta', 'Cobrado', 'Saldo'],
+        ...(r.proyectos as Array<Record<string, unknown>>).map((p): Celda[] => [
+          String(p.nombre ?? ''), String(p.estado ?? ''), String(p.fecha_inicio ?? ''),
+          pesos(p.precio_venta), pesos(p.cobrado), pesos(p.saldo),
+        ]),
+        ...(t.sin_proyecto ? [['Cobros sin proyecto', '', '', 0, pesos(t.sin_proyecto), -pesos(t.sin_proyecto)] as Celda[]] : []),
+        [],
+        ['', '', '', 'Vendido', pesos(t.vendido)],
+        ['', '', '', 'Cobrado', pesos(t.cobrado)],
+        ['', '', '', 'Saldo', pesos(t.saldo)],
+      ],
+    },
+    {
+      nombre: 'Cobros',
+      filas: [
+        ...encabezado,
+        ['Fecha', 'Proyecto', 'Concepto', 'Cuenta', 'Facturado', 'Monto'],
+        ...cobros.map((m): Celda[] => [
+          String(m.fecha ?? ''), nombres.get(String(m.proyecto_id ?? '')) ?? '', String(m.descripcion ?? ''),
+          String(m.cuenta_nombre ?? ''), m.facturado ? 'sí' : 'no', pesos(m.monto),
+        ]),
+        [],
+        ['', '', '', '', 'Cobrado', pesos(t.cobrado)],
+        ['', '', '', '', 'Saldo', pesos(t.saldo)],
+      ],
+    },
+  ]);
+
+  const limpio = String(r.cliente.nombre ?? 'cliente')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'cliente';
+
+  return new Response(libro as unknown as BodyInit, {
+    headers: {
+      'content-type': TIPO_XLSX,
+      'content-disposition': `attachment; filename="estado-${limpio}-${dia}.xlsx"`,
+      'cache-control': 'no-store',
+    },
+  });
+});
+
+/** GET /orgs/:o/accionistas/de-roster — quién hay en roster101, para darlo
+ *  de alta como accionista sin teclearlo otra vez (0.60.0).
+ *
+ *  Va ANTES de `/:o/:tabla/:id`, que si no se lo come como «el accionista
+ *  con id de-roster». Lo lee quien lee accionistas: es la misma pantalla. */
+rutas.get('/:o/accionistas/de-roster', async (c) => {
+  const permiso = puedeLeer(c, 'accionistas');
+  if (permiso) return permiso;
+  return ok(c, { personas: await stub(c).accionistasDeRoster() });
+});
+
 /** POST /orgs/:o/clientes/:id/fusionar {se_va_id} — los dos son el mismo.
  *
  *  `:id` es el que se queda; `se_va_id` desaparece y le deja todo: proyectos,

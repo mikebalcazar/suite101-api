@@ -17,7 +17,20 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.59.1 (EL CORREO DE LOS PUNTOS POR DEFINIR TRAE
+ * Versión del contrato: 0.60.0 (EL SALDO LO SUMA LA BASE, Y LO DEMÁS DEL
+ * 1-OCT. Mike: «ya hay movimientos por más de 70,000 de egresos y el total
+ * sigue sin contarlos»: dash101 sumaba el saldo de la lista de movimientos,
+ * que tiene tope de 500 y salía de la más vieja a la más nueva; pasando de
+ * 500 los últimos egresos no entraban. Ahora cada fila de `cuentas` trae
+ * `saldo` (centavos, calculado en la base sobre TODOS sus movimientos) y la
+ * lista de `movimientos` sale de la más reciente a la más vieja. Además:
+ * `GET /orgs/:o/clientes/:id/estado.xlsx` (el estado de cuenta general del
+ * cliente, dos hojas), `GET /orgs/:o/accionistas/de-roster` (`{ personas }`
+ * de los expedientes de roster101, para dar de alta un accionista jalándolo
+ * de ahí) y la categoría CATEGORIA_GASTO_GENERAL para los egresos que no
+ * son de ningún proyecto: renta, máquinas, herramienta, licencias.)
+ *
+ * Antes, 0.59.1 (EL CORREO DE LOS PUNTOS POR DEFINIR TRAE
  * CADA PUNTO Y «RESPONDER». Mike, 1-oct: «que en el correo venga el texto
  * de la duda y abajo un link que diga "responder" y te mande a la url
  * necesaria para responder». `POST /orgs/:o/quell/projects/:p/avisar-cliente`
@@ -881,7 +894,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.59.1';
+export const VERSION_CONTRATO = '0.60.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1167,6 +1180,10 @@ export interface Cuenta {
   moneda: Moneda;
   /** centavos */
   saldo_inicial: number;
+  /** centavos. CALCULADO AL SALIR (0.60.0): `saldo_inicial` más todos los
+   *  ingresos de la cuenta menos todos sus egresos, sumado en la base. No se
+   *  guarda ni se escribe desde fuera; viene en la lista y en el detalle. */
+  saldo: number;
   creado_at: string;
 }
 
@@ -1225,6 +1242,13 @@ export interface Accionista {
 
 /** La categoría del egreso que es un retiro de utilidades (0.57.0). */
 export const CATEGORIA_RETIRO_UTILIDADES = 'retiro_utilidades';
+/** Un egreso que no es de ningún proyecto: renta, máquinas, herramienta,
+ *  licencias de software (0.60.0). Mike, 1-oct: «debe haber un concepto de
+ *  gastos generales en el tipo de egreso. No va a ningún proyecto el gasto,
+ *  sino son gastos del negocio en general». Es un egreso normal, de una
+ *  cuenta, con `proyecto_id` vacío y esta categoría: baja el saldo de la
+ *  cuenta y no toca ningún proyecto. */
+export const CATEGORIA_GASTO_GENERAL = 'gasto_general';
 
 export interface Proveedor {
   id: string;

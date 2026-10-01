@@ -228,7 +228,15 @@ export const DEFS: Record<Tabla, Def> = {
     },
     requeridos: ['negocio_id', 'tipo', 'monto', 'fecha', 'cuenta_id'],
     filtros: ['negocio_id', 'proyecto_id', 'item_id', 'partida_id', 'cuenta_id', 'tipo', 'facturado', 'requiere_factura'],
-    orden: 'fecha',
+    /* LA MÁS RECIENTE PRIMERO (0.60.0). Hasta el 1-oct-2026 salían de la
+     * más vieja a la más nueva, y con el tope de 500 eso quería decir que
+     * en un negocio con más de 500 movimientos los ÚLTIMOS —los de hoy— se
+     * quedaban fuera de la lista: el saldo que dash101 sumaba de ahí no
+     * cambiaba aunque se capturaran egresos (Mike, 1-oct: «ya hay
+     * movimientos por más de 70,000 de egresos y el total sigue sin
+     * contarlos»). El saldo ya no se suma de la lista (ver `conSaldo`),
+     * pero la lista también tiene que enseñar lo último, no lo primero. */
+    orden: 'fecha DESC, creado_at DESC',
     fecha: 'fecha',
   },
   opex: {
