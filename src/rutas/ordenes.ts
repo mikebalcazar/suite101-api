@@ -74,6 +74,18 @@ export function montarOrdenes(rutas: App): void {
     return ok(c, await stub(c).buzon(undefined, c.req.query('negocio_id') || null, tipo));
   });
 
+  /** 0.59.0 · El historial de lo pagado, para quien paga (Mike, 1-oct:
+   *  «un historial completo de las órdenes de compra ya pagadas»). Mismos
+   *  filtros que el buzón: `?negocio_id=` y `?tipo=`; `?limite=` hasta 5000,
+   *  500 si no se dice. Va antes de `/:id` o `pagadas` sería un id. */
+  rutas.get('/:o/ordenes/pagadas', async (c) => {
+    if (!(await esContador(c))) return err(c, 'sin_permiso', 403, { motivo: 'el historial de pagos es de quien paga' });
+    const tipo = tipoPedido(c);
+    if (tipo && typeof tipo === 'object') return err(c, 'tipo_invalido', 400, { tipo: tipo.error, acepta: TIPOS_ORDEN });
+    const n = Number(c.req.query('limite') || 0);
+    return ok(c, await stub(c).ordenesPagadas(c.req.query('negocio_id') || null, tipo, Number.isInteger(n) && n > 0 ? n : undefined));
+  });
+
   /** 0.56.1 · De un movimiento a su orden. Mike, 30-sep: cuando una orden se
    *  paga «se pasen al movimiento con toda la info que traían ya». El egreso
    *  ya lleva folio, concepto, proveedor, proyecto y partida; lo que no cabe
