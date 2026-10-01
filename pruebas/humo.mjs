@@ -817,8 +817,10 @@ async function importacion() {
       reciboCounter: 7,
     }],
   };
+  // 0.63.0: ya no hay negocios. Un `negocio` en el cuerpo se ignora, en seco
+  // sigue sin escribir nada, y el ensayo cuadra igual.
   const sinNeg = await pedir(STAGING, '/admin/importar', { method: 'POST', body: { org: ORGI, modo: 'seco', negocio: 'no-existe', docs: arbol } });
-  rev(sinNeg.estado === 404 && sinNeg.error === 'negocio_desconocido', 'un negocio inventado se rechaza antes de tocar nada', `${sinNeg.estado} ${sinNeg.error}`);
+  rev(sinNeg.estado === 200 && sinNeg.data?.veredicto === 'cuadra', 'un «negocio» en el cuerpo se ignora: la empresa es una (0.63.0)', `${sinNeg.estado} ${sinNeg.error ?? sinNeg.data?.veredicto}`);
 
   const cotSeco = await pedir(STAGING, '/admin/importar', { method: 'POST', body: { org: ORGI, modo: 'seco', negocio: 'NEG1', docs: arbol } });
   rev(cotSeco.data?.avisos?.sin_folio === 1 && cotSeco.data?.avisos?.folios_traidos === 1, 'el ensayo cuenta 1 cotización con folio y 1 sin', `traídos ${cotSeco.data?.avisos?.folios_traidos}, sin ${cotSeco.data?.avisos?.sin_folio}`);
