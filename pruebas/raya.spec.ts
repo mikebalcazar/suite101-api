@@ -258,15 +258,17 @@ describe('pagar', () => {
     expect(r.estado).toBe(400);
   });
 
-  it('ni se paga de una cuenta de otro negocio', async () => {
-    const otro = (await o('mike', '/negocios', { method: 'POST', json: { nombre: 'Otro' } })).data.id;
-    const ajena = (await o('mike', '/cuentas', { method: 'POST', json: { negocio_id: otro, nombre: 'Ajena', tipo: 'banco', saldo_inicial: 0 } })).data.id;
+  it('ni de una cuenta que no existe; cualquier cuenta de la empresa sí (0.63.0: ya no hay «otro negocio»)', async () => {
     const corte = await o('sol', '/nomina/rayas', { method: 'POST', json: {
       negocio_id: negocio, periodo_inicio: '2026-03-30', periodo_fin: '2026-04-05',
       pagos: [{ personal_id: beto, sueldo: 500_00 }],
     } });
-    const r = await o('sol', `/nomina/rayas/${corte.data.raya.id}/pagar`, { method: 'POST', json: { cuenta_id: ajena } });
-    expect(r.estado).toBe(400);
+    const r = await o('sol', `/nomina/rayas/${corte.data.raya.id}/pagar`, { method: 'POST', json: { cuenta_id: '01NOEXISTE' } });
+    expect(r.estado).toBe(404);
+    const otra = (await o('mike', '/cuentas', { method: 'POST', json: { negocio_id: 'otro', nombre: 'Otra de la empresa', tipo: 'banco', saldo_inicial: 1_000_00 } })).data.id;
+    const bien = await o('sol', `/nomina/rayas/${corte.data.raya.id}/pagar`, { method: 'POST', json: { cuenta_id: otra } });
+    expect(bien.estado, JSON.stringify(bien)).toBe(200);
+    expect((await o('mike', `/cuentas/${otra}`)).data.saldo).toBe(1_000_00 - 500_00);
   });
 });
 

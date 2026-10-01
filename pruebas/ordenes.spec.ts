@@ -304,7 +304,7 @@ describe('19 · órdenes de compra (los casos del encargo)', () => {
     const ana = await o('ana', '/ordenes/pagadas');
     expect(ana.estado, 'quien no paga no ve el historial de la empresa').toBe(403);
     const otro = await o('beto', '/ordenes/pagadas?negocio_id=no-existe');
-    expect(otro.data.filas).toEqual([]);
+    expect(otro.data.filas.length, '`?negocio_id=` se ignora (0.63.0): es la misma lista').toBe(r.data.filas.length);
     const una = await o('beto', '/ordenes/pagadas?limite=1');
     expect(una.data.filas.length).toBe(1);
     const mal = await o('beto', '/ordenes/pagadas?tipo=chueco');
@@ -359,27 +359,27 @@ describe('19 · órdenes de compra (los casos del encargo)', () => {
     expect((await o('ana', '/ordenes/buzon')).estado).toBe(403);
   });
 
-  it('el buzón y mis órdenes se pueden pedir de un solo negocio', async () => {
-    /* dash101 trabaja con un negocio activo a la vez. Sin este filtro, el
-     * buzón mezcla los negocios de la empresa y —peor— sus TOTALES suman
-     * dinero de otro lado sin decirlo. */
-    const otro = (await o('mike', '/negocios', { method: 'POST', json: { nombre: 'Otro taller' } })).data.id;
+  it('el buzón y mis órdenes son de la empresa: `?negocio_id=` ya no acota nada (0.63.0)', async () => {
+    /* Hasta 0.62.0 dash101 trabajaba con un negocio activo a la vez y el
+     * buzón se pedía por negocio. Ya no hay negocios: una orden que llega
+     * con un negocio_id cualquiera es de la empresa, y el buzón y sus
+     * TOTALES —que salen de la misma consulta— la traen con las demás. */
     const ajena = await o('ana', '/ordenes', { method: 'POST', json: {
-      negocio_id: otro, proveedor_nombre: 'Otra', concepto: 'De otro negocio', monto: 700_00,
+      negocio_id: 'otro-taller', proveedor_nombre: 'Otra', concepto: 'De otro negocio', monto: 700_00,
     } });
     expect(ajena.estado).toBe(201);
+    expect('negocio_id' in ajena.data).toBe(false);
 
     const todo = await o('beto', '/ordenes/buzon');
-    const soloOtro = await o('beto', `/ordenes/buzon?negocio_id=${otro}`);
-    expect(soloOtro.data.filas.length, 'sólo la del otro negocio').toBe(1);
-    expect(soloOtro.data.filas[0].id).toBe(ajena.data.id);
-    expect(soloOtro.data.total, 'y el total es el de esa sola').toBe(700_00);
-    expect(todo.data.filas.length, 'sin filtro salen todas').toBeGreaterThan(1);
-    expect(todo.data.total).toBeGreaterThan(soloOtro.data.total);
+    const conFiltro = await o('beto', '/ordenes/buzon?negocio_id=otro-taller');
+    expect(conFiltro.data.filas.length, 'el filtro se ignora: es el mismo buzón').toBe(todo.data.filas.length);
+    expect(conFiltro.data.total).toBe(todo.data.total);
+    expect(todo.data.filas.some((f: any) => f.id === ajena.data.id), 'la orden está en el buzón de la empresa').toBe(true);
+    expect(todo.data.total).toBe(todo.data.filas.reduce((s: number, f: any) => s + f.monto, 0));
 
-    const mias = await o('ana', `/ordenes?negocio_id=${otro}`);
-    expect(mias.data.filas.length).toBe(1);
-    expect(mias.data.filas[0].negocio_id).toBe(otro);
+    const mias = await o('ana', '/ordenes?negocio_id=otro-taller');
+    expect(mias.data.filas.some((f: any) => f.id === ajena.data.id)).toBe(true);
+    expect(mias.data.filas.every((f: any) => !('negocio_id' in f))).toBe(true);
   });
 
   it('el comprobante del pago viaja con la orden, para quien la pidió', async () => {
@@ -410,28 +410,29 @@ describe('19 · órdenes de compra (los casos del encargo)', () => {
     expect(nombres).toEqual(['orden:cotizacion.png', 'pago:comprobante.png']);
   });
 
-  it('lo fiscal también se pide por negocio: el RFC vive en el negocio', async () => {
-    /* Un IVA del mes que sume dos negocios no es el IVA de ninguno de los
-     * dos, y es el número con el que se entera al SAT. */
-    const otro = (await o('mike', '/negocios', { method: 'POST', json: { nombre: 'Fiscal aparte' } })).data.id;
+  it('lo fiscal es de la empresa entera: el RFC es uno (0.63.0)', async () => {
+    /* Hasta 0.62.0 el IVA se pedía por negocio, porque el RFC vivía ahí. Ya
+     * no hay negocios: `?negocio_id=` se ignora y las cifras son las de la
+     * empresa, que es con la que se entera al SAT. */
     const hoy = dia(0);
     const uuid = `PRUEBA-NEG-${Date.now()}`;
     const c = await o('mike', '/fiscal/cfdi', { method: 'POST', json: {
-      negocio_id: otro, uuid, tipo: 'ingreso', subtotal: 1_000_00, iva: 160_00, total: 1_160_00, fecha: hoy,
+      negocio_id: 'fiscal-aparte', uuid, tipo: 'ingreso', subtotal: 1_000_00, iva: 160_00, total: 1_160_00, fecha: hoy,
     } });
-    expect(c.estado).toBe(201);
+    expect(c.estado, JSON.stringify(c)).toBe(201);
+    expect('negocio_id' in c.data).toBe(false);
 
-    const suyo = await o('mike', `/fiscal/iva?desde=${hoy}&hasta=${hoy}&negocio_id=${otro}`);
-    expect(suyo.data.trasladado, 'sólo el IVA de ese negocio').toBe(160_00);
     const todo = await o('mike', `/fiscal/iva?desde=${hoy}&hasta=${hoy}`);
-    expect(todo.data.trasladado, 'sin filtro, el de la empresa entera').toBeGreaterThanOrEqual(160_00);
+    expect(todo.data.trasladado, 'el de la empresa entera').toBeGreaterThanOrEqual(160_00);
+    const conFiltro = await o('mike', `/fiscal/iva?desde=${hoy}&hasta=${hoy}&negocio_id=fiscal-aparte`);
+    expect(conFiltro.data.trasladado, 'el filtro se ignora').toBe(todo.data.trasladado);
 
-    const lista = await o('mike', `/fiscal/cfdi?desde=${hoy}&hasta=${hoy}&negocio_id=${otro}`);
-    expect(lista.data.filas.length).toBe(1);
-    expect(lista.data.filas[0].uuid).toBe(uuid);
+    const lista = await o('mike', `/fiscal/cfdi?desde=${hoy}&hasta=${hoy}&negocio_id=fiscal-aparte`);
+    expect(lista.data.filas.some((f: any) => f.uuid === uuid)).toBe(true);
+    expect(lista.data.filas.length).toBe((await o('mike', `/fiscal/cfdi?desde=${hoy}&hasta=${hoy}`)).data.filas.length);
 
-    const cuadre = await o('mike', `/fiscal/cuadre?desde=${hoy}&hasta=${hoy}&negocio_id=${otro}`);
-    expect(cuadre.data.egresos.total, 'ese negocio no tiene egresos').toBe(0);
+    const cuadre = await o('mike', `/fiscal/cuadre?desde=${hoy}&hasta=${hoy}&negocio_id=fiscal-aparte`);
+    expect(cuadre.data.egresos.total).toBe((await o('mike', `/fiscal/cuadre?desde=${hoy}&hasta=${hoy}`)).data.egresos.total);
   });
 
   it('quien abre como dueño sin ser miembro se puede marcar a sí mismo', async () => {
@@ -664,10 +665,9 @@ describe('0.47.0 · reembolsos: la misma orden, de otro tipo', () => {
     expect(r.data.reembolsos.total).toBe(re.data.total);
     expect(r.data.reembolsos.cuantas).toBe(re.data.filas.length);
     expect(r.data.compras.total).toBe(oc.data.total);
-    // Por negocio: uno que no existe da ceros, no la cifra de la empresa.
-    const vacio = await o('ana', '/ordenes/resumen?negocio_id=no-existe');
-    expect(vacio.data.reembolsos.total).toBe(0);
-    expect(vacio.data.compras.cuantas).toBe(0);
+    // `?negocio_id=` se ignora (0.63.0): es la cifra de la empresa.
+    const igual = await o('ana', '/ordenes/resumen?negocio_id=no-existe');
+    expect(igual.data).toEqual(r.data);
   });
 
   it('al pagar un reembolso el egreso es UNO, categoría reembolso y a nombre de quien lo pidió', async () => {

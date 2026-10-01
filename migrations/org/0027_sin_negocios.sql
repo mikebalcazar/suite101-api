@@ -1,0 +1,14 @@
+-- OrgDB v27 — se va la tabla `negocios` y la columna `negocio_id`.
+--
+-- Mike, 1-oct-2026: «Ya no existe la opción de negocios. Sólo es una
+-- empresa/negocio todo. Elimina todas las lógicas que involucran el concepto
+-- de "negocio"».
+--
+-- ESTA MIGRACIÓN CORRE EN CÓDIGO: OrgDB.quitarNegocios() (src/org-db.ts).
+-- No cabe en SQL fijo porque depende de lo que haya en la base: si hay más
+-- de un negocio se juntan en el primero por nombre, las tablas que llevaban
+-- `REFERENCES negocios` se reconstruyen sin la columna, a las demás se les
+-- tira con DROP COLUMN, y nombre, RFC, moneda y día de conciliación pasan a
+-- la tabla `empresa`, de un solo renglón. El archivo existe para que la lista
+-- de migraciones siga siendo una por archivo y la cuenta de versiones no
+-- cambie de regla.

@@ -1056,8 +1056,7 @@ describe('8 · borrar lo que tiene filas colgando es un 409, no un 500', () => {
     const sigue = await pedir(`/orgs/${ORG}/clientes/${conProyecto.id}`, { app: 'dash101' });
     expect(sigue.estado).toBe(200);
 
-    const n = await pedir(`/orgs/${ORG}/negocios`, { app: 'dash101' });
-    const suelto = await pedir(`/orgs/${ORG}/clientes`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Nadie Nunca', negocio_id: n.data.filas[0].id }) });
+    const suelto = await pedir(`/orgs/${ORG}/clientes`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Nadie Nunca' }) });
     const fue = await pedir(`/orgs/${ORG}/clientes/${suelto.data.id}`, { app: 'dash101', method: 'DELETE' });
     expect(fue.estado).toBe(200);
     expect(fue.data.borrado).toBe(true);
@@ -1068,8 +1067,8 @@ describe('9 · reiniciar una empresa, que solo existe fuera de producción', () 
   it('DELETE /admin/orgs/:o vacía el Durable Object, quita la org del D1, y al recrearla nace limpia', async () => {
     const alta = await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: 'efimera', nombre: 'Efímera' }) });
     expect(alta.estado).toBe(201);
-    await pedir('/orgs/efimera/negocios', { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Taller que no dura' }) });
-    const antes = await pedir('/orgs/efimera/negocios', { app: 'dash101' });
+    await pedir('/orgs/efimera/cuentas', { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Caja que no dura', tipo: 'caja' }) });
+    const antes = await pedir('/orgs/efimera/cuentas', { app: 'dash101' });
     expect(antes.data.total).toBe(1);
 
     const r = await pedir('/admin/orgs/efimera', { method: 'DELETE' });
@@ -1077,14 +1076,14 @@ describe('9 · reiniciar una empresa, que solo existe fuera de producción', () 
     expect(r.data.reiniciada).toBe('efimera');
     expect(r.data.org_db_version).toBe(VERSION_ORG_DB);
 
-    const ya = await pedir('/orgs/efimera/negocios', { app: 'dash101' });
+    const ya = await pedir('/orgs/efimera/cuentas', { app: 'dash101' });
     expect(ya.estado).toBe(404);
     expect(ya.error).toBe('org_desconocida');
 
     const otraVez = await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: 'efimera', nombre: 'Efímera' }) });
     expect(otraVez.estado).toBe(201);
     expect(otraVez.data.org_db_version).toBe(VERSION_ORG_DB);
-    const limpia = await pedir('/orgs/efimera/negocios', { app: 'dash101' });
+    const limpia = await pedir('/orgs/efimera/cuentas', { app: 'dash101' });
     expect(limpia.data.total).toBe(0);
   });
 
@@ -1139,14 +1138,31 @@ describe('10 · la conciliación semanal: lo que se escapa del registro', () => 
   const N: Record<string, string> = {};
   let corte1 = '';
 
-  it('el negocio nace en lunes y con sus cuentas', async () => {
-    const n = await pedir(`/orgs/${ORG}/negocios`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Taller que concilia' }) });
-    expect(n.estado).toBe(201);
+  /* SE CONCILIAN TODAS LAS CUENTAS DE LA EMPRESA. Hasta 0.62.0 esta sección
+   * tenía su propio negocio y sus cuatro cuentas iban solas; desde 0.63.0 la
+   * empresa es una y las que dio de alta la sección 1 también cuentan. Van
+   * en cada corte CUADRADAS —su saldo al día del corte—, para que no reciban
+   * ajuste y las cifras de abajo sigan siendo las de estas cuatro. */
+  const otrasCuadradas = async (dia: string) => {
+    const cuentas = (await pedir(`/orgs/${ORG}/cuentas`, { app: 'dash101' })).data.filas as any[];
+    const mias = new Set([N.banco, N.caja, N.tarjeta, N.otra]);
+    const out: Array<{ cuenta_id: string; saldo_real: number }> = [];
+    for (const c of cuentas) {
+      if (mias.has(c.id)) continue;
+      const movs = (await pedir(`/orgs/${ORG}/movimientos?cuenta_id=${c.id}&hasta=${dia}`, { app: 'dash101' })).data.filas as any[];
+      out.push({ cuenta_id: c.id, saldo_real: c.saldo_inicial + movs.reduce((t, m) => t + (m.tipo === 'ingreso' ? m.monto : -m.monto), 0) });
+    }
+    return out;
+  };
+
+  it('la empresa nace en lunes y con sus cuentas', async () => {
+    const n = await pedir(`/orgs/${ORG}/empresa`, { app: 'dash101' });
+    expect(n.estado).toBe(200);
     // Decisión 3 de Mike: el día se configura, y por omisión es el lunes.
     expect(n.data.dia_conciliacion).toBe(1);
     N.negocio = n.data.id;
-    await pedir(`/orgs/${ORG}/negocios/${N.negocio}`, { app: 'dash101', method: 'PATCH', body: JSON.stringify({ dia_conciliacion: 3 }) });
-    const puesto = await pedir(`/orgs/${ORG}/negocios/${N.negocio}`, { app: 'dash101' });
+    await pedir(`/orgs/${ORG}/empresa`, { app: 'dash101', method: 'PATCH', body: JSON.stringify({ dia_conciliacion: 3 }) });
+    const puesto = await pedir(`/orgs/${ORG}/empresa`, { app: 'dash101' });
     expect(puesto.data.dia_conciliacion).toBe(3);
 
     for (const [clave, nombre, tipo, saldo] of [
@@ -1189,6 +1205,7 @@ describe('10 · la conciliación semanal: lo que se escapa del registro', () => 
           { cuenta_id: N.caja, saldo_real: -350000 },     // cuadra
           { cuenta_id: N.tarjeta, saldo_real: -3050000 }, // se debe $500 más
           { cuenta_id: N.otra, saldo_real: 130000 },      // hay $300 de más
+          ...(await otrasCuadradas('2026-09-07')),
         ],
       }),
     });
@@ -1234,6 +1251,7 @@ describe('10 · la conciliación semanal: lo que se escapa del registro', () => 
           { cuenta_id: N.caja, saldo_real: -350000 },
           { cuenta_id: N.tarjeta, saldo_real: -3050000 },
           { cuenta_id: N.otra, saldo_real: 130000 },
+          ...(await otrasCuadradas('2026-09-14')),
         ],
       }),
     });
@@ -1311,7 +1329,8 @@ describe('10 · la conciliación semanal: lo que se escapa del registro', () => 
     });
     expect(faltan.estado).toBe(400);
     expect(faltan.error).toBe('faltan_cuentas');
-    expect(faltan.detalle.faltan.length).toBe(3);
+    const todas = (await pedir(`/orgs/${ORG}/cuentas`, { app: 'dash101' })).data.total;
+    expect(faltan.detalle.faltan.length, 'todas menos la caja').toBe(todas - 1);
 
     const flotante = await pedir(`/orgs/${ORG}/conciliaciones`, {
       app: 'dash101', method: 'POST',
@@ -1337,6 +1356,7 @@ describe('10 · la conciliación semanal: lo que se escapa del registro', () => 
         saldos: [
           { cuenta_id: N.banco, saldo_real: 1 }, { cuenta_id: N.caja, saldo_real: 2 },
           { cuenta_id: N.tarjeta, saldo_real: 3 }, { cuenta_id: N.otra, saldo_real: 4 },
+          ...(await otrasCuadradas('9999-12-31')),
         ],
       }),
     });
@@ -1839,50 +1859,39 @@ describe('16 · consecutivos por serie (contrato 0.11.0)', () => {
   });
 });
 
-describe('0.11.0 · quote101 puede crear su negocio, y nada más', () => {
+describe('0.63.0 · quote101 cotiza sin que exista ningún negocio', () => {
+  /* Hasta 0.62.0 el cotizador tenía que CREAR el negocio de la empresa antes
+   * de cotizar, porque `cotizaciones.negocio_id` era obligatorio. Ya no hay
+   * negocios: cotiza y ya. Lo que sigue en pie es que el RFC de la empresa
+   * no lo toca el cotizador: eso es de quien la dirige, por /empresa. */
   const ORG_N = 'cotizador-negocio';
 
   beforeAll(async () => {
     await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: ORG_N, nombre: 'Sin negocio' }) });
   });
 
-  it('crea el negocio si la empresa no tiene ninguno', async () => {
-    // `cotizaciones.negocio_id` es obligatorio: una empresa sin negocio no
-    // puede cotizar, y si el cotizador es la primera app que alguien usa
-    // quedaría trabado esperando a otra app.
-    const vacia = await pedir(`/orgs/${ORG_N}/negocios`, { app: 'cotizador101' });
-    expect(vacia.data.total).toBe(0);
+  it('cotiza de entrada, y la empresa ya está ahí con el nombre de la org', async () => {
+    const r = await pedir(`/orgs/${ORG_N}/cotizaciones`, {
+      app: 'cotizador101', method: 'POST', body: JSON.stringify({ total: 100, moneda: 'MXN' }),
+    });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    expect(r.data.folio).toBe('COT-000001');
+    const e = await pedir(`/orgs/${ORG_N}/empresa`, { app: 'cotizador101' });
+    expect(e.data).toMatchObject({ id: 'empresa', nombre: 'Sin negocio', moneda: 'MXN' });
+  });
+
+  it('el compat de /negocios le contesta esa misma empresa', async () => {
+    const lista = await pedir(`/orgs/${ORG_N}/negocios`, { app: 'cotizador101' });
+    expect(lista.data.total).toBe(1);
+    expect(lista.data.filas[0]).toMatchObject({ id: 'empresa', nombre: 'Sin negocio' });
     const r = await pedir(`/orgs/${ORG_N}/negocios`, {
       app: 'cotizador101', method: 'POST', body: JSON.stringify({ nombre: 'Taller 101', moneda: 'MXN' }),
     });
     expect(r.estado).toBe(201);
-    expect(r.data.nombre).toBe('Taller 101');
-  });
-
-  it('pero no le toca lo demás: eso sigue siendo de dash101', async () => {
-    const lista = await pedir(`/orgs/${ORG_N}/negocios`, { app: 'cotizador101' });
-    const id = lista.data.filas[0].id;
-    const r = await pedir(`/orgs/${ORG_N}/negocios/${id}`, {
-      app: 'cotizador101', method: 'PATCH', body: JSON.stringify({ rfc: 'XAXX010101000' }),
-    });
-    expect(r.estado).toBe(403);
-    expect(r.error).toBe('campo_no_permitido');
-    expect(r.detalle.permitidos).toEqual(['nombre', 'moneda']);
+    expect(r.data.nombre, 'ya existía: el nombre del cuerpo se ignora').toBe('Sin negocio');
   });
 });
 
-/* EL DEFECTO DEL 23-SEP-2026. Mike: «desapareció mi info de quote», y con el
- * selector de negocio puesto (quote101 G83) seguía vacío en los tres.
- *
- * Lo que esta prueba deja escrito es el MECANISMO por el que eso pasa sin
- * que nadie borre un solo cliente: `clientes`, `proyectos` y `cotizaciones`
- * guardan su `negocio_id` sin llave foránea (0001), así que borrar un
- * negocio que no tiene cuentas se permite y lo suyo se queda en la base
- * apuntando a nada. Ninguna app lo enseña —todas filtran por un negocio que
- * existe— y por eso se lee como perdido.
- *
- * `/admin/orgs/:o/quote` es la herramienta para encontrarlo: agrupa por el
- * `negocio_id` que trae cada renglón, no por la lista de negocios. */
 describe('0.46.0 · aprobar una cotización crea sus piezas en el proyecto', () => {
   /* Mike, 23-sep: «cada renglón es un ítem que se va agregando con su
    * producto, su descripción y su cantidad (que define cuántos ítems se crean
@@ -1893,7 +1902,7 @@ describe('0.46.0 · aprobar una cotización crea sus piezas en el proyecto', () 
 
   beforeAll(async () => {
     await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: ORG_A, nombre: 'Aprobar cotizaciones' }) });
-    neg = (await pedir(`/orgs/${ORG_A}/negocios`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Taller', moneda: 'MXN' }) })).data.id;
+    neg = (await pedir(`/orgs/${ORG_A}/empresa`, { app: 'dash101' })).data.id;
     cli = (await pedir(`/orgs/${ORG_A}/clientes`, { ...Q, method: 'POST', body: JSON.stringify({ nombre: 'Casa Lomas', negocio_id: neg }) })).data.id;
     proy = (await pedir(`/orgs/${ORG_A}/proyectos`, { ...Q, method: 'POST', body: JSON.stringify({ nombre: 'Departamento', cliente_id: cli, negocio_id: neg }) })).data.id;
     cot = (await pedir(`/orgs/${ORG_A}/cotizaciones`, { ...Q, method: 'POST', body: JSON.stringify({ negocio_id: neg, cliente_id: cli, total: 0, datos: { nombre: 'Corrida 1', proyecto_id: proy, versiones: [] } }) })).data.id;
@@ -1980,60 +1989,35 @@ describe('0.45.1 · al dueño de la suite, sus empresas primero en /yo', () => {
   });
 });
 
-describe('0.45.0 · dónde está lo de quote101, incluido lo que quedó huérfano', () => {
+describe('0.45.0 · dónde está lo de quote101 (0.63.0: de la empresa, sin huérfanos)', () => {
+  /* Nació el 23-sep como lista por negocio con huérfanos: «desapareció mi
+   * info de quote», y era un negocio borrado con clientes colgando de nada.
+   * Sin negocios ya no hay de qué quedar huérfano: el resumen es de la
+   * empresa y cuenta todo lo que hay. */
   const ORG_Q = 'quote-huerfano';
-  let alfa = '', zeta = '';
 
   beforeAll(async () => {
-    await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: ORG_Q, nombre: 'Con un negocio borrado' }) });
-    alfa = (await pedir(`/orgs/${ORG_Q}/negocios`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Alfa', moneda: 'MXN' }) })).data.id;
-    zeta = (await pedir(`/orgs/${ORG_Q}/negocios`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Zeta', moneda: 'MXN' }) })).data.id;
-    // Lo de quote101 vive en Alfa: dos clientes y una cotización.
-    const cli = await pedir(`/orgs/${ORG_Q}/clientes`, { app: 'cotizador101', method: 'POST', body: JSON.stringify({ nombre: 'Cliente que se pierde', negocio_id: alfa }) });
-    await pedir(`/orgs/${ORG_Q}/clientes`, { app: 'cotizador101', method: 'POST', body: JSON.stringify({ nombre: 'Otro cliente', negocio_id: alfa }) });
-    await pedir(`/orgs/${ORG_Q}/cotizaciones`, { app: 'cotizador101', method: 'POST', body: JSON.stringify({ negocio_id: alfa, cliente_id: cli.data.id, datos: { nombre: 'Cocina', versiones: [] } }) });
+    await pedir('/admin/orgs', { method: 'POST', body: JSON.stringify({ id: ORG_Q, nombre: 'Con lo de quote' }) });
+    const cli = await pedir(`/orgs/${ORG_Q}/clientes`, { app: 'cotizador101', method: 'POST', body: JSON.stringify({ nombre: 'Cliente uno' }) });
+    await pedir(`/orgs/${ORG_Q}/clientes`, { app: 'cotizador101', method: 'POST', body: JSON.stringify({ nombre: 'Otro cliente' }) });
+    await pedir(`/orgs/${ORG_Q}/cotizaciones`, { app: 'cotizador101', method: 'POST', body: JSON.stringify({ cliente_id: cli.data.id, datos: { nombre: 'Cocina', versiones: [] } }) });
   });
 
-  it('un negocio con clientes o cotizaciones ya no se borra: dejaría todo huérfano', async () => {
-    /* Hasta el 23-sep esto contestaba 200: no hay llave foránea de
-     * `clientes`/`cotizaciones` a `negocios`, y lo suyo se quedaba apuntando a
-     * nada. Ahora es el mismo 409 que da un proyecto con ítems. */
-    const borra = await pedir(`/orgs/${ORG_Q}/negocios/${alfa}`, { app: 'dash101', method: 'DELETE' });
-    expect(borra.estado, 'con cosas adentro, no se va').toBe(409);
-    expect(borra.error).toBe('en_uso');
-    // Uno vacío sí se puede borrar: la regla no traba lo que no hace daño.
-    const vacio = (await pedir(`/orgs/${ORG_Q}/negocios`, { app: 'dash101', method: 'POST', body: JSON.stringify({ nombre: 'Se va', moneda: 'MXN' }) })).data.id;
-    expect((await pedir(`/orgs/${ORG_Q}/negocios/${vacio}`, { app: 'dash101', method: 'DELETE' })).estado).toBe(200);
+  it('lo que se escribe con un negocio_id inventado es de la empresa, como todo', async () => {
+    /* Así escribía una app vieja. Ya no hay a qué pertenecer más que a la
+     * empresa, así que el renglón se ve donde se ve todo. */
+    const r = await pedir(`/orgs/${ORG_Q}/clientes`, { app: 'cotizador101', method: 'POST', body: JSON.stringify({ nombre: 'Cliente que antes se perdía', negocio_id: 'negocio-borrado' }) });
+    expect(r.estado).toBe(201);
+    const lista = await pedir(`/orgs/${ORG_Q}/clientes`, { app: 'cotizador101' });
+    expect(lista.data.filas.some((c: any) => c.nombre === 'Cliente que antes se perdía')).toBe(true);
   });
 
-  it('lo que YA quedó huérfano no lo ve ninguna app', async () => {
-    /* Así llega lo de antes de esta regla: renglones que apuntan a un negocio
-     * que ya no está. Se fabrica escribiendo con un `negocio_id` que no es
-     * ningún negocio, que es exactamente lo que dejaba un borrado. */
-    await pedir(`/orgs/${ORG_Q}/clientes`, { app: 'cotizador101', method: 'POST', body: JSON.stringify({ nombre: 'Cliente perdido', negocio_id: 'negocio-borrado' }) });
-    await pedir(`/orgs/${ORG_Q}/cotizaciones`, { app: 'cotizador101', method: 'POST', body: JSON.stringify({ negocio_id: 'negocio-borrado', datos: { nombre: 'Baño', versiones: [] } }) });
-    const negocios = await pedir(`/orgs/${ORG_Q}/negocios`, { app: 'cotizador101' });
-    expect(negocios.data.filas.some((n: any) => n.id === 'negocio-borrado'), 'no sale en el selector').toBe(false);
-    for (const n of negocios.data.filas) {
-      const cl = await pedir(`/orgs/${ORG_Q}/clientes?negocio_id=${n.id}`, { app: 'cotizador101' });
-      expect(cl.data.filas.some((c: any) => c.nombre === 'Cliente perdido'), `ni aparece en «${n.nombre}»`).toBe(false);
-    }
-  });
-
-  it('la herramienta los encuentra: huérfanos primero, con cuántos y de cuándo', async () => {
+  it('la herramienta de master101 contesta el resumen de la empresa', async () => {
     const r = await pedir(`/admin/orgs/${ORG_Q}/quote`);
     expect(r.estado).toBe(200);
-    const [primero, ...resto] = r.data.negocios;
-    expect(primero.negocio_id).toBe('negocio-borrado');
-    expect(primero.existe, 'el negocio ya no existe').toBe(false);
-    expect(primero.nombre).toBeNull();
-    expect(primero.clientes).toBe(1);
-    expect(primero.cotizaciones).toBe(1);
-    expect(primero.ultima_cotizacion, 'y dice de cuándo es lo último, para reconocer cuál era el tuyo').toMatch(/^\d{4}-\d{2}-\d{2}/);
-    const a = resto.find((n: any) => n.negocio_id === alfa);
-    expect(a, 'los negocios que sí existen salen con lo suyo').toMatchObject({ existe: true, nombre: 'Alfa', clientes: 2, cotizaciones: 1 });
-    const z = resto.find((n: any) => n.negocio_id === zeta);
-    expect(z, 'y los vacíos también, para ver que ahí no está').toMatchObject({ existe: true, nombre: 'Zeta', clientes: 0, cotizaciones: 0 });
+    expect(r.data.org).toBe(ORG_Q);
+    expect(r.data.resumen).toMatchObject({ clientes: 3, proyectos: 0, cotizaciones: 1 });
+    expect(r.data.resumen.ultima_cotizacion, 'y dice de cuándo es lo último').toMatch(/^\d{4}-\d{2}-\d{2}/);
   });
 
   it('es sólo del dueño de la suite', async () => {

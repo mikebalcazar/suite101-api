@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { DEFS } from '../src/tablas';
-import { MIGRACIONES } from '../src/org-db';
+import { MIGRACIONES, SQL_EMPRESA } from '../src/org-db';
 import { TABLAS, TABLAS_INTERNAS } from '../schema/tipos';
 
 /* La lista de migraciones se IMPORTA de `src/org-db.ts`, que es quien las
@@ -76,7 +76,17 @@ function columnasDelSql(migraciones: string[]): Record<string, string[]> {
   return salida;
 }
 
-const delSql = columnasDelSql(MIGRACIONES);
+/* LA 0027 CORRE EN CÓDIGO (`OrgDB.quitarNegocios`), no en SQL: su archivo es
+ * sólo una nota. Aquí se aplica lo mismo que hace ella, a mano y dicho con
+ * todas sus letras, para que el lector compare contra la base que de verdad
+ * queda: nace `empresa` (el CREATE se lee de `SQL_EMPRESA`, no de una copia),
+ * se va `negocios`, y `negocio_id` se va de todas las demás. */
+const delSql = (() => {
+  const salida = columnasDelSql([...MIGRACIONES, `${SQL_EMPRESA};`]);
+  delete salida.negocios;
+  for (const t of Object.keys(salida)) salida[t] = salida[t].filter((c) => c !== 'negocio_id');
+  return salida;
+})();
 /** El mismo SQL sin comentarios: si no, se mide lo que dicen las notas. */
 const sinNotas = MIGRACIONES.join('\n').replace(/--[^\n]*/g, '');
 

@@ -18,8 +18,8 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
   items: {
     // `partida` la gana cotizador101 el 29-sep (0.49.0): cada cotización
     // aprobada es una pestaña en dash101, y sus piezas nacen en ella.
-    cotizador101: ['nombre', 'descripcion', 'tipo', 'monto', 'cantidad', 'moneda', 'estado', 'proyecto_id', 'cliente_id', 'negocio_id', 'origen', 'partida'],
-    dash101: ['nombre', 'descripcion', 'tipo', 'monto', 'cantidad', 'moneda', 'estado', 'proyecto_id', 'cliente_id', 'negocio_id', 'fecha_entrega', 'partida', 'orden', 'padre_id'],
+    cotizador101: ['nombre', 'descripcion', 'tipo', 'monto', 'cantidad', 'moneda', 'estado', 'proyecto_id', 'cliente_id', 'origen', 'partida'],
+    dash101: ['nombre', 'descripcion', 'tipo', 'monto', 'cantidad', 'moneda', 'estado', 'proyecto_id', 'cliente_id', 'fecha_entrega', 'partida', 'orden', 'padre_id'],
     /* `estado` lo gana quell101 el 20-sep, por encargo de Mike: «se debe
      * poder cancelar algún ítem ya sea desde quell o desde dash, y se
      * refleja en los 2». Se usa por POST /items/:id/aprobar y
@@ -39,15 +39,15 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
     quell101: ['etapas_permitidas', 've_dinero', 'estacion_default'],
   },
   clientes: {
-    cotizador101: ['nombre', 'nombre_norm', 'correo', 'telefono', 'negocio_id'],
-    dash101: ['nombre', 'nombre_norm', 'correo', 'telefono', 'rfc', 'notas', 'portal_activo', 'negocio_id'],
+    cotizador101: ['nombre', 'nombre_norm', 'correo', 'telefono'],
+    dash101: ['nombre', 'nombre_norm', 'correo', 'telefono', 'rfc', 'notas', 'portal_activo'],
   },
   proyectos: {
     /* `tasa_iva` e `iva_incluido` (0018) SÍ los escribe dash101: no son
      * cachés sino una decisión de quien vende, y se marca una vez por
      * obra en «Editar el proyecto». */
-    dash101: ['nombre', 'descripcion', 'estado', 'fecha_inicio', 'fecha_fin_estimada', 'fecha_cierre', 'cliente_id', 'negocio_id', 'tasa_iva', 'iva_incluido'],
-    cotizador101: ['nombre', 'cliente_id', 'negocio_id'], // solo al crear desde /vender
+    dash101: ['nombre', 'descripcion', 'estado', 'fecha_inicio', 'fecha_fin_estimada', 'fecha_cierre', 'cliente_id', 'tasa_iva', 'iva_incluido'],
+    cotizador101: ['nombre', 'cliente_id'], // solo al crear desde /vender
   },
   // Las partidas son de dash101 y de nadie más. `monto_pagado` y `estado` no
   // están en su lista: son cachés (abajo).
@@ -57,13 +57,6 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
    * retiros de utilidades son movimientos de dash101 (Mike, 30-sep-2026). */
   accionistas: { dash101: '*' },
   cuentas: { dash101: '*' },
-  /* El negocio lo maneja dash101. `cotizador101` sólo puede CREARLO —nombre y
-   * moneda, nada más— y es por una razón concreta: `cotizaciones.negocio_id`
-   * es obligatorio, así que una empresa sin negocio no puede cotizar. Si la
-   * primera app que alguien usa es el cotizador, quedaría trabado esperando a
-   * que otra app le cree algo que él no puede ver ni pedir. Con esto se crea
-   * solo; lo demás del negocio sigue siendo de dash101. */
-  negocios: { dash101: '*', suite101: '*', cotizador101: ['nombre', 'moneda'] },
   opex: { dash101: '*' },
   cotizaciones: { cotizador101: '*' },
   /* Los ajustes los escribe cualquier app, pero SÓLO los suyos, y eso no lo
@@ -92,13 +85,13 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
   estaciones: { quell101: '*' },
   // Las escribe la ruta POST /orgs/:o/conciliaciones, no el CRUD genérico:
   // aquí está para que quede dicho de quién son, y para el 403 con la lista.
-  conciliaciones: { dash101: ['negocio_id', 'corte_at', 'hecha_por'] },
+  conciliaciones: { dash101: ['corte_at', 'hecha_por'] },
   /* El catálogo (0017). Lo escribe dash101 hoy; quote101 entra cuando arme
    * el catálogo de verdad, que es para lo que Mike lo pidió. `precio` sí
    * está en la lista: cambiarle el precio a un producto es una decisión de
    * quien cotiza, no un caché. Lo que NO se escribe por aquí es a quién
    * pertenece cada pieza; eso es `items.producto_id`, abajo. */
-  productos: { dash101: ['codigo', 'nombre', 'descripcion', 'tipo', 'precio', 'moneda', 'negocio_id'] },
+  productos: { dash101: ['codigo', 'nombre', 'descripcion', 'tipo', 'precio', 'moneda'] },
   conciliacion_cuentas: { dash101: ['conciliacion_id', 'cuenta_id', 'saldo_registrado', 'saldo_real', 'diferencia', 'movimiento_id'] },
 };
 

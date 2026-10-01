@@ -8,12 +8,10 @@
  * stub) o desde adentro (el propio objeto).
  *
  * Qué deja: el cliente en la base de la empresa si no había uno con ese
- * correo (colgado del negocio de quien invita, del primero, o de uno nuevo con
- * el nombre de la empresa si no hay ninguno: una empresa que sólo usa quell101
- * no tiene por qué haber abierto dash101 antes), la persona en la suite si no
- * existía, y su acceso tipo cliente. Sin PIN: entra con el código al correo. */
+ * correo, la persona en la suite si no existía, y su acceso tipo cliente. Sin
+ * PIN: entra con el código al correo. */
 
-import { acceso, crearUsuario, esSuperadmin, miembro, org, ponerAcceso, usuarioPorCorreo } from './maestro';
+import { acceso, crearUsuario, esSuperadmin, miembro, ponerAcceso, usuarioPorCorreo } from './maestro';
 import { correoValido, normalizaCorreo } from './lib';
 import type { Env } from './entorno';
 import type { ApiOrgDB } from './org-db';
@@ -50,15 +48,7 @@ export async function invitarClienteEnSuite(
   const lista = await tienda.listar('clientes', {});
   let cliente = lista.filas.find((f) => normalizaCorreo(f.correo) === correo) ?? null;
   const nuevo_cliente = !cliente;
-  if (!cliente) {
-    let negocio_id: string | undefined = quien.negocios[0] ?? (await tienda.listar('negocios', {})).filas[0]?.id;
-    if (!negocio_id) {
-      const empresa = await org(env, org_id);
-      const negocio = await tienda.crear('negocios', { nombre: empresa?.nombre ?? org_id, moneda: empresa?.moneda ?? 'MXN' }, { app, usuario_id: quien.usuario_id });
-      negocio_id = String(negocio.id);
-    }
-    cliente = await tienda.crear('clientes', { nombre, correo, negocio_id }, { app, usuario_id: quien.usuario_id });
-  }
+  if (!cliente) cliente = await tienda.crear('clientes', { nombre, correo }, { app, usuario_id: quien.usuario_id });
 
   const usuario = yaEs ?? (await crearUsuario(env, correo, nombre));
   await ponerAcceso(env, { usuario_id: usuario.id, org_id, tipo: 'cliente', ref_id: String(cliente.id) });

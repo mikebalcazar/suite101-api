@@ -291,7 +291,8 @@ describe('§6.1 y §6.2 · los conteos y el dinero cuadran', () => {
 
   it('las filas de Firestore y las del OrgDB son las mismas, tabla por tabla', () => {
     const por = Object.fromEntries(r.data.cuadre.tablas.map((t: any) => [t.tabla, t]));
-    expect(por.negocios).toMatchObject({ firestore: 1, en_orgdb: 1, cuadra: true });
+    expect(por.negocios, 'ya no hay tabla negocios (0.63.0): la colección se lee y se deja').toBeUndefined();
+    expect(r.data.leidos.negocios).toBe(1);
     expect(por.cuentas).toMatchObject({ firestore: 2, en_orgdb: 2, cuadra: true });
     expect(por.clientes).toMatchObject({ firestore: 2, en_orgdb: 2, cuadra: true });
     expect(por.proveedores).toMatchObject({ firestore: 1, en_orgdb: 1, cuadra: true });
@@ -422,7 +423,7 @@ describe('§6.5 · los usuarios existen y entran con «olvidé mi PIN»', () => 
     expect(correos).toContain(CORREO);
     const socia = r.data.filas.find((f: any) => f.correo === 'socia@ejemplo.mx');
     expect(socia.rol).toBe('socio');
-    expect(socia.negocios).toEqual(['NEG1']);
+    expect(socia.negocios, 'ya no significa nada (0.63.0): siempre vacío').toEqual([]);
   });
 
   it('la clienta fija su PIN por correo y entra con él', async () => {
@@ -629,10 +630,13 @@ describe('la mudanza de quote101: del árbol a las filas', () => {
     expect(cosecha.avisos.imagenes_en_el_documento).toBe(1);
   });
 
-  it('sin negocio no se importa nada, y se dice por qué', () => {
+  it('sin negocio se importa igual (0.63.0): ya no hay negocios, y las filas no traen negocio_id', () => {
     const sin = cosechar({ cotizador: [ARBOL] }, '2026-09-16T00:00:00.000Z', {});
-    expect(sin.filas.clientes).toBeUndefined();
-    expect(sin.rechazos[0].motivo).toMatch(/falta `negocio`/);
+    expect(sin.rechazos).toEqual([]);
+    expect(sin.filas.clientes?.length).toBe(cosecha.filas.clientes?.length);
+    for (const t of ['clientes', 'proyectos', 'cotizaciones'] as const) {
+      for (const f of sin.filas[t] ?? []) expect('negocio_id' in f, `${t} sin negocio_id`).toBe(false);
+    }
   });
 
   it('una cantidad que no es entero se rechaza: no se redondea a escondidas', () => {
@@ -732,13 +736,13 @@ describe('la mudanza de quote101: el folio lo pone el OrgDB', () => {
     expect(lista.data.total).toBe(0);
   });
 
-  it('un negocio que no existe se rechaza antes de tocar nada', async () => {
+  it('un `negocio` en la petición ya no se revisa ni se usa (0.63.0)', async () => {
     const r = await pedir('/admin/importar', {
       method: 'POST',
       body: JSON.stringify({ org: ORG_C, modo: 'seco', negocio: 'no-existe', docs: { cotizador: [ARBOL] } }),
     });
-    expect(r.estado).toBe(404);
-    expect(r.error).toBe('negocio_desconocido');
+    expect(r.estado).toBe(200);
+    expect(r.data.rechazos).toEqual([]);
   });
 
   it('al escribir, la que traía folio lo conserva y la que no se lleva el siguiente', async () => {

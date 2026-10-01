@@ -21,7 +21,6 @@ export interface Quien {
   clase: 'miembro' | 'personal' | 'cliente';
   usuario_id: string;
   rol?: Miembro['rol'];
-  negocios: string[];
   ref_id?: string;
   ve_dinero: boolean;
   /** owner, admin y socio ven costos y egresos. staff no. */

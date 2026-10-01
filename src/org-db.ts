@@ -39,6 +39,7 @@ import proveedorCuentas from '../migrations/org/0023_proveedor_cuentas.sql';
 import subitems from '../migrations/org/0024_subitems.sql';
 import accionistas from '../migrations/org/0025_accionistas.sql';
 import movimientoPartida from '../migrations/org/0026_movimiento_partida.sql';
+import sinNegocios from '../migrations/org/0027_sin_negocios.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { PREFIJOS, siguienteCodigo } from './quell/codigos.js';
 
@@ -53,7 +54,7 @@ import type { Quien } from './http';
 import { DEFS, type Def, type Tipo } from './tablas';
 import { ahora, normalizar, ulid } from './lib';
 import { alcanceDeItem } from '../schema/tipos';
-import { TABLAS, type Aviso, type Etapa, type Peek, type Pool, type Tabla } from '../schema/tipos';
+import { TABLAS, type Aviso, type ConteoQuote, type Etapa, type Peek, type Pool, type Tabla } from '../schema/tipos';
 import type { Env } from './entorno';
 
 /* Las migraciones del OrgDB, en orden. Para agregar una: se escribe el .sql,
@@ -65,7 +66,52 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios];
+
+/** La 0027 no es SQL: corre en código (`quitarNegocios`), porque lo que hace
+ *  depende de lo que haya en la base. `migrar()` la reconoce por su lugar en
+ *  la lista; el archivo .sql es sólo la nota que lo dice. */
+const EN_CODIGO: Record<number, 'quitarNegocios'> = { [MIGRACIONES.indexOf(sinNegocios)]: 'quitarNegocios' };
+
+/** La tabla `empresa` (0027): UN renglón, con id fijo, que es lo que antes
+ *  era «el negocio». Se exporta para que `esquema.spec.ts` la lea de aquí y
+ *  no de una copia a mano. */
+export const SQL_EMPRESA = `CREATE TABLE IF NOT EXISTS empresa (
+  id TEXT PRIMARY KEY CHECK (id = 'empresa'), nombre TEXT NOT NULL, rfc TEXT,
+  moneda TEXT NOT NULL DEFAULT 'MXN', dia_conciliacion INTEGER NOT NULL DEFAULT 1, creado_at TEXT NOT NULL
+)`;
+
+/** Los índices que llevaban `negocio_id`, vueltos a crear sin él (0027). */
+const INDICES_SIN_NEGOCIO = [
+  `CREATE INDEX IF NOT EXISTS conciliaciones_corte ON conciliaciones(corte_at)`,
+  `CREATE INDEX IF NOT EXISTS rayas_por_periodo ON rayas(periodo_fin)`,
+  `CREATE INDEX IF NOT EXISTS productos_nombre ON productos(nombre)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS productos_codigo ON productos(codigo) WHERE codigo <> ''`,
+  `CREATE INDEX IF NOT EXISTS ordenes_tipo ON ordenes(tipo, estado)`,
+];
+
+/** El `CREATE TABLE` de una tabla sin una de sus columnas, con otro nombre.
+ *  Parte las definiciones por las comas de primer nivel —un CHECK trae las
+ *  suyas adentro— y tira la pieza cuya primera palabra es la columna. Los
+ *  comentarios se quitan antes: SQLite guarda el texto tal cual se escribió,
+ *  comentarios incluidos, y una coma dentro de uno partiría mal. */
+export function createSinColumna(sqlCreate: string, columna: string, nuevoNombre: string): string {
+  const limpio = sqlCreate.replace(/--[^\n]*/g, '');
+  const abre = limpio.indexOf('(');
+  const cierra = limpio.lastIndexOf(')');
+  const cuerpo = limpio.slice(abre + 1, cierra);
+  const piezas: string[] = [];
+  let nivel = 0;
+  let pieza = '';
+  for (const ch of cuerpo) {
+    if (ch === '(') nivel++;
+    if (ch === ')') nivel--;
+    if (ch === ',' && nivel === 0) { piezas.push(pieza); pieza = ''; } else pieza += ch;
+  }
+  piezas.push(pieza);
+  const quedan = piezas.map((x) => x.trim()).filter((x) => x && x.split(/\s+/)[0].replace(/"/g, '') !== columna);
+  return `CREATE TABLE "${nuevoNombre}" (${quedan.join(', ')})`;
+}
 
 /** La versión a la que llega un OrgDB al día. Se exporta para que las pruebas
  *  no la escriban a mano: el 16-sep, subir la migración 0004 y olvidar el
@@ -147,29 +193,21 @@ export interface ResultadoBorrarConTodo {
   obras_sueltas: number;
 }
 
-/** Lo que devuelve fusionar los negocios de una empresa en uno (0.50.0). */
-export interface ResultadoFusionNegocios {
-  ok: true;
-  queda: Fila;
-  /** Los negocios que se vaciaron y se borraron (o se borrarían, en seco). */
-  se_fueron: Fila[];
-  /** Cuántas filas cambian de negocio, por tabla. */
-  movidos: Record<string, number>;
-  /** Productos del catálogo con el mismo código en dos negocios: quedó uno
-   *  y sus piezas apuntan a él. */
-  productos_fusionados: number;
-  seco: boolean;
-}
-
 export interface ApiOrgDB {
   version(): Promise<number>;
   /** Puerta de servicio: borra TODO y vuelve a migrar. Solo DELETE /admin/orgs/:o fuera de producción. */
   vaciar(): Promise<number>;
   listar(tabla: Tabla, filtros?: Record<string, string>, sujeto?: Sujeto, limite?: number): Promise<{ total: number; filas: Fila[] }>;
   obtener(tabla: Tabla, id: string): Promise<Fila | null>;
-  /** El registro de la empresa (0.61.0): el primero por nombre, como lo lista
-   *  el CRUD; si no hay ninguno, se crea con el nombre que se pase. */
-  negocioDeLaEmpresa(nombre: string): Promise<Fila>;
+  /** La empresa (0.63.0): el único renglón de `empresa`. Si no existe, se
+   *  crea con el nombre y la moneda que se pasen (MXN si no se dice). */
+  empresa(nombre: string, moneda?: 'MXN' | 'USD'): Promise<Fila>;
+  /** Cambia nombre, rfc, moneda o dia_conciliacion de la empresa; lo que no
+   *  venga se queda. Devuelve el renglón ya cambiado. */
+  actualizarEmpresa(datos: Fila): Promise<Fila>;
+  /** Las tablas de esta base con sus columnas, como las ve SQLite. Para
+   *  master101 y para medir una migración (`GET /admin/orgs/:o/esquema`). */
+  esquema(): Promise<Record<string, string[]>>;
   crear(tabla: Tabla, datos: Fila, contexto: { app: string; usuario_id: string }): Promise<Fila>;
   /** Deja el contador de folios en un número. La usa la mudanza de la fase 4
    *  para dejarlo justo después de lo que acabó de importar. */
@@ -184,10 +222,10 @@ export interface ApiOrgDB {
   recalcularProyecto(proyecto_id: string): Promise<Fila | null>;
   /** La conciliación semanal, entera o nada (B1). Sólo la llama POST /conciliaciones. */
   conciliar(args: {
-    negocio_id: string; corte_at: string; usuario_id: string;
+    corte_at: string; usuario_id: string;
     saldos: Array<{ cuenta_id: string; saldo_real: number }>;
   }): Promise<{ ok: true; conciliacion: Fila; cuentas: Fila[]; diferencia_total: number } | { ok: false; error: string; detalle?: Record<string, any> }>;
-  estadisticaConciliacion(negocio_id: string): Promise<{
+  estadisticaConciliacion(): Promise<{
     cortes: Array<Record<string, any>>;
     por_cuenta: Array<Record<string, any>>;
     acumulado: { cortes: number; diferencia_total: number; faltante: number; sobrante: number };
@@ -197,7 +235,7 @@ export interface ApiOrgDB {
     usuario_id: string; persona_id?: string | null; etapas_permitidas?: number[] | null;
   }): Promise<{ ok: true; item: Fila; avance: Fila } | { ok: false; error: string; detalle?: Record<string, any> }>;
   exportarItems(args: {
-    cotizacion_id: string; lineas: Array<Record<string, any>>; negocio_id: string; cliente_id: string; usuario_id: string;
+    cotizacion_id: string; lineas: Array<Record<string, any>>; cliente_id: string; usuario_id: string;
   }): Promise<{ total: number; filas: Fila[] }>;
   venderItems(args: {
     item_ids: string[]; proyecto_id?: string | null; nombre_proyecto?: string; app: string; usuario_id: string;
@@ -225,6 +263,8 @@ export interface ApiOrgDB {
     generado_at: string;
     proyecto: Fila;
     cliente: Fila | null;
+    /** ES LA EMPRESA (0.63.0): {id: 'empresa', nombre, rfc, moneda}. Sigue
+     *  llamándose `negocio` para no romper peek101 ni dash101. */
     negocio: Fila | null;
     items: Fila[];
     movimientos: Fila[];
@@ -242,8 +282,8 @@ export interface ApiOrgDB {
   conteosQuell(): Promise<Record<string, number>>;
   /** Cuántas filas hay en cada tabla de roster101. Para master101 y para medir la mudanza. */
   conteosRoster(): Promise<Record<string, number>>;
-  /** Lo de quote101, POR NEGOCIO, incluidos los negocios que ya no existen. */
-  conteosQuote(): Promise<ConteoQuote[]>;
+  /** Lo de quote101 de la empresa, en cuatro cifras (0.63.0). */
+  conteosQuote(): Promise<ConteoQuote>;
   /* Órdenes de compra (0008). Los permisos los resuelve el Worker; aquí sólo
    * viven las reglas que son verdad de la base —una orden pagada no se vuelve
    * a pagar— y lo que tiene que pasar todo o nada. */
@@ -254,14 +294,14 @@ export interface ApiOrgDB {
   marcarNominas(args: { personal_id: string; valor: boolean; quien_usuario_id: string; quien_nombre?: string | null }): Promise<Fila | null>;
   marcarContador(args: { personal_id: string; valor: boolean; quien_usuario_id: string; quien_nombre?: string | null }): Promise<Fila | null>;
   crearOrden(args: Record<string, unknown>): Promise<Fila | { error: string; detalle?: unknown }>;
-  misOrdenes(usuario_id: string, negocio_id?: string | null): Promise<Fila[]>;
-  buzon(hoy?: string, negocio_id?: string | null, tipo?: TipoOrden | null): Promise<{ filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number }>;
+  misOrdenes(usuario_id: string): Promise<Fila[]>;
+  buzon(hoy?: string, tipo?: TipoOrden | null): Promise<{ filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number }>;
   /** 0.59.0 · El historial: las órdenes ya pagadas, la más reciente arriba (Mike, 1-oct: «un historial completo de las órdenes de compra ya pagadas»). */
-  ordenesPagadas(negocio_id?: string | null, tipo?: TipoOrden | null, limite?: number): Promise<{ filas: Fila[]; total: number }>;
+  ordenesPagadas(tipo?: TipoOrden | null, limite?: number): Promise<{ filas: Fila[]; total: number }>;
   /** Quién hay en los expedientes de roster101, para dar de alta un
    *  accionista jalándolo de ahí (0.60.0). */
   accionistasDeRoster(): Promise<Array<{ id: string; nombre: string; rfc: string; correo: string; puesto: string }>>;
-  pendientesDeOrdenes(negocio_id?: string | null): Promise<{ compras: { total: number; cuantas: number }; reembolsos: { total: number; cuantas: number } }>;
+  pendientesDeOrdenes(): Promise<{ compras: { total: number; cuantas: number }; reembolsos: { total: number; cuantas: number } }>;
   verOrden(id: string): Promise<{ orden: Fila; eventos: Fila[]; archivos: Fila[] } | null>;
   /** 0.56.1 · La orden que dejó ese egreso (o null): para que desde el movimiento se llegue a la orden con toda su historia y sus papeles. */
   ordenDeMovimiento(movimiento_id: string): Promise<{ orden: Fila; eventos: Fila[]; archivos: Fila[] } | null>;
@@ -275,26 +315,21 @@ export interface ApiOrgDB {
   ligarCfdi(args: { cfdi_id: string; movimiento_id: string; monto_aplicado?: number }): Promise<{ ok: true; cfdi: Fila; movimiento: Fila; aplicado_total: number } | { error: string; detalle?: unknown }>;
   cancelarCfdi(id: string): Promise<Fila | { error: string }>;
   marcarFacturado(args: Record<string, unknown>): Promise<Fila | { error: string; detalle?: unknown }>;
-  /* Todas llevan `negocio_id` opcional: el RFC vive en el negocio, así que
-   * un IVA del mes que mezcle dos negocios no es el IVA de nadie. Sin él,
-   * salen las cifras de toda la empresa. */
-  ivaDelMes(desde: string, hasta: string, negocio_id?: string | null): Promise<{ desde: string; hasta: string; trasladado: number; acreditable: number; retenciones: number; a_enterar: number; facturas: { emitidas: number; recibidas: number; canceladas: number } }>;
-  facturadoVsReal(desde: string, hasta: string, negocio_id?: string | null): Promise<{ desde: string; hasta: string; ingresos: { total: number; facturado: number; fuera: number }; egresos: { total: number; facturado: number; fuera: number } }>;
-  pendientesDeFactura(negocio_id?: string | null, tipo?: string | null): Promise<Fila[]>;
-  listaCfdi(args: { desde?: string; hasta?: string; tipo?: string; estado?: string; negocio_id?: string | null }): Promise<Fila[]>;
+  /* Siempre de la empresa entera (0.63.0): el RFC es uno. */
+  ivaDelMes(desde: string, hasta: string): Promise<{ desde: string; hasta: string; trasladado: number; acreditable: number; retenciones: number; a_enterar: number; facturas: { emitidas: number; recibidas: number; canceladas: number } }>;
+  facturadoVsReal(desde: string, hasta: string): Promise<{ desde: string; hasta: string; ingresos: { total: number; facturado: number; fuera: number }; egresos: { total: number; facturado: number; fuera: number } }>;
+  pendientesDeFactura(tipo?: string | null): Promise<Fila[]>;
+  listaCfdi(args: { desde?: string; hasta?: string; tipo?: string; estado?: string }): Promise<Fila[]>;
 
   /* El cliente es uno solo en las tres apps: avisar del parecido y juntar
    * los dos que ya se crearon. */
-  clientesParecidos(nombre: string, negocio_id?: string | null): Promise<Fila[]>;
+  clientesParecidos(nombre: string): Promise<Fila[]>;
   fusionarClientes(queda_id: string, se_va_id: string): Promise<{ ok: true; cliente: Fila; movidos: Record<string, number> } | { error: string; detalle?: unknown }>;
   /** 0.51.0: borrar un cliente o un proyecto CON TODO lo suyo, o decir por
    *  qué no (dinero o historia). `seco` sólo cuenta. */
   borrarClienteConTodo(cliente_id: string, modo: 'seco' | 'borrar'): Promise<ResultadoBorrarConTodo | { error: string; detalle?: unknown }>;
   borrarProyectoConTodo(proyecto_id: string, modo: 'seco' | 'borrar'): Promise<ResultadoBorrarConTodo | { error: string; detalle?: unknown }>;
   fusionarProyectos(queda_id: string, se_va_id: string, seco: boolean): Promise<ResultadoFusionProyectos | { error: string; detalle?: unknown }>;
-  /** 0.50.0: un solo negocio por empresa. Todo lo de los demás negocios pasa
-   *  al que se queda y los demás se borran. Con `seco` sólo cuenta. */
-  fusionarNegocios(queda_id: string, seco: boolean): Promise<ResultadoFusionNegocios | { error: string; detalle?: unknown }>;
 
   /* La obra de quell101 ligada al proyecto de dash101 (0010). */
   obras(args?: { sueltas?: boolean }): Promise<Fila[]>;
@@ -302,10 +337,10 @@ export interface ApiOrgDB {
   sinUbicar(obra_id: string): Promise<{ obra: Fila; items: Fila[] } | { error: string; detalle?: unknown }>;
   ligarObra(obra_id: string, proyecto_id: string): Promise<{ ok: true; obra: Fila } | { error: string; detalle?: unknown }>;
   itemsDeLaObra(obra_id: string): Promise<{ obra: Fila; parejas: Fila[]; nuevos: Fila[]; sueltos: Fila[]; candidatos: Fila[] } | { error: string; detalle?: unknown }>;
-  rayas(negocio_id: string): Promise<Fila[]>;
+  rayas(): Promise<Fila[]>;
   raya(id: string): Promise<{ raya: Fila; pagos: Fila[] } | null>;
   crearRaya(
-    datos: { negocio_id: string; periodo_inicio: string; periodo_fin: string; nota?: string;
+    datos: { periodo_inicio: string; periodo_fin: string; nota?: string;
              pagos?: Array<{ personal_id: string; concepto?: string; sueldo?: number; extras?: number; descuentos?: number; nota?: string }> },
     contexto: { usuario_id: string },
   ): Promise<{ ok: true; raya: Fila; pagos: Fila[] } | { error: string; detalle?: unknown }>;
@@ -449,18 +484,6 @@ export const TABLAS_QUELL = [
 
 /** Lo que devuelve una corrida del importador. Todo son números medidos
  *  dentro del SQLite, no lo que el importador creyó escribir. */
-/** Lo de quote101 de un negocio —o de un `negocio_id` que ya no es ningún
- *  negocio: `existe: false`—. Ver `conteosQuote`. */
-export interface ConteoQuote {
-  negocio_id: string | null;
-  nombre: string | null;
-  existe: boolean;
-  clientes: number;
-  proyectos: number;
-  cotizaciones: number;
-  ultima_cotizacion: string | null;
-}
-
 export interface Importacion {
   antes: Record<string, number>;
   despues: Record<string, number>;
@@ -501,9 +524,155 @@ export class OrgDB extends DurableObject<Env> {
     const fila = this.sql.exec(`SELECT MAX(version) AS v FROM _migraciones`).one() as { v: number | null };
     const desde = fila?.v ?? 0;
     for (let i = desde; i < MIGRACIONES.length; i++) {
-      this.sql.exec(MIGRACIONES[i]);
+      if (EN_CODIGO[i]) this[EN_CODIGO[i]]();
+      else this.sql.exec(MIGRACIONES[i]);
       this.sql.exec(`INSERT INTO _migraciones (version, aplicada_at) VALUES (?, ?)`, i + 1, new Date().toISOString());
     }
+  }
+
+  /* ─────────────── 0027: se va «negocio» (corre en código) ───────────────
+   *
+   * Mike, 1-oct-2026: «Ya no existe la opción de negocios. Sólo es una
+   * empresa/negocio todo. Elimina todas las lógicas que involucran el
+   * concepto de "negocio"».
+   *
+   * Lo que hace, en orden, y por qué así:
+   *   1. Si hay más de un negocio, todo pasa al PRIMERO POR NOMBRE —la misma
+   *      regla que usaban la API, dash101 y las pruebas desde la fase B— y
+   *      los demás se borran (`fusionarEnUno`). Los renglones huérfanos, los
+   *      que apuntaban a un negocio ya borrado (el defecto del 23-sep), se
+   *      adoptan igual: ya no hay a qué pertenecer más que a la empresa.
+   *   2. Nace `empresa`, un solo renglón, con nombre, RFC, moneda y día de
+   *      conciliación del negocio que quedó. Si no había ninguno, queda
+   *      vacía y la crea la primera ruta que la pida con el nombre de la org.
+   *   3. A cada tabla con `negocio_id` se le quita. Las que lo llevaban con
+   *      `REFERENCES negocios` (cuentas, conciliaciones, rayas, accionistas)
+   *      no admiten DROP COLUMN —SQLite no tira una columna con llave
+   *      foránea— y se reconstruyen (ver abajo). A las otras, DROP COLUMN,
+   *      tirando antes los índices que la traían. Los índices que llevaban
+   *      `negocio_id` se vuelven a crear sin él.
+   *   4. DROP TABLE negocios.
+   *
+   * LA RECONSTRUCCIÓN Y LAS LLAVES FORÁNEAS. `cuentas` es padre de
+   * `movimientos`, `conciliacion_cuentas` y `rayas`; `conciliaciones` de
+   * `conciliacion_cuentas`; `rayas` de `raya_pagos`. Tirar un padre con
+   * hijos colgados viola la llave. En el SQLite del Durable Object
+   * `PRAGMA foreign_keys = OFF` cambia el valor pero NO evita la revisión:
+   * workerd revisa las llaves al cerrar y, si quedaron violadas, resetea el
+   * objeto entero (medido el 1-oct-2026 con una prueba de sondeo). Lo que sí
+   * obedece es `PRAGMA defer_foreign_keys = ON` dentro de una transacción:
+   * las violaciones se cuentan y se cobran al cerrar. Con ese contador en
+   * mente el orden es: copiar las filas a `t__copia`, DROP TABLE t (el
+   * contador sube por cada hijo que se queda sin padre), CREATE TABLE t sin
+   * la columna, INSERT desde la copia (insertar un padre que los hijos ya
+   * esperaban BAJA el contador por cada uno), y la cuenta queda en cero. Se
+   * mide: `PRAGMA foreign_key_check` sale vacío después. Todo dentro de
+   * `transactionSync`, así que una tabla se reconstruye entera o no se toca.
+   *
+   * Es idempotente: cada paso mira `sqlite_master` antes de hacer nada, así
+   * que una corrida que se quedó a medias se termina en la siguiente. Y
+   * corre igual sobre una base recién nacida (`vaciar()` aplica todo desde
+   * cero): ahí no hay negocios, no hay filas, y sólo quita columnas. */
+  private quitarNegocios(): void {
+    const hayTabla = (n: string): boolean =>
+      this.sql.exec(`SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = ?`, n).toArray().length > 0;
+
+    if (hayTabla('negocios')) {
+      const primero = this.sql.exec(`SELECT id FROM negocios ORDER BY nombre LIMIT 1`).toArray()[0] as Fila | undefined;
+      if (primero) this.fusionarEnUno(String(primero.id));
+      else this.juntarProductosRepetidos(null);
+    }
+
+    this.sql.exec(SQL_EMPRESA);
+    if (hayTabla('negocios')) {
+      this.sql.exec(
+        `INSERT OR IGNORE INTO empresa (id, nombre, rfc, moneda, dia_conciliacion, creado_at)
+         SELECT 'empresa', nombre, rfc, moneda, dia_conciliacion, creado_at FROM negocios ORDER BY nombre LIMIT 1`,
+      );
+    }
+
+    const tablas = this.sql
+      .exec(`SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name <> 'negocios' AND name NOT LIKE 'sqlite_%' AND sql LIKE '%negocio_id%' ORDER BY name`)
+      .toArray() as Array<{ name: string; sql: string }>;
+    for (const { name: t, sql } of tablas) {
+      this.ctx.storage.transactionSync(() => {
+        const indices = this.sql
+          .exec(`SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL`, t)
+          .toArray() as Array<{ name: string; sql: string }>;
+        for (const i of indices) if (/negocio_id/.test(i.sql)) this.sql.exec(`DROP INDEX IF EXISTS "${i.name}"`);
+        if (/REFERENCES\s+negocios/i.test(sql)) {
+          const columnas = (this.sql.exec(`PRAGMA table_info("${t}")`).toArray() as Fila[])
+            .map((c) => String(c.name)).filter((c) => c !== 'negocio_id');
+          const lista = columnas.map((c) => `"${c}"`).join(', ');
+          this.sql.exec(`PRAGMA defer_foreign_keys = ON`);
+          this.sql.exec(`DROP TABLE IF EXISTS "${t}__copia"`);
+          this.sql.exec(`CREATE TABLE "${t}__copia" AS SELECT ${lista} FROM "${t}"`);
+          this.sql.exec(`DROP TABLE "${t}"`);
+          this.sql.exec(createSinColumna(sql, 'negocio_id', t));
+          this.sql.exec(`INSERT INTO "${t}" (${lista}) SELECT ${lista} FROM "${t}__copia"`);
+          this.sql.exec(`DROP TABLE "${t}__copia"`);
+          // Los índices que no traían la columna se fueron con el DROP: otra vez.
+          for (const i of indices) if (!/negocio_id/.test(i.sql)) this.sql.exec(i.sql);
+        } else {
+          this.sql.exec(`ALTER TABLE "${t}" DROP COLUMN negocio_id`);
+        }
+      });
+      /* El diferido se queda prendido hasta que cierre la transacción de
+       * afuera (la del despertar del objeto): se apaga aquí para que lo que
+       * siga —en esta misma llamada— vuelva a tronar en el momento. */
+      this.sql.exec(`PRAGMA defer_foreign_keys = OFF`);
+    }
+    for (const sql of INDICES_SIN_NEGOCIO) this.sql.exec(sql);
+    this.sql.exec(`DROP TABLE IF EXISTS negocios`);
+  }
+
+  /** Todo lo de los demás negocios pasa al que se queda y los demás se
+   *  borran. Era `fusionarNegocios` (0.50.0, `POST /negocios/fusionar`);
+   *  desde 0.63.0 sólo la llama la migración 0027. Las tablas se descubren
+   *  del esquema, no de una lista a mano. */
+  private fusionarEnUno(queda_id: string): void {
+    const tablas = (this.sql
+      .exec(`SELECT name FROM sqlite_master WHERE type = 'table' AND name <> 'negocios' AND name NOT LIKE 'sqlite_%' AND sql LIKE '%negocio_id%' ORDER BY name`)
+      .toArray() as Fila[]).map((t) => String(t.name));
+    this.ctx.storage.transactionSync(() => {
+      this.juntarProductosRepetidos(queda_id);
+      for (const t of tablas) this.sql.exec(`UPDATE "${t}" SET negocio_id = ? WHERE negocio_id <> ?`, queda_id, queda_id);
+      this.sql.exec(`DELETE FROM negocios WHERE id <> ?`, queda_id);
+    });
+  }
+
+  /** El código del producto era único POR NEGOCIO: dos negocios podían tener
+   *  cada uno su «PT-STD». Al juntarlos queda uno —el del negocio que se
+   *  queda si lo tiene, si no el más viejo—, sus piezas pasan a apuntarle y
+   *  el repetido se borra. Sin esto el índice único de 0027 no se puede
+   *  crear. Corre también sin negocio (`preferido` nulo): renglones
+   *  huérfanos de dos negocios borrados pueden repetir código igual. */
+  private juntarProductosRepetidos(preferido: string | null): void {
+    if (!this.sql.exec(`SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'productos'`).toArray().length) return;
+    const repetidos = this.sql
+      .exec(`SELECT codigo FROM productos WHERE codigo <> '' GROUP BY codigo HAVING COUNT(*) > 1`)
+      .toArray() as Fila[];
+    // En una corrida que se quedó a medias la columna ya puede no estar.
+    const conColumna = (this.sql.exec(`PRAGMA table_info("productos")`).toArray() as Fila[]).some((c) => c.name === 'negocio_id');
+    for (const r of repetidos) {
+      const filas = conColumna
+        ? this.sql.exec(`SELECT id FROM productos WHERE codigo = ? ORDER BY (negocio_id = ?) DESC, creado_at, id`, String(r.codigo), preferido ?? '').toArray() as Fila[]
+        : this.sql.exec(`SELECT id FROM productos WHERE codigo = ? ORDER BY creado_at, id`, String(r.codigo)).toArray() as Fila[];
+      const queda = String(filas[0].id);
+      for (const f of filas.slice(1)) {
+        this.sql.exec(`UPDATE items SET producto_id = ? WHERE producto_id = ?`, queda, String(f.id));
+        this.sql.exec(`DELETE FROM productos WHERE id = ?`, String(f.id));
+      }
+    }
+  }
+
+  /** Las tablas y sus columnas, como las ve SQLite. */
+  esquema(): Record<string, string[]> {
+    const out: Record<string, string[]> = {};
+    for (const t of this.sql.exec(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).toArray() as Fila[]) {
+      out[String(t.name)] = (this.sql.exec(`PRAGMA table_info("${String(t.name)}")`).toArray() as Fila[]).map((c) => String(c.name));
+    }
+    return out;
   }
 
   /** Borra todo lo que hay en el SQLite de esta empresa y lo deja como recién
@@ -599,17 +768,35 @@ export class OrgDB extends DurableObject<Env> {
     return { total, filas: this.conSaldo(tabla, filas).map((f) => this.afuera(tabla, f)!) };
   }
 
-  /** LA EMPRESA ES UNA (0.61.0). Mike, 1-oct-2026: «Ya no existe la opción
-   *  de negocios en dash. Sólo es una empresa/negocio todo. Elimina todas las
-   *  lógicas que involucran el concepto de "negocio"». Hasta que la tabla se
-   *  vaya (fase D), todo sigue colgado de un `negocio_id`; lo que cambia es
-   *  que ya NADIE lo manda: la API lo resuelve aquí. Es el primero por
-   *  nombre —el mismo que devuelve `GET /negocios`, y el mismo que toma
-   *  dash101— y si la empresa no tiene ninguno, se crea con su nombre. */
-  negocioDeLaEmpresa(nombre: string): Fila {
-    const hay = this.sql.exec(`SELECT * FROM negocios ORDER BY nombre LIMIT 1`).toArray()[0] as Fila | undefined;
-    if (hay) return this.afuera('negocios', hay)!;
-    return this.crear('negocios', { nombre: nombre.trim() || 'Mi empresa', moneda: 'MXN' }, { app: 'suite101', usuario_id: '' });
+  /** LA EMPRESA ES UNA. Mike, 1-oct-2026: «Ya no existe la opción de
+   *  negocios en dash. Sólo es una empresa/negocio todo. Elimina todas las
+   *  lógicas que involucran el concepto de "negocio"». Desde 0.63.0 es el
+   *  único renglón de `empresa` (0027): nombre, RFC, moneda y día de
+   *  conciliación. Si todavía no existe —una org recién nacida— se crea con
+   *  el nombre que se pase, que es el de la org en el D1, y moneda MXN (o la
+   *  que se diga: el compat de `POST /negocios` la trae). */
+  empresa(nombre: string, moneda: 'MXN' | 'USD' = 'MXN'): Fila {
+    const hay = this.sql.exec(`SELECT * FROM empresa WHERE id = 'empresa'`).toArray()[0] as Fila | undefined;
+    if (hay) return hay;
+    this.sql.exec(
+      `INSERT INTO empresa (id, nombre, rfc, moneda, dia_conciliacion, creado_at) VALUES ('empresa', ?, NULL, ?, 1, ?)`,
+      nombre.trim() || 'Mi empresa', moneda, ahora(),
+    );
+    return this.sql.exec(`SELECT * FROM empresa WHERE id = 'empresa'`).toArray()[0] as Fila;
+  }
+
+  /** Cambia lo que venga de nombre, rfc, moneda y dia_conciliacion; lo
+   *  demás se queda. Lo que es válido lo decide la ruta (PATCH /empresa). */
+  actualizarEmpresa(datos: Fila): Fila {
+    const antes = this.empresa(String(datos.nombre ?? ''));
+    const cols = ['nombre', 'rfc', 'moneda', 'dia_conciliacion'].filter((c) => datos[c] !== undefined);
+    if (cols.length) {
+      this.sql.exec(
+        `UPDATE empresa SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = 'empresa'`,
+        ...cols.map((c) => (datos[c] === null ? null : c === 'dia_conciliacion' ? Math.trunc(Number(datos[c])) : String(datos[c]))),
+      );
+    }
+    return cols.length ? (this.sql.exec(`SELECT * FROM empresa WHERE id = 'empresa'`).toArray()[0] as Fila) : antes;
   }
 
   obtener(tabla: Tabla, id: string): Fila | null {
@@ -823,23 +1010,6 @@ export class OrgDB extends DurableObject<Env> {
   borrar(tabla: Tabla, id: string): boolean | 'en_uso' {
     const antes = this.obtener(tabla, id);
     if (!antes) return false;
-    /* UN NEGOCIO CON COSAS ADENTRO NO SE BORRA. Las llaves foráneas sólo
-     * cuidan `cuentas`, conciliaciones y raya; `clientes`, `proyectos`,
-     * `cotizaciones` y las demás guardan su `negocio_id` sin llave (0001). Así
-     * que hasta el 23-sep-2026 un negocio sin cuentas se borraba y todo lo
-     * suyo se quedaba en la base apuntando a nada: invisible desde todas las
-     * apps, que filtran por un negocio que existe. Se leía como perdido —Mike:
-     * «desapareció mi info de quote»—.
-     *
-     * Se revisa TODA tabla que traiga `negocio_id`, no una lista escrita a
-     * mano: la tabla que alguien agregue mañana queda cuidada sin acordarse. */
-    if (tabla === 'negocios') {
-      for (const t of TABLAS) {
-        if (t === 'negocios' || !DEFS[t].cols.negocio_id) continue;
-        const n = (this.sql.exec(`SELECT COUNT(*) AS n FROM ${t} WHERE negocio_id = ?`, id).one() as { n: number }).n;
-        if (n > 0) return 'en_uso';
-      }
-    }
     // Las llaves foráneas se aplican. Se contesta con un valor y no con una
     // excepción: cruzar el RPC con una excepción deja «uncaught» en el registro
     // del Worker aunque el Worker la atrape.
@@ -885,16 +1055,13 @@ export class OrgDB extends DurableObject<Env> {
    * dash101 creía tener al corte. Si mañana alguien captura un gasto con
    * fecha vieja, esta conciliación no cambia; eso sale en la siguiente. */
   conciliar(args: {
-    negocio_id: string; corte_at: string; usuario_id: string;
+    corte_at: string; usuario_id: string;
     saldos: Array<{ cuenta_id: string; saldo_real: number }>;
   }): { ok: true; conciliacion: Fila; cuentas: Fila[]; diferencia_total: number } | { ok: false; error: string; detalle?: Record<string, any> } {
-    const negocio = this.sql.exec(`SELECT id FROM negocios WHERE id = ?`, args.negocio_id).toArray()[0] as Fila | undefined;
-    if (!negocio) return { ok: false, error: 'no_encontrado', detalle: { negocio_id: args.negocio_id } };
-
     const cuentas = this.sql
-      .exec(`SELECT id, nombre, saldo_inicial FROM cuentas WHERE negocio_id = ? ORDER BY nombre`, args.negocio_id)
+      .exec(`SELECT id, nombre, saldo_inicial FROM cuentas ORDER BY nombre`)
       .toArray() as Fila[];
-    if (!cuentas.length) return { ok: false, error: 'datos_invalidos', detalle: { motivo: 'el negocio no tiene cuentas' } };
+    if (!cuentas.length) return { ok: false, error: 'datos_invalidos', detalle: { motivo: 'la empresa no tiene cuentas' } };
 
     // Mike decidió que se concilian TODAS las cuentas, iguales: bancos,
     // efectivo y tarjetas. Que falte una es un error, no un silencio.
@@ -902,7 +1069,7 @@ export class OrgDB extends DurableObject<Env> {
     const faltan = cuentas.filter((c) => !dados.has(String(c.id))).map((c) => ({ id: c.id, nombre: c.nombre }));
     if (faltan.length) return { ok: false, error: 'faltan_cuentas', detalle: { faltan } };
     const sobran = args.saldos.filter((s) => !cuentas.some((c) => String(c.id) === s.cuenta_id)).map((s) => s.cuenta_id);
-    if (sobran.length) return { ok: false, error: 'no_encontrado', detalle: { cuentas: sobran, motivo: 'no son de este negocio' } };
+    if (sobran.length) return { ok: false, error: 'no_encontrado', detalle: { cuentas: sobran, motivo: 'no son cuentas de esta empresa' } };
 
     // Los movimientos llevan día, no hora: al corte entra todo lo registrado
     // hasta ese día inclusive.
@@ -914,8 +1081,8 @@ export class OrgDB extends DurableObject<Env> {
 
     this.ctx.storage.transactionSync(() => {
       this.sql.exec(
-        `INSERT INTO conciliaciones (id, negocio_id, corte_at, hecha_por, creado_at) VALUES (?,?,?,?,?)`,
-        id, args.negocio_id, args.corte_at, args.usuario_id, at,
+        `INSERT INTO conciliaciones (id, corte_at, hecha_por, creado_at) VALUES (?,?,?,?)`,
+        id, args.corte_at, args.usuario_id, at,
       );
 
       for (const c of cuentas) {
@@ -939,7 +1106,6 @@ export class OrgDB extends DurableObject<Env> {
           const mov = this.crear(
             'movimientos',
             {
-              negocio_id: args.negocio_id,
               tipo: diferencia > 0 ? 'egreso' : 'ingreso',
               monto: Math.abs(diferencia),
               fecha: dia,
@@ -967,12 +1133,12 @@ export class OrgDB extends DurableObject<Env> {
       }
     });
 
-    this.avisar({ t: 'conciliacion.nueva', id, negocio_id: args.negocio_id, diferencia_total }, 'dinero');
+    this.avisar({ t: 'conciliacion.nueva', id, diferencia_total }, 'dinero');
     return { ok: true, conciliacion: this.obtener('conciliaciones', id)!, cuentas: renglones, diferencia_total };
   }
 
   /** Lo que se escapó: por corte, por cuenta y el acumulado. */
-  estadisticaConciliacion(negocio_id: string): {
+  estadisticaConciliacion(): {
     cortes: Array<Record<string, unknown>>;
     por_cuenta: Array<Record<string, unknown>>;
     acumulado: { cortes: number; diferencia_total: number; faltante: number; sobrante: number };
@@ -986,9 +1152,7 @@ export class OrgDB extends DurableObject<Env> {
                 COALESCE(SUM(CASE WHEN cc.diferencia < 0 THEN -cc.diferencia ELSE 0 END), 0) AS sobrante
          FROM conciliaciones c
          LEFT JOIN conciliacion_cuentas cc ON cc.conciliacion_id = c.id
-         WHERE c.negocio_id = ?
          GROUP BY c.id ORDER BY c.corte_at DESC`,
-        negocio_id,
       )
       .toArray() as Array<Record<string, unknown>>;
 
@@ -999,9 +1163,7 @@ export class OrgDB extends DurableObject<Env> {
          FROM conciliacion_cuentas cc
          JOIN conciliaciones c ON c.id = cc.conciliacion_id
          LEFT JOIN cuentas cu ON cu.id = cc.cuenta_id
-         WHERE c.negocio_id = ?
          GROUP BY cc.cuenta_id ORDER BY diferencia_total DESC`,
-        negocio_id,
       )
       .toArray() as Array<Record<string, unknown>>;
 
@@ -1137,7 +1299,6 @@ export class OrgDB extends DurableObject<Env> {
   exportarItems(args: {
     cotizacion_id: string;
     lineas: Array<Record<string, unknown>>;
-    negocio_id: string;
     cliente_id: string;
     usuario_id: string;
   }): { total: number; filas: Fila[] } {
@@ -1147,7 +1308,6 @@ export class OrgDB extends DurableObject<Env> {
         this.crear(
           'items',
           {
-            negocio_id: l.negocio_id ?? args.negocio_id,
             cliente_id: l.cliente_id ?? args.cliente_id,
             proyecto_id: null,
             nombre: l.nombre,
@@ -1187,7 +1347,6 @@ export class OrgDB extends DurableObject<Env> {
       const p = this.crear(
         'proyectos',
         {
-          negocio_id: items[0].negocio_id,
           cliente_id: items[0].cliente_id,
           nombre: args.nombre_proyecto || `Proyecto ${String(items[0].nombre).slice(0, 40)}`,
           estado: 'activo',
@@ -1277,7 +1436,6 @@ export class OrgDB extends DurableObject<Env> {
     const datosCot = (cot.datos ?? {}) as Record<string, any>;
     const partida = String(args.partida ?? datosCot.nombre ?? cot.folio ?? '').trim().slice(0, 80);
 
-    const negocio_id = String(proyecto.negocio_id ?? cot.negocio_id);
     const contexto = { app: args.app, usuario_id: args.usuario_id };
     let creados = 0;
     let productosNuevos = 0;
@@ -1310,14 +1468,14 @@ export class OrgDB extends DurableObject<Env> {
         }
         let producto_id: string | null = l.producto_id ? String(l.producto_id) : null;
         if (!producto_id && n > 1) {
-          /* El código del producto es único dentro del negocio. Si ya lo usa
+          /* El código del producto es único en la empresa. Si ya lo usa
            * otro, el producto nuevo nace sin código en vez de tronar la
            * aprobación: el renglón sigue diciendo su código en cada pieza. */
           const ocupado = codigo
-            ? this.sql.exec(`SELECT 1 FROM productos WHERE negocio_id = ? AND codigo = ?`, negocio_id, codigo).toArray().length > 0
+            ? this.sql.exec(`SELECT 1 FROM productos WHERE codigo = ?`, codigo).toArray().length > 0
             : false;
           const p = this.crear('productos', {
-            negocio_id, codigo: ocupado ? '' : codigo, nombre: String(l.nombre).trim(),
+            codigo: ocupado ? '' : codigo, nombre: String(l.nombre).trim(),
             descripcion: l.descripcion ?? null, tipo: l.tipo || 'mueble', precio: Number(l.precio), moneda: 'MXN',
           }, contexto);
           producto_id = String(p.id);
@@ -1325,7 +1483,7 @@ export class OrgDB extends DurableObject<Env> {
         }
         for (let k = 0; k < n; k++) {
           this.crear('items', {
-            negocio_id, cliente_id: proyecto.cliente_id, proyecto_id: args.proyecto_id,
+            cliente_id: proyecto.cliente_id, proyecto_id: args.proyecto_id,
             nombre: String(l.nombre).trim(), descripcion: l.descripcion ?? null, tipo: l.tipo || 'mueble',
             clave: codigo || null, monto: Number(l.precio), cantidad: 1, moneda: 'MXN', estado: 'vendido',
             producto_id, partida, origen: { app: 'cotizador101', cotizacion_id: args.cotizacion_id, linea: i + 1 },
@@ -1374,7 +1532,7 @@ export class OrgDB extends DurableObject<Env> {
     const contexto = { app: 'quell101', usuario_id: d.usuario_id };
 
     const item = this.crear('items', {
-      negocio_id: proyecto.negocio_id, proyecto_id: proyecto.id, cliente_id: proyecto.cliente_id,
+      proyecto_id: proyecto.id, cliente_id: proyecto.cliente_id,
       clave: d.code || '', nombre: String(d.name).trim() || 'Requerimiento', tipo: 'requerimiento',
       monto: 0, cantidad: 1, moneda: 'MXN', estado: 'cotizado',
       descripcion: 'Requerimiento levantado en la obra. Falta cotizarlo.',
@@ -1409,7 +1567,7 @@ export class OrgDB extends DurableObject<Env> {
    *  abre otro. */
   private borradorDeRequerimientos(proyecto: Fila, contexto: { app: string; usuario_id: string }): Fila {
     const abiertas = this.sql
-      .exec(`SELECT id, datos FROM cotizaciones WHERE estado = 'borrador' AND negocio_id = ? ORDER BY creado_at`, String(proyecto.negocio_id))
+      .exec(`SELECT id, datos FROM cotizaciones WHERE estado = 'borrador' ORDER BY creado_at`)
       .toArray() as Fila[];
     for (const c of abiertas) {
       let datos: Record<string, any> = {};
@@ -1417,7 +1575,7 @@ export class OrgDB extends DurableObject<Env> {
       if (datos.de_requerimientos === true && String(datos.proyecto_id ?? '') === String(proyecto.id)) return this.obtener('cotizaciones', String(c.id))!;
     }
     return this.crear('cotizaciones', {
-      negocio_id: proyecto.negocio_id, cliente_id: proyecto.cliente_id, total: 0, moneda: 'MXN', estado: 'borrador',
+      cliente_id: proyecto.cliente_id, total: 0, moneda: 'MXN', estado: 'borrador',
       datos: {
         nombre: 'Requerimientos', proyecto_id: proyecto.id, de_requerimientos: true,
         versiones: [{ fecha: ahora(), muebles: [], totalFinal: 0 }],
@@ -1429,10 +1587,9 @@ export class OrgDB extends DurableObject<Env> {
    *  descartó, o se aprobó por otro camino y ya no está pendiente del
    *  cliente. Lo aprobado en quote101 ya no es borrador y no se toca. */
   private quitarDelBorrador(item_id: string): number {
-    const item = this.sql.exec(`SELECT negocio_id FROM items WHERE id = ?`, item_id).toArray()[0] as Fila | undefined;
-    if (!item) return 0;
+    if (!this.sql.exec(`SELECT 1 AS x FROM items WHERE id = ?`, item_id).toArray().length) return 0;
     const abiertas = this.sql
-      .exec(`SELECT id, datos FROM cotizaciones WHERE estado = 'borrador' AND negocio_id = ?`, String(item.negocio_id))
+      .exec(`SELECT id, datos FROM cotizaciones WHERE estado = 'borrador'`)
       .toArray() as Fila[];
     let quitados = 0;
     for (const c of abiertas) {
@@ -1536,9 +1693,8 @@ export class OrgDB extends DurableObject<Env> {
     };
 
     const trabajo = (): void => {
-      // El orden de TABLAS ya respeta las dependencias: negocios antes que
-      // cuentas, clientes antes que proyectos, proyectos antes que ítems,
-      // ítems antes que movimientos.
+      // El orden de TABLAS ya respeta las dependencias: clientes antes que
+      // proyectos, proyectos antes que ítems, ítems antes que movimientos.
       for (const tabla of TABLAS) {
         const filas = args.filas[tabla];
         if (!filas?.length) continue;
@@ -1728,43 +1884,19 @@ export class OrgDB extends DurableObject<Env> {
   conteosRoster(): Record<string, number> { return this.contarTablas(TABLAS_ROSTER); }
 
   /**
-   * Lo de quote101 contado POR NEGOCIO, y con los negocios que ya no existen.
+   * Lo de quote101 de la empresa, en cuatro cifras. Sólo lee.
    *
-   * Nació el 23-sep-2026: Mike, «desapareció mi info de quote», y con el
-   * selector de negocio puesto seguía vacío en los tres. La razón por la que
-   * eso puede pasar sin que se haya borrado nada: `clientes`, `proyectos` y
-   * `cotizaciones` guardan su `negocio_id` SIN llave foránea (0001). Borrar
-   * un negocio que no tiene cuentas se permite, y lo que colgaba de él se
-   * queda en la base apuntando a un negocio que ya no está — invisible desde
-   * todas las apps, porque todas filtran por un negocio que sí existe.
-   *
-   * Por eso aquí se agrupa por el `negocio_id` que trae cada renglón, NO por
-   * la lista de negocios: un grupo sin negocio es justo lo que se busca.
-   * Sólo lee.
+   * Nació el 23-sep-2026 como una lista POR NEGOCIO con huérfanos: Mike,
+   * «desapareció mi info de quote», y lo que había pasado era que un negocio
+   * borrado dejaba clientes y cotizaciones apuntando a nada. Desde 0.63.0 no
+   * hay negocios ni `negocio_id`, así que no hay de qué quedar huérfano: lo
+   * que hay en estas tablas es de la empresa y se cuenta entero.
    */
-  conteosQuote(): ConteoQuote[] {
-    const negocios = new Map(
-      (this.sql.exec(`SELECT id, nombre FROM negocios`).toArray() as Array<{ id: string; nombre: string }>).map((n) => [n.id, n.nombre]),
-    );
-    const grupos = new Map<string, ConteoQuote>();
-    const grupo = (id: string | null): ConteoQuote => {
-      const k = id ?? '';
-      let g = grupos.get(k);
-      if (!g) {
-        g = { negocio_id: id, nombre: id ? negocios.get(id) ?? null : null, existe: !!id && negocios.has(id), clientes: 0, proyectos: 0, cotizaciones: 0, ultima_cotizacion: null };
-        grupos.set(k, g);
-      }
-      return g;
-    };
-    for (const id of negocios.keys()) grupo(id);
-    for (const t of ['clientes', 'proyectos', 'cotizaciones'] as const) {
-      const filas = this.sql.exec(`SELECT negocio_id, COUNT(*) AS n FROM ${t} GROUP BY negocio_id`).toArray() as Array<{ negocio_id: string | null; n: number }>;
-      for (const f of filas) grupo(f.negocio_id || null)[t] = f.n;
-    }
-    const ultimas = this.sql.exec(`SELECT negocio_id, MAX(COALESCE(actualizado_at, creado_at)) AS u FROM cotizaciones GROUP BY negocio_id`).toArray() as Array<{ negocio_id: string | null; u: string | null }>;
-    for (const f of ultimas) grupo(f.negocio_id || null).ultima_cotizacion = f.u;
-    // Los huérfanos primero: son lo que se vino a buscar.
-    return [...grupos.values()].sort((a, b) => Number(a.existe) - Number(b.existe) || b.cotizaciones - a.cotizaciones);
+  conteosQuote(): ConteoQuote {
+    const n = (t: 'clientes' | 'proyectos' | 'cotizaciones'): number =>
+      Number((this.sql.exec(`SELECT COUNT(*) AS n FROM ${t}`).one() as { n: number }).n);
+    const ultima = this.sql.exec(`SELECT MAX(COALESCE(actualizado_at, creado_at)) AS u FROM cotizaciones`).one() as { u: string | null };
+    return { clientes: n('clientes'), proyectos: n('proyectos'), cotizaciones: n('cotizaciones'), ultima_cotizacion: ultima?.u ?? null };
   }
 
   private contarTablas(tablas: readonly string[]): Record<string, number> {
@@ -1935,7 +2067,7 @@ export class OrgDB extends DurableObject<Env> {
   }
 
   crearOrden(args: {
-    negocio_id: string; solicitante_usuario_id: string; solicitante_id?: string | null;
+    solicitante_usuario_id: string; solicitante_id?: string | null;
     solicitante_correo?: string | null; solicitante_nombre?: string | null;
     proveedor_id?: string | null; proveedor_nombre?: string | null;
     proyecto_id?: string | null; partida_id?: string | null;
@@ -1960,11 +2092,11 @@ export class OrgDB extends DurableObject<Env> {
     const folio = `${serie}-${String(this.apartarNumero(serie)).padStart(6, '0')}`;
     const t = ahora();
     this.sql.exec(
-      `INSERT INTO ordenes (id, negocio_id, folio, tipo, solicitante_usuario_id, solicitante_id, solicitante_correo,
+      `INSERT INTO ordenes (id, folio, tipo, solicitante_usuario_id, solicitante_id, solicitante_correo,
         solicitante_nombre, proveedor_id, proveedor_nombre, proyecto_id, partida_id, concepto, monto, moneda,
         con_factura, subtotal, iva, tasa_iva, fecha_maxima_pago, urgente, estado, creado_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'en_buzon',?)`,
-      id, args.negocio_id, folio, tipo, args.solicitante_usuario_id, args.solicitante_id ?? null,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'en_buzon',?)`,
+      id, folio, tipo, args.solicitante_usuario_id, args.solicitante_id ?? null,
       args.solicitante_correo ?? null, args.solicitante_nombre ?? null,
       args.proveedor_id ?? null, args.proveedor_nombre ?? null,
       args.proyecto_id ?? null, args.partida_id ?? null,
@@ -1985,30 +2117,24 @@ export class OrgDB extends DurableObject<Env> {
 
   /** Lo que ve quien pidió: SÓLO lo suyo. El filtro va aquí y no en la
    *  pantalla; una pantalla que filtra es una pantalla que se puede saltar. */
-  misOrdenes(usuario_id: string, negocio_id?: string | null): Fila[] {
-    // El negocio se filtra aquí y no en la pantalla: dash101 trabaja con un
-    // negocio activo a la vez, y una lista que mezcle dos negocios enseña
-    // números de otro lado sin decirlo.
-    const filas = negocio_id
-      ? this.sql.exec(`SELECT * FROM ordenes WHERE solicitante_usuario_id = ? AND negocio_id = ? ORDER BY creado_at DESC`, usuario_id, negocio_id).toArray() as Fila[]
-      : this.sql.exec(`SELECT * FROM ordenes WHERE solicitante_usuario_id = ? ORDER BY creado_at DESC`, usuario_id).toArray() as Fila[];
+  misOrdenes(usuario_id: string): Fila[] {
+    const filas = this.sql.exec(`SELECT * FROM ordenes WHERE solicitante_usuario_id = ? ORDER BY creado_at DESC`, usuario_id).toArray() as Fila[];
     return this.leerInternas('ordenes', filas);
   }
 
   /** El buzón del contador: lo que vence primero, arriba. Las que ya vencieron
    *  van antes que todo, que es como se lee una bandeja de pagos. */
-  buzon(hoy?: string, negocio_id?: string | null, tipo?: TipoOrden | null): { filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number } {
+  buzon(hoy?: string, tipo?: TipoOrden | null): { filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number } {
     const dia = (hoy ?? ahora()).slice(0, 10);
-    // Con `negocio_id`, el buzón y sus TOTALES son de ese negocio. Sin él,
-    // de toda la empresa. Los totales tienen que salir de la misma consulta
-    // que la lista o el número de arriba contradice a los renglones de
-    // abajo, que ya fue un defecto real el 7-sep.
+    // El buzón y sus TOTALES son de toda la empresa. Los totales tienen que
+    // salir de la misma consulta que la lista o el número de arriba
+    // contradice a los renglones de abajo, que ya fue un defecto real el
+    // 7-sep.
     //
     // Con `tipo` (0.47.0), sólo las compras o sólo los reembolsos: son las
     // dos pestañas del buzón, y cada una suma lo suyo. Sin él, todo junto.
     const condiciones = [`estado = 'en_buzon'`];
     const valores: SqlStorageValue[] = [];
-    if (negocio_id) { condiciones.push('negocio_id = ?'); valores.push(negocio_id); }
     if (tipo) { condiciones.push('tipo = ?'); valores.push(tipo); }
     const filas = this.leerInternas('ordenes', this.sql.exec(
       `SELECT * FROM ordenes WHERE ${condiciones.join(' AND ')}
@@ -2028,8 +2154,8 @@ export class OrgDB extends DurableObject<Env> {
   /** El historial de lo pagado (0.59.0). Mike, 1-oct: «quiero ver en la
    *  pantalla de compras un historial completo de las órdenes de compra ya
    *  pagadas». La más reciente arriba, por la fecha en que se pagó. Con
-   *  `negocio_id`, las de ese negocio; con `tipo`, sólo compras o sólo
-   *  reembolsos. `total` es la suma de lo que se lista. Lo lee quien paga,
+   *  `tipo`, sólo compras o sólo reembolsos. `total` es la suma de lo que
+   *  se lista. Lo lee quien paga,
    *  como el buzón: es la otra mitad de la misma bandeja. */
   /** Los expedientes de roster101, resumidos para escoger a uno como
    *  accionista (0.60.0). Mike, 1-oct: «en el menú de accionistas, se debe
@@ -2049,10 +2175,9 @@ export class OrgDB extends DurableObject<Env> {
     });
   }
 
-  ordenesPagadas(negocio_id?: string | null, tipo?: TipoOrden | null, limite = 500): { filas: Fila[]; total: number } {
+  ordenesPagadas(tipo?: TipoOrden | null, limite = 500): { filas: Fila[]; total: number } {
     const condiciones = [`estado = 'pagada'`];
     const valores: SqlStorageValue[] = [];
-    if (negocio_id) { condiciones.push('negocio_id = ?'); valores.push(negocio_id); }
     if (tipo) { condiciones.push('tipo = ?'); valores.push(tipo); }
     const filas = this.leerInternas('ordenes', this.sql.exec(
       `SELECT * FROM ordenes WHERE ${condiciones.join(' AND ')}
@@ -2067,11 +2192,10 @@ export class OrgDB extends DurableObject<Env> {
    *  otros totales», y que resta esa suma del capital de la empresa. Lo lee
    *  quien ve dinero, no sólo quien paga: es una cifra del tablero, no el
    *  buzón —los renglones no salen por aquí. */
-  pendientesDeOrdenes(negocio_id?: string | null): { compras: { total: number; cuantas: number }; reembolsos: { total: number; cuantas: number } } {
-    const filas = (negocio_id
-      ? this.sql.exec(`SELECT tipo, COUNT(*) AS n, COALESCE(SUM(monto), 0) AS suma FROM ordenes WHERE estado = 'en_buzon' AND negocio_id = ? GROUP BY tipo`, negocio_id)
-      : this.sql.exec(`SELECT tipo, COUNT(*) AS n, COALESCE(SUM(monto), 0) AS suma FROM ordenes WHERE estado = 'en_buzon' GROUP BY tipo`)
-    ).toArray() as Array<{ tipo: string; n: number; suma: number }>;
+  pendientesDeOrdenes(): { compras: { total: number; cuantas: number }; reembolsos: { total: number; cuantas: number } } {
+    const filas = this.sql
+      .exec(`SELECT tipo, COUNT(*) AS n, COALESCE(SUM(monto), 0) AS suma FROM ordenes WHERE estado = 'en_buzon' GROUP BY tipo`)
+      .toArray() as Array<{ tipo: string; n: number; suma: number }>;
     const de = (t: TipoOrden) => {
       const f = filas.find((x) => x.tipo === t);
       return { total: Number(f?.suma ?? 0), cuantas: Number(f?.n ?? 0) };
@@ -2158,11 +2282,11 @@ export class OrgDB extends DurableObject<Env> {
       }
 
       this.sql.exec(
-        `INSERT INTO movimientos (id, negocio_id, tipo, monto, fecha, cuenta_id, proyecto_id, partida_id,
+        `INSERT INTO movimientos (id, tipo, monto, fecha, cuenta_id, proyecto_id, partida_id,
           contraparte_tipo, contraparte_id, contraparte_nombre, descripcion, categoria, creado_por, creado_at,
           facturado, requiere_factura, subtotal, iva, tasa_iva)
-         VALUES (?,?,'egreso',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        mov_id, orden.negocio_id, Number(orden.monto), fecha, args.cuenta_id, orden.proyecto_id ?? null, partida_id,
+         VALUES (?,'egreso',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        mov_id, Number(orden.monto), fecha, args.cuenta_id, orden.proyecto_id ?? null, partida_id,
         contraparte.tipo, contraparte.id, contraparte.nombre,
         `${orden.folio} · ${orden.concepto}`, reembolso ? 'reembolso' : 'orden_de_compra', args.quien_usuario_id, t,
         /* `facturado` arranca en 0 aunque la orden diga «con factura»: la
@@ -2268,7 +2392,7 @@ export class OrgDB extends DurableObject<Env> {
    */
 
   crearCfdi(args: {
-    negocio_id: string; uuid: string; rfc?: string | null; razon_social?: string | null;
+    uuid: string; rfc?: string | null; razon_social?: string | null;
     tipo: 'ingreso' | 'egreso'; subtotal?: number; iva?: number; retenciones?: number; total?: number;
     fecha: string; forma_pago?: string | null; creado_por: string;
   }): Fila | { error: string; detalle?: unknown } {
@@ -2287,10 +2411,10 @@ export class OrgDB extends DurableObject<Env> {
     const total = args.total !== undefined ? n(args.total) : subtotal + iva - retenciones;
     const id = ulid();
     this.sql.exec(
-      `INSERT INTO cfdi (id, negocio_id, uuid, rfc, razon_social, tipo, subtotal, iva, retenciones, total,
+      `INSERT INTO cfdi (id, uuid, rfc, razon_social, tipo, subtotal, iva, retenciones, total,
         fecha, forma_pago, estado, creado_por, creado_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'vigente',?,?)`,
-      id, args.negocio_id, uuid, args.rfc ?? null, args.razon_social ?? null, args.tipo,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,'vigente',?,?)`,
+      id, uuid, args.rfc ?? null, args.razon_social ?? null, args.tipo,
       subtotal, iva, retenciones, total, String(args.fecha).slice(0, 10), args.forma_pago ?? null,
       args.creado_por, ahora(),
     );
@@ -2401,23 +2525,20 @@ export class OrgDB extends DurableObject<Env> {
    *  acreditas tú. Es una simplificación —aquí no se separa retención de IVA
    *  de retención de ISR— y está dicha a propósito, porque el número vale lo
    *  que valga lo capturado. */
-  ivaDelMes(desde: string, hasta: string, negocio_id?: string | null): {
+  ivaDelMes(desde: string, hasta: string): {
     desde: string; hasta: string;
     trasladado: number; acreditable: number; retenciones: number; a_enterar: number;
     facturas: { emitidas: number; recibidas: number; canceladas: number };
   } {
     const d = String(desde).slice(0, 10), h = String(hasta).slice(0, 10);
-    // El RFC vive en el negocio: un IVA que sume dos negocios no es el IVA
-    // de ninguno de los dos, y es el número con el que se entera al SAT.
-    const deNegocio = negocio_id ? ' AND negocio_id = ?' : '';
-    const conNeg = (...args: SqlStorageValue[]) => (negocio_id ? [...args, negocio_id] : args);
+    // De la empresa entera: el RFC es uno (0.63.0).
     const suma = (tipo: string) => this.sql
       .exec(`SELECT COALESCE(SUM(iva),0) AS iva, COALESCE(SUM(retenciones),0) AS ret, COUNT(*) AS n
-             FROM cfdi WHERE estado = 'vigente' AND tipo = ? AND fecha >= ? AND fecha <= ?${deNegocio}`, ...conNeg(tipo, d, h))
+             FROM cfdi WHERE estado = 'vigente' AND tipo = ? AND fecha >= ? AND fecha <= ?`, tipo, d, h)
       .one() as { iva: number; ret: number; n: number };
     const ing = suma('ingreso'), egr = suma('egreso');
     const canceladas = (this.sql
-      .exec(`SELECT COUNT(*) AS n FROM cfdi WHERE estado = 'cancelada' AND fecha >= ? AND fecha <= ?${deNegocio}`, ...conNeg(d, h))
+      .exec(`SELECT COUNT(*) AS n FROM cfdi WHERE estado = 'cancelada' AND fecha >= ? AND fecha <= ?`, d, h)
       .one() as { n: number }).n;
     const acreditable = egr.iva - egr.ret;
     return {
@@ -2429,19 +2550,17 @@ export class OrgDB extends DurableObject<Env> {
   }
 
   /** Lo facturado contra lo real. La diferencia es lo que anda fuera. */
-  facturadoVsReal(desde: string, hasta: string, negocio_id?: string | null): {
+  facturadoVsReal(desde: string, hasta: string): {
     desde: string; hasta: string;
     ingresos: { total: number; facturado: number; fuera: number };
     egresos: { total: number; facturado: number; fuera: number };
   } {
     const d = String(desde).slice(0, 10), h = String(hasta).slice(0, 10);
-    const deNegocio = negocio_id ? ' AND negocio_id = ?' : '';
     const lado = (tipo: string) => {
-      const args: SqlStorageValue[] = negocio_id ? [tipo, d, h, negocio_id] : [tipo, d, h];
       const r = this.sql
         .exec(`SELECT COALESCE(SUM(monto),0) AS total,
                       COALESCE(SUM(CASE WHEN facturado = 1 THEN monto ELSE 0 END),0) AS fact
-               FROM movimientos WHERE tipo = ? AND fecha >= ? AND fecha <= ?${deNegocio}`, ...args)
+               FROM movimientos WHERE tipo = ? AND fecha >= ? AND fecha <= ?`, tipo, d, h)
         .one() as { total: number; fact: number };
       return { total: r.total, facturado: r.fact, fuera: r.total - r.fact };
     };
@@ -2461,10 +2580,9 @@ export class OrgDB extends DurableObject<Env> {
    *  0012) y la orden es nada más un dato de adorno cuando existe: por eso el
    *  JOIN es LEFT. La 0012 le puso la espera a los pagos de órdenes que hoy
    *  están pendientes, así que la lista de egresos no cambia de contenido. */
-  pendientesDeFactura(negocio_id?: string | null, tipo?: string | null): Fila[] {
+  pendientesDeFactura(tipo?: string | null): Fila[] {
     const donde: string[] = ['m.requiere_factura = 1', 'm.facturado = 0'];
     const args: SqlStorageValue[] = [];
-    if (negocio_id) { donde.push('m.negocio_id = ?'); args.push(negocio_id); }
     if (tipo) { donde.push('m.tipo = ?'); args.push(tipo); }
     return this.sql.exec(
       `SELECT m.*, o.folio AS orden_folio, o.proveedor_nombre AS orden_proveedor
@@ -2477,14 +2595,13 @@ export class OrgDB extends DurableObject<Env> {
   }
 
   /** Las facturas de un rango, para la pantalla y para el reporte. */
-  listaCfdi(args: { desde?: string; hasta?: string; tipo?: string; estado?: string; negocio_id?: string | null }): Fila[] {
+  listaCfdi(args: { desde?: string; hasta?: string; tipo?: string; estado?: string }): Fila[] {
     const donde: string[] = [];
     const vals: SqlStorageValue[] = [];
     if (args.desde) { donde.push('fecha >= ?'); vals.push(String(args.desde).slice(0, 10)); }
     if (args.hasta) { donde.push('fecha <= ?'); vals.push(String(args.hasta).slice(0, 10)); }
     if (args.tipo) { donde.push('tipo = ?'); vals.push(args.tipo); }
     if (args.estado) { donde.push('estado = ?'); vals.push(args.estado); }
-    if (args.negocio_id) { donde.push('negocio_id = ?'); vals.push(args.negocio_id); }
     const filtro = donde.length ? ` WHERE ${donde.join(' AND ')}` : '';
     return this.leerInternas('cfdi', this.sql.exec(`SELECT * FROM cfdi${filtro} ORDER BY fecha DESC, creado_at DESC`, ...vals).toArray() as Fila[]);
   }
@@ -2507,15 +2624,10 @@ export class OrgDB extends DurableObject<Env> {
    *  aquí: mismo nombre normalizado, o uno contenido en el otro («Muebles
    *  Luna» y «Muebles Luna SA de CV»). Menos de tres letras no compara: con
    *  dos, media lista se parece a todo. */
-  clientesParecidos(nombre: string, negocio_id?: string | null): Fila[] {
+  clientesParecidos(nombre: string): Fila[] {
     const n = normalizar(nombre);
     if (n.length < 3) return [];
-    const filas = this.sql
-      .exec(
-        `SELECT * FROM clientes${negocio_id ? ' WHERE negocio_id = ?' : ''} ORDER BY nombre_norm`,
-        ...(negocio_id ? [negocio_id] : []),
-      )
-      .toArray() as Fila[];
+    const filas = this.sql.exec(`SELECT * FROM clientes ORDER BY nombre_norm`).toArray() as Fila[];
     return filas.filter((c) => {
       const o = normalizar(c.nombre_norm || c.nombre);
       return o === n || (o.length >= 3 && (o.includes(n) || n.includes(o)));
@@ -2534,59 +2646,6 @@ export class OrgDB extends DurableObject<Env> {
    *  al portal— se lo lleva del que se va. Fusionar no puede perder datos: el
    *  que se va casi siempre es el que se capturó en la otra app, y a veces es
    *  el único que trae el correo. */
-  /* ─────────────── un solo negocio (0.50.0) ───────────────
-   *
-   * Mike, 29-sep: «borres de dash (y de todas las plataformas) la opción de
-   * agregar diferentes negocios. Ya no vamos a tener esa funcionalidad (los
-   * otros negocios son como TUYS y vibehome). Todo es para un negocio nada
-   * más.» Y escogió, con botones, FUSIONAR lo que ya existe en uno.
-   *
-   * Aquí está la fusión. La tabla `negocios` se queda —`negocio_id` cuelga de
-   * doce tablas y quitarlo sería reescribir la base para ganar una columna—;
-   * lo que cambia es que hay UNO. Las pantallas ya no dejan crear ni cambiar.
-   *
-   * Las tablas se descubren leyendo el esquema, no de una lista escrita a
-   * mano: una tabla nueva con `negocio_id` entra sola, y una lista a mano es
-   * justo la que se olvida de actualizar.
-   */
-  fusionarNegocios(queda_id: string, seco: boolean): ResultadoFusionNegocios | { error: string; detalle?: unknown } {
-    const queda = this.obtener('negocios', queda_id);
-    if (!queda) return { error: 'no_encontrado', detalle: { que: 'negocio', id: queda_id } };
-    const otros = this.sql.exec(`SELECT * FROM negocios WHERE id <> ? ORDER BY creado_at`, queda_id).toArray() as Fila[];
-    if (!otros.length) return { ok: true, queda, se_fueron: [], movidos: {}, productos_fusionados: 0, seco };
-
-    const tablas = (this.sql
-      .exec(`SELECT name FROM sqlite_master WHERE type = 'table' AND name <> 'negocios' AND name NOT LIKE 'sqlite_%' AND sql LIKE '%negocio_id%' ORDER BY name`)
-      .toArray() as Fila[]).map((t) => String(t.name));
-    const movidos: Record<string, number> = {};
-    for (const t of tablas) {
-      const n = Number((this.sql.exec(`SELECT COUNT(*) AS n FROM "${t}" WHERE negocio_id <> ?`, queda_id).one() as Fila).n);
-      if (n) movidos[t] = n;
-    }
-    /* El código del producto es único por negocio: dos negocios pueden tener
-     * cada uno su «PT-STD». Al juntarlos gana el del negocio que se queda y
-     * las piezas del otro pasan a apuntarle; el repetido se borra. */
-    const repetidos = this.sql
-      .exec(
-        `SELECT o.id AS se_va, q.id AS queda FROM productos o
-           JOIN productos q ON q.negocio_id = ? AND q.codigo = o.codigo AND o.codigo <> ''
-          WHERE o.negocio_id <> ?`,
-        queda_id, queda_id,
-      )
-      .toArray() as Fila[];
-    if (seco) return { ok: true, queda, se_fueron: otros, movidos, productos_fusionados: repetidos.length, seco: true };
-
-    this.ctx.storage.transactionSync(() => {
-      for (const r of repetidos) {
-        this.sql.exec(`UPDATE items SET producto_id = ? WHERE producto_id = ?`, String(r.queda), String(r.se_va));
-        this.sql.exec(`DELETE FROM productos WHERE id = ?`, String(r.se_va));
-      }
-      for (const t of tablas) this.sql.exec(`UPDATE "${t}" SET negocio_id = ? WHERE negocio_id <> ?`, queda_id, queda_id);
-      this.sql.exec(`DELETE FROM negocios WHERE id <> ?`, queda_id);
-    });
-    return { ok: true, queda: this.obtener('negocios', queda_id)!, se_fueron: otros, movidos, productos_fusionados: repetidos.length, seco: false };
-  }
-
   /* ─────────────── borrar un cliente o un proyecto con todo lo suyo (0.51.0) ───────────────
    *
    * Mike, 29-sep: «no puedo borrar clientes de quote101, me aparece este
@@ -2752,7 +2811,7 @@ export class OrgDB extends DurableObject<Env> {
    * Misma forma que fusionar clientes: `queda` se queda con TODO lo del que
    * se va —ítems (con su partida), partidas, dinero, órdenes, cotizaciones,
    * archivos— y el que se va desaparece. Las tablas con `proyecto_id` se
-   * descubren del esquema, como al fusionar negocios, para que una tabla
+   * descubren del esquema para que una tabla
    * nueva no se quede atrás sin que nadie lo note. Lo que no es una columna:
    *   · las cotizaciones de quote101 apuntan al proyecto dentro de `datos`
    *     (`datos.proyecto_id`): se cambia ahí;
@@ -2824,7 +2883,7 @@ export class OrgDB extends DurableObject<Env> {
       .exec(
         `SELECT o.id, o.name AS nombre, o.client AS cliente, o.status AS estado,
                 o.created_at AS creado_at, o.proyecto_id,
-                p.nombre AS proyecto_nombre, p.negocio_id AS proyecto_negocio_id,
+                p.nombre AS proyecto_nombre,
                 (SELECT COUNT(*) FROM quell_plans pl WHERE pl.project_id = o.id) AS planos,
                 (SELECT COUNT(*) FROM quell_elements e WHERE e.project_id = o.id) AS ubicados
          FROM quell_projects o LEFT JOIN proyectos p ON p.id = o.proyecto_id${filtro}
@@ -3227,7 +3286,7 @@ export class OrgDB extends DurableObject<Env> {
       const item = this.crear(
         'items',
         {
-          negocio_id: proyecto.negocio_id, proyecto_id, cliente_id: proyecto.cliente_id,
+          proyecto_id, cliente_id: proyecto.cliente_id,
           clave: pz.code ?? '', nombre: String(pide.nombre ?? '').trim() || pz.name || 'Pieza del plano', tipo: pz.type ?? '',
           monto, cantidad: 1, estado: monto > 0 ? 'vendido' : 'cotizado',
           descripcion: String(pide.descripcion ?? '').trim() ||
@@ -3470,9 +3529,6 @@ export class OrgDB extends DurableObject<Env> {
     if (args.producto_id) {
       const producto = this.obtener('productos', args.producto_id);
       if (!producto) return { error: 'no_encontrado', detalle: { que: 'producto', id: args.producto_id } };
-      if (String(producto.negocio_id) !== String(proyecto.negocio_id)) {
-        return { error: 'sin_permiso', detalle: { motivo: 'ese producto es de otra empresa' } };
-      }
       if (String(producto.moneda ?? 'MXN') !== String(piezas[0].moneda ?? 'MXN')) {
         return { error: 'moneda_distinta', detalle: { moneda: piezas[0].moneda, esperado: producto.moneda } };
       }
@@ -3503,9 +3559,7 @@ export class OrgDB extends DurableObject<Env> {
      * nace sin código, para que quien arme el catálogo le ponga el suyo. */
     const claves = [...new Set(piezas.map((it) => String(it.clave ?? '').trim()))];
     const codigo = String(args.codigo ?? (claves.length === 1 ? claves[0] : '')).trim();
-    if (codigo && this.sql.exec(
-      `SELECT id FROM productos WHERE negocio_id = ? AND codigo = ?`, String(proyecto.negocio_id), codigo,
-    ).toArray().length) {
+    if (codigo && this.sql.exec(`SELECT id FROM productos WHERE codigo = ?`, codigo).toArray().length) {
       return { error: 'codigo_en_uso', detalle: { codigo, motivo: 'ya hay otro producto con ese código de catálogo en esta empresa' } };
     }
 
@@ -3516,9 +3570,9 @@ export class OrgDB extends DurableObject<Env> {
     const nombre = String(args.nombre ?? '').trim() || this.nombreDeFamilia(piezas[0].nombre);
     const descripcion = piezas.map((it) => String(it.descripcion ?? '').trim()).find(Boolean) ?? null;
     this.sql.exec(
-      `INSERT INTO productos (id, negocio_id, codigo, nombre, descripcion, tipo, precio, moneda, creado_at, creado_por)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      id, String(proyecto.negocio_id), codigo, nombre, descripcion,
+      `INSERT INTO productos (id, codigo, nombre, descripcion, tipo, precio, moneda, creado_at, creado_por)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+      id, codigo, nombre, descripcion,
       String(piezas[0].tipo ?? 'mueble'), precio, String(piezas[0].moneda ?? 'MXN'), ahora(), contexto.usuario_id,
     );
 
@@ -3656,9 +3710,6 @@ export class OrgDB extends DurableObject<Env> {
     if (args.producto_id) {
       const producto = this.obtener('productos', args.producto_id);
       if (!producto) return { error: 'no_encontrado', detalle: { que: 'producto', id: args.producto_id } };
-      if (String(producto.negocio_id) !== String(item.negocio_id)) {
-        return { error: 'sin_permiso', detalle: { motivo: 'ese producto es de otra empresa' } };
-      }
       if (String(producto.moneda ?? 'MXN') !== String(item.moneda ?? 'MXN')) {
         return { error: 'moneda_distinta', detalle: { moneda: item.moneda, esperado: producto.moneda } };
       }
@@ -3672,9 +3723,6 @@ export class OrgDB extends DurableObject<Env> {
       }
       const otro = this.obtener('items', String(args.desde_item));
       if (!otro) return { error: 'no_encontrado', detalle: { que: 'item', id: args.desde_item } };
-      if (String(otro.negocio_id) !== String(item.negocio_id)) {
-        return { error: 'sin_permiso', detalle: { motivo: 'ese ítem es de otra empresa' } };
-      }
       if (String(otro.moneda ?? 'MXN') !== String(item.moneda ?? 'MXN')) {
         return { error: 'moneda_distinta', detalle: { moneda: item.moneda, esperado: otro.moneda } };
       }
@@ -3694,13 +3742,13 @@ export class OrgDB extends DurableObject<Env> {
        * vale más un producto sin catalogar que un 409 en la cara de alguien
        * que sólo quería decir «éstas dos son iguales». */
       const chocado = clave
-        ? this.sql.exec(`SELECT id FROM productos WHERE negocio_id = ? AND codigo = ?`, String(item.negocio_id), clave).toArray().length > 0
+        ? this.sql.exec(`SELECT id FROM productos WHERE codigo = ?`, clave).toArray().length > 0
         : false;
       const id = ulid();
       this.sql.exec(
-        `INSERT INTO productos (id, negocio_id, codigo, nombre, descripcion, tipo, precio, moneda, creado_at, creado_por)
-         VALUES (?,?,?,?,?,?,?,?,?,?)`,
-        id, String(item.negocio_id), chocado ? '' : clave,
+        `INSERT INTO productos (id, codigo, nombre, descripcion, tipo, precio, moneda, creado_at, creado_por)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
+        id, chocado ? '' : clave,
         this.nombreDeFamilia(otro.nombre), (otro.descripcion as string | null) ?? null,
         String(otro.tipo ?? 'mueble'), Math.round(Number(otro.monto ?? 0) / cantOtro),
         String(otro.moneda ?? 'MXN'), ahora(), contexto.usuario_id,
@@ -3819,12 +3867,12 @@ export class OrgDB extends DurableObject<Env> {
       const id = String(a.id);
       const clave = String(a.clave ?? '').trim() || null;
       this.sql.exec(
-        `INSERT INTO items (id, negocio_id, proyecto_id, cliente_id, clave, nombre, descripcion, tipo,
+        `INSERT INTO items (id, proyecto_id, cliente_id, clave, nombre, descripcion, tipo,
                             monto, cantidad, moneda, estado, etapa, etapa_at, etapa_por, fecha_entrega,
                             asignados, origen, refs, partida, orden, aprobado_at, cancelado_at,
                             cancelado_motivo, producto_id, creado_at, creado_por, actualizado_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,?,?)`,
-        id, item.negocio_id, item.proyecto_id, item.cliente_id, clave,
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,?,?)`,
+        id, item.proyecto_id, item.cliente_id, clave,
         String(a.nombre ?? item.nombre), item.descripcion ?? null, item.tipo,
         Math.round(Number(a.monto ?? 0)), cant(a.cantidad), item.moneda, item.estado,
         // La etapa del más atrasado, que es con la que se quedó la fusión.
@@ -4164,15 +4212,14 @@ export class OrgDB extends DurableObject<Env> {
    * pagó, sale de una cuenta de verdad, y queda un recibo.
    */
 
-  /** Los cortes de un negocio, con cuánta gente trae cada uno. */
-  rayas(negocio_id: string): Fila[] {
+  /** Los cortes de la empresa, con cuánta gente trae cada uno. */
+  rayas(): Fila[] {
     return this.sql
       .exec(
         `SELECT r.*, (SELECT COUNT(*) FROM raya_pagos p WHERE p.raya_id = r.id) AS personas,
                 c.nombre AS cuenta_nombre
          FROM rayas r LEFT JOIN cuentas c ON c.id = r.cuenta_id
-         WHERE r.negocio_id = ? ORDER BY r.periodo_fin DESC, r.creado_at DESC`,
-        negocio_id,
+         ORDER BY r.periodo_fin DESC, r.creado_at DESC`,
       )
       .toArray() as Fila[];
   }
@@ -4207,13 +4254,10 @@ export class OrgDB extends DurableObject<Env> {
   /** Abrir un corte con su gente. Nace en BORRADOR: nada sale de la cuenta
    *  hasta que alguien diga «pagar». */
   crearRaya(
-    datos: { negocio_id: string; periodo_inicio: string; periodo_fin: string; nota?: string;
+    datos: { periodo_inicio: string; periodo_fin: string; nota?: string;
              pagos?: Array<{ personal_id: string; concepto?: string; sueldo?: number; extras?: number; descuentos?: number; nota?: string }> },
     contexto: { usuario_id: string },
   ): { ok: true; raya: Fila; pagos: Fila[] } | { error: string; detalle?: unknown } {
-    if (!this.obtener('negocios', datos.negocio_id)) {
-      return { error: 'no_encontrado', detalle: { que: 'negocio', id: datos.negocio_id } };
-    }
     if (!datos.periodo_inicio || !datos.periodo_fin) return { error: 'datos_invalidos', detalle: { falta: 'periodo' } };
     if (datos.periodo_fin < datos.periodo_inicio) {
       return { error: 'datos_invalidos', detalle: { motivo: 'el periodo termina antes de empezar' } };
@@ -4221,9 +4265,9 @@ export class OrgDB extends DurableObject<Env> {
     const id = ulid();
     const t = ahora();
     this.sql.exec(
-      `INSERT INTO rayas (id, negocio_id, periodo_inicio, periodo_fin, estado, total, nota, creado_por, creado_at)
-       VALUES (?,?,?,?,'borrador',0,?,?,?)`,
-      id, datos.negocio_id, datos.periodo_inicio, datos.periodo_fin, datos.nota ?? '', contexto.usuario_id, t,
+      `INSERT INTO rayas (id, periodo_inicio, periodo_fin, estado, total, nota, creado_por, creado_at)
+       VALUES (?,?,?,'borrador',0,?,?,?)`,
+      id, datos.periodo_inicio, datos.periodo_fin, datos.nota ?? '', contexto.usuario_id, t,
     );
     const r = this.ponerPagos(id, datos.pagos ?? []);
     if ('error' in r) {
@@ -4321,9 +4365,6 @@ export class OrgDB extends DurableObject<Env> {
 
     const cuenta = this.obtener('cuentas', args.cuenta_id);
     if (!cuenta) return { error: 'no_encontrado', detalle: { que: 'cuenta', id: args.cuenta_id } };
-    if (cuenta.negocio_id !== raya.negocio_id) {
-      return { error: 'datos_invalidos', detalle: { motivo: 'esa cuenta es de otro negocio' } };
-    }
     const pagos = this.sql.exec(`SELECT * FROM raya_pagos WHERE raya_id = ?`, id).toArray() as Fila[];
     if (!pagos.length) return { error: 'datos_invalidos', detalle: { motivo: 'este corte no tiene a nadie' } };
 
@@ -4332,11 +4373,11 @@ export class OrgDB extends DurableObject<Env> {
     for (const p of pagos) {
       const mov_id = ulid();
       this.sql.exec(
-        `INSERT INTO movimientos (id, negocio_id, tipo, monto, fecha, cuenta_id,
+        `INSERT INTO movimientos (id, tipo, monto, fecha, cuenta_id,
            contraparte_tipo, contraparte_id, contraparte_nombre, descripcion, categoria, creado_por, creado_at,
            facturado, requiere_factura)
-         VALUES (?,?,'egreso',?,?,?,'personal',?,?,?,'raya',?,?,0,0)`,
-        mov_id, raya.negocio_id, Number(p.neto), fecha, args.cuenta_id,
+         VALUES (?,'egreso',?,?,?,'personal',?,?,?,'raya',?,?,0,0)`,
+        mov_id, Number(p.neto), fecha, args.cuenta_id,
         p.personal_id, p.nombre,
         `Raya ${raya.periodo_inicio} a ${raya.periodo_fin} · ${p.concepto}`,
         args.quien_usuario_id, t,
@@ -4492,13 +4533,13 @@ export class OrgDB extends DurableObject<Env> {
     totales: { vendido: number; cobrado: number; saldo: number; sin_proyecto: number };
   } | null {
     const cliente = this.sql
-      .exec(`SELECT id, nombre, rfc, correo, telefono, negocio_id FROM clientes WHERE id = ?`, cliente_id)
+      .exec(`SELECT id, nombre, rfc, correo, telefono FROM clientes WHERE id = ?`, cliente_id)
       .toArray()[0] as Fila | undefined;
     if (!cliente) return null;
 
     const proyectos = this.sql
       .exec(
-        `SELECT id, nombre, estado, fecha_inicio, fecha_cierre, precio_venta, negocio_id
+        `SELECT id, nombre, estado, fecha_inicio, fecha_cierre, precio_venta
          FROM proyectos WHERE cliente_id = ? ORDER BY COALESCE(fecha_inicio, creado_at)`,
         cliente_id,
       )
@@ -4609,7 +4650,7 @@ export class OrgDB extends DurableObject<Env> {
      * asoma sola. */
     const proyecto: Fila = {
       id: completo.id, nombre: completo.nombre, descripcion: completo.descripcion,
-      estado: completo.estado, cliente_id: completo.cliente_id, negocio_id: completo.negocio_id,
+      estado: completo.estado, cliente_id: completo.cliente_id,
       fecha_inicio: completo.fecha_inicio, fecha_fin_estimada: completo.fecha_fin_estimada,
       fecha_cierre: completo.fecha_cierre, precio_venta: completo.precio_venta,
       tasa_iva: completo.tasa_iva, iva_incluido: completo.iva_incluido,
@@ -4618,9 +4659,10 @@ export class OrgDB extends DurableObject<Env> {
     const cliente = proyecto.cliente_id
       ? (this.sql.exec(`SELECT id, nombre, rfc, correo, telefono FROM clientes WHERE id = ?`, proyecto.cliente_id).toArray()[0] as Fila | undefined) ?? null
       : null;
-    const negocio = proyecto.negocio_id
-      ? (this.sql.exec(`SELECT id, nombre, rfc, moneda FROM negocios WHERE id = ?`, proyecto.negocio_id).toArray()[0] as Fila | undefined) ?? null
-      : null;
+    /* `negocio` ES LA EMPRESA (0.63.0): el único renglón de `empresa`. El
+     * campo conserva su nombre para que peek101 y dash101 sigan leyendo el
+     * RFC y la moneda de quien cobra sin cambiar nada. */
+    const negocio = (this.sql.exec(`SELECT id, nombre, rfc, moneda FROM empresa WHERE id = 'empresa'`).toArray()[0] as Fila | undefined) ?? null;
 
     /* Los VENDIDOS, que son los que suman. `pr.nombre` sale por LEFT JOIN
      * para que un ítem agrupado diga de qué modelo es sin que la pantalla
@@ -4692,7 +4734,7 @@ export class OrgDB extends DurableObject<Env> {
 
     const proyectos = this.sql
       .exec(
-        `SELECT id, negocio_id, cliente_id, nombre, descripcion, estado, fecha_inicio, fecha_fin_estimada,
+        `SELECT id, cliente_id, nombre, descripcion, estado, fecha_inicio, fecha_fin_estimada,
                 fecha_cierre, precio_venta, cobrado, avance, creado_at, actualizado_at
          FROM proyectos WHERE cliente_id = ? ORDER BY creado_at DESC`,
         cliente_id,
@@ -4759,7 +4801,7 @@ export class OrgDB extends DurableObject<Env> {
         // La invitación del cliente en la suite, desde adentro: el motor la
         // pide después de revisar que quien invita sea el dueño de la obra.
         INVITAR_EN_SUITE: (correo: string, nombre: string) =>
-          invitarClienteEnSuite(e, org, { ...sesion.quien, negocios: [], ve_dinero: true, ve_costos: true } as Quien, this as unknown as ApiOrgDB, 'quell101', correo, nombre),
+          invitarClienteEnSuite(e, org, { ...sesion.quien, ve_dinero: true, ve_costos: true } as Quien, this as unknown as ApiOrgDB, 'quell101', correo, nombre),
         // 0.49.0: el requerimiento nace como ítem y cae en el borrador de quote101.
         LEVANTAR_REQUERIMIENTO: (d) => this.levantarRequerimiento({ ...d, usuario_id: sesion.quien.usuario_id }),
       }, url, url.pathname);

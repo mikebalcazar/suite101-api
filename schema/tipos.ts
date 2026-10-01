@@ -17,7 +17,56 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.62.0 (LA EMPRESA TIENE SU RUTA. `GET /orgs/:o/empresa`
+ * Versión del contrato: 0.63.0 (SE VA LA TABLA `negocios` Y LA COLUMNA
+ * `negocio_id`. Mike, 1-oct: «Ya no existe la opción de negocios. Sólo es
+ * una empresa/negocio todo. Elimina todas las lógicas que involucran el
+ * concepto de "negocio"». La migración 0027 del OrgDB corre en código: si una
+ * empresa tenía varios negocios se juntan en el primero por nombre —como
+ * `POST /negocios/fusionar`, que se va—, nombre, RFC, moneda y día de
+ * conciliación pasan a la tabla `empresa` (un solo renglón, id 'empresa'),
+ * las tablas que llevaban llave foránea a `negocios` (cuentas,
+ * conciliaciones, rayas, accionistas) se reconstruyen sin la columna, a las
+ * demás (clientes, cotizaciones, proyectos, productos, items, movimientos,
+ * opex, ordenes, cfdi) se les tira con DROP COLUMN, y al final se tira
+ * `negocios`. Lo que cambia hacia afuera:
+ *   · Ninguna fila trae `negocio_id`: `Cuenta`, `Cliente`, `Proyecto`,
+ *     `Item`, `Movimiento`, `Opex`, `Conciliacion`, `Cotizacion`,
+ *     `Producto`, `Accionista`, `Orden`, `Cfdi`, `Raya`. Si una app vieja
+ *     lo manda al crear o al editar, se ignora (no es 403); como filtro
+ *     (`?negocio_id=`) también se ignora. Se va la interfaz `Negocio`.
+ *   · `GET`/`PATCH /orgs/:o/empresa` leen y escriben la tabla `empresa`,
+ *     con la misma forma de 0.62.0: { id: 'empresa', nombre, rfc, moneda,
+ *     dia_conciliacion }. Si el renglón no existe se crea con el nombre de
+ *     la empresa y moneda MXN.
+ *   · COMPATIBILIDAD, se va cuando ninguna prueba lo pida: `GET /negocios`
+ *     contesta { total: 1, filas: [la empresa con la forma de negocio: id
+ *     'empresa', nombre, rfc, moneda, dia_conciliacion, creado_at] };
+ *     `POST /negocios` contesta 201 con esa misma fila (ignora el cuerpo,
+ *     salvo nombre y moneda si la empresa aún no existía); `GET
+ *     /negocios/:id` la misma fila si el id coincide (404 si no); `PATCH
+ *     /negocios/:id` actualiza la empresa. Se va `POST /negocios/fusionar`.
+ *   · `GET /admin/orgs/:o/quote` contesta { org, resumen: ConteoQuote } con
+ *     { clientes, proyectos, cotizaciones, ultima_cotizacion } de la
+ *     empresa; ya no hay lista por negocio ni huérfanos.
+ *   · `GET /orgs/:o/ordenes/buzon`, `/pagadas`, `/resumen`, `/ordenes`,
+ *     `/fiscal/iva`, `/cuadre`, `/pendientes`, `/cfdi`,
+ *     `/clientes/parecidos`, `/conciliaciones/estadistica` y
+ *     `/nomina/rayas`: `?negocio_id=` se acepta y se ignora; siempre son de
+ *     la empresa.
+ *   · `estadoDelProyecto` (`GET /proyectos/:id/estado`) sigue contestando
+ *     el campo `negocio` {id, nombre, rfc, moneda} para no romper peek101
+ *     ni dash101, pero ES LA EMPRESA (id 'empresa').
+ *   · `Obra` pierde `proyecto_negocio_id`; el aviso `conciliacion.nueva`
+ *     pierde `negocio_id`.
+ *   · `/yo` sigue trayendo `negocios: []` en cada org, fijo, por
+ *     compatibilidad; la columna `miembros.negocios` del D1 se queda vacía
+ *     hasta que haya migración de D1. `POST /admin/importar` ignora el
+ *     campo `negocio` del cuerpo y la colección `negocios` del documento.
+ *   · Nuevo `GET /admin/orgs/:o/esquema` (superadmin): { tablas: { nombre:
+ *     [columnas] } }, para medir que la base no trae `negocios` ni
+ *     `negocio_id`.)
+ *
+ * Antes, 0.62.0 (LA EMPRESA TIENE SU RUTA. `GET /orgs/:o/empresa`
  * → { id, nombre, rfc, moneda, dia_conciliacion }; `PATCH /orgs/:o/empresa`
  * (owner y admin) cambia nombre, rfc, moneda (MXN|USD) y dia_conciliacion
  * (0-6). Es lo que las pantallas leen y editan en vez de `negocios`, que
@@ -911,7 +960,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.62.0';
+export const VERSION_CONTRATO = '0.63.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1143,6 +1192,8 @@ export interface Yo {
   /** Para el superadmin salen TODAS, primero en las que es miembro
    *  (`miembro: true`) y luego las demás, cada grupo por nombre (0.45.1).
    *  Para los demás, sólo las suyas, todas con `miembro: true`. */
+  /** `negocios` va siempre `[]` desde 0.63.0: ya no hay negocios. Se queda
+   *  en la forma por compatibilidad con quien lo lea. */
   orgs: Array<{ id: string; nombre: string; rol: Rol; apps: string[]; negocios: string[]; miembro: boolean }>;
   acceso: { org_id: string; tipo: TipoAcceso; ref_id: string } | null;
 }
@@ -1178,8 +1229,11 @@ export interface RenglonBitacoraAdmin {
 
 export type Moneda = 'MXN' | 'USD';
 
-/** La empresa (0.62.0): lo que antes se editaba en `negocios`. */
+/** La empresa (0.62.0; tabla `empresa` desde 0.63.0, un solo renglón con
+ *  id 'empresa'). Es lo que antes se editaba en `negocios`: desde el 1-oct
+ *  no hay negocios, hay UNA empresa. */
 export interface Empresa {
+  /** Siempre 'empresa'. */
   id: string;
   nombre: string;
   rfc: string | null;
@@ -1188,19 +1242,18 @@ export interface Empresa {
   dia_conciliacion: number;
 }
 
-export interface Negocio {
-  id: string;
-  nombre: string;
-  rfc: string | null;
-  moneda: Moneda;
-  /** Día en que toca conciliar: 0 domingo … 6 sábado. Por omisión el lunes. */
-  dia_conciliacion: number;
-  creado_at: string;
+/** Lo de quote101 de una empresa, en cuatro cifras (0.63.0). Lo lee
+ *  master101 por `GET /admin/orgs/:o/quote`. Hasta 0.62.0 era una lista por
+ *  negocio con huérfanos; sin negocios ya no hay de qué quedar huérfano. */
+export interface ConteoQuote {
+  clientes: number;
+  proyectos: number;
+  cotizaciones: number;
+  ultima_cotizacion: string | null;
 }
 
 export interface Cuenta {
   id: string;
-  negocio_id: string;
   nombre: string;
   tipo: 'banco' | 'caja' | 'credito' | 'otro';
   banco: string | null;
@@ -1216,7 +1269,6 @@ export interface Cuenta {
 
 export interface Cliente {
   id: string;
-  negocio_id: string;
   nombre: string;
   nombre_norm: string;
   correo: string | null;
@@ -1245,7 +1297,7 @@ export interface ProveedorCuenta {
   creado_at: string;
 }
 
-/** Un accionista del negocio (0025, contrato 0.57.0). Mike, 30-sep-2026:
+/** Un accionista de la empresa (0025, contrato 0.57.0). Mike, 30-sep-2026:
  *  «un módulo de accionistas donde se registren pagos a los accionistas como
  *  retiro de utilidades». El retiro NO es una tabla: es un `Movimiento` de
  *  tipo egreso con `categoria` = CATEGORIA_RETIRO_UTILIDADES,
@@ -1255,7 +1307,6 @@ export interface ProveedorCuenta {
  *  100), opcional. Lo escribe dash101 y lo ve quien ve dinero. */
 export interface Accionista {
   id: string;
-  negocio_id: string;
   nombre: string;
   nombre_norm: string;
   rfc: string | null;
@@ -1323,7 +1374,6 @@ export interface Estacion {
 
 export interface Cotizacion {
   id: string;
-  negocio_id: string;
   cliente_id: string | null;
   folio: string | null;
   estado: 'borrador' | 'enviada' | 'aceptada' | 'rechazada';
@@ -1360,7 +1410,6 @@ export interface Partida {
 
 export interface Proyecto {
   id: string;
-  negocio_id: string;
   cliente_id: string;
   nombre: string;
   descripcion: string | null;
@@ -1421,7 +1470,6 @@ export const ETAPA_CLAVE: Etapa = 4;
  *  de producto y puede haber varios ítems del mismo modelo». */
 export interface Producto {
   id: string;
-  negocio_id: string;
   /** El del catálogo. Único dentro de la empresa cuando no está vacío;
    *  vacío mientras nadie lo cataloga, que es como nace al agrupar. */
   codigo: string;
@@ -1438,7 +1486,6 @@ export interface Producto {
 
 export interface Item {
   id: string;
-  negocio_id: string;
   proyecto_id: string | null; // NULL mientras solo está cotizado
   cliente_id: string;
   clave: string | null;
@@ -1489,7 +1536,6 @@ export interface Avance {
 
 export interface Movimiento {
   id: string;
-  negocio_id: string;
   tipo: 'ingreso' | 'egreso';
   /** centavos */
   monto: number;
@@ -1513,7 +1559,6 @@ export interface Movimiento {
 
 export interface Opex {
   id: string;
-  negocio_id: string;
   nombre: string;
   tipo: string;
   /** centavos */
@@ -1533,7 +1578,6 @@ export interface Opex {
 /** Una conciliación: la foto de un momento. Append-only, como `avances`. */
 export interface Conciliacion {
   id: string;
-  negocio_id: string;
   /** La hora exacta del corte; el saldo registrado se congela ahí. */
   corte_at: string;
   hecha_por: string;
@@ -1568,7 +1612,7 @@ export interface Archivo {
 }
 
 /** Configuración de UNA app dentro de una empresa: lo que no describe al
- *  negocio —eso es `Negocio`— sino a cómo esa app trabaja. `valor` se lee
+ *  empresa —eso es `Empresa`— sino a cómo esa app trabaja. `valor` se lee
  *  entero; nadie lo consulta por dentro.
  *
  *  El `id` es `app:clave` y lo arma la API con la cabecera `X-App`: ninguna app
@@ -1585,7 +1629,6 @@ export interface Ajuste {
 }
 
 export const TABLAS = [
-  'negocios',
   'cuentas',
   'clientes',
   'proveedores',
@@ -1621,6 +1664,9 @@ export type Tabla = (typeof TABLAS)[number];
  * la bitácora de obra por /orgs/:o/quell/*, con sus propias reglas. */
 export const TABLAS_INTERNAS = [
   'folios',
+  /* La empresa (0027): un solo renglón con nombre, RFC, moneda y día de
+   * conciliación. No sale por el CRUD genérico: va por GET/PATCH /empresa. */
+  'empresa',
   'quell_users', 'quell_projects', 'quell_project_members', 'quell_plans', 'quell_elements', 'quell_log_entries',
   'quell_punch_items', 'quell_photos', 'quell_operaciones', 'quell_etapas', 'quell_element_etapas', 'quell_dudas',
   'quell_duda_respuestas', 'quell_element_contratistas',
@@ -1661,7 +1707,6 @@ export interface Obra {
   creado_at: string;
   proyecto_id: string | null;
   proyecto_nombre: string | null;
-  proyecto_negocio_id: string | null;
   /** cuántos planos tiene cargados */
   planos: number;
   /** cuántos ítems están ya ubicados en un plano */
@@ -1697,7 +1742,7 @@ export type Aviso =
   | { t: 'item.cambio'; id: string }
   | { t: 'movimiento.nuevo'; id: string; proyecto_id: string | null }
   | { t: 'proyecto.cache'; id: string; precio_venta: number; cobrado: number; avance: number }
-  | { t: 'conciliacion.nueva'; id: string; negocio_id: string; diferencia_total: number }
+  | { t: 'conciliacion.nueva'; id: string; diferencia_total: number }
   /* 0.27.0 · se pagó una raya. Va al canal del dinero porque son N egresos
    * de golpe: una pantalla de saldos abierta tiene que enterarse. */
   | { t: 'raya.pagada'; id: string };

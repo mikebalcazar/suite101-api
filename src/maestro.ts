@@ -239,27 +239,31 @@ export async function marcarBienvenida(env: Env, id: string): Promise<void> {
   await env.MASTER.prepare(`UPDATE orgs SET bienvenida_at = ? WHERE id = ?`).bind(ahora(), id).run();
 }
 
+/** `negocios` se queda en la forma y en la columna del D1 por ahora, pero ya
+ *  no significa nada (0.63.0): se guarda siempre `[]` y se devuelve `[]`.
+ *  Se irá con una migración de D1 cuando toque. */
 export interface Miembro { org_id: string; usuario_id: string; rol: Rol; apps: string[]; negocios: string[] }
 
 export async function miembro(env: Env, org_id: string, usuario_id: string): Promise<Miembro | null> {
   const f = await env.MASTER.prepare(`SELECT * FROM miembros WHERE org_id = ? AND usuario_id = ?`)
     .bind(org_id, usuario_id)
     .first<{ org_id: string; usuario_id: string; rol: Rol; apps: string; negocios: string }>();
-  return f ? { ...f, apps: JSON.parse(f.apps || '[]'), negocios: JSON.parse(f.negocios || '[]') } : null;
+  return f ? { ...f, apps: JSON.parse(f.apps || '[]'), negocios: [] } : null;
 }
 
 export async function miembrosDe(env: Env, org_id: string): Promise<Array<Miembro & { correo: string; nombre: string | null }>> {
   const r = await env.MASTER.prepare(
     `SELECT m.*, u.correo, u.nombre FROM miembros m JOIN usuarios u ON u.id = m.usuario_id WHERE m.org_id = ?`,
   ).bind(org_id).all<{ org_id: string; usuario_id: string; rol: Rol; apps: string; negocios: string; correo: string; nombre: string | null }>();
-  return (r.results ?? []).map((f) => ({ ...f, apps: JSON.parse(f.apps || '[]'), negocios: JSON.parse(f.negocios || '[]') }));
+  return (r.results ?? []).map((f) => ({ ...f, apps: JSON.parse(f.apps || '[]'), negocios: [] }));
 }
 
-export async function ponerMiembro(env: Env, org_id: string, usuario_id: string, rol: Rol, apps: string[] = [], negocios: string[] = []): Promise<void> {
+export async function ponerMiembro(env: Env, org_id: string, usuario_id: string, rol: Rol, apps: string[] = []): Promise<void> {
+  // `negocios` siempre vacío: ya no hay negocios (0.63.0).
   await env.MASTER.prepare(
-    `INSERT INTO miembros (org_id, usuario_id, rol, apps, negocios) VALUES (?,?,?,?,?)
-     ON CONFLICT(org_id, usuario_id) DO UPDATE SET rol = excluded.rol, apps = excluded.apps, negocios = excluded.negocios`,
-  ).bind(org_id, usuario_id, rol, JSON.stringify(apps), JSON.stringify(negocios)).run();
+    `INSERT INTO miembros (org_id, usuario_id, rol, apps, negocios) VALUES (?,?,?,?,'[]')
+     ON CONFLICT(org_id, usuario_id) DO UPDATE SET rol = excluded.rol, apps = excluded.apps, negocios = '[]'`,
+  ).bind(org_id, usuario_id, rol, JSON.stringify(apps)).run();
 }
 
 export async function quitarMiembro(env: Env, org_id: string, usuario_id: string): Promise<void> {

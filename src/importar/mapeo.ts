@@ -55,7 +55,7 @@ export interface UsuarioImportado {
   correo: string;
   nombre: string | null;
   /** Miembro de la org (socios y oficina). */
-  miembro?: { rol: 'owner' | 'admin' | 'socio' | 'staff'; negocios: string[] };
+  miembro?: { rol: 'owner' | 'admin' | 'socio' | 'staff' };
   /** Acceso de cliente al portal (peek101). */
   acceso?: { tipo: 'cliente' | 'personal'; ref_id: string };
   de: 'usuarios' | 'clientes';
@@ -351,9 +351,9 @@ export function aplanar(lista: unknown): Crudo[] {
 
 /* ─────────────── el mapeo, colección por colección ─────────────── */
 
-/** Lo que el mapeo no puede saber leyendo el documento. Hoy sólo el negocio:
- *  la suite guarda clientes y cotizaciones por negocio, y quote101 no sabe que
- *  los negocios existen. Se pide en la petición en vez de adivinarlo. */
+/** Hasta 0.62.0 aquí se pedía el `negocio_id` al que colgar lo de quote101.
+ *  Ya no hay negocios (0.63.0): se acepta para no romper a quien lo mande y
+ *  no se usa. */
 export interface Opciones {
   negocio_id?: string;
 }
@@ -361,14 +361,14 @@ export interface Opciones {
 export function cosechar(
   entrada: Record<string, unknown>,
   hoy = new Date().toISOString(),
-  opciones: Opciones = {},
+  _opciones: Opciones = {},
 ): Cosecha {
   const docs: Record<string, Crudo[]> = {};
   for (const [k, v] of Object.entries(entrada)) docs[k] = aplanar(v);
-  return mapear(docs, hoy, opciones);
+  return mapear(docs, hoy);
 }
 
-function mapear(docs: Record<string, Crudo[]>, hoy: string, opciones: Opciones): Cosecha {
+function mapear(docs: Record<string, Crudo[]>, hoy: string): Cosecha {
   const c = new Cesta();
   const lista = (nombre: string): Crudo[] => {
     const l = Array.isArray(docs[nombre]) ? docs[nombre] : [];
@@ -377,28 +377,20 @@ function mapear(docs: Record<string, Crudo[]>, hoy: string, opciones: Opciones):
   };
   const id = (d: Crudo): string => String(d.id ?? d._id ?? '').trim();
 
-  /* negocios */
-  for (const d of lista('negocios')) {
-    if (!id(d)) { c.rechaza('negocios', '(sin id)', 'el documento no trae id'); continue; }
-    if (!texto(d.nombre)) { c.rechaza('negocios', id(d), 'sin nombre', 'nombre'); continue; }
-    c.pon('negocios', {
-      id: id(d), nombre: texto(d.nombre), rfc: texto(d.rfc),
-      moneda: texto(d.moneda) ?? 'MXN', creado_at: aISO(d.creado_at) ?? hoy,
-    });
-    c.sobrantes('negocios', d, ['id', 'nombre', 'rfc', 'moneda', 'creado_at']);
-  }
+  /* negocios: se leen para contarlos y se dejan. Ya no hay tabla (0.63.0);
+   * lo que describía al negocio vive en `empresa` y lo pone la ruta con el
+   * nombre de la org. */
+  lista('negocios');
 
   /* cuentas */
   for (const d of lista('cuentas')) {
     if (!id(d)) { c.rechaza('cuentas', '(sin id)', 'el documento no trae id'); continue; }
-    if (!texto(d.nombre) || !texto(d.negocio_id)) {
-      c.rechaza('cuentas', id(d), 'falta nombre o negocio_id'); continue;
-    }
+    if (!texto(d.nombre)) { c.rechaza('cuentas', id(d), 'sin nombre', 'nombre'); continue; }
     const plata: Pendiente[] = [];
     const saldo = c.dinero(plata, 'cuentas', 'cuentas', 'saldo_inicial', id(d), d.saldo_inicial);
     if (saldo === null) continue;
     c.pon('cuentas', {
-      id: id(d), negocio_id: texto(d.negocio_id), nombre: texto(d.nombre),
+      id: id(d), nombre: texto(d.nombre),
       tipo: texto(d.tipo) ?? 'otro', banco: texto(d.banco), moneda: texto(d.moneda) ?? 'MXN',
       saldo_inicial: saldo, creado_at: aISO(d.creado_at) ?? hoy,
     }, plata);
@@ -414,7 +406,7 @@ function mapear(docs: Record<string, Crudo[]>, hoy: string, opciones: Opciones):
     const uid = texto(d.uid ?? d.cliente_uid ?? d.usuario_id);
     const mail = correo(d.email ?? d.correo);
     c.pon('clientes', {
-      id: id(d), negocio_id: texto(d.negocio_id) ?? '', nombre: texto(d.nombre),
+      id: id(d), nombre: texto(d.nombre),
       correo: mail, telefono: texto(d.telefono), rfc: texto(d.rfc), notas: texto(d.notas),
       usuario_id: uid, portal_activo: !!uid,
       creado_en_app: 'conta-master', creado_at: aISO(d.creado_at) ?? hoy,
@@ -456,7 +448,7 @@ function mapear(docs: Record<string, Crudo[]>, hoy: string, opciones: Opciones):
     }
 
     c.pon('proyectos', {
-      id: id(d), negocio_id: texto(d.negocio_id) ?? '', cliente_id: texto(d.cliente_id),
+      id: id(d), cliente_id: texto(d.cliente_id),
       nombre: texto(d.nombre), descripcion: texto(d.descripcion), estado,
       fecha_inicio: aDia(d.fecha_inicio), fecha_fin_estimada: aDia(d.fecha_fin_estimada),
       fecha_cierre: aDia(d.fecha_cierre),
@@ -507,7 +499,6 @@ function mapear(docs: Record<string, Crudo[]>, hoy: string, opciones: Opciones):
 
       c.pon('items', {
         id: pid,
-        negocio_id: texto(d.negocio_id) ?? '',
         proyecto_id: id(d),
         cliente_id: texto(d.cliente_id),
         nombre: texto(p.nombre),
@@ -540,7 +531,7 @@ function mapear(docs: Record<string, Crudo[]>, hoy: string, opciones: Opciones):
       const monto = c.dinero(platita, 'proyectos', 'items', 'monto', iid, d.precio_venta);
       if (monto !== null) {
         c.pon('items', {
-          id: iid, negocio_id: texto(d.negocio_id) ?? '', proyecto_id: id(d), cliente_id: texto(d.cliente_id),
+          id: iid, proyecto_id: id(d), cliente_id: texto(d.cliente_id),
           nombre: texto(d.nombre), descripcion: null, tipo: 'otro', monto, moneda: texto(d.moneda) ?? 'MXN',
           estado: 'vendido', etapa: 0, fecha_entrega: aDia(d.fecha_fin_estimada),
           origen: { app: 'conta-master', proyecto_id: id(d), regla: 'producto_unico' },
@@ -567,7 +558,7 @@ function mapear(docs: Record<string, Crudo[]>, hoy: string, opciones: Opciones):
     if (monto === null) continue;
 
     c.pon('movimientos', {
-      id: id(d), negocio_id: texto(d.negocio_id) ?? '', tipo, monto, fecha,
+      id: id(d), tipo, monto, fecha,
       cuenta_id: texto(d.cuenta_id), proyecto_id: texto(d.proyecto_id),
       // `producto_id` era el nombre viejo. Aquí se dice ítem.
       item_id: texto(d.producto_id ?? d.item_id),
@@ -598,7 +589,7 @@ function mapear(docs: Record<string, Crudo[]>, hoy: string, opciones: Opciones):
     if (monto === null) continue;
 
     c.pon('opex', {
-      id: id(d), negocio_id: texto(d.negocio_id) ?? '', nombre: texto(d.nombre),
+      id: id(d), nombre: texto(d.nombre),
       tipo: texto(d.tipo) ?? 'egreso', monto, moneda: texto(d.moneda) ?? 'MXN',
       frecuencia: texto(d.frecuencia),
       dia_semana: d.dia_semana === null || d.dia_semana === undefined ? null : Number(d.dia_semana),
@@ -634,7 +625,7 @@ function mapear(docs: Record<string, Crudo[]>, hoy: string, opciones: Opciones):
 
     c.usuarios.push({
       id: uid, correo: mail, nombre: texto(d.nombre), de: 'usuarios',
-      ...(rol ? { miembro: { rol, negocios } } : {}),
+      ...(rol ? { miembro: { rol } } : {}),
     });
     c.sobrantes('usuarios', d, ['id', 'email', 'correo', 'nombre', 'memberships', 'negocios_acceso', 'creado_at']);
   }
@@ -673,12 +664,6 @@ function mapear(docs: Record<string, Crudo[]>, hoy: string, opciones: Opciones):
    * después del último y no hay que acomodarlo a mano.
    */
   for (const d of lista('cotizador')) {
-    const negocio_id = texto(opciones.negocio_id);
-    if (!negocio_id) {
-      c.rechaza('cotizador', '(documento)', 'falta `negocio` en la petición: la suite guarda clientes y cotizaciones por negocio, y quote101 no sabe de negocios');
-      continue;
-    }
-
     const clientes = Array.isArray(d.clientes) ? (d.clientes as Crudo[]) : [];
     for (const cl of clientes) {
       const cid = id(cl);
@@ -686,7 +671,7 @@ function mapear(docs: Record<string, Crudo[]>, hoy: string, opciones: Opciones):
       if (!texto(cl.nombre)) { c.rechaza('cotizador', cid, 'cliente sin nombre', 'nombre'); continue; }
 
       c.pon('clientes', {
-        id: cid, negocio_id, nombre: texto(cl.nombre),
+        id: cid, nombre: texto(cl.nombre),
         creado_en_app: 'cotizador101', creado_at: aISO(cl.creado_at) ?? hoy,
       });
 
@@ -697,7 +682,7 @@ function mapear(docs: Record<string, Crudo[]>, hoy: string, opciones: Opciones):
         if (!texto(pr.nombre)) { c.rechaza('cotizador', pid, 'proyecto sin nombre', 'nombre'); continue; }
 
         c.pon('proyectos', {
-          id: pid, negocio_id, cliente_id: cid, nombre: texto(pr.nombre),
+          id: pid, cliente_id: cid, nombre: texto(pr.nombre),
           estado: 'planeando', creado_at: aISO(pr.creado_at) ?? hoy,
         });
 
@@ -748,7 +733,7 @@ function mapear(docs: Record<string, Crudo[]>, hoy: string, opciones: Opciones):
           if (folio) c.avisos.folios_traidos++; else c.avisos.sin_folio++;
 
           c.pon('cotizaciones', {
-            id: qid, negocio_id, cliente_id: cid,
+            id: qid, cliente_id: cid,
             // Si no traía folio, la columna NI SE MENCIONA. No es lo mismo
             // que mandarla vacía: el importador actualiza las filas que ya
             // están, y una columna vacía le borraría a la cotización el folio
