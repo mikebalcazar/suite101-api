@@ -36,6 +36,7 @@ import { err, ok, type Ctx, type Vars } from '../http';
 import type { Env } from '../entorno';
 import type { ApiOrgDB } from '../org-db';
 import { miembrosDe } from '../maestro';
+import { negocioDeLaEmpresa } from '../empresa';
 
 type App = Hono<{ Bindings: Env; Variables: Vars }>;
 
@@ -206,8 +207,8 @@ export function montarNomina(rutas: App): void {
   /** GET /orgs/:o/nomina/rayas?negocio_id= — los cortes de un negocio. */
   rutas.get('/:o/nomina/rayas', async (c) => {
     if (!(await puedeNomina(c))) return err(c, 'sin_permiso', 403, { motivo: 'la raya la ve quien la lleva' });
-    const negocio_id = c.req.query('negocio_id');
-    if (!negocio_id) return err(c, 'datos_invalidos', 400, { falta: 'negocio_id' });
+    /* Sin `negocio_id` (0.61.0): el de la empresa. */
+    const negocio_id = c.req.query('negocio_id') || await negocioDeLaEmpresa(c);
     return ok(c, { rayas: await stub(c).rayas(negocio_id) });
   });
 
@@ -219,9 +220,10 @@ export function montarNomina(rutas: App): void {
       pagos?: Array<{ personal_id: string; concepto?: string; sueldo?: number; extras?: number; descuentos?: number; nota?: string }>;
     };
     const b = await c.req.json<Cuerpo>().catch(() => ({}) as Cuerpo);
-    if (!b.negocio_id || !b.periodo_inicio || !b.periodo_fin) {
-      return err(c, 'datos_invalidos', 400, { falta: 'negocio_id, periodo_inicio y periodo_fin' });
+    if (!b.periodo_inicio || !b.periodo_fin) {
+      return err(c, 'datos_invalidos', 400, { falta: 'periodo_inicio y periodo_fin' });
     }
+    if (!b.negocio_id) b.negocio_id = await negocioDeLaEmpresa(c);
     const r = await stub(c).crearRaya(
       { negocio_id: b.negocio_id, periodo_inicio: b.periodo_inicio, periodo_fin: b.periodo_fin, nota: b.nota, pagos: b.pagos },
       { usuario_id: c.get('quien').usuario_id },
