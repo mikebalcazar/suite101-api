@@ -18,6 +18,7 @@ import { invitarClienteEnSuite } from '../clientes';
 import { crearUsuario } from '../maestro';
 import { guardarPin, normalizaCorreo, pinAceptable, ulid } from '../lib';
 import { TIPO_XLSX, xlsx, type Celda } from '../xlsx';
+import { negocioDeLaEmpresa } from '../empresa';
 import { montarOrdenes } from './ordenes';
 import { montarObras } from './obras';
 import { montarNomina } from './nomina';
@@ -1126,7 +1127,7 @@ rutas.post('/:o/conciliaciones', async (c) => {
   const cuerpo = await c.req
     .json<{ negocio_id?: string; corte_at?: string; saldos?: Array<{ cuenta_id?: string; saldo_real?: unknown }> }>()
     .catch(() => ({}) as never);
-  if (!cuerpo.negocio_id) return err(c, 'datos_invalidos', 400, { falta: 'negocio_id' });
+  if (!cuerpo.negocio_id) cuerpo.negocio_id = await negocioDeLaEmpresa(c);
   if (!Array.isArray(cuerpo.saldos) || !cuerpo.saldos.length) return err(c, 'datos_invalidos', 400, { falta: 'saldos' });
 
   const saldos: Array<{ cuenta_id: string; saldo_real: number }> = [];
@@ -1152,8 +1153,7 @@ rutas.get('/:o/conciliaciones/estadistica', async (c) => {
   const permiso = puedeLeer(c, 'conciliaciones');
   if (permiso) return permiso;
   const quien = c.get('quien');
-  const negocio_id = c.req.query('negocio_id') || quien.negocios[0];
-  if (!negocio_id) return err(c, 'datos_invalidos', 400, { falta: 'negocio_id' });
+  const negocio_id = c.req.query('negocio_id') || quien.negocios[0] || await negocioDeLaEmpresa(c);
   return ok(c, await stub(c).estadisticaConciliacion(negocio_id));
 });
 
@@ -1286,6 +1286,12 @@ rutas.post('/:o/:tabla', async (c) => {
 
   const veredicto = revisarEscritura(tabla, c.get('app'), campos);
   if (!veredicto.ok) return err(c, veredicto.error, 403, veredicto.detalle);
+
+  /* `negocio_id` ya no se pide (0.61.0): si la fila lo lleva y no viene, es
+   * el de la empresa. Las apps dejan de saber que existe. */
+  if (tabla !== 'negocios' && DEFS[tabla].cols.negocio_id && (datos.negocio_id === undefined || datos.negocio_id === null || datos.negocio_id === '')) {
+    datos.negocio_id = await negocioDeLaEmpresa(c);
+  }
 
   const falta = DEFS[tabla].requeridos.filter((r) => datos[r] === undefined || datos[r] === null || datos[r] === '');
   if (falta.length) return err(c, 'datos_invalidos', 400, { falta });

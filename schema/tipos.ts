@@ -17,7 +17,18 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.60.0 (EL SALDO LO SUMA LA BASE, Y LO DEMÁS DEL
+ * Versión del contrato: 0.61.0 (LA EMPRESA ES UNA: `negocio_id` YA NO SE
+ * PIDE. Mike, 1-oct: «Ya no existe la opción de negocios en dash. Sólo es
+ * una empresa/negocio todo. Elimina todas las lógicas que involucran el
+ * concepto de "negocio"». Toda ruta que lo exigía lo resuelve sola con el
+ * registro de la empresa —el primero por nombre; si no hay, se crea con el
+ * nombre de la empresa—: el CRUD al crear cuentas, clientes, proyectos,
+ * movimientos, opex, accionistas, cotizaciones y lo demás que lo lleve;
+ * `POST /conciliaciones`, `GET /conciliaciones/estadistica`,
+ * `GET`/`POST /nomina/rayas`. Si una app lo manda, se respeta, pero ya no
+ * debe mandarlo: en la fase D se van la tabla y las columnas.)
+ *
+ * Antes, 0.60.0 (EL SALDO LO SUMA LA BASE, Y LO DEMÁS DEL
  * 1-OCT. Mike: «ya hay movimientos por más de 70,000 de egresos y el total
  * sigue sin contarlos»: dash101 sumaba el saldo de la lista de movimientos,
  * que tiene tope de 500 y salía de la más vieja a la más nueva; pasando de
@@ -894,7 +905,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.60.0';
+export const VERSION_CONTRATO = '0.61.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

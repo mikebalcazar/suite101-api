@@ -167,6 +167,9 @@ export interface ApiOrgDB {
   vaciar(): Promise<number>;
   listar(tabla: Tabla, filtros?: Record<string, string>, sujeto?: Sujeto, limite?: number): Promise<{ total: number; filas: Fila[] }>;
   obtener(tabla: Tabla, id: string): Promise<Fila | null>;
+  /** El registro de la empresa (0.61.0): el primero por nombre, como lo lista
+   *  el CRUD; si no hay ninguno, se crea con el nombre que se pase. */
+  negocioDeLaEmpresa(nombre: string): Promise<Fila>;
   crear(tabla: Tabla, datos: Fila, contexto: { app: string; usuario_id: string }): Promise<Fila>;
   /** Deja el contador de folios en un número. La usa la mudanza de la fase 4
    *  para dejarlo justo después de lo que acabó de importar. */
@@ -594,6 +597,19 @@ export class OrgDB extends DurableObject<Env> {
       .exec(`SELECT * FROM ${tabla}${w} ORDER BY ${def.orden} LIMIT ?`, ...args, limite)
       .toArray() as Fila[];
     return { total, filas: this.conSaldo(tabla, filas).map((f) => this.afuera(tabla, f)!) };
+  }
+
+  /** LA EMPRESA ES UNA (0.61.0). Mike, 1-oct-2026: «Ya no existe la opción
+   *  de negocios en dash. Sólo es una empresa/negocio todo. Elimina todas las
+   *  lógicas que involucran el concepto de "negocio"». Hasta que la tabla se
+   *  vaya (fase D), todo sigue colgado de un `negocio_id`; lo que cambia es
+   *  que ya NADIE lo manda: la API lo resuelve aquí. Es el primero por
+   *  nombre —el mismo que devuelve `GET /negocios`, y el mismo que toma
+   *  dash101— y si la empresa no tiene ninguno, se crea con su nombre. */
+  negocioDeLaEmpresa(nombre: string): Fila {
+    const hay = this.sql.exec(`SELECT * FROM negocios ORDER BY nombre LIMIT 1`).toArray()[0] as Fila | undefined;
+    if (hay) return this.afuera('negocios', hay)!;
+    return this.crear('negocios', { nombre: nombre.trim() || 'Mi empresa', moneda: 'MXN' }, { app: 'suite101', usuario_id: '' });
   }
 
   obtener(tabla: Tabla, id: string): Fila | null {

@@ -93,8 +93,12 @@ describe('el alta del accionista', () => {
     const correo = await o('mike', '/accionistas', { method: 'POST', json: { negocio_id: negocio, nombre: 'Paco', correo: 'paco-sin-arroba' } });
     expect(correo.estado).toBe(400);
     expect(correo.detalle.errores.correo).toMatch(/correo/);
+    /* Sin negocio_id ya NO es error (0.61.0): la API le pone el de la
+     * empresa. Se borra enseguida para que las listas de abajo no lo vean. */
     const sinNegocio = await o('mike', '/accionistas', { method: 'POST', json: { nombre: 'Paco' } });
-    expect(sinNegocio.estado).toBe(400);
+    expect(sinNegocio.estado, JSON.stringify(sinNegocio)).toBe(201);
+    expect(sinNegocio.data.negocio_id).toBeTruthy();
+    expect((await o('mike', `/accionistas/${sinNegocio.data.id}`, { method: 'DELETE' })).estado).toBe(200);
   });
   it('se corrige por PATCH con la misma vara, y la participación vacía queda en null', async () => {
     const mal = await o('mike', `/accionistas/${id}`, { method: 'PATCH', json: { porcentaje: 'mucho' } });
