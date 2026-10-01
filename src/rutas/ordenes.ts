@@ -21,6 +21,7 @@ import { err, ok, type Ctx, type Vars } from '../http';
 import type { Env } from '../entorno';
 import { TIPOS_ORDEN, type ApiOrgDB, type TipoOrden } from '../org-db';
 import { miembrosDe } from '../maestro';
+import { negocioDeLaEmpresa } from '../empresa';
 import { enviarCorreo, correoOrdenPagada, correoOrdenResuelta } from '../auth/correo';
 
 type App = Hono<{ Bindings: Env; Variables: Vars }>;
@@ -221,6 +222,11 @@ export function montarOrdenes(rutas: App): void {
     const persona = (await stub(c).personalDeUsuario(q.usuario_id)) as Record<string, unknown> | null;
     const r = await stub(c).crearOrden({
       ...b,
+      // 0.62.1 · La empresa es una: si la pantalla no dice de qué registro
+      // (supply101 ya no lo manda desde el 1-oct), lo pone la API. Sin esto
+      // la base contestaba NOT NULL en ordenes.negocio_id y la compra no
+      // salía.
+      negocio_id: typeof b.negocio_id === 'string' && b.negocio_id ? b.negocio_id : await negocioDeLaEmpresa(c),
       // Estos cuatro NO los manda la pantalla: los pone la API. Si los
       // mandara, cualquiera podría pedir una compra a nombre de otro.
       solicitante_usuario_id: q.usuario_id,
