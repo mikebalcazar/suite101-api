@@ -390,6 +390,18 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   pide cada 2 min y al volver la pestaña. Lo que hay que no romper: una
   prueba que lea la lista entera de la org demo debe pedir `?limite=`
   (ya pasó de 500 movimientos; #109). Muro 2026-09-30-1800.
+- **QUITAR «NEGOCIO» (1-oct, en curso: fases A, B y C hechas; falta D).**
+  Mike: «Ya no existe la opción de negocios en dash. Sólo es una
+  empresa/negocio todo. Elimina todas las lógicas que involucran el
+  concepto de "negocio"» y escogió sacarlo también de la API y las otras
+  apps. A: dash101 #117/#119 (contexto implícito: el primero por nombre,
+  sin selector, sin /negocios, Configuración «Empresa»). B: API 0.61.0
+  #194 (negocio_id ya no se pide; src/empresa.ts). C: quote101 #72 y
+  supply101 #118 no lo mandan. D (pendiente, con el orden obligado en el
+  muro): dash101 deja de mandar negocio_id → migración que tira tabla y
+  columnas + tabla `empresa` de un renglón + limpieza de API, dash101,
+  master101, mocks de workshop101/t101-portal → la org demo de staging a
+  un solo registro. Muro 2026-10-01-1930.
 - **El punchlist a lo ancho (1-oct, quell101 #96).** `.pend` y `.proc` a
   secas se le pegaban a `.pi.pend` / `.pi.proc` (120px a la derecha).
   Quedan `.lrow .pend` y `.barproc .proc`. Lo que hay que no romper: los
