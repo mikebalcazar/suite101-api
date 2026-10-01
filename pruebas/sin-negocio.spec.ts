@@ -109,3 +109,29 @@ describe('las rutas que lo exigían ya no lo exigen', () => {
     expect(corte.data.raya.negocio_id).toBe(negocio);
   });
 });
+
+describe('la empresa tiene su ruta (0.62.0)', () => {
+  it('GET /empresa trae nombre, rfc, moneda y día; es el mismo registro', async () => {
+    const r = await o('mike', '/empresa');
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.id).toBe(negocio);
+    expect(r.data.nombre).toBe('Carpintería Sin Negocio');
+    expect(Object.keys(r.data).sort()).toEqual(['dia_conciliacion', 'id', 'moneda', 'nombre', 'rfc']);
+  });
+
+  it('PATCH /empresa cambia rfc, moneda y día, y lo que no se manda se queda', async () => {
+    const r = await o('mike', '/empresa', { method: 'PATCH', json: { rfc: 'csn010101aaa', dia_conciliacion: 5 } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.rfc).toBe('CSN010101AAA');
+    expect(r.data.dia_conciliacion).toBe(5);
+    expect(r.data.nombre).toBe('Carpintería Sin Negocio');
+    /* Y es el mismo registro que ven las lecturas por dentro. */
+    expect((await o('mike', '/negocios')).data.filas[0].rfc).toBe('CSN010101AAA');
+  });
+
+  it('una moneda inventada o un día fuera de 0-6 se rechazan', async () => {
+    expect((await o('mike', '/empresa', { method: 'PATCH', json: { moneda: 'EUR' } })).estado).toBe(400);
+    expect((await o('mike', '/empresa', { method: 'PATCH', json: { dia_conciliacion: 9 } })).estado).toBe(400);
+    expect((await o('mike', '/empresa', { method: 'PATCH', json: { nombre: '  ' } })).estado).toBe(400);
+  });
+});

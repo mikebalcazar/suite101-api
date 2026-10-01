@@ -17,7 +17,13 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.61.0 (LA EMPRESA ES UNA: `negocio_id` YA NO SE
+ * Versión del contrato: 0.62.0 (LA EMPRESA TIENE SU RUTA. `GET /orgs/:o/empresa`
+ * → { id, nombre, rfc, moneda, dia_conciliacion }; `PATCH /orgs/:o/empresa`
+ * (owner y admin) cambia nombre, rfc, moneda (MXN|USD) y dia_conciliacion
+ * (0-6). Es lo que las pantallas leen y editan en vez de `negocios`, que
+ * sigue sólo por dentro hasta la fase D. Tipo `Empresa`.)
+ *
+ * Antes, 0.61.0 (LA EMPRESA ES UNA: `negocio_id` YA NO SE
  * PIDE. Mike, 1-oct: «Ya no existe la opción de negocios en dash. Sólo es
  * una empresa/negocio todo. Elimina todas las lógicas que involucran el
  * concepto de "negocio"». Toda ruta que lo exigía lo resuelve sola con el
@@ -905,7 +911,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.61.0';
+export const VERSION_CONTRATO = '0.62.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1171,6 +1177,16 @@ export interface RenglonBitacoraAdmin {
 /* ─────────────── OrgDB: el SQLite de cada empresa ─────────────── */
 
 export type Moneda = 'MXN' | 'USD';
+
+/** La empresa (0.62.0): lo que antes se editaba en `negocios`. */
+export interface Empresa {
+  id: string;
+  nombre: string;
+  rfc: string | null;
+  moneda: Moneda;
+  /** Día en que toca conciliar: 0 domingo … 6 sábado. Por omisión el lunes. */
+  dia_conciliacion: number;
+}
 
 export interface Negocio {
   id: string;

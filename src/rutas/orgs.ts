@@ -1162,6 +1162,54 @@ rutas.get('/:o/conciliaciones/estadistica', async (c) => {
 /* Órdenes de compra y contabilidad fiscal (0.21.0). Se montan AQUÍ, antes
  * del CRUD genérico: si fueran después, `/:o/:tabla` se tragaría
  * `/:o/ordenes` como si «ordenes» fuera el nombre de una tabla. */
+/** LA EMPRESA (0.62.0): nombre, RFC, moneda y día de conciliación.
+ *
+ *  Mike, 1-oct: «Sólo es una empresa/negocio todo». Esto es lo que las
+ *  pantallas leen y editan en vez de `negocios`. Hoy es una fachada sobre
+ *  el registro de la empresa (negocioDeLaEmpresa); cuando la tabla
+ *  `negocios` se vaya (fase D), aquí mismo vive la tabla `empresa` y las
+ *  apps no notan el cambio. GET lo abre quien es de la empresa o su
+ *  personal; PATCH, quien la dirige. */
+async function empresaDe(c: Ctx): Promise<Record<string, unknown>> {
+  const id = await negocioDeLaEmpresa(c);
+  const n = (await stub(c).obtener('negocios', id)) ?? {};
+  return {
+    id, nombre: String(n.nombre ?? ''), rfc: (n.rfc as string | null) ?? null,
+    moneda: String(n.moneda ?? 'MXN'), dia_conciliacion: Number(n.dia_conciliacion ?? 1),
+  };
+}
+
+rutas.get('/:o/empresa', async (c) => {
+  if (c.get('quien').clase === 'cliente') return err(c, 'sin_permiso', 403, { motivo: 'un cliente solo abre /peek' });
+  return ok(c, await empresaDe(c));
+});
+
+rutas.patch('/:o/empresa', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro' || (quien.rol !== 'owner' && quien.rol !== 'admin')) {
+    return err(c, 'sin_permiso', 403, { motivo: 'los datos de la empresa los cambia quien la dirige' });
+  }
+  const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const datos: Record<string, unknown> = {};
+  if (b.nombre !== undefined) {
+    const nombre = String(b.nombre).trim();
+    if (!nombre) return err(c, 'datos_invalidos', 400, { falta: 'nombre' });
+    datos.nombre = nombre;
+  }
+  if (b.rfc !== undefined) datos.rfc = b.rfc === null || String(b.rfc).trim() === '' ? null : String(b.rfc).trim().toUpperCase();
+  if (b.moneda !== undefined) {
+    if (b.moneda !== 'MXN' && b.moneda !== 'USD') return err(c, 'datos_invalidos', 400, { campo: 'moneda', permitidas: ['MXN', 'USD'] });
+    datos.moneda = b.moneda;
+  }
+  if (b.dia_conciliacion !== undefined) {
+    const dia = Number(b.dia_conciliacion);
+    if (!Number.isInteger(dia) || dia < 0 || dia > 6) return err(c, 'datos_invalidos', 400, { campo: 'dia_conciliacion', regla: '0 domingo … 6 sábado' });
+    datos.dia_conciliacion = dia;
+  }
+  if (Object.keys(datos).length) await stub(c).actualizar('negocios', await negocioDeLaEmpresa(c), datos);
+  return ok(c, await empresaDe(c));
+});
+
 montarOrdenes(rutas);
 montarObras(rutas);
 montarNomina(rutas);
