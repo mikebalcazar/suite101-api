@@ -17,7 +17,15 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.57.0 (ACCIONISTAS Y RETIROS DE UTILIDADES. Mike,
+ * Versión del contrato: 0.58.0 (EL EGRESO SABE SU PARTIDA. Mike, 1-oct, en
+ * HOLCIM: «estos compromisos están pendientes pero son órdenes de compra ya
+ * pagadas». Migración org 0026: `movimientos.partida_id`; al pagar una orden
+ * el egreso lleva la partida, y lo pagado de una partida son sus egresos
+ * por partida más los del proyecto a nombre de su proveedor sin otra
+ * partida. La migración rellena lo ya pagado y vuelve a sumar las partidas.
+ * `partida_id` es filtro de GET /movimientos.)
+ *
+ * Antes, 0.57.0 (ACCIONISTAS Y RETIROS DE UTILIDADES. Mike,
  * 30-sep: «un módulo de accionistas donde se registren pagos a los
  * accionistas como retiro de utilidades». Migración org 0025: tabla
  * `accionistas` (negocio_id, nombre, rfc, correo, telefono, porcentaje,
@@ -860,7 +868,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.57.0';
+export const VERSION_CONTRATO = '0.58.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1425,6 +1433,9 @@ export interface Movimiento {
   cuenta_id: string;
   proyecto_id: string | null;
   item_id: string | null;
+  /** 0026 (0.58.0): de qué partida del proyecto es este egreso. Lo pone la
+   *  API al pagar una orden; lo pagado de la partida se suma por aquí. */
+  partida_id: string | null;
   /** `accionista` desde 0.57.0: un retiro de utilidades. */
   contraparte_tipo: 'cliente' | 'proveedor' | 'personal' | 'accionista' | 'otro';
   contraparte_id: string | null;

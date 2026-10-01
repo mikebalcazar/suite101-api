@@ -211,7 +211,7 @@ export const DEFS: Record<Tabla, Def> = {
   movimientos: {
     cols: {
       ...IDENT, negocio_id: 'texto', tipo: 'texto', monto: 'dinero', fecha: 'texto', cuenta_id: 'texto',
-      proyecto_id: 'texto', item_id: 'texto', contraparte_tipo: 'texto', contraparte_id: 'texto',
+      proyecto_id: 'texto', item_id: 'texto', partida_id: 'texto', contraparte_tipo: 'texto', contraparte_id: 'texto',
       contraparte_nombre: 'texto', transfer_id: 'texto', descripcion: 'texto', categoria: 'texto', creado_por: 'texto',
       /* Fiscal (0009). No hay dos contabilidades: la fiscal es esta misma
        * lista filtrada por `facturado`. `tasa_iva` va en puntos base
@@ -227,7 +227,7 @@ export const DEFS: Record<Tabla, Def> = {
       requiere_factura: 'bool',
     },
     requeridos: ['negocio_id', 'tipo', 'monto', 'fecha', 'cuenta_id'],
-    filtros: ['negocio_id', 'proyecto_id', 'item_id', 'cuenta_id', 'tipo', 'facturado', 'requiere_factura'],
+    filtros: ['negocio_id', 'proyecto_id', 'item_id', 'partida_id', 'cuenta_id', 'tipo', 'facturado', 'requiere_factura'],
     orden: 'fecha',
     fecha: 'fecha',
   },
