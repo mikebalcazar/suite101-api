@@ -402,6 +402,13 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   columnas + tabla `empresa` de un renglón + limpieza de API, dash101,
   master101, mocks de workshop101/t101-portal → la org demo de staging a
   un solo registro. Muro 2026-10-01-1930.
+- **quell101: el plano pegado y la nota que pregunta (1-oct, #97 y #98).**
+  El cuadro «Subir» de DocsItem.jsx toma un PDF o imagen del portapapeles
+  (paste en el documento mientras está abierto) o del arrastre encima;
+  pegar.js `planoDe` / `nombreDePlanoPegado` (la bitácora sigue sin aceptar
+  PDF a propósito). `borraMarca` pregunta con confirm antes de pedirle a
+  la API, con el texto de la nota. Pruebas el-plano-pegado.mjs (20) y
+  la-nota-pregunta.mjs (6). Huella 6f9f3de. Muro 2026-10-01-2000.
 - **El punchlist a lo ancho (1-oct, quell101 #96).** `.pend` y `.proc` a
   secas se le pegaban a `.pi.pend` / `.pi.proc` (120px a la derecha).
   Quedan `.lrow .pend` y `.barproc .proc`. Lo que hay que no romper: los
