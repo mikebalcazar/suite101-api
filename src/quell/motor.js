@@ -155,18 +155,41 @@ async function invitaCliente(env, req, quien, obras) {
   catch (e) { return { ok: false, error: String(e.message || e) }; }
 }
 
+// El correo al cliente con sus puntos por definir, armado aparte para poder
+// medirlo. Mike, 1-oct-2026: «quiero que en el correo venga el texto de la
+// duda y abajo un link que diga "responder" y te mande a la url necesaria
+// para responder. Obvio logueándote con tu cuenta de cliente». Cada punto va
+// con su pieza (código y nombre) si la tiene, y la liga lleva a la lista de
+// puntos de la obra: `#/p/OBRA/dudas`. quell101 pide la cuenta al entrar y
+// conserva la liga, así que después de entrar cae justo ahí.
+const escapaHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+export function correoDePuntos({ sitio, quien, obra, dudas }) {
+  const cuantos = dudas.length;
+  const liga = `${sitio}/#/p/${obra.id}/dudas`;
+  const lista = dudas.map((d) => `
+      <li style="margin:0 0 10px 0">
+        ${d.pieza ? `<div style="font-size:12px;color:#666">${escapaHtml(d.pieza)}</div>` : ''}
+        <div>${escapaHtml(d.texto)}</div>
+      </li>`).join('');
+  const html = `
+    <p>Hola${quien.name ? ' ' + escapaHtml(quien.name) : ''},</p>
+    <p>En tu obra <b>${escapaHtml(obra.name)}</b> hay <b>${cuantos} ${cuantos === 1 ? 'punto' : 'puntos'} por definir</b>.
+       El taller necesita tu respuesta para seguir.</p>
+    <ol style="padding-left:20px">${lista}
+    </ol>
+    <p style="margin:20px 0">
+      <a href="${liga}" style="display:inline-block;background:#1f1f1f;color:#fff;text-decoration:none;padding:10px 18px;border-radius:10px;font-weight:600">Responder</a>
+    </p>
+    <p style="font-size:12px;color:#666">Te pedirá tu correo y tu contraseña de cliente; al entrar caes directo en los puntos de esta obra.
+       Si algo no se entiende, ahí mismo puedes preguntar.</p>`;
+  return { asunto: `${cuantos} ${cuantos === 1 ? 'punto' : 'puntos'} por definir en ${obra.name}`, html, liga };
+}
+
 // El aviso al cliente de que tiene puntos por definir. Un solo correo, cuando
 // el taller aprieta el botón; nada automático por punto (decisión 8 de Mike).
-async function avisaCliente(env, req, quien, obra, cuantos) {
-  const sitio = env.SITIO;
-  const app = env.APP_NAME || 'quell101';
-  const html = `
-    <p>Hola${quien.name ? ' ' + quien.name : ''},</p>
-    <p>En tu obra <b>${obra.name}</b> hay <b>${cuantos} ${cuantos === 1 ? 'punto' : 'puntos'} por definir</b>.
-       El taller necesita tu respuesta para seguir.</p>
-    <p>Entra a <a href="${sitio}/#/p/${obra.id}">${sitio}</a> con tu correo y tu contraseña, abre la obra y
-       contesta sobre cada punto. Si algo no se entiende, ahí mismo puedes preguntar.</p>`;
-  try { await sendMail(env, quien.email, `${cuantos} ${cuantos === 1 ? 'punto' : 'puntos'} por definir en ${obra.name}`, html); return { ok: true }; }
+async function avisaCliente(env, req, quien, obra, dudas) {
+  const { asunto, html } = correoDePuntos({ sitio: env.SITIO, quien, obra, dudas });
+  try { await sendMail(env, quien.email, asunto, html); return { ok: true }; }
   catch (e) { return { ok: false, error: String(e.message || e) }; }
 }
 
@@ -804,18 +827,26 @@ export async function atender(req, env, url, path) {
       const b = await req.json().catch(() => ({}));
       if (await yaHecha(env, b.op_id)) return json({ ok: true, repetida: true });
       const obra = await env.DB.prepare(`SELECT id, name, client FROM quell_projects WHERE id = ?`).bind(pid).first();
-      const cuantos = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM quell_dudas WHERE project_id = ? AND para = 'cliente' AND estado = 'abierta'`).bind(pid).first())?.n || 0;
+      // Los puntos abiertos, con su pieza, en el orden en que se abrieron:
+      // son el cuerpo del correo (Mike, 1-oct: «que en el correo venga el
+      // texto de la duda»).
+      const { results: abiertas } = await env.DB.prepare(
+        `SELECT d.texto, e.code, e.name AS pieza_nombre FROM quell_dudas d LEFT JOIN quell_elements e ON e.id = d.element_id
+          WHERE d.project_id = ? AND d.para = 'cliente' AND d.estado = 'abierta' ORDER BY d.created_at ASC`).bind(pid).all();
+      const dudas = abiertas.map((d) => ({ texto: d.texto, pieza: d.code ? `${d.code}${d.pieza_nombre ? ' · ' + d.pieza_nombre : ''}` : null }));
+      const cuantos = dudas.length;
       if (!cuantos) return err('No hay puntos abiertos para el cliente en esta obra.', 400);
       const { results: clientes } = await env.DB.prepare(
         `SELECT u.id, u.email, u.name FROM quell_project_members pm JOIN quell_users u ON u.id = pm.user_id WHERE pm.project_id = ? AND pm.rol = 'cli' AND u.active = 1`).bind(pid).all();
       if (!clientes.length) return err('Esta obra no tiene cliente invitado. Invítalo desde la pantalla de inicio.', 400);
       let enviados = 0; const avisos = [];
       for (const c of clientes) {
-        const r = await avisaCliente(env, req, c, obra, cuantos);
+        const r = await avisaCliente(env, req, c, obra, dudas);
         if (r.ok) enviados++; else avisos.push(`${c.email}: ${r.error}`);
       }
       await apunta(env, b.op_id);
-      return json({ ok: true, puntos: cuantos, enviados, aviso: avisos.length ? avisos.join(' · ') : null });
+      const { liga } = correoDePuntos({ sitio: env.SITIO, quien: {}, obra, dudas });
+      return json({ ok: true, puntos: cuantos, enviados, aviso: avisos.length ? avisos.join(' · ') : null, liga, dudas });
     }
 
     // ----- dudas -----

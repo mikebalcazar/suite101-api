@@ -17,7 +17,14 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.59.0 (EL HISTORIAL DE LO PAGADO. Mike, 1-oct:
+ * Versión del contrato: 0.59.1 (EL CORREO DE LOS PUNTOS POR DEFINIR TRAE
+ * CADA PUNTO Y «RESPONDER». Mike, 1-oct: «que en el correo venga el texto
+ * de la duda y abajo un link que diga "responder" y te mande a la url
+ * necesaria para responder». `POST /orgs/:o/quell/projects/:p/avisar-cliente`
+ * manda cada punto abierto con su pieza y la liga `#/p/OBRA/dudas`, y
+ * contesta además `liga` y `dudas`.)
+ *
+ * Antes, 0.59.0 (EL HISTORIAL DE LO PAGADO. Mike, 1-oct:
  * «quiero ver en la pantalla de compras un historial completo de las
  * órdenes de compra ya pagadas». Nueva `GET /orgs/:o/ordenes/pagadas`
  * (quien paga): `{ filas, total }`, la más reciente arriba por `pagada_at`;
@@ -874,7 +881,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.59.0';
+export const VERSION_CONTRATO = '0.59.1';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

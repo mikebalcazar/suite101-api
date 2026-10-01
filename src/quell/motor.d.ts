@@ -42,3 +42,11 @@ export interface EntornoQuell {
 }
 
 export function atender(req: Request, env: EntornoQuell, url: URL, path: string): Promise<Response>;
+
+/** 0.59.1 · El correo al cliente con sus puntos por definir, armado aparte para medirlo. */
+export function correoDePuntos(args: {
+  sitio: string;
+  quien: { name?: string | null };
+  obra: { id: string; name: string };
+  dudas: Array<{ texto: string; pieza: string | null }>;
+}): { asunto: string; html: string; liga: string };
