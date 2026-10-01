@@ -402,6 +402,13 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   columnas + tabla `empresa` de un renglón + limpieza de API, dash101,
   master101, mocks de workshop101/t101-portal → la org demo de staging a
   un solo registro. Muro 2026-10-01-1930.
+- **DEFECTO: «pagado» por ítem con el tope de 500 (1-oct, dash101 #127).**
+  `partesDeProyectos()` pedía movimientos sin `limite`; pasando 500 los
+  viejos se caían y un ítem pagado salía en cero (la demo, 701 movimientos
+  tras la unión). REGLA: toda lectura de la que salga una suma va con
+  `limite: '5000'` o `listarCompleto`. Pruebas ajustadas por la unión:
+  #123, #125 (cuenta de pruebas, no la primera de la lista; saldos contra
+  la suma real), #126 (tsc antes de empujar). Muro 2026-10-01-2110.
 - **Quitar «negocio», fase D completa (1-oct tarde).** API 0.62.0 #196
   (GET/PATCH /orgs/:o/empresa, registrada antes de montarOrdenes) y
   0.62.1 #197 (POST /ordenes sin negocio_id: la ruta propia se había
