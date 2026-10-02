@@ -17,7 +17,14 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.64.0 (EL ALCANCE EN DOS ESTADOS. Mike, 2-oct:
+ * Versión del contrato: 0.64.1 (EL REQUERIMIENTO PENDIENTE ESTÁ FUERA DEL
+ * ALCANCE TAMBIÉN EN QUELL. Mike, 2-oct: «se genera como requerimiento
+ * (fuera de alcance) o como ítem (en alcance)». El motor de quell mandaba un
+ * requerimiento sin aprobar como 'dentro' —excepción del 22-sep— y la lista
+ * de fuera de alcance de la obra no lo enseñaba; ahora el `alcance` de cada
+ * pieza es exactamente `alcanceDeItem` de su ítem: vendido dentro, lo demás
+ * fuera, y sin ítem dentro). Antes:
+ * 0.64.0 (EL ALCANCE EN DOS ESTADOS. Mike, 2-oct:
  * «eliminar el estado de los ítems de "cancelado" y solo existirá "en
  * alcance" o "fuera de alcance" (…) no pasan a otra lista, regresan a fuera
  * de alcance, solo en la bitácora sí aparecerá como "se sacó del alcance" y
@@ -984,7 +991,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.64.0';
+export const VERSION_CONTRATO = '0.64.1';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

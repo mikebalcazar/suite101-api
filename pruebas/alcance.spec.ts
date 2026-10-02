@@ -401,9 +401,11 @@ describe('0.49.0 · el requerimiento nace como ítem y cae en el borrador de quo
     expect(item).toMatchObject({ proyecto_id: proyecto, estado: 'cotizado', tipo: 'requerimiento', monto: 0, cantidad: 1, alcance: 'fuera' });
     expect(item.clave, 'el mismo código que la pieza').toMatch(/^RQ-\d+$/);
     expect(await venta(), 'un cotizado no mueve la venta').toBe(v);
-    /* En el plano sigue DENTRO: un requerimiento pendiente no se esconde
-     * (Mike, 22-sep: «sí aparece en mapa»); su tipo ya dice lo que es. */
-    expect((await enPlano())['Barra de la cocina']).toBe('dentro');
+    /* En el plano va FUERA (0.64.1). Mike, 2-oct: «se genera como
+     * requerimiento (fuera de alcance)»; la lista de fuera de alcance de la
+     * obra lo enseña, y la pantalla pasa a «Todos» al levantarlo para que no
+     * se le pierda a quien lo clavó. */
+    expect((await enPlano())['Barra de la cocina']).toBe('fuera');
   });
 
   it('el borrador es UNO por proyecto y se llama «Requerimientos»: el segundo cae en el mismo', async () => {

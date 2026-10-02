@@ -774,16 +774,18 @@ describe('el requerimiento, que está en revisión', () => {
     expect(r.code).toBe('SV-01');
   });
 
-  it('SÍ sale en el plano y en la lista, como cualquier otro', async () => {
-    /* Ésta es la mitad que se pierde si alguien lo trata como un
-     * `no_aprobado`: aquéllos se esconden salvo en la vista de fuera de
-     * alcance. Un requerimiento no. */
+  it('viaja con los demás elementos del plano, marcado FUERA del alcance', async () => {
+    /* 0.64.1 · Mike, 2-oct: «se genera como requerimiento (fuera de
+     * alcance)». La API no lo esconde —viaja con todo lo demás— pero lo
+     * marca fuera, para que la vista de fuera de alcance de la obra lo
+     * enseñe. Esconderlo o no es de la pantalla, que al levantarlo pasa el
+     * filtro a «Todos». */
     const obra = await q('mike', `/projects/${obraA}`);
     expect(obra.estado).toBe(200);
     const suyo = obra.elements.find((e: any) => e.id === rq);
     expect(suyo, 'el requerimiento viaja con los demás elementos del plano').toBeTruthy();
     expect(suyo.type).toBe('Requerimiento');
-    expect(suyo.alcance ?? 'dentro', 'y no se esconde detrás del filtro de alcance').toBe('dentro');
+    expect(suyo.alcance, 'y la API lo marca fuera del alcance').toBe('fuera');
   });
 
   it('pero NO se le puede marcar una etapa: está pendiente de cotizarse y autorizarse', async () => {
