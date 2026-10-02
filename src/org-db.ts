@@ -41,6 +41,7 @@ import accionistas from '../migrations/org/0025_accionistas.sql';
 import movimientoPartida from '../migrations/org/0026_movimiento_partida.sql';
 import sinNegocios from '../migrations/org/0027_sin_negocios.sql';
 import alcanceDosEstados from '../migrations/org/0028_alcance_dos_estados.sql';
+import planoGirado from '../migrations/org/0029_plano_girado_y_sustituido.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { PREFIJOS, siguienteCodigo } from './quell/codigos.js';
 
@@ -67,7 +68,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado];
 
 /** La 0027 no es SQL: corre en código (`quitarNegocios`), porque lo que hace
  *  depende de lo que haya en la base. `migrar()` la reconoce por su lugar en
