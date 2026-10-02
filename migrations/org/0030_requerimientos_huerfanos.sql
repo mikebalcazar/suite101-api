@@ -1,0 +1,19 @@
+-- OrgDB v30 — los requerimientos del plano que se quedaron sin ítem.
+--
+-- Mike, 2-oct-2026: «los requerimientos levantados en quell son ítems no
+-- aprobados (…) tienen que aparecer en la lista de quote de ítems
+-- pendientes. Ahorita hay unos requerimientos del Depto Bosques de Santa Fe
+-- que no aparecen».
+--
+-- Un requerimiento nace como ítem cotizado SÓLO si la obra ya estaba ligada
+-- a un proyecto cuando se levantó (0.49.0, 29-sep). Los que se levantaron
+-- antes de ligar —o antes del 29-sep— se quedaron como pin sin ítem, y sin
+-- ítem no hay nada que quote101 pueda enseñar.
+--
+-- ESTA MIGRACIÓN CORRE EN CÓDIGO: OrgDB.levantarRequerimientosHuerfanos()
+-- (src/org-db.ts). Por cada pieza del plano de tipo requerimiento sin
+-- `item_id` cuya obra esté ligada a un proyecto, nace su ítem cotizado y su
+-- renglón en el borrador «Requerimientos» de quote101, igual que si se
+-- levantara hoy. Las obras sin ligar no se tocan: se reparan al ligarlas.
+-- El archivo existe para que la lista de migraciones siga siendo una por
+-- archivo y la cuenta de versiones no cambie de regla.

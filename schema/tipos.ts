@@ -17,7 +17,17 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.64.1 (EL REQUERIMIENTO PENDIENTE ESTÁ FUERA DEL
+ * Versión del contrato: 0.64.2 (LOS REQUERIMIENTOS SIN ÍTEM. Mike, 2-oct:
+ * «los requerimientos levantados en quell (…) tienen que aparecer en la
+ * lista de quote de ítems pendientes. Ahorita hay unos requerimientos del
+ * Depto Bosques de Santa Fe que no aparecen». Un requerimiento levantado
+ * antes de ligar la obra —o antes del 29-sep— era un pin sin ítem. Ahora:
+ * al ligar la obra (`POST /obras/:id/ligar`) nacen los ítems de sus
+ * requerimientos huérfanos; la migración 0030 del OrgDB los repara en las
+ * obras ya ligadas; y «traer del plano» (`POST /obras/:id/items` con
+ * `crear`) levanta un requerimiento como requerimiento, con su renglón en
+ * el borrador de quote101, en vez de como pieza cotizada suelta). Antes:
+ * 0.64.1 (EL REQUERIMIENTO PENDIENTE ESTÁ FUERA DEL
  * ALCANCE TAMBIÉN EN QUELL. Mike, 2-oct: «se genera como requerimiento
  * (fuera de alcance) o como ítem (en alcance)». El motor de quell mandaba un
  * requerimiento sin aprobar como 'dentro' —excepción del 22-sep— y la lista
@@ -991,7 +1001,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.64.1';
+export const VERSION_CONTRATO = '0.64.2';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

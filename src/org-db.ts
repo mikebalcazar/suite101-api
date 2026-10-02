@@ -42,8 +42,9 @@ import movimientoPartida from '../migrations/org/0026_movimiento_partida.sql';
 import sinNegocios from '../migrations/org/0027_sin_negocios.sql';
 import alcanceDosEstados from '../migrations/org/0028_alcance_dos_estados.sql';
 import planoGirado from '../migrations/org/0029_plano_girado_y_sustituido.sql';
+import requerimientosHuerfanos from '../migrations/org/0030_requerimientos_huerfanos.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
-import { PREFIJOS, siguienteCodigo } from './quell/codigos.js';
+import { PREFIJOS, esRequerimiento, siguienteCodigo } from './quell/codigos.js';
 
 /** El tipo del ítem (minúsculas, como lo guarda `items.tipo`) dicho como lo
  *  escribe quell en `quell_elements.type`, que es lo que decide el prefijo
@@ -68,12 +69,15 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos];
 
-/** La 0027 no es SQL: corre en código (`quitarNegocios`), porque lo que hace
- *  depende de lo que haya en la base. `migrar()` la reconoce por su lugar en
- *  la lista; el archivo .sql es sólo la nota que lo dice. */
-const EN_CODIGO: Record<number, 'quitarNegocios'> = { [MIGRACIONES.indexOf(sinNegocios)]: 'quitarNegocios' };
+/** La 0027 y la 0030 no son SQL: corren en código, porque lo que hacen
+ *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
+ *  en la lista; el archivo .sql es sólo la nota que lo dice. */
+const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos'> = {
+  [MIGRACIONES.indexOf(sinNegocios)]: 'quitarNegocios',
+  [MIGRACIONES.indexOf(requerimientosHuerfanos)]: 'migrarRequerimientosHuerfanos',
+};
 
 /** La tabla `empresa` (0027): UN renglón, con id fijo, que es lo que antes
  *  era «el negocio». Se exporta para que `esquema.spec.ts` la lea de aquí y
@@ -342,7 +346,8 @@ export interface ApiOrgDB {
   obras(args?: { sueltas?: boolean }): Promise<Fila[]>;
   obraDeProyecto(proyecto_id: string): Promise<Fila | null>;
   sinUbicar(obra_id: string): Promise<{ obra: Fila; items: Fila[] } | { error: string; detalle?: unknown }>;
-  ligarObra(obra_id: string, proyecto_id: string): Promise<{ ok: true; obra: Fila } | { error: string; detalle?: unknown }>;
+  ligarObra(obra_id: string, proyecto_id: string, usuario_id?: string): Promise<{ ok: true; obra: Fila } | { error: string; detalle?: unknown }>;
+  levantarRequerimientosHuerfanos(obra_id?: string | null, usuario_id?: string): Promise<number>;
   itemsDeLaObra(obra_id: string): Promise<{ obra: Fila; parejas: Fila[]; nuevos: Fila[]; sueltos: Fila[]; candidatos: Fila[] } | { error: string; detalle?: unknown }>;
   rayas(): Promise<Fila[]>;
   raya(id: string): Promise<{ raya: Fila; pagos: Fila[] } | null>;
@@ -3003,7 +3008,7 @@ export class OrgDB extends DurableObject<Env> {
    *  OTRO: una obra con dos proyectos, o un proyecto con dos obras, deja «el
    *  avance del proyecto» con dos respuestas ciertas al mismo tiempo. Ligar
    *  lo que ya estaba ligado igual no es un error: contesta lo mismo. */
-  ligarObra(obra_id: string, proyecto_id: string): { ok: true; obra: Fila } | { error: string; detalle?: unknown } {
+  ligarObra(obra_id: string, proyecto_id: string, usuario_id = 'sistema'): { ok: true; obra: Fila } | { error: string; detalle?: unknown } {
     const obra = this.sql.exec(`SELECT * FROM quell_projects WHERE id = ?`, obra_id).toArray()[0] as Fila | undefined;
     if (!obra) return { error: 'no_encontrado', detalle: { que: 'obra', id: obra_id } };
     const proyecto = this.sql.exec(`SELECT id FROM proyectos WHERE id = ?`, proyecto_id).toArray()[0] as Fila | undefined;
@@ -3020,7 +3025,44 @@ export class OrgDB extends DurableObject<Env> {
     }
 
     this.sql.exec(`UPDATE quell_projects SET proyecto_id = ? WHERE id = ?`, proyecto_id, obra_id);
+    /* 0.64.2 · Los requerimientos que se levantaron ANTES de ligar no tenían
+     * proyecto donde nacer como ítem; ahora sí. Mike, 2-oct: «tienen que
+     * aparecer en la lista de quote de ítems pendientes». */
+    this.levantarRequerimientosHuerfanos(obra_id, usuario_id);
     return { ok: true, obra: this.obras().find((o) => o.id === obra_id)! };
+  }
+
+  /** Los requerimientos del plano sin ítem, en obras ligadas: nace su ítem
+   *  cotizado y su renglón en el borrador de quote101, como si se levantaran
+   *  hoy (levantarRequerimiento). Con `obra_id` sólo esa obra; sin él, todas.
+   *  Idempotente: una pieza con ítem no se toca. Devuelve cuántos levantó. */
+  levantarRequerimientosHuerfanos(obra_id: string | null = null, usuario_id = 'sistema'): number {
+    const piezas = this.sql
+      .exec(
+        `SELECT e.id, e.project_id, e.code, e.name, e.padre_id
+           FROM quell_elements e JOIN quell_projects o ON o.id = e.project_id
+          WHERE e.item_id IS NULL AND o.proyecto_id IS NOT NULL
+            AND lower(trim(e.type)) = 'requerimiento'` + (obra_id ? ` AND e.project_id = ?` : '') + ` ORDER BY e.created_at, e.code`,
+        ...(obra_id ? [obra_id] : []),
+      )
+      .toArray() as Fila[];
+    let levantados = 0;
+    for (const pz of piezas) {
+      const padre = pz.padre_id
+        ? (this.sql.exec(`SELECT item_id FROM quell_elements WHERE id = ?`, String(pz.padre_id)).toArray()[0] as Fila | undefined)
+        : undefined;
+      const r = this.levantarRequerimiento({
+        element_id: String(pz.id), obra_id: String(pz.project_id), code: String(pz.code ?? ''), name: String(pz.name ?? ''),
+        usuario_id, padre_item_id: padre?.item_id ? String(padre.item_id) : null,
+      });
+      if (r.item_id) levantados++;
+    }
+    return levantados;
+  }
+
+  /** 0030, en código: repara las obras ya ligadas de la empresa. */
+  private migrarRequerimientosHuerfanos(): void {
+    this.levantarRequerimientosHuerfanos(null, 'migracion-0030');
   }
 
   /* ─────────────── los ítems, uno solo de los dos lados (§91) ───────────────
@@ -3341,6 +3383,17 @@ export class OrgDB extends DurableObject<Env> {
       const monto = Number.isFinite(Number(pide.monto)) && Number(pide.monto) > 0 ? Math.trunc(Number(pide.monto)) : 0;
       if (pide.monto !== undefined && !Number.isInteger(Number(pide.monto))) {
         return { error: 'dinero_no_entero', detalle: { element_id: eid, monto: pide.monto, motivo: 'el dinero va en centavos enteros' } };
+      }
+      /* 0.64.2 · Un requerimiento del plano sin precio es un requerimiento:
+       * nace con su tipo y cae en el borrador de quote101, no como una pieza
+       * cotizada cualquiera que quote101 no sabría de dónde salió. */
+      if (esRequerimiento(pz.type) && monto === 0) {
+        const r = this.levantarRequerimiento({
+          element_id: String(pz.id), obra_id, code: String(pz.code ?? ''), name: String(pide.nombre ?? '').trim() || String(pz.name ?? ''),
+          usuario_id: contexto.usuario_id, padre_item_id: null,
+        });
+        if (r.item_id) creados++;
+        continue;
       }
       const item = this.crear(
         'items',
