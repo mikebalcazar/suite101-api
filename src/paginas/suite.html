@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Suite 101</title>
+<meta name="description" content="Los programas de la suite 101: cuentas, obra, cotizaciones, compras, personal, cliente, equipo y el panel de la suite.">
+<meta name="robots" content="noindex">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* Identidad Taller 101: azul #0080C1 y Raleway, como la página de
+     licencias. Una sola hoja: ocho ligas, una por programa, y nada más. Se
+     ve igual a 390 px (una columna) que en una pantalla grande (cuadrícula). */
+  :root { --azul:#0080C1; --azul-texto:#0074ad; --tinta:#122733; --suave:#5b6b76; --linea:#dfe6ea; --fondo:#f4f7f9; }
+  * { box-sizing:border-box; }
+  html { -webkit-text-size-adjust:100%; }
+  body { margin:0; min-height:100vh; background:var(--fondo); color:var(--tinta);
+         font:400 16px/1.5 Raleway,system-ui,sans-serif; display:flex; flex-direction:column; }
+  main { width:100%; max-width:1080px; margin:0 auto; padding:28px 16px 40px; flex:1; }
+  header { display:flex; align-items:center; gap:14px; margin:0 0 6px; }
+  header svg { width:150px; height:auto; fill:var(--azul); flex:none; }
+  .intro { color:var(--suave); margin:0 0 24px; font-size:15px; }
+  .apps { display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:14px; }
+  .app { display:flex; flex-direction:column; gap:6px; padding:18px 18px 16px; background:#fff;
+         border:1px solid var(--linea); border-radius:14px; color:inherit; text-decoration:none;
+         transition:border-color .15s, transform .15s; }
+  .app:hover, .app:focus-visible { border-color:var(--azul); transform:translateY(-1px); outline:none; }
+  .app:focus-visible { box-shadow:0 0 0 3px rgba(0,128,193,.25); }
+  .nombre { font-size:24px; font-weight:800; letter-spacing:-.02em; line-height:1.1; }
+  .nombre b { color:var(--azul); font-weight:800; }
+  .que { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--azul-texto); }
+  .lema { font-size:15px; line-height:1.4; }
+  .liga { margin-top:auto; padding-top:8px; font-size:13px; color:var(--suave); }
+  footer { padding:16px; text-align:center; font-size:13px; color:var(--suave); }
+  @media (prefers-color-scheme: dark) {
+    :root { --tinta:#e8eef2; --suave:#a9c0ce; --linea:#2a3a46; --fondo:#0f1b24; }
+    .app { background:#16242e; }
+    header svg { fill:#3AA3DC; }
+    .nombre b, .que { color:#3AA3DC; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <svg viewBox="0 0 402.06 194.51" role="img" aria-label="Suite 101"><use href="#suite101"/></svg>
+  </header>
+  <p class="intro">Una misma cuenta abre todos los programas. Escoge a dónde vas.</p>
+  <nav class="apps" aria-label="Programas de la suite">
+    <a class="app" href="https://dash101.taller101.com" data-app="dash101">
+      <span class="nombre">dash<b>101</b></span>
+      <span class="que">Cuentas</span>
+      <span class="lema">El dinero del taller, en una sola pantalla: cuentas, proyectos, cobros y pagos.</span>
+      <span class="liga">dash101.taller101.com</span>
+    </a>
+    <a class="app" href="https://quell101.taller101.com" data-app="quell101">
+      <span class="nombre">quell<b>101</b></span>
+      <span class="que">Obra</span>
+      <span class="lema">La obra, mueble por mueble, sobre el plano: etapas, pendientes y dudas.</span>
+      <span class="liga">quell101.taller101.com</span>
+    </a>
+    <a class="app" href="https://quote101.taller101.com" data-app="quote101">
+      <span class="nombre">quote<b>101</b></span>
+      <span class="que">Cotizaciones</span>
+      <span class="lema">Del levantamiento de medidas a la propuesta firmada.</span>
+      <span class="liga">quote101.taller101.com</span>
+    </a>
+    <a class="app" href="https://supply101.taller101.com" data-app="supply101">
+      <span class="nombre">supply<b>101</b></span>
+      <span class="que">Compras</span>
+      <span class="lema">Pedir una compra o un reembolso desde el teléfono, con su foto, y ver cuándo se pagó.</span>
+      <span class="liga">supply101.taller101.com</span>
+    </a>
+    <a class="app" href="https://roster101.taller101.com" data-app="roster101">
+      <span class="nombre">roster<b>101</b></span>
+      <span class="que">Personal</span>
+      <span class="lema">El expediente laboral lo arma el propio trabajador, desde su celular.</span>
+      <span class="liga">roster101.taller101.com</span>
+    </a>
+    <a class="app" href="https://peek101.taller101.com" data-app="peek101">
+      <span class="nombre">peek<b>101</b></span>
+      <span class="que">Cliente</span>
+      <span class="lema">Lo que el cliente pregunta por teléfono, contestado sin llamada: su proyecto y su estado de cuenta.</span>
+      <span class="liga">peek101.taller101.com</span>
+    </a>
+    <a class="app" href="https://workshop101.taller101.com" data-app="workshop101">
+      <span class="nombre">workshop<b>101</b></span>
+      <span class="que">Equipo</span>
+      <span class="lema">Quién trabaja en la empresa, con qué rol y a qué programas entra.</span>
+      <span class="liga">workshop101.taller101.com</span>
+    </a>
+    <a class="app" href="https://master101.taller101.com" data-app="master101">
+      <span class="nombre">master<b>101</b></span>
+      <span class="que">Suite</span>
+      <span class="lema">El panel del dueño de la suite: empresas, programas y licencias.</span>
+      <span class="liga">master101.taller101.com</span>
+    </a>
+  </nav>
+</main>
+<footer>FORESPOT · Suite 101</footer>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="suite101" viewBox="126.69 208.74 402.06 194.51">
+<g transform="translate(0,351.34) scale(0.047783,-0.047783)"><path d="M2701.287734131386 50V270Q2876.287734131386 200 3105.287734131386 200Q3276.287734131386 200 3276.287734131386 310Q3276.287734131386 415 3161.287734131386 415H2971.287734131386Q2651.287734131386 415 2651.287734131386 730Q2651.287734131386 1060 3118.287734131386 1060Q3316.287734131386 1060 3491.287734131386 1000V780Q3316.287734131386 850 3111.287734131386 850Q2896.287734131386 850 2896.287734131386 740Q2896.287734131386 635 3021.287734131386 635H3191.287734131386Q3541.287734131386 635 3541.287734131386 320Q3541.287734131386 -10 3095.287734131386 -10Q2876.287734131386 -10 2701.287734131386 50ZM4568.8877341313855 1050V0H4361.8877341313855L4329.8877341313855 134Q4148.8877341313855 0 3945.887734131386 0Q3623.887734131386 0 3623.887734131386 381V1050H3888.887734131386V388Q3888.887734131386 214 4040.887734131386 214Q4169.8877341313855 214 4303.8877341313855 317V1050ZM4981.487734131386 1430V1220H4716.487734131386V1430ZM4981.487734131386 1050V0H4716.487734131386V1050ZM5114.087734131386 1220H5310.087734131386L5350.087734131386 1050H5614.087734131386V840H5379.087734131386V357Q5379.087734131386 210 5506.087734131386 210H5614.087734131386V0H5378.087734131386Q5114.087734131386 0 5114.087734131386 283ZM6134.687734131387 1050Q6612.687734131387 1050 6612.687734131387 562Q6612.687734131387 497 6603.687734131387 432H5906.687734131387Q5906.687734131387 210 6232.687734131387 210Q6391.687734131387 210 6550.687734131387 240V30Q6411.687734131387 0 6212.687734131387 0Q5641.687734131387 0 5641.687734131387 537Q5641.687734131387 1050 6134.687734131387 1050ZM5906.687734131387 616H6354.687734131387V624Q6354.687734131387 842 6134.687734131387 842Q5924.687734131387 842 5906.687734131387 616Z"/></g>
+<path fill-rule="evenodd" d="M431.49,208.74c-53.63,0-97.26,43.63-97.26,97.26,0,20.28,6.25,39.12,16.91,54.72h-224.45v6.52h229.32c17.85,21.95,45.05,36.01,75.48,36.01,53.63,0,97.26-43.63,97.26-97.26s-43.63-97.26-97.26-97.26ZM431.81,262.73c-26.11,0-39.16,14.87-39.16,44.62s13.05,44.38,39.16,44.38,38.48-14.79,38.48-44.38-12.83-44.62-38.48-44.62ZM431.81,337.61c-14.85,0-22.28-10.21-22.28-30.63s7.43-30.14,22.28-30.14,21.61,10.05,21.61,30.14-7.2,30.63-21.61,30.63ZM366.4,261.5h16.27v89.61h-16.27ZM479.98,261.19h16.27v89.61h-16.27Z"/>
+</symbol></svg>
+</body>
+</html>

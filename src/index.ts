@@ -16,6 +16,7 @@ import licencias, { paginaLicencia } from './rutas/licencias';
 import nube from './rutas/nube';
 import importar, { paginaImportar } from './rutas/importar';
 import roster from './rutas/roster';
+import { puertaDeLaSuite } from './portal';
 import { err, ok, type Vars } from './http';
 import type { Env } from './entorno';
 import { VERSION_CONTRATO } from '../schema/tipos';
@@ -58,6 +59,10 @@ app.use('*', async (c, next) => {
     c.res.headers.set('Vary', 'Origin');
   }
 });
+
+/* La puerta de la suite (suite101.taller101.com) va antes de la sesión: es
+ * una página pública con ligas, no necesita saber quién la abre. */
+app.use('*', puertaDeLaSuite);
 
 app.use('*', conSesion);
 
