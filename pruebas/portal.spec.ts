@@ -11,7 +11,9 @@ import { describe, expect, it } from 'vitest';
 import { DOMINIO_SUITE } from '../src/portal';
 
 const SUITE = `https://${DOMINIO_SUITE}`;
-const APPS = ['dash101', 'quell101', 'quote101', 'supply101', 'roster101', 'peek101', 'workshop101', 'master101'];
+/* Siete programas de la empresa. master101 NO va: es el panel del dueño de la
+ * suite y lo tiene sólo Mike (2-oct-2026). */
+const APPS = ['dash101', 'quell101', 'quote101', 'supply101', 'roster101', 'peek101', 'workshop101'];
 
 describe('la puerta de la suite', () => {
   it('la raíz es una página con una liga a cada uno de los ocho programas', async () => {
@@ -20,16 +22,31 @@ describe('la puerta de la suite', () => {
     expect(r.headers.get('Content-Type')).toMatch(/text\/html/);
     const html = await r.text();
     for (const app of APPS) {
-      expect(html, app).toContain(`href="https://${app}.taller101.com"`);
+      // roster101 manda al panel de la empresa, no al portal del trabajador.
+      const liga = app === 'roster101' ? 'https://roster101.taller101.com/admin' : `https://${app}.taller101.com`;
+      expect(html, app).toContain(`href="${liga}"`);
       expect(html, app).toContain(`data-app="${app}"`);
     }
     expect(html).toContain('Suite 101');
     expect(html).not.toMatch(/negocio/i);
+    expect(html, 'master101 es sólo de Mike').not.toContain('master101');
+  });
+
+  it('el portal de trabajadores va aparte, con su liga y el botón de compartirla', async () => {
+    const html = await (await SELF.fetch(`${SUITE}/`)).text();
+    expect(html).toContain('data-app="portal-trabajadores"');
+    expect(html).toContain('Portal de trabajadores');
+    expect(html).toContain('href="https://roster101.taller101.com"');
+    expect(html).toContain('data-compartir="https://roster101.taller101.com"');
+    expect(html).toContain('Compartir portal');
+    // En el celular, la hoja de compartir del sistema; si no, al portapapeles.
+    expect(html).toContain('navigator.share(');
+    expect(html).toContain('navigator.clipboard.writeText(');
   });
 
   it('cada liga lleva una línea que dice para qué sirve el programa', async () => {
     const html = await (await SELF.fetch(`${SUITE}/`)).text();
-    expect((html.match(/class="lema"/g) ?? []).length).toBe(APPS.length);
+    expect((html.match(/class="lema"/g) ?? []).length).toBe(APPS.length + 1);
   });
 
   it('trae su favicon y nada más: cualquier otra ruta es 404', async () => {
