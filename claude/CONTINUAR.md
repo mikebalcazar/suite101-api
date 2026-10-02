@@ -419,6 +419,15 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **dash101 ya no genera ítems (2-oct, dash101 #131; decisión de Mike con botones: «dash sólo lee»).**
+  Se fueron «Agregar» en «Editar la lista», «Ítem en esta partida» y el
+  «Precio de venta» del proyecto nuevo (la «regla 1»). Editar, quitar
+  (sacar del alcance) y revivir por id siguen. `createProyecto` ignora
+  `items`/`precio_venta`; `updateProyecto` rechaza completo un renglón sin
+  id (`DASH_NO_GENERA_ITEMS`). Las pruebas siembran ítems por la API con
+  `pruebas/sembrar.ts`. REGLA: un ítem nuevo se levanta en quell101 o se
+  cotiza en quote101, nunca desde dash101. Muro
+  `2026-10-02-1840-jr-dash-no-genera-items.md`.
 - **El requerimiento pendiente está fuera del alcance también en quell (2-oct, API 0.64.1 #215, bitacora-obra #104).**
   Mike: «Aún no queda la lista de ítems fuera de alcance en quell» + el
   flujo completo (quell/quote generan; dash lee, saca y mete; requerimiento
