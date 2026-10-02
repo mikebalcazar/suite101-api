@@ -5,6 +5,7 @@
 import type { Context } from 'hono';
 import type { App } from '../schema/tipos';
 import type { Env } from './entorno';
+import type { DominioResuelto } from './dominios';
 import type { TokenLicencia } from '../schema/tipos';
 import type { Miembro } from './maestro';
 
@@ -35,7 +36,12 @@ export interface Quien {
 /** `carga` es del enrutador de /nube: la app instalada no trae cookie de
  *  sesión, trae su token de licencia, y la puerta de /nube lo abre y lo deja
  *  aquí. Opcional porque en el resto de la API no existe. */
-export type Vars = { sesion: Sesion; app: App; quien: Quien; org_id: string; carga?: TokenLicencia };
+export type Vars = { sesion: Sesion; app: App; quien: Quien; org_id: string; carga?: TokenLicencia;
+  /** 2-oct · la empresa a la que pertenece el dominio por el que entró la
+   *  petición (cabecera X-Dominio-Empresa, que pone la puerta de las
+   *  empresas). Opcional: por api.taller101.com no existe. */
+  dominio?: DominioResuelto;
+};
 export type Ctx = Context<{ Bindings: Env; Variables: Vars }>;
 
 /* Se arma la Response a mano en vez de con c.json(): el tipado de Hono para el

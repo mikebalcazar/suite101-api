@@ -1198,6 +1198,9 @@ export interface Org {
   paga_hasta: string | null;
   origen_pago: OrigenPago;
   bienvenida_at: string | null;
+  /** 2-oct · el dominio propio de la empresa (acme.com), o null. De él salen
+   *  los nombres de sus apps: roster101.acme.com… (DOMINIOS.md). */
+  dominio: string | null;
   /** Lo que se calcula: `vigente` = activa y (cortesía o pagada al día). */
   vigente: boolean;
   estado: EstadoEmpresa;

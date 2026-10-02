@@ -1,0 +1,53 @@
+# La puerta de las empresas (2-oct-2026): el Worker que recibe TODO lo que entra
+# a la zona taller101.com y reparte lo que viene con dominio de empresa
+# (roster101.acme.com) al Worker de su app. Ver DOMINIOS.md y puerta/destino.ts.
+#
+# Se publica desde el mismo flujo que la API (desplegar.yml), con los mismos
+# secretos de Cloudflare. No tiene staging: los dominios de las empresas sólo
+# existen en producción.
+name = "suite101-puerta"
+main = "index.ts"
+compatibility_date = "2025-09-01"
+workers_dev = false
+
+# `*/*`: así lo pide Cloudflare for SaaS para que el tráfico de los custom
+# hostnames llegue a un Worker. Lo de *.taller101.com pasa tal cual (fetch).
+routes = [
+  { pattern = "*/*", zone_name = "taller101.com" }
+]
+
+[observability]
+enabled = true
+
+# Los Workers de cada app, por enlace de servicio. master101 no: ése es sólo de Mike.
+[[services]]
+binding = "API"
+service = "suite101-api"
+
+[[services]]
+binding = "DASH"
+service = "dash101"
+
+[[services]]
+binding = "QUELL"
+service = "bitacora-obra"
+
+[[services]]
+binding = "QUOTE"
+service = "quote101"
+
+[[services]]
+binding = "SUPPLY"
+service = "supply101"
+
+[[services]]
+binding = "ROSTER"
+service = "t101-portal"
+
+[[services]]
+binding = "PEEK"
+service = "peek101"
+
+[[services]]
+binding = "WORKSHOP"
+service = "workshop101"
