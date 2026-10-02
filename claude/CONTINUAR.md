@@ -402,6 +402,14 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   columnas + tabla `empresa` de un renglón + limpieza de API, dash101,
   master101, mocks de workshop101/t101-portal → la org demo de staging a
   un solo registro. Muro 2026-10-01-1930.
+- **La puerta de la suite: suite101.taller101.com (2-oct, API #204).**
+  Una hoja con el logotipo y ocho ligas (dash, quell, quote, supply,
+  roster, peek, workshop, master) servida por la API en un segundo
+  custom_domain (src/portal.ts antes de conSesion; src/paginas/suite.html;
+  en ese host `/` es la página, `/favicon.svg` y `/salud`, lo demás 404).
+  Para agregar una liga: la tarjeta en suite.html y APPS en
+  pruebas/portal.spec.ts. Las apps de escritorio no van. Muro
+  2026-10-02-0105.
 - **La demo de staging, resembrada limpia (1-oct, decisión de Mike).**
   DELETE /admin/orgs/demo → POST org con sus apps → los dos miembros
   (prueba.admin admin, socia socio; el guion NO los crea) →
