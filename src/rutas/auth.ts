@@ -28,6 +28,7 @@
  */
 
 import { Hono } from 'hono';
+import { origenDeEmpresa } from '../dominios';
 import {
   ahora, claveCoincide, cookie, correoValido, enSegundos, guardarClave, guardarPin, igualSeguro,
   normalizaCorreo, pinAceptable, pinCoincide, revisaClave, sha256, ulid, vencida,
@@ -252,7 +253,7 @@ rutas.post('/clave', async (c) => {
  * app (https://dash101.mike-929.workers.dev/login). Si es absoluta, su origen
  * tiene que estar en ORIGENES: es a donde se manda el boleto de entrada, y
  * mandarlo a cualquier sitio sería regalar sesiones. */
-function volverAPermitido(c: Ctx, volver_a: string): boolean {
+async function volverAPermitido(c: Ctx, volver_a: string): Promise<boolean> {
   if (!volver_a.startsWith('http')) return true;
   let origen: string;
   try {
@@ -261,7 +262,9 @@ function volverAPermitido(c: Ctx, volver_a: string): boolean {
     return false;
   }
   const permitidos = String(c.env.ORIGENES || '').split(',').map((s) => s.trim()).filter(Boolean);
-  return permitidos.includes('*') || permitidos.includes(origen);
+  if (permitidos.includes('*') || permitidos.includes(origen)) return true;
+  // 2-oct · la puerta de una empresa con dominio propio (dash101.acme.com).
+  return origenDeEmpresa(c.env, origen);
 }
 
 const VIDA_TICKET = 60; // segundos: lo que tarda un navegador en volver a la app
@@ -293,7 +296,7 @@ export function urlAutorizacionGoogle(env: Pick<Env, 'URL_PUBLICA' | 'GOOGLE_CLI
 
 rutas.get('/google', async (c) => {
   const volver_a = c.req.query('volver_a') || '/';
-  if (!volverAPermitido(c, volver_a)) return err(c, 'origen_no_permitido', 403, { volver_a });
+  if (!(await volverAPermitido(c, volver_a))) return err(c, 'origen_no_permitido', 403, { volver_a });
   if (!c.env.GOOGLE_CLIENT_ID || !c.env.GOOGLE_CLIENT_SECRET) return err(c, 'google_no_configurado', 501);
   return c.redirect(urlAutorizacionGoogle(c.env, c.req.url, volver_a).toString(), 302);
 });
@@ -337,7 +340,7 @@ rutas.get('/google/callback', async (c) => {
   // otro origen. Se le manda un boleto de un solo uso y ella lo canjea por
   // /s101/auth/canje, con lo que la cookie queda en su propio origen.
   if (volver_a.startsWith('http')) {
-    if (!volverAPermitido(c, volver_a)) return err(c, 'origen_no_permitido', 403, { volver_a });
+    if (!(await volverAPermitido(c, volver_a))) return err(c, 'origen_no_permitido', 403, { volver_a });
     const ticket = await emitirTicket(c.env, s.cookie);
     const u = new URL(volver_a);
     u.searchParams.set('entrada', ticket);
@@ -429,7 +432,13 @@ export async function yo(c: Ctx) {
   // Qué puede ofrecer la pantalla la próxima vez (contrato 0.7.0). Nunca los
   // hashes: sólo si existen.
   const secretos = await secretosDe(c.env, s.usuario_id);
-  return ok(c, { usuario, superadmin: soySuper, orgs: mias, acceso: acc, entro_con: s.como, ...secretos });
+  /* 2-oct · por el dominio de una empresa (dash101.acme.com) sólo se ve ESA
+   * empresa, también para el dueño de la suite: la pantalla abre directo la
+   * de la casa, sin escoger. `empresa` es para que la app se nombre. */
+  const dom = c.get('dominio');
+  const visibles = dom ? mias.filter((o) => o.id === dom.org_id) : mias;
+  const empresa = dom ? { id: dom.org_id, nombre: dom.nombre, dominio: dom.dominio, app: dom.app } : null;
+  return ok(c, { usuario, superadmin: soySuper, orgs: visibles, acceso: acc, entro_con: s.como, empresa, ...secretos });
 }
 
 /** Middleware: lee la sesión y la deja en el contexto. No exige nada: cada

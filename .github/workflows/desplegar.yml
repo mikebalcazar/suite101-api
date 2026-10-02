@@ -184,6 +184,23 @@ jobs:
           done
           echo "credenciales de Google puestas en produccion y en staging"
 
+      # 2-oct · el token de Cloudflare for SaaS, para dar de alta los nombres
+      # de las empresas con dominio propio (DOMINIOS.md). Mike lo pone como
+      # secreto del repositorio; sin el, la API publica igual y lo del dominio
+      # contesta 503 dominio_no_configurado.
+      - name: Poner el token de Cloudflare for SaaS en el Worker
+        env:
+          CLOUDFLARE_SAAS_TOKEN: ${{ secrets.CLOUDFLARE_SAAS_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_SAAS_TOKEN:-}" ]; then
+            echo "::warning::Sin CLOUDFLARE_SAAS_TOKEN. El dominio propio de las empresas contestara 503 dominio_no_configurado."
+            exit 0
+          fi
+          printf '%s' "$CLOUDFLARE_SAAS_TOKEN" | npx wrangler secret put CLOUDFLARE_SAAS_TOKEN
+          printf '%s' "$CLOUDFLARE_SAAS_TOKEN" | npx wrangler secret put CLOUDFLARE_SAAS_TOKEN --env staging
+          echo "token de Cloudflare for SaaS puesto en produccion y en staging"
+
       - name: Publicar
         id: publicar
         run: |

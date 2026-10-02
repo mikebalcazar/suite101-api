@@ -45,6 +45,14 @@ export interface Env {
   /** El remitente de los correos de roster101 cuando el Worker de la empresa
    *  no manda el suyo (códigos y confirmaciones del trabajador). */
   CORREO_ROSTER?: string;
+  /** El token de Cloudflare para dar de alta los nombres de las empresas
+   *  (custom hostnames de la zona). Lo pone Mike como secreto del
+   *  repositorio; el despliegue lo lleva al Worker. Sin él, lo del dominio
+   *  propio contesta 503 dominio_no_configurado (DOMINIOS.md). */
+  CLOUDFLARE_SAAS_TOKEN?: string;
+  /** La zona de Cloudflare for SaaS y su registro de respaldo (wrangler.toml). */
+  ZONA_SAAS?: string;
+  RESPALDO_SAAS?: string;
 
   ENTORNO: string; // 'produccion' | 'staging' | 'prueba'
   ORIGENES: string; // CSV de orígenes con permiso de CORS

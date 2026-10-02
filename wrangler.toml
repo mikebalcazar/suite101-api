@@ -96,6 +96,11 @@ URL_PANEL_DIRECTOR = "https://workshop101.taller101.com"
 URL_SUPPLY = "https://supply101.taller101.com"
 CORREO_QUELL = "quell101 <bitacora@envios.taller101.mx>"
 CORREO_ROSTER = "roster101 <expedientes@envios.taller101.mx>"
+# El dominio propio de cada empresa (DOMINIOS.md): la zona de Cloudflare for
+# SaaS y el registro de respaldo al que cada empresa apunta sus CNAME. El token
+# (CLOUDFLARE_SAAS_TOKEN) es secreto y lo pone el despliegue.
+ZONA_SAAS = "taller101.com"
+RESPALDO_SAAS = "empresas.taller101.com"
 
 # ─────────────── staging ───────────────
 # Mismo codigo, otra base y otro bucket. Aqui ENTORNO no es "produccion", asi
@@ -146,3 +151,8 @@ URL_PANEL_DIRECTOR = "https://workshop101-staging.mike-929.workers.dev"
 URL_SUPPLY = "https://supply101-staging.mike-929.workers.dev"
 CORREO_QUELL = "quell101 <bitacora@envios.taller101.mx>"
 CORREO_ROSTER = "roster101 <expedientes@envios.taller101.mx>"
+# El dominio propio de cada empresa (DOMINIOS.md): la zona de Cloudflare for
+# SaaS y el registro de respaldo al que cada empresa apunta sus CNAME. El token
+# (CLOUDFLARE_SAAS_TOKEN) es secreto y lo pone el despliegue.
+ZONA_SAAS = "taller101.com"
+RESPALDO_SAAS = "empresas.taller101.com"

@@ -17,6 +17,7 @@ import nube from './rutas/nube';
 import importar, { paginaImportar } from './rutas/importar';
 import roster from './rutas/roster';
 import { puertaDeLaSuite } from './portal';
+import { resolverHost } from './dominios';
 import { err, ok, type Vars } from './http';
 import type { Env } from './entorno';
 import { VERSION_CONTRATO } from '../schema/tipos';
@@ -60,9 +61,37 @@ app.use('*', async (c, next) => {
   }
 });
 
+/* 2-oct · la empresa del dominio. La puerta de las empresas (puerta/) recibe
+ * roster101.acme.com, averigua de quién es y lo reenvía a la app con
+ * `X-Dominio-Empresa: acme.com` y `X-Host-Original`. Aquí se vuelve a
+ * resolver —no se confía en la cabecera para nada que abra puertas: sólo
+ * ACOTA (la sesión ve esa empresa y nada más) y da el nombre para la
+ * portada—. Quien mande la cabecera a mano a api.taller101.com no gana nada
+ * que no tuviera. */
+app.use('*', async (c, next) => {
+  const dominio = c.req.header('X-Dominio-Empresa');
+  const host = c.req.header('X-Host-Original');
+  if (dominio && host) {
+    const r = await resolverHost(c.env, host);
+    if (r && r.dominio === dominio.trim().toLowerCase()) c.set('dominio', r);
+  }
+  await next();
+});
+
 /* La puerta de la suite (suite101.taller101.com) va antes de la sesión: es
  * una página pública con ligas, no necesita saber quién la abre. */
 app.use('*', puertaDeLaSuite);
+
+/** GET /dominios/resolver?host=roster101.acme.com — para la puerta de las
+ *  empresas: de quién es ese host y a qué app va. Público y sin nada que no
+ *  esté ya en el propio nombre: la empresa y su nombre comercial. */
+app.get('/dominios/resolver', async (c) => {
+  const host = c.req.query('host') || '';
+  const r = await resolverHost(c.env, host);
+  if (!r) return err(c, 'dominio_desconocido', 404, { host });
+  if (!r.activa) return err(c, 'org_inactiva', 403, { host });
+  return ok(c, { org_id: r.org_id, nombre: r.nombre, dominio: r.dominio, app: r.app });
+});
 
 app.use('*', conSesion);
 

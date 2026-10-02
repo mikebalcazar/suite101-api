@@ -402,6 +402,34 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   columnas + tabla `empresa` de un renglón + limpieza de API, dash101,
   master101, mocks de workshop101/t101-portal → la org demo de staging a
   un solo registro. Muro 2026-10-01-1930.
+- **quell101: el plano se gira y se sustituye; quote101: «Ítems pendientes» y agrupar arrastrando (2-oct, API #209, quell #101, quote #73).**
+  OrgDB 0029: `quell_plans.rotation` y `versiones`; `POST /plans/:id/sustituir`
+  (mismo plano, otra hoja, piezas intactas). quell101 sube con vista previa y
+  giro ↺ ↻; la capa nítida gira igual. quote101: liga «Ítems pendientes (n)»
+  bajo «+ Nueva cotización», modal con selección múltiple a una cotización
+  nueva o a un borrador; arrastrar un renglón sobre otro los agrupa
+  (`item_ids`) y al aprobar va una línea por ítem. Muro
+  `2026-10-02-0237-jr-plano-girado-sustituido-e-items-pendientes.md`.
+- **El alcance en dos estados —dentro o fuera— con su bitácora (2-oct, API 0.64.0 #208, dash101 #128/#129, quell101 #100).**
+  Se fue «cancelado»: `AlcanceItem` es 'dentro' | 'fuera'; sacar regresa el
+  ítem a cotizado con `cancelado_at`; la tabla `alcance_movimientos` (0028)
+  lleva entra/sale con quién, app y motivo, y la escribe toda puerta que
+  mueva el estado. `GET /items/:id/alcance`. dash101: una pestaña «Fuera de
+  alcance» con bitácora por ítem; quell101: filtro en dos y bitácora en el
+  panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
+  'cancelado'` y se cayó en staging (#129 la arregló). Muro
+  `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **Dominio propio por empresa (2-oct, en curso: rama `claude/dominio-propio` de la API).**
+  Mike decidió «dominio propio con alta automática» (Cloudflare for SaaS);
+  sus pasos están en `DOMINIOS.md`. Lo construido: migración D1 0022
+  (`orgs.dominio`, `dominios_nombres`), `src/dominios.ts` (ocho nombres,
+  cliente de Cloudflare con doble en pruebas, resolvedor), rutas de master101
+  (PATCH dominio, GET/DELETE /admin/orgs/:o/dominio), `/dominios/resolver`,
+  /yo acotado al dominio, 403 `otra_empresa`, portada por empresa, y el
+  Worker `puerta/` (ruta comodín de la zona, service bindings a las ocho
+  apps). PENDIENTE: que Mike haga sus pasos (token), mezclar, y la fase B:
+  dash101 (NEXT_PUBLIC_ORG), quell101 (ORG_ID) y t101-portal (ORG_ID) toman
+  la empresa de `X-Org-Empresa`, porque hoy son un Worker por empresa.
 - **La puerta ajustada y compartir archivos en quell101 (2-oct, API #206 y bitacora-obra #99).**
   En la puerta, roster101 lleva al panel de la empresa (/admin), master101
   ya no sale, y hay un bloque «Portal de trabajadores» con el botón

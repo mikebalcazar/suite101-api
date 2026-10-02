@@ -150,6 +150,7 @@ interface FilaOrg {
   razon_social: string | null; rfc: string | null; telefono: string | null;
   director_correo: string | null; director_nombre: string | null; director_telefono: string | null;
   cortesia: number; paga_hasta: string | null; origen_pago: string; bienvenida_at: string | null;
+  dominio?: string | null;
 }
 
 const hoy = (): string => ahora().slice(0, 10);
@@ -164,6 +165,7 @@ export const estadoEmpresa = (f: { activa: number | boolean; cortesia: number | 
 
 const armaOrg = (f: FilaOrg): Org => ({
   ...f,
+  dominio: f.dominio ?? null,
   activa: !!f.activa,
   apps: JSON.parse(f.apps || '{}'),
   razon_social: f.razon_social ?? null,

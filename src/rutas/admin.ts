@@ -18,6 +18,7 @@ import {
   superadmins, ultimasEntradasDe, usuarioPorId,
 } from '../maestro';
 import { correoValido, normalizaCorreo } from '../lib';
+import { cloudflareDe, darDeAltaNombres, dominioLimpio, olvidarDominio, quitarNombres, refrescarNombres, nombresDeLaOrg } from '../dominios';
 import { correoBienvenida, enviarCorreo } from '../auth/correo';
 import { LLAVE_APP, APPS } from '../../schema/tipos';
 import type { Org } from '../../schema/tipos';
@@ -129,6 +130,7 @@ rutas.post('/orgs', async (c) => {
     razon_social?: string; rfc?: string; telefono?: string;
     director?: { correo?: string; nombre?: string; telefono?: string };
     cortesia?: boolean; paga_hasta?: string | null;
+    dominio?: string | null;
   }>().catch(() => ({}) as never);
   const id = String(cuerpo.id || '').trim().toLowerCase();
   if (!/^[a-z0-9-]{2,40}$/.test(id)) return err(c, 'datos_invalidos', 400, { id: 'slug de a-z, 0-9 y guiones' });
@@ -159,8 +161,79 @@ rutas.post('/orgs', async (c) => {
     director = { usuario_id: usuario.id, correo: directorCorreo, rol: 'owner' };
     bienvenida = await mandarBienvenida(c, nueva, directorCorreo, texto(cuerpo.director?.nombre));
   }
+  /* 2-oct · el dominio propio, desde el alta (Mike: «cuando abra una nueva
+   * empresa, quiero poder poner su dominio»). Si falla —token sin poner, un
+   * dominio que no tiene forma— la empresa YA quedó creada y se dice en
+   * `dominio_aviso`, en vez de deshacer el alta por un CNAME. */
+  let dominio_aviso: string | null = null;
+  if (cuerpo.dominio) {
+    const r = await cambiarDominio(c, (await org(c.env, id))!, cuerpo.dominio);
+    if ('error' in r) dominio_aviso = `${r.error}${r.detalle ? ': ' + JSON.stringify(r.detalle) : ''}`;
+  }
   const conTodo = (await org(c.env, id))!;
-  return ok(c, { org: conTodo, org_db_version: version, director, bienvenida }, 201);
+  return ok(c, { org: conTodo, org_db_version: version, director, bienvenida, dominio_aviso }, 201);
+});
+
+/* ─────────────── el dominio propio de la empresa (2-oct) ───────────────
+ *
+ * Mike: «poder poner su dominio en la plataforma (desde master101) y que al
+ * abrirla les abra sus portales personalizados (ej. roster101.dominioempresa.com)».
+ * De `orgs.dominio` salen ocho nombres, uno por app, que se dan de alta en
+ * Cloudflare como custom hostnames de la zona (DOMINIOS.md). master101 no.
+ */
+
+type ResultadoDominio = { ok: true; org: Org } | { error: string; estado: number; detalle?: Record<string, unknown> };
+
+async function cambiarDominio(c: Ctx, antes: Org, pedido: string | null): Promise<ResultadoDominio> {
+  const cf = cloudflareDe(c.env);
+  if (pedido === null || String(pedido).trim() === '') {
+    await quitarNombres(c.env, cf, antes.id);
+    await c.env.MASTER.prepare(`UPDATE orgs SET dominio = NULL WHERE id = ?`).bind(antes.id).run();
+    olvidarDominio(antes.dominio);
+    if (antes.dominio) await apuntaAdmin(c.env, { quien: quien(c), org_id: antes.id, campo: 'dominio', antes: antes.dominio, despues: null });
+    return { ok: true, org: (await org(c.env, antes.id))! };
+  }
+  const d = dominioLimpio(pedido);
+  if (!d) return { error: 'datos_invalidos', estado: 400, detalle: { dominio: 'no tiene forma de dominio (acme.com), o es nuestro' } };
+  const ocupado = await c.env.MASTER.prepare(`SELECT id FROM orgs WHERE dominio = ? AND id <> ?`).bind(d, antes.id).first<{ id: string }>();
+  if (ocupado) return { error: 'dominio_en_uso', estado: 409, detalle: { dominio: d, empresa: ocupado.id } };
+  if (!cf) return { error: 'dominio_no_configurado', estado: 503, detalle: { falta: 'CLOUDFLARE_SAAS_TOKEN en el Worker; ver DOMINIOS.md' } };
+  if (antes.dominio && antes.dominio !== d) await quitarNombres(c.env, cf, antes.id);
+  await c.env.MASTER.prepare(`UPDATE orgs SET dominio = ? WHERE id = ?`).bind(d, antes.id).run();
+  olvidarDominio(antes.dominio); olvidarDominio(d);
+  await darDeAltaNombres(c.env, cf, antes.id, d);
+  if (antes.dominio !== d) await apuntaAdmin(c.env, { quien: quien(c), org_id: antes.id, campo: 'dominio', antes: antes.dominio, despues: d });
+  return { ok: true, org: (await org(c.env, antes.id))! };
+}
+
+/** GET /admin/orgs/:o/dominio — el dominio, sus ocho nombres con su estado
+ *  (vuelto a preguntar a Cloudflare los que no están activos) y lo que la
+ *  empresa tiene que poner en su DNS. */
+rutas.get('/orgs/:o/dominio', async (c) => {
+  if (!(await soySuper(c))) return err(c, 'sin_permiso', 403);
+  const o = await org(c.env, c.req.param('o')!);
+  if (!o) return err(c, 'org_desconocida', 404);
+  const cf = cloudflareDe(c.env);
+  const nombres = o.dominio && cf ? await refrescarNombres(c.env, cf, o.id) : await nombresDeLaOrg(c.env, o.id);
+  const respaldo = c.env.RESPALDO_SAAS || 'empresas.taller101.com';
+  return ok(c, {
+    dominio: o.dominio,
+    configurado: !!cf,
+    respaldo,
+    nombres,
+    instrucciones: nombres.map((n) => `${n.hostname}  CNAME  ${respaldo}`),
+    activos: nombres.filter((n) => n.estado === 'activo').length,
+  });
+});
+
+/** DELETE /admin/orgs/:o/dominio — se quita el dominio y sus nombres. */
+rutas.delete('/orgs/:o/dominio', async (c) => {
+  if (!(await soySuper(c))) return err(c, 'sin_permiso', 403);
+  const o = await org(c.env, c.req.param('o')!);
+  if (!o) return err(c, 'org_desconocida', 404);
+  const r = await cambiarDominio(c, o, null);
+  if ('error' in r) return err(c, r.error, r.estado, r.detalle);
+  return ok(c, { org: r.org });
 });
 
 /** Marca hasta qué día está pagada la empresa (0.14.0). Mike a mano, o Stripe
@@ -215,7 +288,14 @@ rutas.patch('/orgs/:o', async (c) => {
     razon_social?: string | null; rfc?: string | null; telefono?: string | null;
     director_nombre?: string | null; director_telefono?: string | null; director_correo?: string | null;
     cortesia?: boolean; paga_hasta?: string | null;
+    dominio?: string | null;
   }>().catch(() => ({}) as never);
+
+  // 2-oct · el dominio va por su propio camino (Cloudflare de por medio).
+  if (cuerpo.dominio !== undefined) {
+    const r = await cambiarDominio(c, antes, cuerpo.dominio);
+    if ('error' in r) return err(c, r.error, r.estado, r.detalle);
+  }
 
   const sets: string[] = [];
   const args: unknown[] = [];
@@ -248,6 +328,8 @@ rutas.patch('/orgs/:o', async (c) => {
     sets.push('paga_hasta = ?'); args.push(cuerpo.paga_hasta);
   }
   if (cuerpo.cortesia !== undefined) { sets.push('cortesia = ?'); args.push(cuerpo.cortesia ? 1 : 0); }
+  // Sólo el dominio: ya quedó hecho arriba, y la empresa se devuelve como quedó.
+  if (!sets.length && cuerpo.dominio !== undefined) return ok(c, (await org(c.env, id))!);
   if (!sets.length) return err(c, 'datos_invalidos', 400, { falta: 'algo que cambiar' });
 
   await c.env.MASTER.prepare(`UPDATE orgs SET ${sets.join(', ')} WHERE id = ?`).bind(...args, id).run();
