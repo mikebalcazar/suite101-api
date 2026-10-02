@@ -284,6 +284,15 @@ async function canAccessProject(env, user, projectId) {
   const r = await env.DB.prepare(`SELECT 1 FROM quell_project_members WHERE project_id = ? AND user_id = ?`).bind(projectId, user.id).first();
   return !!r;
 }
+/** 0, 90, 180 o 270; cualquier otra cosa es 0. */
+function giroValido(v) {
+  const n = Number(v) || 0;
+  return [0, 90, 180, 270].includes(n) ? n : 0;
+}
+/** Las versiones anteriores del plano, como lista (la columna es JSON). */
+function versionesDe(plan) {
+  try { const v = JSON.parse(plan.versiones || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
+}
 async function projectOfPlan(env, planId) {
   const r = await env.DB.prepare(`SELECT project_id FROM quell_plans WHERE id = ?`).bind(planId).first();
   return r ? r.project_id : null;
@@ -680,6 +689,8 @@ export async function atender(req, env, url, path) {
       const project = await env.DB.prepare(`SELECT * FROM quell_projects WHERE id = ?`).bind(pid).first();
       if (!project) return err('no encontrado', 404);
       const { results: plans } = await env.DB.prepare(`SELECT * FROM quell_plans WHERE project_id = ? ORDER BY sort, created_at`).bind(pid).all();
+      // 0029 · la lista de versiones viaja como lista, no como texto JSON.
+      for (const p of plans) { p.versiones = versionesDe(p); p.rotation = Number(p.rotation) || 0; }
       // El cliente: todos los ítems del plano, pero sólo para ubicarse (código,
       // nombre, tipo, posición), resaltados los que tienen puntos por definir
       // (decisiones 3 y 4). Ni fase, ni pendientes, ni bitácora, ni quién anda
@@ -815,9 +826,13 @@ export async function atender(req, env, url, path) {
         await env.FILES.put(sourceKey, source.stream(), { httpMetadata: { contentType: source.type || 'application/pdf' } });
       }
       const sort = await env.DB.prepare(`SELECT COALESCE(MAX(sort),0)+1 AS s FROM quell_plans WHERE project_id = ?`).bind(pid).first();
-      await env.DB.prepare(`INSERT INTO quell_plans (id, project_id, name, file_name, image_key, source_key, width, height, sort) VALUES (?,?,?,?,?,?,?,?,?)`)
-        .bind(id, pid, fd.get('name') || 'Plano', fd.get('file_name') || '', imageKey, sourceKey, +fd.get('width') || 0, +fd.get('height') || 0, sort.s).run();
-      return json({ ok: true, id, image_key: imageKey });
+      /* 0029 · cuántos grados se giró el original al subirlo (Mike, 2-oct:
+       * «a veces el PDF viene vertical»). La imagen ya viene girada; el PDF
+       * no, y la capa nítida lo gira con este número. */
+      const rotation = giroValido(fd.get('rotation'));
+      await env.DB.prepare(`INSERT INTO quell_plans (id, project_id, name, file_name, image_key, source_key, width, height, sort, rotation) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+        .bind(id, pid, fd.get('name') || 'Plano', fd.get('file_name') || '', imageKey, sourceKey, +fd.get('width') || 0, +fd.get('height') || 0, sort.s, rotation).run();
+      return json({ ok: true, id, image_key: imageKey, rotation });
     }
     // Avisarle al cliente que tiene puntos por definir: un correo por cliente
     // de la obra, cuando el taller aprieta el botón. Nada automático por punto.
@@ -1006,6 +1021,39 @@ export async function atender(req, env, url, path) {
       const b = await req.json();
       await env.DB.prepare(`UPDATE quell_plans SET name = COALESCE(?, name), sort = COALESCE(?, sort) WHERE id = ?`).bind(b.name ?? null, b.sort ?? null, seg[1]).run();
       return json({ ok: true });
+    }
+    /* 0029 · SUSTITUIR el plano por una versión nueva (Mike, 2-oct: «subir y
+     * sustituir el que está para actualizar versiones»). Es el mismo plano
+     * —mismo id, mismas piezas con sus x, y— con otra imagen y otro original.
+     * Lo de antes no se borra: queda en `versiones` y los archivos siguen en
+     * R2, por si hay que volver a mirar la hoja anterior. */
+    if (seg[2] === 'sustituir' && m === 'POST') {
+      if (!isStaff(user)) return err('sin permiso', 403);
+      const plan = await env.DB.prepare(`SELECT * FROM quell_plans WHERE id = ?`).bind(seg[1]).first();
+      if (!plan) return err('no encontrado', 404);
+      const fd = await req.formData();
+      const image = fd.get('image');
+      if (!(image instanceof File)) return err('imagen del plano requerida');
+      const versiones = versionesDe(plan);
+      const n = versiones.length + 1;
+      const imageKey = `${env.PREFIJO_R2}plans/${pid}/${plan.id}-v${n}.png`;
+      await env.FILES.put(imageKey, image.stream(), { httpMetadata: { contentType: image.type || 'image/png' } });
+      let sourceKey = null;
+      const source = fd.get('source');
+      if (source instanceof File && source.size) {
+        sourceKey = `${env.PREFIJO_R2}plans/${pid}/${plan.id}-v${n}-src.${(source.name.split('.').pop() || 'pdf').toLowerCase()}`;
+        await env.FILES.put(sourceKey, source.stream(), { httpMetadata: { contentType: source.type || 'application/pdf' } });
+      }
+      versiones.push({
+        image_key: plan.image_key, source_key: plan.source_key, file_name: plan.file_name,
+        width: plan.width, height: plan.height, rotation: Number(plan.rotation) || 0,
+        at: new Date().toISOString(), quien: user.name || user.email || null,
+      });
+      const rotation = giroValido(fd.get('rotation'));
+      await env.DB.prepare(
+        `UPDATE quell_plans SET image_key = ?, source_key = ?, file_name = ?, width = ?, height = ?, rotation = ?, versiones = ? WHERE id = ?`)
+        .bind(imageKey, sourceKey, fd.get('file_name') || plan.file_name || '', +fd.get('width') || 0, +fd.get('height') || 0, rotation, JSON.stringify(versiones), plan.id).run();
+      return json({ ok: true, id: plan.id, image_key: imageKey, rotation, version: n + 1 });
     }
     if (!seg[2] && m === 'DELETE') {
       if (!isStaff(user)) return err('sin permiso', 403);
