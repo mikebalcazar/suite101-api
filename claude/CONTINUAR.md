@@ -419,6 +419,15 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **DEFECTO quell101: «Reubicar en el plano» cerraba el ítem (2-oct, bitacora-obra #103).**
+  Mike en Bosques de Santa Fe: «se sale de la función y deselecciona todo».
+  El botón llamaba `setVista('plan')` con el ítem abierto, y `setVista`
+  NAVEGA: del ítem (hondura 3) al plano (1) es `history.back()`, que cierra
+  el ítem, y su popstate tardío apagaba el `useEncima` de `moviendo`. Se
+  quitó esa llamada ahí y en el `onIr` de las dudas (mismo patrón). REGLA:
+  en Project.jsx `setVista` no es un setState; con ítem o sección abiertos,
+  'plan' retrocede. Prueba `el-atras.mjs` +5. Muro
+  `2026-10-02-1200-jr-reubicar-no-cierra.md`.
 - **Dominio propio por empresa, fase B en vivo (2-oct, bitacora-obra #102, t101-portal #35, dash101 #130).**
   Los tres Workers que eran de una sola empresa ya toman la empresa de la
   puerta: quell101 (`empresaPedida` → `empresaDe`, si está entre las del
