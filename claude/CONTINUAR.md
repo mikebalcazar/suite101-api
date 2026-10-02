@@ -419,6 +419,19 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **Dominio propio por empresa, fase B en vivo (2-oct, bitacora-obra #102, t101-portal #35, dash101 #130).**
+  Los tres Workers que eran de una sola empresa ya toman la empresa de la
+  puerta: quell101 (`empresaPedida` → `empresaDe`, si está entre las del
+  usuario), roster101 (`empresaDe`/`nombreDeEmpresa`, cabeceras juntas o
+  ORG_ID) y dash101 (el Worker deja la cookie `s101_org`; `lib/fuente.ts`
+  la lee antes que NEXT_PUBLIC_ORG). Sin cabeceras no cambia nada (medido en
+  vivo). quote101, peek101, supply101 y workshop101 van por /yo, ya acotado.
+  OJO: las cabeceras puestas a mano hacen que el Worker PIDA otra empresa
+  (la suite sigue exigiendo membresía; riesgo bajo); al desplegar la puerta,
+  endurecer: honrarlas sólo si el host del pedido no es nuestro. FALTA (al
+  «listo» de Mike con DOMINIOS.md): el paso del deploy de `puerta/`, un
+  dominio de prueba de punta a punta y ese endurecimiento. Muro
+  `2026-10-02-0305-jr-dominio-propio-fase-b.md`.
 - **Dominio propio por empresa, fase A en main (2-oct, API #210/#211, master101 #34).**
   Mike decidió «dominio propio con alta automática» (Cloudflare for SaaS);
   sus pasos están en `DOMINIOS.md` y FALTAN (token `CLOUDFLARE_SAAS_TOKEN`).
