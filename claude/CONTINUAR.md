@@ -419,6 +419,15 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **Los requerimientos sin ítem (2-oct, API 0.64.2 #218).** Mike: «hay unos
+  requerimientos del Depto Bosques de Santa Fe que no aparecen en ítems
+  pendientes en quote». Eran pines levantados antes de ligar la obra (o
+  antes del 29-sep): sin proyecto no nacía el ítem. Ahora `ligarObra`
+  levanta los huérfanos de esa obra, la migración 0030 (en código) los
+  repara en las obras ya ligadas, y «traer del plano» levanta un
+  requerimiento como requerimiento. Si la obra no está ligada, hay que
+  ligarla desde dash101 y ahí nacen. Muro
+  `2026-10-02-1915-jr-requerimientos-huerfanos.md`.
 - **dash101 ya no genera ítems (2-oct, dash101 #131; decisión de Mike con botones: «dash sólo lee»).**
   Se fueron «Agregar» en «Editar la lista», «Ítem en esta partida» y el
   «Precio de venta» del proyecto nuevo (la «regla 1»). Editar, quitar
