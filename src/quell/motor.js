@@ -273,11 +273,10 @@ const soloUbicacion = (e) => ({ id: e.id, plan_id: e.plan_id, project_id: e.proj
  * pendiente. Si se descarta, sí se va: descartado es descartado. */
 const ALCANCE_SQL = `CASE
     WHEN it.id IS NULL THEN 'dentro'
-    WHEN it.estado = 'cancelado' AND it.aprobado_at IS NOT NULL THEN 'cancelado'
-    WHEN it.estado = 'cancelado' THEN 'descartado'
     WHEN it.estado = 'vendido' THEN 'dentro'
+    WHEN it.cancelado_at IS NOT NULL THEN 'fuera'
     WHEN lower(trim(e.type)) = 'requerimiento' THEN 'dentro'
-    ELSE 'no_aprobado'
+    ELSE 'fuera'
   END AS alcance`;
 
 async function canAccessProject(env, user, projectId) {
@@ -1170,6 +1169,13 @@ export async function atender(req, env, url, path) {
        * hay fecha: ahí la pantalla decide qué poner, y lo que pone es un
        * botón para fijarla. */
       element.item_entrega_falta = faltaParaEntrega(element.item_fecha_entrega);
+      /* La bitácora del alcance del ítem (0.64.0): cuándo entró, cuándo
+       * salió, quién y por qué. Es del ítem, no de la pieza, y por eso viene
+       * de `alcance_movimientos` y no de la bitácora de la obra. Sólo para la
+       * empresa: al cliente no se le cuenta quién sacó qué. */
+      element.item_alcance_movimientos = element.item_id && !esCli(user)
+        ? (await env.DB.prepare(`SELECT id, accion, quien, app, motivo, at FROM alcance_movimientos WHERE item_id = ? ORDER BY at, id`).bind(element.item_id).all()).results
+        : [];
       // El cliente: el ítem para ubicarse y sus puntos por definir, y nada más
       // (decisión 4). Ni fase, ni pendientes, ni bitácora, ni responsable.
       if (esCli(user)) {

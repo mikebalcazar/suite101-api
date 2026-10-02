@@ -17,7 +17,24 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.63.0 (SE VA LA TABLA `negocios` Y LA COLUMNA
+ * Versión del contrato: 0.64.0 (EL ALCANCE EN DOS ESTADOS. Mike, 2-oct:
+ * «eliminar el estado de los ítems de "cancelado" y solo existirá "en
+ * alcance" o "fuera de alcance" (…) no pasan a otra lista, regresan a fuera
+ * de alcance, solo en la bitácora sí aparecerá como "se sacó del alcance" y
+ * si se agrega de nuevo aparecerá después "se agregó al alcance" con su fecha
+ * y quién la agregó». `AlcanceItem` es 'dentro' | 'fuera' y `alcanceDeItem`
+ * sólo mira `estado`: vendido es dentro, lo demás es fuera. La API ya no
+ * escribe `estado = 'cancelado'`: `POST /items/:id/sacar` (y `/cancelar`,
+ * que se queda como alias) devuelve el ítem a 'cotizado' con `cancelado_at`
+ * y su motivo, y un `cancelado` que llegue por el CRUD se guarda como
+ * `cotizado`. La migración 0028 del OrgDB crea `alcance_movimientos` —la bitácora:
+ * entra/sale, quién, app, motivo, cuándo— y la siembra de `aprobado_at` y
+ * `cancelado_at`; `GET /orgs/:o/items/:id/alcance` la devuelve. Se anota
+ * en toda puerta que mueva el estado: aprobar, sacar, el CRUD, vender desde
+ * quote101 y aprobar una cotización. `borrar-cancelados` se queda y borra
+ * los que se SACARON —`cancelado_at` con fecha—, nunca un requerimiento que
+ * nadie ha decidido). Antes:
+ * 0.63.0 (SE VA LA TABLA `negocios` Y LA COLUMNA
  * `negocio_id`. Mike, 1-oct: «Ya no existe la opción de negocios. Sólo es
  * una empresa/negocio todo. Elimina todas las lógicas que involucran el
  * concepto de "negocio"». La migración 0027 del OrgDB corre en código: si una
@@ -967,7 +984,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.63.0';
+export const VERSION_CONTRATO = '0.64.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1448,7 +1465,10 @@ export interface Proyecto {
   actualizado_at: string | null;
 }
 
-/** Eje comercial. No se condiciona con la etapa. */
+/** Eje comercial. No se condiciona con la etapa. Desde 0.64.0 la API sólo
+ *  escribe 'cotizado' (fuera del alcance) y 'vendido' (dentro); 'cancelado'
+ *  sigue en el tipo porque el CHECK de la 0001 lo admite y una app vieja
+ *  puede mandarlo —se guarda como 'cotizado'—. */
 export type EstadoItem = 'cotizado' | 'vendido' | 'cancelado';
 /** Eje de fabricación. 0 = todavía no arranca. */
 export type Etapa = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
@@ -1674,6 +1694,9 @@ export const TABLAS_INTERNAS = [
   /* La empresa (0027): un solo renglón con nombre, RFC, moneda y día de
    * conciliación. No sale por el CRUD genérico: va por GET/PATCH /empresa. */
   'empresa',
+  /* La bitácora del alcance (0028): entra/sale, quién, app, motivo, cuándo.
+   * Append-only; se lee por GET /orgs/:o/items/:id/alcance. */
+  'alcance_movimientos',
   'quell_users', 'quell_projects', 'quell_project_members', 'quell_plans', 'quell_elements', 'quell_log_entries',
   'quell_punch_items', 'quell_photos', 'quell_operaciones', 'quell_etapas', 'quell_element_etapas', 'quell_dudas',
   'quell_duda_respuestas', 'quell_element_contratistas',
@@ -1754,39 +1777,55 @@ export type Aviso =
    * de golpe: una pantalla de saldos abierta tiene que enterarse. */
   | { t: 'raya.pagada'; id: string };
 
-/* ─────────────── el alcance de un ítem (0.31.0) ───────────────
+/* ─────────────── el alcance de un ítem (0.64.0) ───────────────
  *
- * Mike, 20-sep-2026: «hay ítems nuevos no aprobados e ítems cancelados. Para
- * que un ítem se considere cancelado TIENE QUE HABER ESTADO APROBADO PRIMERO
- * y luego cancelado. (…) Los no aprobados, a pesar de que tienen precio y
- * toda la info, NO SUMAN en dash y NO APARECEN en quell al menos que veas la
- * vista de ítems fuera de alcance.»
+ * Mike, 2-oct-2026: «Hay que eliminar el estado de los ítems de "cancelado" y
+ * solo existirá "en alcance" o "fuera de alcance". Así hay una lista
+ * unificada de las cosas que están requeridas pero aún no se confirman, o se
+ * confirmaron y se cancelaron, pero no pasan a otra lista, regresan a fuera
+ * de alcance; solo en la bitácora sí aparecerá como "se sacó del alcance" y
+ * si se agrega de nuevo aparecerá después "se agregó al alcance" con su fecha
+ * y quién la agregó.»
  *
- * La regla vive aquí, en el archivo que las tres apps copian tal cual, por lo
- * mismo de siempre: tres pantallas con tres ideas de qué es un cancelado son
- * tres reglas, y la que falle va a ser la que nadie probó. Sale de dos datos
- * y nada más: el estado, y si alguna vez estuvo aprobado.
+ * Antes (0.31.0) eran cuatro casos —dentro, no aprobado, cancelado y
+ * descartado— y la clasificación salía de `estado` más `aprobado_at`. Ya no:
+ * la regla vive aquí, en el archivo que las tres apps copian tal cual, y sale
+ * de UN dato. La historia —cuándo entró, cuándo salió, quién y por qué— ya no
+ * se deduce de columnas: se lee de la bitácora `alcance_movimientos`.
  */
 
-export type AlcanceItem = 'dentro' | 'no_aprobado' | 'cancelado' | 'descartado';
+export type AlcanceItem = 'dentro' | 'fuera';
 
 /** En qué parte del alcance está un ítem.
  *
- *   · `dentro`      — vendido. Suma, se fabrica, sale en el plano.
- *   · `no_aprobado` — cotizado: tiene precio y todo, pero nadie ha dicho que
- *                     sí. Es el «nuevo requerimiento» que nace en la obra.
- *   · `cancelado`   — estuvo aprobado y se canceló.
- *   · `descartado`  — se quitó SIN haber estado aprobado nunca. No es un
- *                     cancelado: no se canceló trabajo, se dijo que no a un
- *                     requerimiento, y meterlo entre los cancelados diría
- *                     que se echó para atrás una venta que jamás existió.
+ *   · `dentro` — vendido. Suma, se fabrica, sale en el plano.
+ *   · `fuera`  — todo lo demás: el requerimiento que nadie ha aprobado, lo
+ *                que estuvo dentro y se sacó. Una sola lista.
  */
-export function alcanceDeItem(item: { estado?: string | null; aprobado_at?: string | null }): AlcanceItem {
-  const estado = String(item.estado ?? 'cotizado');
-  if (estado === 'cancelado') return item.aprobado_at ? 'cancelado' : 'descartado';
-  if (estado === 'vendido') return 'dentro';
-  return 'no_aprobado';
+export function alcanceDeItem(item: { estado?: string | null }): AlcanceItem {
+  return String(item.estado ?? 'cotizado') === 'vendido' ? 'dentro' : 'fuera';
 }
+
+/** Un renglón de la bitácora del alcance (`GET /orgs/:o/items/:id/alcance`). */
+export interface MovimientoAlcance {
+  id: string;
+  item_id: string;
+  proyecto_id: string | null;
+  /** `entra` = se agregó al alcance; `sale` = se sacó del alcance. */
+  accion: 'entra' | 'sale';
+  /** Correo de quien lo movió. `null` en lo sembrado por la migración 0028:
+   *  nunca se guardó, y la pantalla lo dice así en vez de inventar un nombre. */
+  quien: string | null;
+  app: string | null;
+  motivo: string | null;
+  at: string;
+}
+
+/** Lo que se enseña de cada movimiento, en palabras de Mike. */
+export const NOMBRE_MOVIMIENTO_ALCANCE: Record<MovimientoAlcance['accion'], string> = {
+  entra: 'Se agregó al alcance',
+  sale: 'Se sacó del alcance',
+};
 
 /* ─────────────── la fecha de entrega y lo que falta (§123) ───────────────
  *
@@ -1839,10 +1878,8 @@ export function faltaParaEntrega(fecha: unknown, hoy?: unknown): { dias: number;
 
 /** Lo que se enseña de cada alcance, en palabras de Mike. */
 export const NOMBRE_ALCANCE: Record<AlcanceItem, string> = {
-  dentro: 'En proceso',
-  no_aprobado: 'No aprobados',
-  cancelado: 'Cancelados',
-  descartado: 'Descartados',
+  dentro: 'En alcance',
+  fuera: 'Fuera de alcance',
 };
 
 /* ─────────────── ayudas de formato (identidad Taller 101) ─────────────── */

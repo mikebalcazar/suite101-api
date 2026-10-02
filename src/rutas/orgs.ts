@@ -249,7 +249,7 @@ rutas.post('/:o/cotizaciones/:id/aprobar', async (c) => {
   if (!Array.isArray(cuerpo.lineas) || !cuerpo.lineas.length) return err(c, 'datos_invalidos', 400, { falta: 'lineas' });
   const r = await stub(c).aprobarCotizacion({
     cotizacion_id: c.req.param('id')!, proyecto_id: cuerpo.proyecto_id, lineas: cuerpo.lineas,
-    usuario_id: quien.usuario_id, app, partida: cuerpo.partida ?? null,
+    usuario_id: quien.usuario_id, app, partida: cuerpo.partida ?? null, correo: c.get('sesion')?.correo ?? null,
   });
   if (!r.ok) {
     const estado = r.error === 'no_encontrado' ? 404 : r.error === 'ya_aprobada' ? 409 : 400;
@@ -271,6 +271,7 @@ rutas.post('/:o/items/vender', async (c) => {
     nombre_proyecto: cuerpo.nombre_proyecto,
     app,
     usuario_id: c.get('quien').usuario_id,
+    correo: c.get('sesion')?.correo ?? null,
   });
   if (!r.ok) return err(c, r.error, 404, r.detalle);
   return ok(c, { proyecto: r.proyecto, items: r.items });
@@ -549,43 +550,56 @@ async function borrarConTodo(c: Ctx, que: 'cliente' | 'proyecto') {
 rutas.post('/:o/clientes/:id/borrar', (c) => borrarConTodo(c, 'cliente'));
 rutas.post('/:o/proyectos/:id/borrar', (c) => borrarConTodo(c, 'proyecto'));
 
-/* ─────────────── aprobar y cancelar un ítem (§106) ───────────────
+/* ─────────────── agregar al alcance y sacar del alcance (§106 → 0.64.0) ───────────────
  *
  * Mike, 20-sep: «se debe poder cancelar algún ítem ya sea desde quell o
- * desde dash, y se refleja en los 2», y «para que un ítem se considere
- * cancelado tiene que haber estado aprobado primero y luego cancelado».
+ * desde dash, y se refleja en los 2». Mike, 2-oct: ya no hay «cancelado»; un
+ * ítem está en alcance o fuera, y la historia va en la bitácora.
  *
- * Las dos rutas las abren dash101 y quell101 por igual —es el mismo ítem en
- * la misma base—, y el permiso se revisa por campo, contra `estado`, que es
- * lo que de verdad se está cambiando.
+ * Las rutas las abren dash101 y quell101 por igual —es el mismo ítem en la
+ * misma base—, y el permiso se revisa por campo, contra `estado`, que es lo
+ * que de verdad se está cambiando.
  */
 
-/** POST /orgs/:o/items/:id/aprobar — el requerimiento entra al alcance y
- *  desde ahí suma en el proyecto. */
+/** Quién mueve el alcance, para la bitácora: app, usuario y su correo. */
+const quienMueve = (c: Ctx) => ({ app: c.get('app'), usuario_id: c.get('quien').usuario_id, correo: c.get('sesion')?.correo ?? null });
+
+/** POST /orgs/:o/items/:id/aprobar — se agrega al alcance y desde ahí suma
+ *  en el proyecto. */
 rutas.post('/:o/items/:id/aprobar', async (c) => {
   const quien = c.get('quien');
-  if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'aprobar un ítem lo hace quien es de la empresa' });
+  if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'agregar un ítem al alcance lo hace quien es de la empresa' });
   const veredicto = revisarEscritura('items', c.get('app'), ['estado']);
   if (!veredicto.ok) return err(c, veredicto.error, 403, veredicto.detalle);
-  const r = await stub(c).aprobarItem(c.req.param('id'), { usuario_id: quien.usuario_id });
+  const r = await stub(c).aprobarItem(c.req.param('id'), quienMueve(c));
   if ('error' in r) return err(c, r.error, 404, r.detalle);
-  return ok(c, { item: r.item, era: r.era });
+  return ok(c, { item: r.item, era: r.era, alcance: 'dentro' });
 });
 
-/** POST /orgs/:o/items/:id/cancelar {motivo?} — se cae del alcance.
- *
- *  Contesta `alcance` ya resuelto: 'cancelado' si estuvo aprobado, y
- *  'descartado' si nunca lo estuvo. La pantalla no vuelve a aplicar la
- *  regla; la dice. */
-rutas.post('/:o/items/:id/cancelar', async (c) => {
+/** POST /orgs/:o/items/:id/sacar {motivo?} — se saca del alcance. Contesta
+ *  `alcance: 'fuera'`, que es lo único que puede quedar. `/cancelar` es el
+ *  mismo camino con el nombre de antes: se queda para quien ya lo llama. */
+async function sacarDelAlcance(c: Ctx) {
   const quien = c.get('quien');
-  if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'cancelar un ítem lo hace quien es de la empresa' });
+  if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'sacar un ítem del alcance lo hace quien es de la empresa' });
   const veredicto = revisarEscritura('items', c.get('app'), ['estado']);
   if (!veredicto.ok) return err(c, veredicto.error, 403, veredicto.detalle);
   const b = await c.req.json<{ motivo?: string }>().catch(() => ({}) as { motivo?: string });
-  const r = await stub(c).cancelarItem(c.req.param('id'), { motivo: b.motivo }, { usuario_id: quien.usuario_id });
+  const r = await stub(c).cancelarItem(c.req.param('id')!, { motivo: b.motivo }, quienMueve(c));
   if ('error' in r) return err(c, r.error, 404, r.detalle);
   return ok(c, { item: r.item, alcance: r.alcance });
+}
+rutas.post('/:o/items/:id/sacar', sacarDelAlcance);
+rutas.post('/:o/items/:id/cancelar', sacarDelAlcance);
+
+/** GET /orgs/:o/items/:id/alcance — en qué está y su bitácora: cada entrada
+ *  y salida con fecha, quién, desde qué app y por qué. */
+rutas.get('/:o/items/:id/alcance', async (c) => {
+  const permiso = puedeLeer(c, 'items');
+  if (permiso) return permiso;
+  const r = await stub(c).bitacoraAlcance(c.req.param('id'));
+  if ('error' in r) return err(c, r.error, 404, r.detalle);
+  return ok(c, { item_id: r.item.id, alcance: r.item.alcance, movimientos: r.movimientos });
 });
 
 /* ─────────────── varios ítems iguales, un solo concepto (§98) ───────────────
@@ -1353,7 +1367,7 @@ rutas.post('/:o/:tabla', async (c) => {
   const malProveedor = tabla === 'proveedores' ? revisarProveedor(datos) : tabla === 'proveedor_cuentas' ? revisarCuenta(datos) : tabla === 'accionistas' ? revisarAccionista(datos) : null;
   if (malProveedor) return err(c, 'datos_invalidos', 400, { errores: malProveedor });
 
-  const fila = await stub(c).crear(tabla, datos, { app: c.get('app'), usuario_id: quien.usuario_id });
+  const fila = await stub(c).crear(tabla, datos, { app: c.get('app'), usuario_id: quien.usuario_id, correo: c.get('sesion')?.correo ?? null });
   return ok(c, podar(quien, tabla, fila), 201);
 });
 
@@ -1472,7 +1486,7 @@ rutas.patch('/:o/:tabla/:id', async (c) => {
     }
   }
 
-  const fila = await stub(c).actualizar(tabla, c.req.param('id')!, datos);
+  const fila = await stub(c).actualizar(tabla, c.req.param('id')!, datos, { app: c.get('app'), usuario_id: quien.usuario_id, correo: c.get('sesion')?.correo ?? null });
   if (!fila) return err(c, 'no_encontrado', 404);
   return ok(c, podar(quien, tabla, fila));
 });
@@ -1484,7 +1498,7 @@ rutas.delete('/:o/:tabla/:id', async (c) => {
   if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403);
   // Un ítem no se borra: se cancela. Si se borrara, el historial y el saldo
   // dejarían de cuadrar y nadie sabría por qué.
-  if (tabla === 'items') return err(c, 'items_nunca_se_borran', 403, { en_su_lugar: "PATCH {estado:'cancelado'}" });
+  if (tabla === 'items') return err(c, 'items_nunca_se_borran', 403, { en_su_lugar: 'POST /orgs/:o/items/:id/sacar' });
   if ((APPEND_ONLY as string[]).includes(tabla)) return err(c, 'sin_permiso', 403, { motivo: `${tabla} es append-only` });
   const ajeno = ajusteAjeno(c, tabla, c.req.param('id')!);
   if (ajeno) return ajeno;
