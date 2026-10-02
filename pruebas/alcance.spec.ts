@@ -1,25 +1,28 @@
-/* El alcance del ítem: dentro, no aprobado, cancelado y descartado · 0.31.0
+/* El alcance del ítem: dentro o fuera, y su bitácora · 0.64.0 (antes 0.31.0)
  *
  * Mike, 20-sep-2026: «se debe poder cancelar algún ítem ya sea desde quell o
- * desde dash, y se refleja en los 2. (…) Hay ítems nuevos no aprobados e
- * ítems cancelados. PARA QUE UN ÍTEM SE CONSIDERE CANCELADO TIENE QUE HABER
- * ESTADO APROBADO PRIMERO y luego cancelado. (…) Los no aprobados, a pesar
- * de que tienen precio y toda la info, NO SUMAN en dash y NO APARECEN en
- * quell al menos que veas la vista de ítems fuera de alcance.»
+ * desde dash, y se refleja en los 2. (…) Los no aprobados, a pesar de que
+ * tienen precio y toda la info, NO SUMAN en dash y NO APARECEN en quell al
+ * menos que veas la vista de ítems fuera de alcance.»
+ *
+ * Mike, 2-oct-2026: «Hay que eliminar el estado de los ítems de "cancelado" y
+ * solo existirá "en alcance" o "fuera de alcance". (…) no pasan a otra lista,
+ * regresan a fuera de alcance, solo en la bitácora sí aparecerá como "se sacó
+ * del alcance" y si se agrega de nuevo aparecerá después "se agregó al
+ * alcance" con su fecha y quién la agregó.»
  *
  * LO QUE DE VERDAD APORTAN ESTAS PRUEBAS:
  *
- *   · que un no aprobado NO SUME, aunque traiga precio. Es la mitad del
- *     encargo, y es la que se rompería sin que nadie lo note: un
+ *   · que un fuera del alcance NO SUME, aunque traiga precio. Un
  *     requerimiento con precio metido en el precio de venta es una cifra que
  *     el cliente nunca aceptó, viajando en un estado de cuenta;
- *   · que cancelar algo que nunca estuvo aprobado NO se cuente como
- *     cancelado. Esa es la regla textual de Mike, y de ella depende que la
- *     lista de «cancelados» signifique algo: si se llena de requerimientos
- *     que nadie aprobó, deja de poder leerse;
- *   · que APROBADO_AT no se borre al cancelar. Es el único dato del que sale
- *     la clasificación; si se limpiara al cancelar, todo cancelado pasaría a
- *     descartado al día siguiente;
+ *   · que sólo haya DOS respuestas, dentro y fuera, por cualquier puerta: lo
+ *     que estuvo dentro y se sacó regresa a la misma lista que lo que nadie
+ *     aprobó. Un tercer estado que se cuele es la lista partida que Mike
+ *     mandó quitar;
+ *   · que la BITÁCORA tenga cada entrada y salida con fecha, quién y motivo,
+ *     y que la escriba toda puerta que mueva el estado —aprobar, sacar, el
+ *     CRUD, nacer vendido—, no sólo las dos rutas con nombre;
  *   · que la copia de la regla que vive en el motor de quell (SQL) diga lo
  *     MISMO que la del contrato (`alcanceDeItem`). Son dos copias por una
  *     razón real —el motor es JavaScript suelto—, y dos copias sin una
@@ -96,11 +99,13 @@ beforeAll(async () => {
 }, 60000);
 
 describe('la regla, escrita una vez', () => {
-  it('el contrato la dice en sus cuatro casos', () => {
+  it('el contrato sólo conoce dos respuestas: dentro y fuera', () => {
     expect(alcanceDeItem({ estado: 'vendido' })).toBe('dentro');
-    expect(alcanceDeItem({ estado: 'cotizado' })).toBe('no_aprobado');
-    expect(alcanceDeItem({ estado: 'cancelado', aprobado_at: '2026-09-20T00:00:00Z' })).toBe('cancelado');
-    expect(alcanceDeItem({ estado: 'cancelado', aprobado_at: null })).toBe('descartado');
+    expect(alcanceDeItem({ estado: 'cotizado' })).toBe('fuera');
+    /* Un 'cancelado' viejo —de antes de la 0028— también es fuera, y nada
+     * más: ya no hay cancelados ni descartados. */
+    expect(alcanceDeItem({ estado: 'cancelado' })).toBe('fuera');
+    expect(alcanceDeItem({})).toBe('fuera');
   });
 });
 
@@ -119,12 +124,12 @@ describe('el requerimiento: tiene precio y no suma', () => {
     expect((await o('mike', `/items/${req}`)).data.monto, 'y el requerimiento sí trae precio').toBe(20_000_00);
   });
 
-  it('en el plano sale marcado como no aprobado, no escondido en el servidor', async () => {
+  it('en el plano sale marcado como fuera, no escondido en el servidor', async () => {
     /* El recorte es de la pantalla, no de la API: quell tiene que poder
      * enseñarlo cuando alguien pide ver los que están fuera de alcance, y
      * para eso tiene que llegarle. */
     const plano_ = await enPlano();
-    expect(plano_['Clóset de más']).toBe('no_aprobado');
+    expect(plano_['Clóset de más']).toBe('fuera');
     expect(plano_['Cocina']).toBe('dentro');
   });
 
@@ -138,56 +143,131 @@ describe('el requerimiento: tiene precio y no suma', () => {
   });
 });
 
-describe('cancelar', () => {
-  it('lo que estuvo aprobado queda CANCELADO, y deja de sumar', async () => {
+describe('sacar del alcance', () => {
+  it('lo que estaba dentro queda FUERA, deja de sumar y regresa a estado cotizado', async () => {
     const it = await item('Barra', 30_000_00);
     await pieza('Barra', it);
     const antes = await venta();
-    const r = await o('mike', `/items/${it}/cancelar`, { method: 'POST', json: { motivo: 'El cliente quitó la barra' } });
+    const r = await o('mike', `/items/${it}/sacar`, { method: 'POST', json: { motivo: 'El cliente quitó la barra' } });
     expect(r.estado, JSON.stringify(r)).toBe(200);
-    expect(r.data.alcance).toBe('cancelado');
+    expect(r.data.alcance).toBe('fuera');
     expect(await venta()).toBe(antes - 30_000_00);
-    expect((await enPlano())['Barra']).toBe('cancelado');
-    expect((await o('mike', `/items/${it}`)).data.cancelado_motivo).toBe('El cliente quitó la barra');
+    expect((await enPlano())['Barra']).toBe('fuera');
+    const fila = (await o('mike', `/items/${it}`)).data;
+    expect(fila.estado, 'no hay un tercer estado: fuera es cotizado').toBe('cotizado');
+    expect(fila.cancelado_motivo).toBe('El cliente quitó la barra');
+    expect(fila.cancelado_at, 'y queda dicho que lo SACARON').toBeTruthy();
   });
 
-  it('lo que NUNCA estuvo aprobado queda descartado, no cancelado', async () => {
-    /* La regla textual de Mike. De ella depende que la lista de cancelados
-     * signifique algo: si se llena de requerimientos que nadie aprobó, deja
-     * de poder leerse. */
+  it('/cancelar sigue contestando, con el nombre de antes y la respuesta de ahora', async () => {
+    const it = await item('Repisa vieja', 2_000_00);
+    const r = await o('mike', `/items/${it}/cancelar`, { method: 'POST', json: {} });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.alcance).toBe('fuera');
+  });
+
+  it('lo que NUNCA estuvo aprobado también se saca, y es la misma palabra: fuera', async () => {
+    /* Ya no hay «descartado»: Mike, 2-oct, «no pasan a otra lista». Lo que
+     * cambia es que deja de salir en el plano como pendiente. */
     const it = await item('Pérgola que no fue', 50_000_00, 'cotizado');
     await pieza('Pérgola que no fue', it);
-    const r = await o('mike', `/items/${it}/cancelar`, { method: 'POST' });
+    const r = await o('mike', `/items/${it}/sacar`, { method: 'POST' });
     expect(r.estado, JSON.stringify(r)).toBe(200);
-    expect(r.data.alcance).toBe('descartado');
-    expect((await enPlano())['Pérgola que no fue']).toBe('descartado');
+    expect(r.data.alcance).toBe('fuera');
+    expect((await enPlano())['Pérgola que no fue']).toBe('fuera');
   });
 
-  it('cancelar no borra que estuvo aprobado', async () => {
+  it('sacar no borra que estuvo aprobado', async () => {
     const it = await item('Librero', 10_000_00);
     const cuando = (await o('mike', `/items/${it}`)).data.aprobado_at;
     expect(cuando).toBeTruthy();
-    await o('mike', `/items/${it}/cancelar`, { method: 'POST' });
+    await o('mike', `/items/${it}/sacar`, { method: 'POST' });
     expect((await o('mike', `/items/${it}`)).data.aprobado_at, 'la fecha sigue ahí').toBe(cuando);
   });
 
-  it('se puede cancelar desde quell101, que es el otro lado de la misma pieza', async () => {
+  it('se puede sacar desde quell101, que es el otro lado de la misma pieza', async () => {
     const it = await item('Cabecera', 8_000_00);
-    const r = await o('mike', `/items/${it}/cancelar`, { method: 'POST', app: 'quell101', json: { motivo: 'Se cayó en obra' } });
+    const r = await o('mike', `/items/${it}/sacar`, { method: 'POST', app: 'quell101', json: { motivo: 'Se cayó en obra' } });
     expect(r.estado, JSON.stringify(r)).toBe(200);
-    expect(r.data.alcance).toBe('cancelado');
+    expect(r.data.alcance).toBe('fuera');
   });
 
-  it('y volver a aprobarlo lo revive, con su fecha original', async () => {
+  it('y volver a agregarlo lo regresa, con su fecha original y sin rastro de la salida en el renglón', async () => {
     const it = await item('Mesa', 15_000_00);
     const cuando = (await o('mike', `/items/${it}`)).data.aprobado_at;
-    await o('mike', `/items/${it}/cancelar`, { method: 'POST' });
+    await o('mike', `/items/${it}/sacar`, { method: 'POST' });
     const r = await o('mike', `/items/${it}/aprobar`, { method: 'POST' });
     expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.alcance).toBe('dentro');
     const ya = (await o('mike', `/items/${it}`)).data;
     expect(ya.estado).toBe('vendido');
     expect(ya.aprobado_at, 'estuvo aprobado desde el principio, y eso no se reescribe').toBe(cuando);
-    expect(ya.cancelado_at, 'y ya no está cancelado').toBeFalsy();
+    expect(ya.cancelado_at, 'y ya no está sacado').toBeFalsy();
+  });
+});
+
+/* ─────────────── la bitácora (0.64.0) ───────────────
+ *
+ * Mike, 2-oct: «solo en la bitácora sí aparecerá como "se sacó del alcance" y
+ * si se agrega de nuevo aparecerá después "se agregó al alcance" con su fecha
+ * y quién la agregó». */
+describe('la bitácora del alcance', () => {
+  const bitacora = async (id: string) => (await o('mike', `/items/${id}/alcance`)).data;
+
+  it('un ítem que nace vendido entra al alcance al nacer, y queda quién', async () => {
+    const it = await item('Vitrina', 9_000_00);
+    const b = await bitacora(it);
+    expect(b.alcance).toBe('dentro');
+    expect(b.movimientos.map((m: any) => m.accion)).toEqual(['entra']);
+    expect(b.movimientos[0]).toMatchObject({ item_id: it, proyecto_id: proyecto, quien: CORREO, app: 'dash101', motivo: null });
+    expect(b.movimientos[0].at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('sacar y volver a agregar deja los dos renglones, en orden, con motivo y quién', async () => {
+    const it = await item('Alacena', 12_000_00);
+    await o('mike', `/items/${it}/sacar`, { method: 'POST', app: 'quell101', json: { motivo: 'No cabe' } });
+    await o('mike', `/items/${it}/aprobar`, { method: 'POST' });
+    const b = await bitacora(it);
+    expect(b.alcance).toBe('dentro');
+    expect(b.movimientos.map((m: any) => m.accion)).toEqual(['entra', 'sale', 'entra']);
+    expect(b.movimientos[1]).toMatchObject({ quien: CORREO, app: 'quell101', motivo: 'No cabe' });
+    expect(b.movimientos[2]).toMatchObject({ quien: CORREO, app: 'dash101' });
+  });
+
+  it('un requerimiento nace sin movimientos: todavía no ha entrado ni salido', async () => {
+    const it = await item('Tapanco', 3_000_00, 'cotizado');
+    const b = await bitacora(it);
+    expect(b.alcance).toBe('fuera');
+    expect(b.movimientos).toEqual([]);
+  });
+
+  it('el CRUD también la escribe: PATCH estado lo mueve y queda anotado', async () => {
+    /* La pantalla del proyecto de dash101 quita un renglón con PATCH
+     * {estado:'cancelado'}. Eso ya no es un tercer estado: se guarda como
+     * cotizado, con su salida en la bitácora. */
+    const it = await item('Zapatera grande', 4_000_00);
+    const r = await o('mike', `/items/${it}`, { method: 'PATCH', json: { estado: 'cancelado' } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.estado).toBe('cotizado');
+    expect(r.data.alcance).toBe('fuera');
+    expect(r.data.cancelado_at).toBeTruthy();
+    const r2 = await o('mike', `/items/${it}`, { method: 'PATCH', json: { estado: 'vendido' } });
+    expect(r2.data.alcance).toBe('dentro');
+    expect(r2.data.cancelado_at).toBeFalsy();
+    const b = await bitacora(it);
+    expect(b.movimientos.map((m: any) => m.accion)).toEqual(['entra', 'sale', 'entra']);
+    expect(b.movimientos[1].quien).toBe(CORREO);
+  });
+
+  it('cambiar otra cosa del ítem no inventa movimientos', async () => {
+    const it = await item('Cómoda', 5_000_00);
+    await o('mike', `/items/${it}`, { method: 'PATCH', json: { nombre: 'Cómoda de nogal' } });
+    await o('mike', `/items/${it}`, { method: 'PATCH', json: { estado: 'vendido' } });
+    expect((await bitacora(it)).movimientos.length).toBe(1);
+  });
+
+  it('la bitácora de un ítem que no existe es 404', async () => {
+    expect((await o('mike', '/items/no-existe/alcance')).estado).toBe(404);
   });
 });
 
@@ -198,14 +278,14 @@ describe('las dos copias de la regla dicen lo mismo', () => {
      * la que se quede atrás va a ser la que nadie mire. */
     const casos: Array<{ nombre: string; estado: string; cancelar: boolean }> = [
       { nombre: 'Caso dentro', estado: 'vendido', cancelar: false },
-      { nombre: 'Caso no aprobado', estado: 'cotizado', cancelar: false },
-      { nombre: 'Caso cancelado', estado: 'vendido', cancelar: true },
-      { nombre: 'Caso descartado', estado: 'cotizado', cancelar: true },
+      { nombre: 'Caso fuera sin decidir', estado: 'cotizado', cancelar: false },
+      { nombre: 'Caso fuera sacado', estado: 'vendido', cancelar: true },
+      { nombre: 'Caso fuera descartado', estado: 'cotizado', cancelar: true },
     ];
     for (const c of casos) {
       const it = await item(c.nombre, 1_000_00, c.estado);
       await pieza(c.nombre, it);
-      if (c.cancelar) await o('mike', `/items/${it}/cancelar`, { method: 'POST' });
+      if (c.cancelar) await o('mike', `/items/${it}/sacar`, { method: 'POST' });
       const fila = (await o('mike', `/items/${it}`)).data;
       expect((await enPlano())[c.nombre], `${c.nombre}: el motor y el contrato`).toBe(alcanceDeItem(fila));
     }
@@ -217,7 +297,7 @@ describe('el alcance viaja calculado', () => {
     /* Si cada app aplicara la regla por su cuenta habría tantas reglas como
      * apps. Así la dice el servidor una vez y las tres la leen. */
     const it = await item('Zapatera', 4_000_00, 'cotizado');
-    expect((await o('mike', `/items/${it}`)).data.alcance).toBe('no_aprobado');
+    expect((await o('mike', `/items/${it}`)).data.alcance).toBe('fuera');
     await o('mike', `/items/${it}/aprobar`, { method: 'POST' });
     expect((await o('mike', `/items/${it}`)).data.alcance).toBe('dentro');
     const lista = await o('mike', `/items?proyecto_id=${proyecto}`);
@@ -229,7 +309,7 @@ describe('el alcance viaja calculado', () => {
     const r = await o('mike', `/items/${it}`, { method: 'PATCH', json: { alcance: 'dentro' } });
     /* El CRUD ignora lo que no es columna, así que no truena; lo que importa
      * es que el alcance siga diciendo la verdad. */
-    expect((await o('mike', `/items/${it}`)).data.alcance).toBe('no_aprobado');
+    expect((await o('mike', `/items/${it}`)).data.alcance).toBe('fuera');
     void r;
   });
 });
@@ -318,7 +398,7 @@ describe('0.49.0 · el requerimiento nace como ítem y cae en el borrador de quo
     expect(it1, 'la pieza sale con su ítem').toBeTruthy();
     expect(borrador, 'y con el borrador donde cayó').toBeTruthy();
     const item = (await o('mike', `/items/${it1}`)).data;
-    expect(item).toMatchObject({ proyecto_id: proyecto, estado: 'cotizado', tipo: 'requerimiento', monto: 0, cantidad: 1, alcance: 'no_aprobado' });
+    expect(item).toMatchObject({ proyecto_id: proyecto, estado: 'cotizado', tipo: 'requerimiento', monto: 0, cantidad: 1, alcance: 'fuera' });
     expect(item.clave, 'el mismo código que la pieza').toMatch(/^RQ-\d+$/);
     expect(await venta(), 'un cotizado no mueve la venta').toBe(v);
     /* En el plano sigue DENTRO: un requerimiento pendiente no se esconde
@@ -340,12 +420,12 @@ describe('0.49.0 · el requerimiento nace como ítem y cae en el borrador de quo
     expect(muebles[0].codigo).toMatch(/^RQ-\d+$/);
   });
 
-  it('descartar un requerimiento lo saca del borrador', async () => {
-    const r = await o('mike', `/items/${it2}/cancelar`, { method: 'POST', json: { motivo: 'el cliente ya no lo quiso' } });
+  it('sacar un requerimiento lo saca del borrador y del plano', async () => {
+    const r = await o('mike', `/items/${it2}/sacar`, { method: 'POST', json: { motivo: 'el cliente ya no lo quiso' } });
     expect(r.estado, JSON.stringify(r)).toBe(200);
-    expect(r.data.alcance).toBe('descartado');
+    expect(r.data.alcance).toBe('fuera');
     expect((await borradores())[0].datos.versiones[0].muebles.map((m: any) => m.item_id)).toEqual([it1]);
-    expect((await enPlano())['Repisa del baño'], 'y en el plano queda como descartado').toBe('descartado');
+    expect((await enPlano())['Repisa del baño'], 'y en el plano ya no está como pendiente').toBe('fuera');
   });
 
   it('aprobar el borrador aprueba ESE ítem —precio, tipo, código nuevo, pestaña— y no duplica nada', async () => {
@@ -366,6 +446,10 @@ describe('0.49.0 · el requerimiento nace como ítem y cae en el borrador de quo
     expect(item.aprobado_at).toBeTruthy();
     expect(item.clave, 'estrena el prefijo de su tipo').toMatch(/^PT-\d+$/);
     expect(await venta(), 'ahora sí suma').toBe(v + 150000);
+    /* Y la entrada quedó en la bitácora, con quién la aprobó (0.64.0). */
+    const b = (await o('mike', `/items/${it1}/alcance`)).data;
+    expect(b.movimientos.map((m: any) => m.accion)).toEqual(['entra']);
+    expect(b.movimientos[0]).toMatchObject({ quien: CORREO, app: 'cotizador101' });
 
     const det = await q('mike', `/elements/${rq1}`);
     expect(det.element.type, 'la pieza del plano cambió de tipo').toBe('Puerta');
@@ -378,7 +462,7 @@ describe('0.49.0 · el requerimiento nace como ítem y cae en el borrador de quo
     expect(r.cotizacion_id).toBeTruthy();
     expect(r.cotizacion_id).not.toBe(borrador);
     expect((await borradores()).length).toBe(1);
-    await o('mike', `/items/${r.item_id}/cancelar`, { method: 'POST', json: {} });
+    await o('mike', `/items/${r.item_id}/sacar`, { method: 'POST', json: {} });
   });
 
   it('aprobar desde dash también lo saca del borrador: ya no está pendiente del cliente', async () => {

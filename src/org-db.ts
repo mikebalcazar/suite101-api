@@ -40,6 +40,7 @@ import subitems from '../migrations/org/0024_subitems.sql';
 import accionistas from '../migrations/org/0025_accionistas.sql';
 import movimientoPartida from '../migrations/org/0026_movimiento_partida.sql';
 import sinNegocios from '../migrations/org/0027_sin_negocios.sql';
+import alcanceDosEstados from '../migrations/org/0028_alcance_dos_estados.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { PREFIJOS, siguienteCodigo } from './quell/codigos.js';
 
@@ -53,7 +54,7 @@ import { secretoDe } from './maestro';
 import type { Quien } from './http';
 import { DEFS, type Def, type Tipo } from './tablas';
 import { ahora, normalizar, ulid } from './lib';
-import { alcanceDeItem } from '../schema/tipos';
+import { alcanceDeItem, type MovimientoAlcance } from '../schema/tipos';
 import { TABLAS, type Aviso, type ConteoQuote, type Etapa, type Peek, type Pool, type Tabla } from '../schema/tipos';
 import type { Env } from './entorno';
 
@@ -66,7 +67,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados];
 
 /** La 0027 no es SQL: corre en código (`quitarNegocios`), porque lo que hace
  *  depende de lo que haya en la base. `migrar()` la reconoce por su lugar en
@@ -154,8 +155,12 @@ export interface LineaAprobada {
    *  en vez de crear otro. */
   item_id?: string | null;
 }
+/** Quién escribe, para la bitácora del alcance (0.64.0): la app y el
+ *  usuario siempre; el correo cuando la ruta lo tiene a la mano. */
+export interface ContextoEscritura { app: string; usuario_id: string; correo?: string | null }
+
 export interface AprobarCotizacion {
-  cotizacion_id: string; proyecto_id: string; lineas: LineaAprobada[]; usuario_id: string; app: string;
+  cotizacion_id: string; proyecto_id: string; lineas: LineaAprobada[]; usuario_id: string; app: string; correo?: string | null;
   /** 0.49.0: la partida (pestaña) en la que caen las piezas. Sin ella, el
    *  nombre de la cotización. */
   partida?: string | null;
@@ -208,7 +213,7 @@ export interface ApiOrgDB {
   /** Las tablas de esta base con sus columnas, como las ve SQLite. Para
    *  master101 y para medir una migración (`GET /admin/orgs/:o/esquema`). */
   esquema(): Promise<Record<string, string[]>>;
-  crear(tabla: Tabla, datos: Fila, contexto: { app: string; usuario_id: string }): Promise<Fila>;
+  crear(tabla: Tabla, datos: Fila, contexto: ContextoEscritura): Promise<Fila>;
   /** Deja el contador de folios en un número. La usa la mudanza de la fase 4
    *  para dejarlo justo después de lo que acabó de importar. */
   fijarFolio(siguiente: number, serie?: string): Promise<number>;
@@ -216,7 +221,7 @@ export interface ApiOrgDB {
   apartarNumero(serie: string): Promise<number>;
   /** Mira el siguiente número sin apartarlo. */
   verNumero(serie: string): Promise<number>;
-  actualizar(tabla: Tabla, id: string, datos: Fila): Promise<Fila | null>;
+  actualizar(tabla: Tabla, id: string, datos: Fila, contexto?: Partial<ContextoEscritura>): Promise<Fila | null>;
   /** false si no existía; 'en_uso' si otras filas apuntan a esta (llave foránea). */
   borrar(tabla: Tabla, id: string): Promise<boolean | 'en_uso'>;
   recalcularProyecto(proyecto_id: string): Promise<Fila | null>;
@@ -239,6 +244,7 @@ export interface ApiOrgDB {
   }): Promise<{ total: number; filas: Fila[] }>;
   venderItems(args: {
     item_ids: string[]; proyecto_id?: string | null; nombre_proyecto?: string; app: string; usuario_id: string;
+    correo?: string | null;
   }): Promise<{ ok: true; proyecto: Fila; items: Fila[] } | { ok: false; error: string; detalle?: Record<string, any> }>;
   aprobarCotizacion(args: AprobarCotizacion): Promise<ResultadoAprobar>;
   /** 0.49.0: un requerimiento levantado en la obra nace como ítem cotizado del
@@ -398,13 +404,15 @@ export interface ApiOrgDB {
     items: Array<{ id: string; partida?: string; orden?: number }>,
   ): Promise<{ ok: true; acomodados: number } | { error: string; detalle?: unknown }>;
 
-  /* Aprobar y cancelar un ítem (§106). */
-  aprobarItem(id: string, contexto: { usuario_id: string }): Promise<{ ok: true; item: Fila; era: string } | { error: string; detalle?: unknown }>;
+  /* Agregar al alcance y sacar del alcance (§106, dos estados desde 0.64.0). */
+  aprobarItem(id: string, contexto: Partial<ContextoEscritura>): Promise<{ ok: true; item: Fila; era: string } | { error: string; detalle?: unknown }>;
   cancelarItem(
     id: string,
     args: { motivo?: string },
-    contexto: { usuario_id: string },
-  ): Promise<{ ok: true; item: Fila; alcance: 'cancelado' | 'descartado' } | { error: string; detalle?: unknown }>;
+    contexto: Partial<ContextoEscritura>,
+  ): Promise<{ ok: true; item: Fila; alcance: 'fuera' } | { error: string; detalle?: unknown }>;
+  /** La bitácora del alcance de un ítem (0.64.0), del más viejo al más nuevo. */
+  bitacoraAlcance(item_id: string): Promise<{ ok: true; item: Fila; movimientos: MovimientoAlcance[] } | { error: string; detalle?: unknown }>;
   /** Borrar lo cancelado de un proyecto (§117). `modo: 'seco'` no escribe:
    *  contesta el mismo censo para poder enseñarlo antes. */
   borrarCancelados(
@@ -717,7 +725,7 @@ export class OrgDB extends DurableObject<Env> {
      * que se quede atrás va a ser la que nadie mire—. Así la dice el
      * servidor una vez y las tres la leen. No es columna: no se guarda, se
      * calcula al salir, y por eso no se puede escribir desde fuera. */
-    if (tabla === 'items') out.alcance = alcanceDeItem(out as { estado?: string; aprobado_at?: string | null });
+    if (tabla === 'items') out.alcance = alcanceDeItem(out as { estado?: string });
     return out;
   }
 
@@ -898,7 +906,7 @@ export class OrgDB extends DurableObject<Env> {
     return n;
   }
 
-  crear(tabla: Tabla, datos: Fila, contexto: { app: string; usuario_id: string }): Fila {
+  crear(tabla: Tabla, datos: Fila, contexto: ContextoEscritura): Fila {
     const def = DEFS[tabla];
     const fila: Fila = { ...datos };
 
@@ -932,8 +940,10 @@ export class OrgDB extends DurableObject<Env> {
      * distingue después un cancelado —estuvo aprobado— de un descartado
      * —nunca lo estuvo—, que es la regla que puso Mike el 20-sep, y si no se
      * escribe en el momento ya no hay de dónde sacarla. */
-    if (tabla === 'items' && String(fila.estado ?? 'cotizado') === 'vendido' && !fila.aprobado_at) {
-      fila.aprobado_at = ahora();
+    if (tabla === 'items') {
+      // 0.64.0: 'cancelado' ya no se escribe; es fuera del alcance, o sea cotizado.
+      if (String(fila.estado ?? '') === 'cancelado') fila.estado = 'cotizado';
+      if (String(fila.estado ?? 'cotizado') === 'vendido' && !fila.aprobado_at) fila.aprobado_at = ahora();
     }
     if (def.cols.creado_at) fila.creado_at = ahora();
     if (def.cols.ts && !fila.ts) fila.ts = ahora();
@@ -956,10 +966,14 @@ export class OrgDB extends DurableObject<Env> {
     );
 
     this.despuesDeEscribir(tabla, fila.id as string);
+    // Un ítem que nace vendido entra al alcance al nacer: queda en la bitácora.
+    if (tabla === 'items' && String(fila.estado ?? 'cotizado') === 'vendido') {
+      this.anotarAlcance(String(fila.id), (fila.proyecto_id as string | null) ?? null, 'entra', contexto, null);
+    }
     return this.obtener(tabla, fila.id as string)!;
   }
 
-  actualizar(tabla: Tabla, id: string, datos: Fila): Fila | null {
+  actualizar(tabla: Tabla, id: string, datos: Fila, contexto: Partial<ContextoEscritura> = {}): Fila | null {
     const def = DEFS[tabla];
     const cols = Object.keys(datos).filter((c) => c in def.cols && c !== 'id');
     if (!cols.length) return this.obtener(tabla, id);
@@ -983,16 +997,28 @@ export class OrgDB extends DurableObject<Env> {
      * `aprobado_at` se pone la primera vez que el ítem queda vendido y ya no
      * se borra: que un ítem se cancele no borra que estuvo aprobado, y eso
      * es justo lo que hay que recordar. */
+    let mueveAlcance: 'entra' | 'sale' | null = null;
+    let proyectoDelItem: string | null = null;
     if (tabla === 'items' && datos.estado !== undefined) {
-      const antes = this.sql.exec(`SELECT estado, aprobado_at FROM items WHERE id = ?`, id).toArray()[0] as Fila | undefined;
+      const antes = this.sql.exec(`SELECT estado, aprobado_at, cancelado_at, proyecto_id FROM items WHERE id = ?`, id).toArray()[0] as Fila | undefined;
+      proyectoDelItem = (antes?.proyecto_id as string | null) ?? null;
+      /* 0.64.0 · dos estados. 'cancelado' ya no se escribe: lo que llega así
+       * —la pantalla del proyecto al quitar un renglón, una app vieja— es
+       * fuera del alcance, o sea 'cotizado', con `cancelado_at` para que se
+       * sepa que lo SACARON y no que nadie lo ha decidido. */
+      if (String(datos.estado) === 'cancelado') datos.estado = 'cotizado';
       const nuevo = String(datos.estado);
-      if (nuevo === 'vendido' && !antes?.aprobado_at && datos.aprobado_at === undefined) {
-        cols.push('aprobado_at');
-        datos.aprobado_at = ahora();
-      }
-      if (nuevo === 'cancelado' && String(antes?.estado ?? '') !== 'cancelado' && datos.cancelado_at === undefined) {
-        cols.push('cancelado_at');
-        datos.cancelado_at = ahora();
+      const eraVendido = String(antes?.estado ?? 'cotizado') === 'vendido';
+      if (nuevo === 'vendido') {
+        if (!antes?.aprobado_at && datos.aprobado_at === undefined) { cols.push('aprobado_at'); datos.aprobado_at = ahora(); }
+        if (!eraVendido) {
+          mueveAlcance = 'entra';
+          if (datos.cancelado_at === undefined) { cols.push('cancelado_at'); datos.cancelado_at = null; }
+          if (datos.cancelado_motivo === undefined) { cols.push('cancelado_motivo'); datos.cancelado_motivo = null; }
+        }
+      } else if (eraVendido) {
+        mueveAlcance = 'sale';
+        if (datos.cancelado_at === undefined) { cols.push('cancelado_at'); datos.cancelado_at = ahora(); }
       }
     }
     if (def.cols.actualizado_at) {
@@ -1004,7 +1030,34 @@ export class OrgDB extends DurableObject<Env> {
 
     this.despuesDeEscribir(tabla, id);
     if (montoAntes !== undefined) this.huellaDePrecio(id, Number(montoAntes));
+    if (mueveAlcance) this.anotarAlcance(id, proyectoDelItem, mueveAlcance, contexto, (datos.cancelado_motivo as string | null) ?? null);
     return this.obtener(tabla, id);
+  }
+
+  /* ─────────────── la bitácora del alcance (0.64.0) ───────────────
+   *
+   * Mike, 2-oct: «solo en la bitácora sí aparecerá como "se sacó del
+   * alcance" y si se agrega de nuevo aparecerá después "se agregó al alcance"
+   * con su fecha y quién la agregó».
+   *
+   * Se anota AQUÍ, en el único lugar por donde pasa cada cambio de estado
+   * —el CRUD, aprobar, sacar, vender desde quote101, aprobar una
+   * cotización—, y no en las rutas: una bitácora que sólo escriben dos rutas
+   * se queda muda la primera vez que el estado cambia por una tercera. */
+  private anotarAlcance(item_id: string, proyecto_id: string | null, accion: 'entra' | 'sale', contexto: Partial<ContextoEscritura>, motivo: string | null): void {
+    this.sql.exec(
+      `INSERT INTO alcance_movimientos (id, item_id, proyecto_id, accion, quien, app, motivo, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ulid(), item_id, proyecto_id, accion, contexto.correo ?? null, contexto.app ?? null, motivo ? String(motivo).trim() || null : null, ahora(),
+    );
+  }
+
+  bitacoraAlcance(item_id: string): { ok: true; item: Fila; movimientos: MovimientoAlcance[] } | { error: string; detalle?: unknown } {
+    const item = this.obtener('items', item_id);
+    if (!item) return { error: 'no_encontrado', detalle: { que: 'item', id: item_id } };
+    const movimientos = this.sql
+      .exec(`SELECT id, item_id, proyecto_id, accion, quien, app, motivo, at FROM alcance_movimientos WHERE item_id = ? ORDER BY at, id`, item_id)
+      .toArray() as unknown as MovimientoAlcance[];
+    return { ok: true, item, movimientos };
   }
 
   borrar(tabla: Tabla, id: string): boolean | 'en_uso' {
@@ -1338,6 +1391,7 @@ export class OrgDB extends DurableObject<Env> {
     nombre_proyecto?: string;
     app: string;
     usuario_id: string;
+    correo?: string | null;
   }): { ok: true; proyecto: Fila; items: Fila[] } | { ok: false; error: string; detalle?: Record<string, any> } {
     const items = args.item_ids.map((id) => this.obtener('items', id)).filter(Boolean) as Fila[];
     if (!items.length) return { ok: false, error: 'no_encontrado', detalle: { item_ids: args.item_ids } };
@@ -1361,9 +1415,11 @@ export class OrgDB extends DurableObject<Env> {
 
     for (const it of items) {
       this.sql.exec(
-        `UPDATE items SET estado = 'vendido', proyecto_id = ?, actualizado_at = ? WHERE id = ?`,
-        proyecto_id, ahora(), it.id,
+        `UPDATE items SET estado = 'vendido', proyecto_id = ?, aprobado_at = COALESCE(aprobado_at, ?), cancelado_at = NULL,
+                cancelado_motivo = NULL, actualizado_at = ? WHERE id = ?`,
+        proyecto_id, ahora(), ahora(), it.id,
       );
+      if (String(it.estado ?? 'cotizado') !== 'vendido') this.anotarAlcance(String(it.id), proyecto_id, 'entra', { app: args.app, usuario_id: args.usuario_id, correo: args.correo }, null);
       this.avisar({ t: 'item.cambio', id: String(it.id) }, 'todos');
     }
     const proyecto = this.recalcularProyecto(proyecto_id)!;
@@ -1436,7 +1492,7 @@ export class OrgDB extends DurableObject<Env> {
     const datosCot = (cot.datos ?? {}) as Record<string, any>;
     const partida = String(args.partida ?? datosCot.nombre ?? cot.folio ?? '').trim().slice(0, 80);
 
-    const contexto = { app: args.app, usuario_id: args.usuario_id };
+    const contexto = { app: args.app, usuario_id: args.usuario_id, correo: args.correo };
     let creados = 0;
     let productosNuevos = 0;
     this.ctx.storage.transactionSync(() => {
@@ -1451,6 +1507,7 @@ export class OrgDB extends DurableObject<Env> {
            * y estrena código con el prefijo que le toca. */
           const id = String(l.item_id);
           const tipo = String(l.tipo || 'mueble').trim().toLowerCase();
+          const estabaDentro = String(this.obtener('items', id)?.estado ?? 'cotizado') === 'vendido';
           const recodificada = this.recodificarPiezas(id, tipo, codigo);
           const clave = recodificada ?? (codigo || null);
           this.sql.exec(
@@ -1462,6 +1519,7 @@ export class OrgDB extends DurableObject<Env> {
             l.producto_id ? String(l.producto_id) : null, partida, ahora(), ahora(), id,
           );
           this.quitarDelBorrador(id);
+          if (!estabaDentro) this.anotarAlcance(id, args.proyecto_id, 'entra', contexto, null);
           this.avisar({ t: 'item.cambio', id }, 'todos');
           creados++;
           return;
@@ -3946,30 +4004,23 @@ export class OrgDB extends DurableObject<Env> {
 
 
 
-  /* ─────────────── aprobar y cancelar un ítem (§106) ───────────────
+  /* ─────────────── agregar al alcance y sacar del alcance (§106 → 0.64.0) ───────────────
    *
    * Mike, 20-sep: «se debe poder cancelar algún ítem ya sea desde quell o
-   * desde dash, y se refleja en los 2», y «para que un ítem se considere
-   * cancelado tiene que haber estado aprobado primero y luego cancelado».
+   * desde dash, y se refleja en los 2». Se refleja solo: el ítem es UNO en la
+   * base de la empresa, y la pieza del plano cuelga de él.
    *
-   * Se refleja en los dos lados sin hacer nada extra, y por eso estas dos
-   * rutas viven aquí y no en cada app: el ítem es UNO en la base de la
-   * empresa, y la pieza del plano cuelga de él. Lo que cada pantalla decide
-   * es cómo lo enseña.
-   *
-   * La regla de Mike no es un candado, es una CLASIFICACIÓN: cancelar lo que
-   * nunca estuvo aprobado sí se puede —es decirle que no a un
-   * requerimiento—, pero eso no es un cancelado, es un descartado, y sale en
-   * otra lista. Quien lo decide es `aprobado_at`, y por eso nadie más que la
-   * API la escribe. Si fuera un candado, borrar un proyecto —que cancela
-   * todos sus ítems, aprobados o no— se trabaría en el primer cotizado.
+   * Mike, 2-oct: ya no hay «cancelado»: un ítem está en alcance o fuera de
+   * alcance, y lo que estuvo dentro y se sacó REGRESA a fuera, a la misma
+   * lista que el requerimiento que nadie ha aprobado. Lo que distingue a uno
+   * de otro ya no es un estado: es la bitácora (`alcance_movimientos`), y
+   * `cancelado_at` sólo dice que a éste lo sacaron —para que el plano y el
+   * borrador de quote101 dejen de enseñarlo como pendiente—.
    */
 
-  /** Aprobar: el requerimiento pasa a estar dentro del alcance y, desde ese
-   *  momento, suma en el proyecto. Reactivar un cancelado también pasa por
-   *  aquí: se le limpia la fecha de cancelación y conserva la de aprobación,
-   *  porque estuvo aprobado y eso no se borra. */
-  aprobarItem(id: string, contexto: { usuario_id: string }): { ok: true; item: Fila; era: string } | { error: string; detalle?: unknown } {
+  /** Agregar al alcance: pasa a 'vendido' y desde ese momento suma en el
+   *  proyecto. `aprobado_at` se pone la primera vez y no se reescribe. */
+  aprobarItem(id: string, contexto: Partial<ContextoEscritura>): { ok: true; item: Fila; era: string } | { error: string; detalle?: unknown } {
     const item = this.obtener('items', id);
     if (!item) return { error: 'no_encontrado', detalle: { que: 'item', id } };
     const era = String(item.estado ?? 'cotizado');
@@ -3980,42 +4031,45 @@ export class OrgDB extends DurableObject<Env> {
               cancelado_motivo = NULL, actualizado_at = ? WHERE id = ?`,
       ahora(), ahora(), id,
     );
-    void contexto;
+    this.anotarAlcance(id, (item.proyecto_id as string | null) ?? null, 'entra', contexto, null);
     // Aprobado desde dash o quell: ya no está pendiente del cliente (0.49.0).
-    if (era === 'cotizado') this.quitarDelBorrador(id);
+    this.quitarDelBorrador(id);
     if (item.proyecto_id) this.recalcularProyecto(String(item.proyecto_id));
     this.avisar({ t: 'item.cambio', id }, 'todos');
     return { ok: true, item: this.obtener('items', id)!, era };
   }
 
-  /** Cancelar. `motivo` es opcional pero se guarda: tres meses después, «por
-   *  qué se cayó esto» no tiene otra respuesta.
+  /** Sacar del alcance. `motivo` es opcional pero se guarda: tres meses
+   *  después, «por qué se cayó esto» no tiene otra respuesta.
    *
-   *  Devuelve `alcance` ya resuelto —'cancelado' o 'descartado'— para que la
-   *  pantalla diga la palabra correcta sin volver a aplicar la regla. */
+   *  Un requerimiento que nadie había aprobado también se puede sacar: deja
+   *  de salir en el plano y en el borrador de quote101, y queda en la
+   *  bitácora como salida. Lo que ya estaba sacado sólo cambia de motivo. */
   cancelarItem(
     id: string,
     args: { motivo?: string },
-    contexto: { usuario_id: string },
-  ): { ok: true; item: Fila; alcance: 'cancelado' | 'descartado' } | { error: string; detalle?: unknown } {
+    contexto: Partial<ContextoEscritura>,
+  ): { ok: true; item: Fila; alcance: 'fuera' } | { error: string; detalle?: unknown } {
     const item = this.obtener('items', id);
     if (!item) return { error: 'no_encontrado', detalle: { que: 'item', id } };
+    const motivo = String(args.motivo ?? '').trim() || null;
+    const eraVendido = String(item.estado ?? 'cotizado') === 'vendido';
+    const yaSacado = !eraVendido && !!item.cancelado_at;
 
-    if (String(item.estado) !== 'cancelado') {
+    if (!yaSacado) {
       this.sql.exec(
-        `UPDATE items SET estado = 'cancelado', cancelado_at = ?, cancelado_motivo = ?, actualizado_at = ? WHERE id = ?`,
-        ahora(), String(args.motivo ?? '').trim() || null, ahora(), id,
+        `UPDATE items SET estado = 'cotizado', cancelado_at = ?, cancelado_motivo = ?, actualizado_at = ? WHERE id = ?`,
+        ahora(), motivo, ahora(), id,
       );
-    } else if (args.motivo) {
-      this.sql.exec(`UPDATE items SET cancelado_motivo = ?, actualizado_at = ? WHERE id = ?`, String(args.motivo).trim(), ahora(), id);
+      this.anotarAlcance(id, (item.proyecto_id as string | null) ?? null, 'sale', contexto, motivo);
+    } else if (motivo) {
+      this.sql.exec(`UPDATE items SET cancelado_motivo = ?, actualizado_at = ? WHERE id = ?`, motivo, ahora(), id);
     }
-    void contexto;
-    // Un requerimiento descartado sale del borrador que iba al cliente (0.49.0).
-    if (!item.aprobado_at) this.quitarDelBorrador(id);
-    if (item.proyecto_id) this.recalcularProyecto(String(item.proyecto_id));
+    // Un requerimiento que se saca deja el borrador que iba al cliente (0.49.0).
+    this.quitarDelBorrador(id);
+    if (eraVendido && item.proyecto_id) this.recalcularProyecto(String(item.proyecto_id));
     this.avisar({ t: 'item.cambio', id }, 'todos');
-    const ya = this.obtener('items', id)!;
-    return { ok: true, item: ya, alcance: ya.aprobado_at ? 'cancelado' : 'descartado' };
+    return { ok: true, item: this.obtener('items', id)!, alcance: 'fuera' };
   }
 
   /* ─────────────── borrar lo cancelado de un proyecto (§117) ───────────────
@@ -4060,7 +4114,10 @@ export class OrgDB extends DurableObject<Env> {
     cobros: number; avances: number; compromisos: number; archivos: number; piezas: number;
   }> {
     const items = this.sql
-      .exec(`SELECT id, clave, nombre, monto, aprobado_at FROM items WHERE proyecto_id = ? AND estado = 'cancelado' ORDER BY creado_at`, proyecto_id)
+      /* 0.64.0: ya no hay `estado = 'cancelado'`. Se censa lo que se SACÓ del
+       * alcance —`cancelado_at` con fecha— y está fuera; un requerimiento que
+       * nadie ha decidido no entra aquí: no es basura, es una pregunta. */
+      .exec(`SELECT id, clave, nombre, monto, aprobado_at FROM items WHERE proyecto_id = ? AND estado <> 'vendido' AND cancelado_at IS NOT NULL ORDER BY creado_at`, proyecto_id)
       .toArray() as Fila[];
     if (!items.length) return [];
 

@@ -70,7 +70,7 @@ const cancelado = async (nombre: string, monto = 5_000_00) => {
   expect((await o('mike', `/items/${id}/aprobar`, { method: 'POST', json: {} })).estado).toBe(200);
   const r = await o('mike', `/items/${id}/cancelar`, { method: 'POST', json: { motivo: 'el cliente lo quitó' } });
   expect(r.estado, JSON.stringify(r)).toBe(200);
-  expect(r.data.alcance).toBe('cancelado');
+  expect(r.data.alcance).toBe('fuera');
   return id;
 };
 
@@ -145,7 +145,7 @@ describe('el censo, antes de escribir', () => {
       negocio_id: negocio, cliente_id: cliente, proyecto_id: proyecto,
       nombre: 'Requerimiento descartado', monto: 1_000_00, cantidad: 1, estado: 'cotizado', tipo: 'mueble',
     } })).data.id as string;
-    expect((await o('mike', `/items/${d1}/cancelar`, { method: 'POST', json: {} })).data.alcance).toBe('descartado');
+    expect((await o('mike', `/items/${d1}/cancelar`, { method: 'POST', json: {} })).data.alcance).toBe('fuera');
 
     const r = await seco();
     expect(r.data.total).toBe(2);

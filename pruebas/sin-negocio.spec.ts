@@ -262,7 +262,10 @@ describe('la migración 0027 sobre una base con negocios', () => {
   const dentro = runInDurableObject as unknown as <T>(s: unknown, f: (o: any) => T | Promise<T>) => Promise<T>;
   const entorno = env as unknown as { ORG: DurableObjectNamespace };
   const elDO = () => entorno.ORG.get(entorno.ORG.idFromName('migracion-0027')) as unknown as DurableObjectStub;
-  const HASTA = MIGRACIONES.length - 1; // todas menos la 0027
+  /* Hasta la 0026. La 0027 corre en código y las que siguen (0028…) las
+   * aplica `migrar()` después de ella: lo que se mide es que una base con
+   * negocios llegue a la versión de hoy sin perder nada. */
+  const HASTA = 26;
 
   const T = '2026-09-01T00:00:00.000Z';
   const siembra = (db: any) => {

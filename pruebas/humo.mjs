@@ -463,6 +463,18 @@ async function recorrido() {
   const ven = await pedir(STAGING, `/orgs/${ORG}/items/vender`, { app: 'cotizador101', method: 'POST', body: { item_ids: [item, item2], nombre_proyecto: 'Casa Pérez' } });
   rev(ven.data?.proyecto?.precio_venta === 20000000, 'el precio del proyecto lo sumó la API', String(ven.data?.proyecto?.precio_venta));
 
+  // 0.64.0 · el alcance en dos estados, con bitácora (Mike, 2-oct)
+  const alc = await pedir(STAGING, `/orgs/${ORG}/items/${item}/alcance`, { app: 'dash101' });
+  rev(alc.data?.alcance === 'dentro' && alc.data?.movimientos?.[0]?.accion === 'entra' && !!alc.data?.movimientos?.[0]?.quien,
+      'vender desde quote101 deja «entra» en la bitácora del alcance, con quién', JSON.stringify(alc.data?.movimientos));
+  const sac = await pedir(STAGING, `/orgs/${ORG}/items/${item2}/sacar`, { app: 'dash101', method: 'POST', body: { motivo: 'humo' } });
+  rev(sac.data?.alcance === 'fuera' && sac.data?.item?.estado === 'cotizado', 'sacar del alcance regresa a cotizado y contesta «fuera»', `${sac.estado} ${sac.data?.alcance} ${sac.data?.item?.estado}`);
+  const alc2 = await pedir(STAGING, `/orgs/${ORG}/items/${item2}/alcance`, { app: 'dash101' });
+  rev((alc2.data?.movimientos || []).map((m) => m.accion).join(',') === 'entra,sale' && alc2.data?.movimientos?.[1]?.motivo === 'humo',
+      'y la salida queda anotada con su motivo', JSON.stringify(alc2.data?.movimientos));
+  const reg = await pedir(STAGING, `/orgs/${ORG}/items/${item2}/aprobar`, { app: 'dash101', method: 'POST' });
+  rev(reg.data?.alcance === 'dentro', 'y volver a agregarlo contesta «dentro»', `${reg.estado} ${reg.data?.alcance}`);
+
   // 4 · se mueve la etapa y el WebSocket lo avisa a otra pantalla
   const avisos = [];
   const ws = new WebSocket(`${STAGING.replace(/^http/, 'ws')}/orgs/${ORG}/ws`, { headers: { Cookie: galleta, 'X-App': 'quell101' } });
