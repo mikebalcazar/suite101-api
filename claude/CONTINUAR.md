@@ -402,6 +402,15 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   columnas + tabla `empresa` de un renglón + limpieza de API, dash101,
   master101, mocks de workshop101/t101-portal → la org demo de staging a
   un solo registro. Muro 2026-10-01-1930.
+- **La puerta ajustada y compartir archivos en quell101 (2-oct, API #206 y bitacora-obra #99).**
+  En la puerta, roster101 lleva al panel de la empresa (/admin), master101
+  ya no sale, y hay un bloque «Portal de trabajadores» con el botón
+  «Compartir portal» (hoja de compartir del sistema en el celular, copia al
+  portapapeles en escritorio). En quell101, toda foto, plano, PDF o soporte
+  trae «Compartir»: baja el archivo con la sesión y lo manda como COPIA por
+  navigator.share (archivos) o lo descarga con su nombre. Nota en el muro
+  `2026-10-02-0127-jr-puerta-ajustada-y-compartir-archivos.md`. Pendiente
+  de medir en iPhone real la hoja de compartir con archivos.
 - **La puerta de la suite: suite101.taller101.com (2-oct, API #204).**
   Una hoja con el logotipo y ocho ligas (dash, quell, quote, supply,
   roster, peek, workshop, master) servida por la API en un segundo
