@@ -419,6 +419,16 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **El requerimiento pendiente está fuera del alcance también en quell (2-oct, API 0.64.1 #215, bitacora-obra #104).**
+  Mike: «Aún no queda la lista de ítems fuera de alcance en quell» + el
+  flujo completo (quell/quote generan; dash lee, saca y mete; requerimiento
+  = fuera; aprobar la cotización mete al alcance con tipo y precio; versiones
+  sólo refieren). `ALCANCE_SQL` ya es `alcanceDeItem` sin la excepción del
+  22-sep; quell101 pasa el filtro a «Todos» al levantar un requerimiento.
+  El resto del flujo ya existía (auditado en el muro). PENDIENTE de Mike:
+  dash101 todavía crea ítems («Editar la lista», «Ítem en esta partida»);
+  él dice que sólo quote y quell generan. Muro
+  `2026-10-02-1800-jr-requerimiento-fuera-de-alcance.md`.
 - **DEFECTO quell101: «Reubicar en el plano» cerraba el ítem (2-oct, bitacora-obra #103).**
   Mike en Bosques de Santa Fe: «se sale de la función y deselecciona todo».
   El botón llamaba `setVista('plan')` con el ítem abierto, y `setVista`
