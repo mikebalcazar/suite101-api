@@ -474,17 +474,72 @@ describe('0.49.0 · el requerimiento nace como ítem y cae en el borrador de quo
     expect((await borradores())[0].datos.versiones[0].muebles.map((m: any) => m.item_id)).not.toContain(r.item_id);
   });
 
+  let obra2 = '', plano2 = '', proyecto2 = '', rqSuelto = '';
   it('en una obra sin proyecto ligado la pieza se levanta igual, y nada más', async () => {
-    const obra2 = (await q('mike', '/projects', { method: 'POST', json: { name: 'Obra suelta', client: 'Nadie' } })).id;
+    obra2 = (await q('mike', '/projects', { method: 'POST', json: { name: 'Obra suelta', client: 'Nadie' } })).id;
     const fd = new FormData();
     fd.append('name', 'Planta'); fd.append('file_name', 'p.pdf'); fd.append('width', '1000'); fd.append('height', '800');
     fd.append('image', new File([PNG], 'plan.png', { type: 'image/png' }));
-    const plano2 = (await q('mike', `/projects/${obra2}/plans`, { method: 'POST', body: fd })).id;
+    plano2 = (await q('mike', `/projects/${obra2}/plans`, { method: 'POST', body: fd })).id;
     const r = await levantar('Sin proyecto', plano2);
     expect(r.estado, JSON.stringify(r)).toBe(200);
     expect(r.code).toBe('RQ-01');
     expect(r.item_id).toBeNull();
     expect(r.cotizacion_id).toBeNull();
+    rqSuelto = r.id;
+  });
+
+  /* 0.64.2 · Mike, 2-oct: «los requerimientos levantados en quell (…) tienen
+   * que aparecer en la lista de quote de ítems pendientes. Ahorita hay unos
+   * requerimientos del Depto Bosques de Santa Fe que no aparecen». Eran
+   * pines levantados ANTES de ligar la obra: sin proyecto no había dónde
+   * nacer como ítem. Al ligar, nacen. */
+  const pendientesDe = async (p: string) => (await o('mike', `/items?proyecto_id=${p}&estado=cotizado`, C)).data.filas as any[];
+  const borradorDe = async (p: string) =>
+    ((await o('mike', `/cotizaciones?negocio_id=${negocio}`, C)).data.filas as any[])
+      .filter((c) => c.estado === 'borrador' && c.datos?.de_requerimientos === true && c.datos?.proyecto_id === p);
+
+  it('0.64.2 · al ligar la obra, el requerimiento huérfano nace como ítem cotizado y cae en el borrador de quote101', async () => {
+    proyecto2 = (await o('mike', '/proyectos', { method: 'POST', json: { negocio_id: negocio, cliente_id: cliente, nombre: 'Casa dos' } })).data.id;
+    const l = await o('mike', `/obras/${obra2}/ligar`, { method: 'POST', json: { proyecto_id: proyecto2 } });
+    expect(l.estado, JSON.stringify(l)).toBe(200);
+
+    const it = (await pendientesDe(proyecto2)).find((i) => i.nombre === 'Sin proyecto');
+    expect(it, 'ya es un ítem pendiente del proyecto: lo que quote101 lista').toBeTruthy();
+    expect(it).toMatchObject({ tipo: 'requerimiento', estado: 'cotizado', alcance: 'fuera', clave: 'RQ-01', monto: 0 });
+    const det = await q('mike', `/elements/${rqSuelto}`);
+    expect(det.element.item_id, 'y la pieza del plano cuelga de él').toBe(it.id);
+    const b = await borradorDe(proyecto2);
+    expect(b.length).toBe(1);
+    expect(b[0].datos.versiones[0].muebles.map((m: any) => m.item_id)).toEqual([it.id]);
+    const r = await q('mike', `/projects/${obra2}`);
+    expect((r.elements ?? []).find((e: any) => e.id === rqSuelto).alcance).toBe('fuera');
+  });
+
+  it('0.64.2 · desligar y volver a ligar no duplica nada', async () => {
+    expect((await o('mike', `/obras/${obra2}/ligar`, { method: 'DELETE' })).estado).toBe(200);
+    expect((await o('mike', `/obras/${obra2}/ligar`, { method: 'POST', json: { proyecto_id: proyecto2 } })).estado).toBe(200);
+    expect((await pendientesDe(proyecto2)).filter((i) => i.nombre === 'Sin proyecto').length).toBe(1);
+    expect((await borradorDe(proyecto2))[0].datos.versiones[0].muebles.length).toBe(1);
+  });
+
+  it('0.64.2 · «traer del plano» levanta un requerimiento como requerimiento, no como pieza suelta', async () => {
+    /* Una pieza que se volvió requerimiento después de nacer (se le cambió el
+     * tipo) es un pin sin ítem en una obra ligada: el único camino que le
+     * queda es «traer del plano». Por ahí también tiene que caer en quote101. */
+    const r = await q('mike', `/plans/${plano2}/elements`, {
+      method: 'POST', json: { op_id: crypto.randomUUID(), name: 'Nació mueble', type: 'Mueble', x: 0.2, y: 0.2 },
+    });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.item_id).toBeNull();
+    const p = await q('mike', `/elements/${r.id}`, { method: 'PATCH', json: { op_id: crypto.randomUUID(), type: 'Requerimiento' } });
+    expect(p.estado, JSON.stringify(p)).toBe(200);
+    const t = await o('mike', `/obras/${obra2}/items`, { method: 'POST', json: { crear: [r.id] } });
+    expect(t.estado, JSON.stringify(t)).toBe(200);
+    expect(t.data.creados).toBe(1);
+    const it = (await pendientesDe(proyecto2)).find((i) => i.nombre === 'Nació mueble');
+    expect(it).toMatchObject({ tipo: 'requerimiento', estado: 'cotizado', alcance: 'fuera' });
+    expect((await borradorDe(proyecto2))[0].datos.versiones[0].muebles.map((m: any) => m.item_id)).toContain(it.id);
   });
 });
 

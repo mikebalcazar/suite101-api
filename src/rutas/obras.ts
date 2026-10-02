@@ -151,7 +151,7 @@ export function montarObras(rutas: App): void {
     if (!puedeLigar(c)) return err(c, 'sin_permiso', 403, { motivo: 'ligar una obra con un proyecto lo hace quien dirige la empresa' });
     const b = await c.req.json<{ proyecto_id?: string }>().catch(() => ({}) as { proyecto_id?: string });
     if (!b.proyecto_id) return err(c, 'datos_invalidos', 400, { falta: 'proyecto_id' });
-    const r = await stub(c).ligarObra(c.req.param('id'), b.proyecto_id);
+    const r = await stub(c).ligarObra(c.req.param('id'), b.proyecto_id, c.get('quien')?.usuario_id ?? 'sistema');
     if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 409, r.detalle);
     return ok(c, { obra: r.obra });
   });
