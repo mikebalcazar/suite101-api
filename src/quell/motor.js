@@ -251,31 +251,29 @@ const soloUbicacion = (e) => ({ id: e.id, plan_id: e.plan_id, project_id: e.proj
 
 /* EN QUÉ PARTE DEL ALCANCE ESTÁ LA PIEZA, que es el del ítem del que cuelga.
  *
- * Mike, 20-sep-2026: «hay ítems nuevos no aprobados e ítems cancelados. Para
- * que un ítem se considere cancelado tiene que haber estado aprobado primero
- * y luego cancelado. (…) Los no aprobados NO APARECEN en quell al menos que
- * veas la vista de ítems fuera de alcance.»
+ * Mike, 2-oct-2026: «solo existirá "en alcance" o "fuera de alcance"», y el
+ * mismo día, al revisar la obra: «cuando se genera uno en quell (…) se genera
+ * como requerimiento (fuera de alcance) o como ítem (en alcance)». Y antes,
+ * el 20-sep: «los no aprobados NO APARECEN en quell al menos que veas la
+ * vista de ítems fuera de alcance».
  *
- * La regla misma vive en `schema/tipos.ts` (`alcanceDeItem`), que es el
- * archivo que las tres apps copian. Aquí se repite en cuatro líneas porque
- * este motor es JavaScript suelto y no importa el contrato; para que las dos
- * copias no se separen, `pruebas/alcance.spec.ts` las compara caso por caso.
+ * La regla misma vive en `schema/tipos.ts` (`alcanceDeItem`): vendido es
+ * dentro, lo demás es fuera. Aquí se repite en tres líneas porque este motor
+ * es JavaScript suelto y no importa el contrato; para que las dos copias no
+ * se separen, `pruebas/alcance.spec.ts` las compara caso por caso.
  *
  * Una pieza SIN ítem va dentro: es trabajo de la obra que nadie cotizó, y
  * esconderla del plano por no tener renglón en dash sería borrarla de la
  * obra por una razón de contabilidad.
  *
- * Y un REQUERIMIENTO pendiente también va dentro (0.49.0). Desde que nace
- * como ítem cotizado —para caer en el borrador de quote101— su ítem dice
- * `no_aprobado`, y esa palabra en esta pantalla significa «escondido salvo
- * en la vista de fuera de alcance». Mike, 22-sep: el requerimiento «sí
- * aparece en mapa, sí aparece en ítems»; su propio tipo ya dice que está
- * pendiente. Si se descarta, sí se va: descartado es descartado. */
+ * HISTORIA: del 22-sep al 2-oct un requerimiento pendiente iba DENTRO («sí
+ * aparece en mapa»). Mike lo cambió el 2-oct: el requerimiento ES lo que
+ * está fuera del alcance mientras no se cotice y autorice, y la lista de
+ * fuera de alcance de quell tiene que enseñarlo. Para que no se le pierda
+ * al levantarlo, la pantalla pasa el filtro a «Todos» en cuanto lo clava. */
 const ALCANCE_SQL = `CASE
     WHEN it.id IS NULL THEN 'dentro'
     WHEN it.estado = 'vendido' THEN 'dentro'
-    WHEN it.cancelado_at IS NOT NULL THEN 'fuera'
-    WHEN lower(trim(e.type)) = 'requerimiento' THEN 'dentro'
     ELSE 'fuera'
   END AS alcance`;
 
