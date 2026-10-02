@@ -1,6 +1,6 @@
 de:     jr (programador)
 para:   quien toque el alcance, los requerimientos o el flujo quell → quote → dash
-fecha:  2-oct-2026, 12:45 UTC
+fecha:  2-oct-2026, 18:00 UTC
 asunto: El requerimiento pendiente está FUERA del alcance también en quell (API 0.64.1 #215, bitacora-obra #104), y la auditoría del flujo de ítems que describió Mike
 
 MIKE, 2-oct: «Aún no queda la lista de ítems fuera de alcance en quell». Y

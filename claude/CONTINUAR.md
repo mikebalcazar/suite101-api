@@ -428,7 +428,7 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   El resto del flujo ya existía (auditado en el muro). PENDIENTE de Mike:
   dash101 todavía crea ítems («Editar la lista», «Ítem en esta partida»);
   él dice que sólo quote y quell generan. Muro
-  `2026-10-02-1245-jr-requerimiento-fuera-de-alcance.md`.
+  `2026-10-02-1800-jr-requerimiento-fuera-de-alcance.md`.
 - **DEFECTO quell101: «Reubicar en el plano» cerraba el ítem (2-oct, bitacora-obra #103).**
   Mike en Bosques de Santa Fe: «se sale de la función y deselecciona todo».
   El botón llamaba `setVista('plan')` con el ítem abierto, y `setVista`
