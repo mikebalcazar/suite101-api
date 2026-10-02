@@ -419,17 +419,20 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
-- **Dominio propio por empresa (2-oct, en curso: rama `claude/dominio-propio` de la API).**
+- **Dominio propio por empresa, fase A en main (2-oct, API #210/#211, master101 #34).**
   Mike decidió «dominio propio con alta automática» (Cloudflare for SaaS);
-  sus pasos están en `DOMINIOS.md`. Lo construido: migración D1 0022
-  (`orgs.dominio`, `dominios_nombres`), `src/dominios.ts` (ocho nombres,
-  cliente de Cloudflare con doble en pruebas, resolvedor), rutas de master101
-  (PATCH dominio, GET/DELETE /admin/orgs/:o/dominio), `/dominios/resolver`,
-  /yo acotado al dominio, 403 `otra_empresa`, portada por empresa, y el
-  Worker `puerta/` (ruta comodín de la zona, service bindings a las ocho
-  apps). PENDIENTE: que Mike haga sus pasos (token), mezclar, y la fase B:
-  dash101 (NEXT_PUBLIC_ORG), quell101 (ORG_ID) y t101-portal (ORG_ID) toman
-  la empresa de `X-Org-Empresa`, porque hoy son un Worker por empresa.
+  sus pasos están en `DOMINIOS.md` y FALTAN (token `CLOUDFLARE_SAAS_TOKEN`).
+  Hecho: D1 0022 (`orgs.dominio`, `dominios_nombres`), `src/dominios.ts`,
+  rutas de master101 (PATCH dominio, GET/DELETE /admin/orgs/:o/dominio),
+  `/dominios/resolver`, /yo acotado al dominio, 403 `otra_empresa`, portada
+  por empresa, el Worker `puerta/` (SIN desplegar todavía: falta el paso en
+  desplegar.yml, a propósito) y la pantalla de master101. OJO: el código
+  entró en #210, que era un PR de docs (los cambios sin confirmar se vinieron
+  a la rama); está contado en el muro. PENDIENTE fase B: dash101
+  (NEXT_PUBLIC_ORG), quell101 (ORG_ID) y t101-portal (ORG_ID) deben tomar la
+  empresa de `X-Org-Empresa`, porque hoy son un Worker por empresa; luego el
+  paso del deploy de la puerta y una medición con un dominio de prueba. Muro
+  `2026-10-02-0245-jr-dominio-propio-fase-a.md`.
 - **La puerta ajustada y compartir archivos en quell101 (2-oct, API #206 y bitacora-obra #99).**
   En la puerta, roster101 lleva al panel de la empresa (/admin), master101
   ya no sale, y hay un bloque «Portal de trabajadores» con el botón
