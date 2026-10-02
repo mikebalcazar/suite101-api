@@ -21,7 +21,11 @@ compatibility_flags = ["nodejs_compat"]
 # porque `routes` se hereda).
 workers_dev = true
 routes = [
-  { pattern = "api.taller101.com", custom_domain = true }
+  { pattern = "api.taller101.com", custom_domain = true },
+  # La puerta de la suite (2-oct-2026): la misma API sirve en este dominio la
+  # página con las ligas a cada programa (src/portal.ts). Cloudflare pone el
+  # registro y el certificado igual que para api.
+  { pattern = "suite101.taller101.com", custom_domain = true }
 ]
 
 [observability]
