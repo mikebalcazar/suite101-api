@@ -419,6 +419,15 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **El menú de abajo tapado por Safari 26 (2-oct, bitacora-obra #105).**
+  Mike, en un iPhone: «No alcanzo a ver el menú de abajo». Safari 26 pone
+  su barra flotante encima de la página y `safe-area-inset-bottom` no la
+  cuenta. quell101 ahora mide con `visualViewport` (web/src/alto.js →
+  `--alto-visible`, `--tapa`) y la app mide lo visible en el celular. Y el
+  plano se comparte (PDF o imagen original) junto a «Imprimir» y en la lista
+  de planos. PENDIENTE: dash101, supply101, roster101 y quote101 tienen el
+  mismo hoyo con lo que pegan abajo; mismo arreglo. Muro
+  `2026-10-02-2210-jr-menu-tapado-en-safari.md`.
 - **Los requerimientos sin ítem (2-oct, API 0.64.2 #218).** Mike: «hay unos
   requerimientos del Depto Bosques de Santa Fe que no aparecen en ítems
   pendientes en quote». Eran pines levantados antes de ligar la obra (o
