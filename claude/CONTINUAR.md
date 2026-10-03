@@ -419,6 +419,22 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **El pin del requerimiento se ve (3-oct, bitacora-obra #106).** Mike:
+  «los círculos de los requerimientos en quell no se ven … un amarillo
+  relleno con círculo verde». Era gris y, por estar fuera del alcance,
+  hueco y punteado. Ahora el tipo es amarillo (#F0C419) y el pin lleva
+  `.pin.revision`: relleno amarillo, aro verde, gana a `.pin.fuera`. Muro
+  `2026-10-03-0300-jr-requerimiento-se-ve.md`.
+- **quote101 G106: comisiones siempre a la vista e indirectos en lo escrito a mano (3-oct, cotizador-t101 #74).**
+  Mike: «otra vez no me aparece la opción de agregar la comisión del
+  arquitecto ni la de TDC … considera los indirectos siempre … en el PDF
+  no se exportan nunca». La caja de cargos sólo salía con muebles del
+  armador. Ahora sale con cualquier renglón; lo escrito a mano es la base
+  y lleva indirectos y comisiones prendidas (al peso); los PDF del cliente
+  sólo traen el precio repartido. `cargosAMano` en la versión: las de antes
+  se ven como se mandaron y entran a la regla al editarlas. Al aprobar,
+  `lineas[].precio` ya va con cargos. Muro
+  `2026-10-03-0255-jr-cargos-siempre-en-quote.md`.
 - **El menú de abajo tapado por Safari 26 (2-oct, bitacora-obra #105).**
   Mike, en un iPhone: «No alcanzo a ver el menú de abajo». Safari 26 pone
   su barra flotante encima de la página y `safe-area-inset-bottom` no la
