@@ -433,8 +433,10 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   y lleva indirectos y comisiones prendidas (al peso); los PDF del cliente
   sólo traen el precio repartido. `cargosAMano` en la versión: las de antes
   se ven como se mandaron y entran a la regla al editarlas. Al aprobar,
-  `lineas[].precio` ya va con cargos. Muro
-  `2026-10-03-0255-jr-cargos-siempre-en-quote.md`.
+  `lineas[].precio` ya va con cargos. Mismo día, #75: el flete también se
+  reparte entre todos los renglones (a mano incluidos) y su casilla sale
+  siempre. Muro `2026-10-03-0255-jr-cargos-siempre-en-quote.md` y
+  `2026-10-03-0320-jr-flete-en-todos.md`.
 - **El menú de abajo tapado por Safari 26 (2-oct, bitacora-obra #105).**
   Mike, en un iPhone: «No alcanzo a ver el menú de abajo». Safari 26 pone
   su barra flotante encima de la página y `safe-area-inset-bottom` no la
