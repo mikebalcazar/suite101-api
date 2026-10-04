@@ -419,6 +419,18 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **peek101 junta lo del cliente (4-oct, API 0.66.0 #229).** Mike: «para
+  el cliente es muy tedioso irse metiendo a diferentes plataformas (…)
+  Juntemos dentro de Peek la info de su estado de cuenta y la info que le
+  aparece en quell». /peek trae `obra` por proyecto, `piezas` (con
+  `docs`) por ítem y `pendientes` (dudas del taller al cliente, todas sus
+  obras). El cliente de la suite entra a la obra ligada a su proyecto sin
+  invitación aparte, ve `item_monto` y lee la documentación del ítem. El
+  estado de cuenta general lo baja él mismo. quell101 #108 (precio, etapa,
+  archivos en la cara de cliente); peek101 #23 (pendientes arriba,
+  ligas a quell101, columna Planos, Excel general; `public/ligas.js`
+  deduce la dirección de quell101 de la del portal). Muro
+  `2026-10-04-1850-jr-peek-junta-lo-del-cliente.md`.
 - **Un cliente por correo, en las tres apps (4-oct, API 0.65.0 #227).**
   Mike: «El cliente se debe poder crear desde quell, dash o quote … en
   caso de querer generar un nuevo cliente con el email de otro que ya
