@@ -421,6 +421,15 @@ async function correoDeOtroCliente(c: Ctx, datos: Record<string, unknown>, salvo
   return err(c, 'correo_en_uso', 409, { motivo: 'ese correo ya es de otro cliente', cliente: resumenCliente(otro) });
 }
 
+/** 0.66.0 · El cliente abre SU estado de cuenta general (Mike, 4-oct: «que
+ *  cuando el cliente entre en Peek pueda ver estados de cuentas (general y de
+ *  proyectos)»). Sólo el suyo: el id de la ruta tiene que ser el de su acceso.
+ *  Para cualquier otro id sigue siendo de la empresa. */
+const esSuPropioEstado = (c: Ctx) => {
+  const quien = c.get('quien');
+  return quien.clase === 'cliente' && String(quien.ref_id ?? '') === String(c.req.param('id'));
+};
+
 /** GET /orgs/:o/clientes/:id/estado-de-cuenta — qué se le vendió, qué pagó y
  *  qué debe. Global y por proyecto.
  *
@@ -436,10 +445,13 @@ async function correoDeOtroCliente(c: Ctx, datos: Record<string, unknown>, salvo
  *  Lo abre quien es de la empresa. Un cliente no: él ve lo suyo por /peek,
  *  que recorta lo que enseña; esto trae la cuenta completa. */
 rutas.get('/:o/clientes/:id/estado-de-cuenta', async (c) => {
-  const permiso = puedeLeer(c, 'clientes');
-  if (permiso) return permiso;
-  if (c.get('quien').clase !== 'miembro') {
-    return err(c, 'sin_permiso', 403, { motivo: 'el estado de cuenta completo es de la empresa; un cliente abre el suyo por peek101' });
+  const propio = esSuPropioEstado(c);
+  if (!propio) {
+    const permiso = puedeLeer(c, 'clientes');
+    if (permiso) return permiso;
+    if (c.get('quien').clase !== 'miembro') {
+      return err(c, 'sin_permiso', 403, { motivo: 'el estado de cuenta completo es de la empresa; un cliente abre el suyo por peek101' });
+    }
   }
   const r = await stub(c).estadoDeCuenta(c.req.param('id'));
   if (!r) return err(c, 'no_encontrado', 404, { que: 'cliente', id: c.req.param('id') });
@@ -457,10 +469,13 @@ rutas.get('/:o/clientes/:id/estado-de-cuenta', async (c) => {
  *  porque salen de la misma función; en PESOS y como NÚMERO, por lo mismo
  *  que el de proyecto. */
 rutas.get('/:o/clientes/:id/estado.xlsx', async (c) => {
-  const permiso = puedeLeer(c, 'clientes');
-  if (permiso) return permiso;
-  if (c.get('quien').clase !== 'miembro') {
-    return err(c, 'sin_permiso', 403, { motivo: 'el estado de cuenta completo es de la empresa; un cliente abre el suyo por peek101' });
+  const propio = esSuPropioEstado(c);
+  if (!propio) {
+    const permiso = puedeLeer(c, 'clientes');
+    if (permiso) return permiso;
+    if (c.get('quien').clase !== 'miembro') {
+      return err(c, 'sin_permiso', 403, { motivo: 'el estado de cuenta completo es de la empresa; un cliente abre el suyo por peek101' });
+    }
   }
   const r = await stub(c).estadoDeCuenta(c.req.param('id'));
   if (!r) return err(c, 'no_encontrado', 404, { que: 'cliente', id: c.req.param('id') });
@@ -1046,7 +1061,9 @@ rutas.all('/:o/quell/*', async (c) => {
   // rompe en el navegador y saca un aviso en workerd. El objeto la decodifica.
   cabeceras.set('x-sesion', encodeURIComponent(JSON.stringify({
     correo: s.correo, nombre: usuario?.nombre ?? null, superadmin: s.superadmin,
-    quien: { clase: quien.clase, rol: quien.rol, usuario_id: quien.usuario_id },
+    // 0.66.0 · `ref_id`: el cliente de la suite, para que el motor le abra la
+    // obra ligada a su proyecto sin invitación aparte.
+    quien: { clase: quien.clase, rol: quien.rol, usuario_id: quien.usuario_id, ref_id: quien.ref_id ?? null },
   })));
 
   // El cuerpo se lee entero antes de pasarlo: si el motor contesta sin leer

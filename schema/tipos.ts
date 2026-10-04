@@ -17,6 +17,20 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
+ * Versión del contrato: 0.66.0 (PEEK JUNTA LO DEL CLIENTE. Mike, 4-oct: «para
+ * el cliente es muy tedioso irse metiendo a diferentes plataformas (…)
+ * Juntemos dentro de Peek la info de su estado de cuenta y la info que le
+ * aparece en quell». `GET /peek` trae además, por proyecto, la `obra` de
+ * quell101 ligada; por ítem, sus `piezas` del plano con cuántos planos
+ * (`docs`) tiene cada una; y arriba `pendientes`: las dudas abiertas que el
+ * taller le hizo al cliente en todas sus obras. En quell101 el cliente de la
+ * suite entra a la obra ligada a su proyecto sin invitación aparte, el
+ * detalle de la pieza le trae `item_monto` («al cliente sí le debe aparecer
+ * el precio»), `item_descripcion` e `item_etapa`, y puede leer la
+ * documentación del ítem (GET docs, versiones y marcas; subir y anotar
+ * siguen siendo del taller). `GET /clientes/:id/estado-de-cuenta` y
+ * `/estado.xlsx` los abre también el propio cliente, sólo con su id.)
+ *
  * Versión del contrato: 0.65.0 (EL CORREO ES DE UN SOLO CLIENTE. Mike, 4-oct:
  * «El cliente se debe poder crear desde quell, dash o quote. Los 3 generan
  * exactamente el mismo cliente (…) en caso de querer generar un nuevo
@@ -1032,7 +1046,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.65.0';
+export const VERSION_CONTRATO = '0.66.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1808,12 +1822,28 @@ export interface Peek {
   cliente: Pick<Cliente, 'id' | 'nombre' | 'correo'>;
   proyectos: Array<
     Omit<Proyecto, 'pagado_prov' | 'compromiso'> & {
-      items: Array<Pick<Item, 'id' | 'clave' | 'nombre' | 'monto' | 'moneda' | 'estado' | 'etapa' | 'etapa_at' | 'fecha_entrega'>>;
+      /** 0.66.0 · la obra de quell101 ligada al proyecto, o null. */
+      obra: { id: string; nombre: string; estado: string } | null;
+      items: Array<
+        Pick<Item, 'id' | 'clave' | 'nombre' | 'monto' | 'moneda' | 'estado' | 'etapa' | 'etapa_at' | 'fecha_entrega'> & {
+          /** 0.66.0 · las piezas del plano que cuelgan del ítem, con cuántos
+           *  planos (documentos vivos) tiene cada una. */
+          piezas: Array<{ id: string; obra_id: string; codigo: string | null; docs: number }>;
+        }
+      >;
     }
   >;
   /** centavos */
   totales: { vendido: number; cobrado: number; saldo: number; avance: number };
   pagos: Array<Pick<Movimiento, 'id' | 'fecha' | 'monto' | 'proyecto_id' | 'descripcion'>>;
+  /** 0.66.0 · los puntos por definir: las dudas abiertas que el taller le
+   *  hizo al cliente, en todas sus obras, la más vieja primero. */
+  pendientes: Array<{
+    id: string; texto: string; created_at: string;
+    obra_id: string; obra: string;
+    element_id: string | null; codigo: string | null; pieza: string | null;
+    quien: string | null;
+  }>;
 }
 
 /* ─────────────── WebSocket (§8) ─────────────── */

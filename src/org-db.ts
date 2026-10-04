@@ -4866,16 +4866,55 @@ export class OrgDB extends DurableObject<Env> {
       )
       .toArray() as Fila[];
 
-    const conItems = proyectos.map((p) => ({
-      ...p,
-      items: this.sql
+    /* 0.66.0 · Lo de quell101 viaja junto (Mike, 4-oct: «para el cliente es
+     * muy tedioso irse metiendo a diferentes plataformas»): la obra ligada al
+     * proyecto, la pieza del plano que cuelga de cada ítem con cuántos planos
+     * tiene, y abajo los puntos que el taller le pidió definir. peek101 arma
+     * las ligas a quell101 con estos ids; aquí no hay direcciones. */
+    const conItems = proyectos.map((p) => {
+      const obra = this.sql
+        .exec(`SELECT id, name AS nombre, status AS estado FROM quell_projects WHERE proyecto_id = ? ORDER BY created_at LIMIT 1`, p.id)
+        .toArray()[0] ?? null;
+      const items = (this.sql
         .exec(
           `SELECT id, clave, nombre, monto, moneda, estado, etapa, etapa_at, fecha_entrega
            FROM items WHERE proyecto_id = ? AND estado != 'cancelado' ORDER BY creado_at`,
           p.id,
         )
-        .toArray(),
-    }));
+        .toArray() as Fila[]).map((it) => ({
+          ...it,
+          piezas: this.sql
+            .exec(
+              `SELECT e.id, e.project_id AS obra_id, e.code AS codigo,
+                      (SELECT COUNT(*) FROM quell_element_docs d WHERE d.element_id = e.id AND d.archivado_at IS NULL) AS docs
+               FROM quell_elements e WHERE e.item_id = ? ORDER BY e.code`,
+              String(it.id),
+            )
+            .toArray(),
+        }));
+      return { ...p, obra, items };
+    });
+
+    /* Los puntos por definir: las dudas abiertas que el TALLER le hizo al
+     * cliente (no las que él preguntó), en las obras ligadas a sus proyectos
+     * o donde quell lo tiene apuntado como cliente. Van primero las más
+     * viejas: son las que más tiempo llevan deteniendo algo. */
+    const pendientes = this.sql
+      .exec(
+        `SELECT d.id, d.texto, d.created_at, d.project_id AS obra_id, p.name AS obra,
+                d.element_id, e.code AS codigo, e.name AS pieza, u.name AS quien
+           FROM quell_dudas d
+           JOIN quell_projects p ON p.id = d.project_id
+           LEFT JOIN quell_elements e ON e.id = d.element_id
+           LEFT JOIN quell_users u ON u.id = d.user_id
+          WHERE d.para = 'cliente' AND d.estado = 'abierta' AND COALESCE(u.role, '') <> 'cli'
+            AND (p.proyecto_id IN (SELECT id FROM proyectos WHERE cliente_id = ?)
+                 OR p.id IN (SELECT pm.project_id FROM quell_project_members pm JOIN quell_users qu ON qu.id = pm.user_id
+                             WHERE pm.rol = 'cli' AND lower(qu.email) = lower(?)))
+          ORDER BY d.created_at`,
+        cliente_id, String(cliente.correo ?? ''),
+      )
+      .toArray();
 
     const vendido = proyectos.reduce((s, p) => s + Number(p.precio_venta || 0), 0);
     const cobrado = proyectos.reduce((s, p) => s + Number(p.cobrado || 0), 0);
@@ -4895,6 +4934,7 @@ export class OrgDB extends DurableObject<Env> {
       proyectos: conItems,
       totales: { vendido, cobrado, saldo: vendido - cobrado, avance },
       pagos,
+      pendientes,
     } as unknown as Peek;
   }
 
