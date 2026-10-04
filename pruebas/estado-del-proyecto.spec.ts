@@ -127,7 +127,7 @@ describe('lo que dice el papel', () => {
   it('el cliente tampoco los recibe en su copia', async () => {
     /* Se mide aparte porque es la que de verdad importa: el mismo recorte,
      * pero visto desde el portal del cliente. */
-    const inv = await o('mike', '/clientes/invitar', { method: 'POST', json: { correo: 'contacto@holcim.mx', nombre: 'Contacto' } });
+    const inv = await o('mike', '/clientes/invitar', { method: 'POST', json: { correo: 'contacto@holcim.mx', nombre: 'Contacto', usar_existente: true } });
     expect([201, 409]).toContain(inv.estado);
     const c = await pedir('holcim2', '/auth/codigo', { method: 'POST', json: { correo: 'contacto@holcim.mx' }, app: '' });
     await pedir('holcim2', '/auth/entrar', { method: 'POST', json: { correo: 'contacto@holcim.mx', codigo: c.data.codigo_prueba }, app: '' });
@@ -223,7 +223,7 @@ describe('quién lo abre', () => {
     /* La invitación encuentra al cliente POR CORREO —por eso HOLCIM se creó
      * con el suyo—; si no lo encontrara crearía otro y la prueba de «sólo el
      * suyo» estaría midiendo un cliente distinto al del proyecto. */
-    const inv = await o('mike', '/clientes/invitar', { method: 'POST', json: { correo: 'contacto@holcim.mx', nombre: 'Contacto' } });
+    const inv = await o('mike', '/clientes/invitar', { method: 'POST', json: { correo: 'contacto@holcim.mx', nombre: 'Contacto', usar_existente: true } });
     expect(inv.estado, JSON.stringify(inv)).toBe(201);
     expect(inv.data.cliente_id, 'invitó al cliente que ya existía, no a uno nuevo').toBe(cliente);
     usuarioCliente = 'contacto@holcim.mx';

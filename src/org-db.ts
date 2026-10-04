@@ -4925,8 +4925,8 @@ export class OrgDB extends DurableObject<Env> {
         CORREO_SALE: e.ENTORNO === 'produccion' || e.CORREO_DE_VERDAD === '1',
         // La invitación del cliente en la suite, desde adentro: el motor la
         // pide después de revisar que quien invita sea el dueño de la obra.
-        INVITAR_EN_SUITE: (correo: string, nombre: string) =>
-          invitarClienteEnSuite(e, org, { ...sesion.quien, ve_dinero: true, ve_costos: true } as Quien, this as unknown as ApiOrgDB, 'quell101', correo, nombre),
+        INVITAR_EN_SUITE: (correo: string, nombre: string, usarExistente = false) =>
+          invitarClienteEnSuite(e, org, { ...sesion.quien, ve_dinero: true, ve_costos: true } as Quien, this as unknown as ApiOrgDB, 'quell101', correo, nombre, usarExistente),
         // 0.49.0: el requerimiento nace como ítem y cae en el borrador de quote101.
         LEVANTAR_REQUERIMIENTO: (d) => this.levantarRequerimiento({ ...d, usuario_id: sesion.quien.usuario_id }),
       }, url, url.pathname);

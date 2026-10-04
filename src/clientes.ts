@@ -25,7 +25,7 @@ export interface Invitado {
 export type ResultadoInvitacion = { ok: true; data: Invitado } | { ok: false; error: string; estado: number; detalle?: Record<string, unknown> };
 
 export async function invitarClienteEnSuite(
-  env: Env, org_id: string, quien: Quien, tienda: Tienda, app: string, correoCrudo: unknown, nombreCrudo: unknown,
+  env: Env, org_id: string, quien: Quien, tienda: Tienda, app: string, correoCrudo: unknown, nombreCrudo: unknown, usarExistente = false,
 ): Promise<ResultadoInvitacion> {
   if (quien.clase !== 'miembro') return { ok: false, error: 'sin_permiso', estado: 403 };
   const correo = normalizaCorreo(correoCrudo);
@@ -47,6 +47,13 @@ export async function invitarClienteEnSuite(
 
   const lista = await tienda.listar('clientes', {});
   let cliente = lista.filas.find((f) => normalizaCorreo(f.correo) === correo) ?? null;
+  /* 0.65.0 · Si ya hay un cliente con ese correo, no se usa en silencio: se
+   * contesta 409 con su resumen para que la pantalla pregunte «¿es ése?», y
+   * la app vuelve con `usar_existente` (Mike, 4-oct). */
+  if (cliente && !usarExistente) {
+    const { id, nombre: n, correo: co, telefono, rfc, portal_activo } = cliente as Record<string, unknown>;
+    return { ok: false, error: 'correo_en_uso', estado: 409, detalle: { motivo: 'ese correo ya es de un cliente', cliente: { id: String(id), nombre: String(n ?? ''), correo: (co as string) ?? null, telefono: (telefono as string) ?? null, rfc: (rfc as string) ?? null, portal_activo: !!portal_activo } } };
+  }
   const nuevo_cliente = !cliente;
   if (!cliente) cliente = await tienda.crear('clientes', { nombre, correo }, { app, usuario_id: quien.usuario_id });
 

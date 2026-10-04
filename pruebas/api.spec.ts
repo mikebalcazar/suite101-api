@@ -2914,7 +2914,14 @@ describe('20 · invitar a un cliente desde una app (contrato 0.15.0)', () => {
     expect(fila?.portal_activo).toBe(true);
     expect(fila?.usuario_id).toBe(r.data.usuario_id);
 
-    const otraVez = await pedir(`/orgs/${ORG}/clientes/invitar`, { app: 'quell101', method: 'POST', body: JSON.stringify({ correo: INVITADA.toUpperCase(), nombre: 'Otro nombre' }) });
+    // 0.65.0: con el correo de un cliente que ya existe, primero se pregunta (409 con su resumen)…
+    const pregunta = await pedir(`/orgs/${ORG}/clientes/invitar`, { app: 'quell101', method: 'POST', body: JSON.stringify({ correo: INVITADA.toUpperCase(), nombre: 'Otro nombre' }) });
+    expect(pregunta.estado, JSON.stringify(pregunta)).toBe(409);
+    expect(pregunta.error).toBe('correo_en_uso');
+    expect(pregunta.detalle.cliente.id).toBe(clienteId);
+    expect(pregunta.detalle.cliente.nombre).toBe('Invitada Quell');
+    // …y con `usar_existente` se usa ése, sin duplicar.
+    const otraVez = await pedir(`/orgs/${ORG}/clientes/invitar`, { app: 'quell101', method: 'POST', body: JSON.stringify({ correo: INVITADA.toUpperCase(), nombre: 'Otro nombre', usar_existente: true }) });
     expect(otraVez.estado).toBe(201);
     expect(otraVez.data.cliente_id).toBe(clienteId);
     expect(otraVez.data.nuevo_usuario).toBe(false);

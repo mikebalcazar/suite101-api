@@ -596,7 +596,7 @@ describe('20 · contabilidad fiscal (los casos del encargo)', () => {
   });
 
   it('lo fiscal es dinero: un cliente del portal no lo abre', async () => {
-    const inv = await o('mike', '/clientes/invitar', { method: 'POST', json: { correo: 'cliente-oc@ejemplo.mx', nombre: 'Cliente Uno' } });
+    const inv = await o('mike', '/clientes/invitar', { method: 'POST', json: { correo: 'cliente-oc@ejemplo.mx', nombre: 'Cliente Uno', usar_existente: true } });
     expect([200, 201]).toContain(inv.estado);
     await entrar('clienteoc', 'cliente-oc@ejemplo.mx');
     expect((await o('clienteoc', '/fiscal/iva', { app: 'peek101' })).estado).toBe(403);

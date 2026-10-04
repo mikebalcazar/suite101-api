@@ -293,7 +293,15 @@ describe('B · la cara de cliente, con la invitación pasando por la suite', () 
     const lista = await q('mike', '/clientes');
     expect(lista.clientes.length).toBe(1);
     expect(lista.clientes[0].obras).toBe('Obra de prueba A');
-    const otraVez = await q('mike', '/clientes/invitar', { method: 'POST', json: { email: CLIENTE.correo, name: 'Renombrado', project_ids: [obraA, obraB] } });
+    // 0.65.0: el correo ya es de un cliente: la bitácora pregunta antes (409 con quién es)…
+    const pregunta = await q('mike', '/clientes/invitar', { method: 'POST', json: { email: CLIENTE.correo, name: 'Renombrado', project_ids: [obraA, obraB] } });
+    expect(pregunta.estado, JSON.stringify(pregunta)).toBe(409);
+    expect(pregunta.error).toBe('correo_en_uso');
+    expect(pregunta.cliente.correo).toBe(CLIENTE.correo);
+    expect((await q('mike', '/clientes')).clientes.length).toBe(1);
+    // …y con `usar_existente` lo usa.
+    const otraVez = await q('mike', '/clientes/invitar', { method: 'POST', json: { email: CLIENTE.correo, name: 'Renombrado', project_ids: [obraA, obraB], usar_existente: true } });
+    expect(otraVez.estado, JSON.stringify(otraVez)).toBe(200);
     expect(otraVez.nuevo).toBe(false);
     expect((await q('mike', '/clientes')).clientes.length).toBe(1);
   });
