@@ -32,6 +32,11 @@ PRUEBAS: clientes-fusion.spec.ts +2 (la invitada abre /peek después de
 fusionar; una cuenta chueca se repara al abrir /peek). Sobre el código
 viejo fallan las dos. 732 en verde.
 
-PENDIENTE DE VERIFICAR CON MIKE: que vuelva a entrar a peek101 con ese
-correo; si sigue sin entrar, la causa es otra (p. ej. el cliente se borró,
-no se fusionó: entonces hay que volver a invitarlo desde dash101).
+SEGUNDO INTENTO (05:20 UTC, API 0.64.4, #225). Con 0.64.3 Mike seguía
+sin entrar: en forespot ya no hay NINGÚN cliente que traiga su usuario, así
+que el original se borró o se volvió a capturar sin la liga. /peek ahora
+también busca por el correo de la sesión (el mismo de la invitación), le
+vuelve a colgar el usuario al cliente (`portal_activo`) y repara el acceso.
+Si tampoco hay un cliente con ese correo, ya no es un defecto: hay que
+volver a invitarlo desde dash101 (cliente → «abrir portal»), que crea el
+cliente si no está y re-apunta el acceso.
