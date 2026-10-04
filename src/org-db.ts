@@ -261,6 +261,8 @@ export interface ApiOrgDB {
   }): Promise<Fila | null>;
   pool(): Promise<Pool>;
   peek(cliente_id: string): Promise<Peek | null>;
+  /** El cliente ligado a un usuario de la suite (`clientes.usuario_id`), si lo hay (0.64.3). */
+  clientePorUsuario(usuario_id: string): Promise<Fila | null>;
   estadoDeCuenta(cliente_id: string): Promise<{
     cliente: Fila;
     proyectos: Fila[];
@@ -4836,6 +4838,10 @@ export class OrgDB extends DurableObject<Env> {
    * Los totales salen de la misma consulta que la lista, así el KPI y la tabla
    * no se pueden contradecir. Fue un defecto real del 7-sep.
    * Las partidas y los egresos no salen de aquí: el cliente no ve costos. */
+
+  clientePorUsuario(usuario_id: string): Fila | null {
+    return (this.sql.exec(`SELECT * FROM clientes WHERE usuario_id = ? LIMIT 1`, usuario_id).toArray()[0] as Fila | undefined) ?? null;
+  }
 
   peek(cliente_id: string): Peek | null {
     const cliente = this.sql
