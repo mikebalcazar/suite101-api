@@ -419,6 +419,12 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **El acceso al portal tras fusionar clientes (4-oct, API 0.64.3 #223).**
+  Mike: «No podemos entrar en Peek como cliente y ya está invitado». El
+  acceso de la base maestra apuntaba al cliente borrado por la fusión
+  (/peek → no_encontrado). Ahora fusionar re-apunta el acceso y /peek
+  repara al pasar una cuenta chueca (`clientePorUsuario`). Falta que Mike
+  confirme que entra. Muro `2026-10-04-0440-jr-acceso-tras-fusionar.md`.
 - **El pin del requerimiento se ve (3-oct, bitacora-obra #106).** Mike:
   «los círculos de los requerimientos en quell no se ven … un amarillo
   relleno con círculo verde». Era gris y, por estar fuera del alcance,
