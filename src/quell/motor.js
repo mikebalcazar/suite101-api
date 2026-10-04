@@ -199,9 +199,9 @@ async function avisaCliente(env, req, quien, obra, dudas) {
 // (src/clientes.ts) y llega aquí como una función en el entorno: se llama
 // después de revisar que quien invita sea el dueño de la obra, y si la suite
 // dice que no, aquí no se escribe nada.
-async function invitaEnSuite(env, correo, nombre) {
+async function invitaEnSuite(env, correo, nombre, usarExistente = false) {
   if (!env.INVITAR_EN_SUITE) return { ok: false, error: 'sin_suite' };
-  const r = await env.INVITAR_EN_SUITE(correo, nombre);
+  const r = await env.INVITAR_EN_SUITE(correo, nombre, usarExistente);
   return r.ok ? { ok: true, data: r.data } : { ok: false, error: r.error, detalle: r.detalle };
 }
 const PORQUE_NO_INVITA = {
@@ -626,7 +626,13 @@ export async function atender(req, env, url, path) {
       const ya = await env.DB.prepare(`SELECT * FROM quell_users WHERE email = ?`).bind(e).first();
       if (ya && ya.role !== 'cli') return err('Ese correo ya es de alguien del taller, no de un cliente.', 409);
 
-      const suite = await invitaEnSuite(env, e, nombre);
+      const suite = await invitaEnSuite(env, e, nombre, b.usar_existente === true);
+      /* 0.65.0 · Ya hay un cliente con ese correo: se devuelve quién es para que
+       * la pantalla pregunte «¿es ése?» y vuelva con `usar_existente`. */
+      if (!suite.ok && suite.error === 'correo_en_uso') {
+        return json({ ok: false, error: 'correo_en_uso', cliente: suite.detalle && suite.detalle.cliente || null,
+          mensaje: 'Ya hay un cliente con ese correo.' }, 409);
+      }
       if (!suite.ok) return err(PORQUE_NO_INVITA[suite.error] || `La suite no dejó invitar (${suite.error}).`, suite.error === 'es_miembro' || suite.error === 'en_uso' ? 409 : 502);
 
       let id = ya ? ya.id : uid();

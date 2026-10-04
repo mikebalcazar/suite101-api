@@ -362,8 +362,8 @@ for (const par of [
  * persona que ya es cliente de OTRA empresa tampoco (409 en_uso): `accesos`
  * lleva una fila por usuario. */
 rutas.post('/:o/clientes/invitar', async (c) => {
-  const cuerpo = await c.req.json<{ correo?: string; nombre?: string }>().catch(() => ({}) as never);
-  const r = await invitarClienteEnSuite(c.env, c.get('org_id'), c.get('quien'), stub(c), c.get('app'), cuerpo.correo, cuerpo.nombre);
+  const cuerpo = await c.req.json<{ correo?: string; nombre?: string; usar_existente?: boolean }>().catch(() => ({}) as never);
+  const r = await invitarClienteEnSuite(c.env, c.get('org_id'), c.get('quien'), stub(c), c.get('app'), cuerpo.correo, cuerpo.nombre, cuerpo.usar_existente === true);
   return r.ok ? ok(c, r.data, 201) : err(c, r.error, r.estado, r.detalle);
 });
 
@@ -390,9 +390,36 @@ rutas.get('/:o/clientes/parecidos', async (c) => {
   const permiso = puedeLeer(c, 'clientes');
   if (permiso) return permiso;
   const nombre = c.req.query('nombre') || '';
-  const filas = await stub(c).clientesParecidos(nombre);
-  return ok(c, { parecidos: filas });
+  const filas = nombre ? await stub(c).clientesParecidos(nombre) : [];
+  /* 0.65.0 · `?correo=` contesta además `por_correo`: el cliente que YA tiene
+   * ese correo, si lo hay (Mike, 4-oct: «avisar que ya existe un cliente,
+   * presentar su info y preguntar si es ese»). Las pantallas lo usan antes
+   * de guardar; la regla dura vive en POST/PATCH (409 correo_en_uso). */
+  const correo = normalizaCorreo(c.req.query('correo') || '');
+  const por_correo = correo ? resumenCliente(await stub(c).clientePorCorreo(correo)) : null;
+  return ok(c, { parecidos: filas, por_correo });
 });
+
+/** Lo que se le enseña a quien va a crear un cliente que ya existe: lo justo
+ *  para reconocerlo. Nunca `usuario_id` ni notas. */
+export function resumenCliente(f: Record<string, unknown> | null): { id: string; nombre: string; correo: string | null; telefono: string | null; rfc: string | null; portal_activo: boolean } | null {
+  if (!f) return null;
+  return { id: String(f.id), nombre: String(f.nombre ?? ''), correo: (f.correo as string) ?? null, telefono: (f.telefono as string) ?? null, rfc: (f.rfc as string) ?? null, portal_activo: !!f.portal_activo };
+}
+
+/** 0.65.0 · El correo es de UN cliente (Mike, 4-oct: «en caso de querer
+ *  generar un nuevo cliente con el email de otro que ya existe, avisar que
+ *  ya existe un cliente, presentar su info y preguntar si es ese cliente
+ *  (…) o si quieres crear uno nuevo con otro email»). Al crear o al cambiar
+ *  el correo, si otro cliente ya lo tiene se contesta 409 `correo_en_uso`
+ *  con el resumen de ése, para que la pantalla lo enseñe y pregunte. */
+async function correoDeOtroCliente(c: Ctx, datos: Record<string, unknown>, salvo: string | null): Promise<Response | null> {
+  const correo = normalizaCorreo(datos.correo);
+  if (!correo) return null;
+  const otro = await stub(c).clientePorCorreo(correo);
+  if (!otro || (salvo && String(otro.id) === salvo)) return null;
+  return err(c, 'correo_en_uso', 409, { motivo: 'ese correo ya es de otro cliente', cliente: resumenCliente(otro) });
+}
 
 /** GET /orgs/:o/clientes/:id/estado-de-cuenta — qué se le vendió, qué pagó y
  *  qué debe. Global y por proyecto.
@@ -1396,6 +1423,7 @@ rutas.post('/:o/:tabla', async (c) => {
 
   const malProveedor = tabla === 'proveedores' ? revisarProveedor(datos) : tabla === 'proveedor_cuentas' ? revisarCuenta(datos) : tabla === 'accionistas' ? revisarAccionista(datos) : null;
   if (malProveedor) return err(c, 'datos_invalidos', 400, { errores: malProveedor });
+  if (tabla === 'clientes') { const repetido = await correoDeOtroCliente(c, datos, null); if (repetido) return repetido; }
 
   const fila = await stub(c).crear(tabla, datos, { app: c.get('app'), usuario_id: quien.usuario_id, correo: c.get('sesion')?.correo ?? null });
   return ok(c, podar(quien, tabla, fila), 201);
@@ -1501,6 +1529,7 @@ rutas.patch('/:o/:tabla/:id', async (c) => {
 
   const malProveedor = tabla === 'proveedores' ? revisarProveedor(datos) : tabla === 'proveedor_cuentas' ? revisarCuenta(datos) : tabla === 'accionistas' ? revisarAccionista(datos) : null;
   if (malProveedor) return err(c, 'datos_invalidos', 400, { errores: malProveedor });
+  if (tabla === 'clientes') { const repetido = await correoDeOtroCliente(c, datos, c.req.param('id')!); if (repetido) return repetido; }
 
   /* 0.46.0 · Una cotización aprobada es lo que se vendió: sus piezas ya están
    * en el proyecto. Si se pudiera seguir editando, el papel y la obra dirían

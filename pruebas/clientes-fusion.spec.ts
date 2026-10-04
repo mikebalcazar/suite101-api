@@ -80,7 +80,7 @@ beforeAll(async () => {
 
   /* Y el acceso al portal, también del lado que se va: la invitación encuentra
    * al cliente por su correo (compras@luna.mx) y le cuelga el usuario. */
-  const inv = await o('mike', '/clientes/invitar', { method: 'POST', json: { correo: 'compras@luna.mx', nombre: 'Muebles Luna' } });
+  const inv = await o('mike', '/clientes/invitar', { method: 'POST', json: { correo: 'compras@luna.mx', nombre: 'Muebles Luna', usar_existente: true } });
   expect(inv.estado, JSON.stringify(inv)).toBe(201);
   expect(inv.data.cliente_id).toBe(enQuote);
 
@@ -199,5 +199,57 @@ describe('fusionar', () => {
     expect(c.portal_activo).toBe(true);
     const a = await e.MASTER.prepare(`SELECT ref_id FROM accesos WHERE org_id = ? AND tipo = 'cliente'`).bind(ORG).first<{ ref_id: string }>();
     expect(a?.ref_id, 'y el acceso apunta al cliente').toBe(enDash);
+  });
+});
+
+/* Mike, 4-oct-2026: «El cliente se debe poder crear desde quell, dash o
+ * quote. Los 3 generan exactamente el mismo cliente (…) en caso de querer
+ * generar un nuevo cliente con el email de otro que ya existe, avisar que ya
+ * existe un cliente, presentar su info y preguntar si es ese cliente el que
+ * estás buscando y ya usarlo o si quieres crear uno nuevo con otro email.»
+ * La regla vive aquí, una sola para las tres apps: el correo es de UN
+ * cliente. */
+describe('el correo es de un solo cliente (0.65.0)', () => {
+  it('crear otro cliente con el correo de uno que ya existe contesta 409 con quién es', async () => {
+    const r = await o('mike', '/clientes', { method: 'POST', json: { nombre: 'Luna Norte', correo: 'COMPRAS@luna.mx ' }, app: 'cotizador101' });
+    expect(r.estado, JSON.stringify(r)).toBe(409);
+    expect(r.error).toBe('correo_en_uso');
+    expect(r.detalle.cliente.id).toBe(enDash);
+    expect(r.detalle.cliente.nombre).toBe('Muebles Luna SA de CV');
+    expect(r.detalle.cliente.correo).toBe('compras@luna.mx');
+    expect(r.detalle.cliente.telefono).toBe('5555555555');
+    expect(r.detalle.cliente.usuario_id, 'el resumen no trae el usuario').toBeUndefined();
+    expect((await o('mike', '/clientes')).data.filas).toHaveLength(1);
+  });
+
+  it('cambiarle el correo a un cliente por el de otro también se rechaza; el suyo propio, no', async () => {
+    const otro = (await o('mike', '/clientes', { method: 'POST', json: { nombre: 'Otro cliente', correo: 'otro@ejemplo.mx' } })).data.id;
+    const choca = await o('mike', `/clientes/${otro}`, { method: 'PATCH', json: { correo: 'compras@luna.mx' } });
+    expect(choca.estado, JSON.stringify(choca)).toBe(409);
+    expect(choca.error).toBe('correo_en_uso');
+    expect(choca.detalle.cliente.id).toBe(enDash);
+    const mismo = await o('mike', `/clientes/${enDash}`, { method: 'PATCH', json: { correo: 'Compras@Luna.mx', telefono: '5555555556' } });
+    expect(mismo.estado, 'su propio correo no choca consigo mismo').toBe(200);
+  });
+
+  it('las pantallas preguntan antes: GET /clientes/parecidos?correo= dice quién lo tiene', async () => {
+    const r = await o('mike', `/clientes/parecidos?correo=${encodeURIComponent('compras@luna.mx')}`);
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.por_correo?.id).toBe(enDash);
+    expect(r.data.parecidos).toEqual([]);
+    const libre = await o('mike', `/clientes/parecidos?correo=${encodeURIComponent('nadie@ejemplo.mx')}`);
+    expect(libre.data.por_correo).toBeNull();
+  });
+
+  it('invitar con el correo de un cliente que ya existe pregunta (409), y con usar_existente lo usa', async () => {
+    const pregunta = await o('mike', '/clientes/invitar', { method: 'POST', json: { correo: 'compras@luna.mx', nombre: 'Luna otra vez' } });
+    expect(pregunta.estado, JSON.stringify(pregunta)).toBe(409);
+    expect(pregunta.error).toBe('correo_en_uso');
+    expect(pregunta.detalle.cliente.id).toBe(enDash);
+    const usa = await o('mike', '/clientes/invitar', { method: 'POST', json: { correo: 'compras@luna.mx', nombre: 'Luna otra vez', usar_existente: true } });
+    expect(usa.estado, JSON.stringify(usa)).toBe(201);
+    expect(usa.data.cliente_id).toBe(enDash);
+    expect(usa.data.nuevo_cliente).toBe(false);
+    expect((await o('mike', '/clientes')).data.filas).toHaveLength(2);
   });
 });

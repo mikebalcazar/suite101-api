@@ -17,6 +17,21 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
+ * Versión del contrato: 0.65.0 (EL CORREO ES DE UN SOLO CLIENTE. Mike, 4-oct:
+ * «El cliente se debe poder crear desde quell, dash o quote. Los 3 generan
+ * exactamente el mismo cliente (…) en caso de querer generar un nuevo
+ * cliente con el email de otro que ya existe, avisar que ya existe un
+ * cliente, presentar su info y preguntar si es ese cliente el que estás
+ * buscando y ya usarlo o si quieres crear uno nuevo con otro email».
+ * `POST /clientes` y `PATCH /clientes/:id` con un correo que ya es de otro
+ * cliente contestan 409 `correo_en_uso` con `detalle.cliente` (id, nombre,
+ * correo, teléfono, RFC, portal_activo). `GET /clientes/parecidos?correo=`
+ * contesta además `por_correo` para preguntar antes de guardar.
+ * `POST /clientes/invitar` con el correo de un cliente que ya existe
+ * contesta 409 `correo_en_uso` salvo que traiga `usar_existente: true`
+ * (antes lo usaba en silencio). quell101 (`/clientes/invitar` del motor)
+ * lo repite con `cliente` en el cuerpo.)
+ *
  * Versión del contrato: 0.64.4 (/peek TAMBIÉN RESCATA POR CORREO. Mike,
  * 4-oct, segundo intento: con 0.64.3 seguía sin entrar, porque en la
  * empresa ya no hay ningún cliente con su usuario. Si el acceso apunta a un
@@ -1017,7 +1032,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.64.4';
+export const VERSION_CONTRATO = '0.65.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

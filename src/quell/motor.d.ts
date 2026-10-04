@@ -35,7 +35,7 @@ export interface EntornoQuell {
   /** Fuera de producción el correo no sale. */
   CORREO_SALE: boolean;
   /** Invita al cliente en la suite (src/clientes.ts). */
-  INVITAR_EN_SUITE: (correo: string, nombre: string) => Promise<{ ok: true; data: unknown } | { ok: false; error: string; detalle?: unknown }>;
+  INVITAR_EN_SUITE: (correo: string, nombre: string, usarExistente?: boolean) => Promise<{ ok: true; data: unknown } | { ok: false; error: string; detalle?: unknown }>;
   /** 0.49.0: al levantar un requerimiento en una obra ligada, la suite le
    *  hace su ítem y lo mete al borrador de quote101 (org-db.ts). */
   LEVANTAR_REQUERIMIENTO?: (d: { element_id: string; obra_id: string; code: string; name: string; padre_item_id?: string | null }) => { item_id: string | null; cotizacion_id: string | null } | Promise<{ item_id: string | null; cotizacion_id: string | null }>;
