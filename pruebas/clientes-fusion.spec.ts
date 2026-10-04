@@ -21,11 +21,13 @@
  *     probó.
  */
 
-import { SELF, env } from 'cloudflare:test';
+import { SELF, env, runInDurableObject } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Env } from '../src/entorno';
 
 const e = env as unknown as Env;
+const dentro = runInDurableObject as unknown as <T>(s: unknown, f: (o: any) => T | Promise<T>) => Promise<T>;
+const elDO = () => e.ORG.get(e.ORG.idFromName(ORG)) as unknown as DurableObjectStub;
 
 const CORREO = 'mike@forespot.com';
 const ORG = 'un-solo-cliente';
@@ -179,5 +181,23 @@ describe('fusionar', () => {
     expect(peek.data.cliente.id).toBe(enDash);
     const a = await e.MASTER.prepare(`SELECT ref_id FROM accesos WHERE org_id = ? AND tipo = 'cliente'`).bind(ORG).first<{ ref_id: string }>();
     expect(a?.ref_id, 'y el acceso quedó reparado').toBe(enDash);
+  });
+
+  /* Mike, 4-oct, segundo intento: ningún cliente de la empresa traía su
+   * usuario (el original se borró o se volvió a capturar). El correo de la
+   * sesión es el de la invitación: por ahí se le vuelve a colgar. */
+  it('si ningún cliente trae el usuario, /peek lo busca por el correo de la sesión y lo vuelve a ligar (0.64.4)', async () => {
+    await e.MASTER.prepare(`UPDATE accesos SET ref_id = ? WHERE org_id = ? AND tipo = 'cliente'`).bind(enQuote, ORG).run();
+    // La liga se quita por dentro: la API no deja tocar usuario_id desde una app, y así debe seguir.
+    await dentro(elDO(), (orgdb) => { orgdb.sql.exec(`UPDATE clientes SET usuario_id = NULL WHERE id = ?`, enDash); });
+    expect((await o('mike', `/clientes/${enDash}`)).data.usuario_id ?? null, 'sin liga al usuario').toBeNull();
+    const peek = await o('luna', '/peek', { app: 'peek101' });
+    expect(peek.estado, JSON.stringify(peek)).toBe(200);
+    expect(peek.data.cliente.id).toBe(enDash);
+    const c = (await o('mike', `/clientes/${enDash}`)).data;
+    expect(c.usuario_id, 'el cliente vuelve a traer su usuario').toBeTruthy();
+    expect(c.portal_activo).toBe(true);
+    const a = await e.MASTER.prepare(`SELECT ref_id FROM accesos WHERE org_id = ? AND tipo = 'cliente'`).bind(ORG).first<{ ref_id: string }>();
+    expect(a?.ref_id, 'y el acceso apunta al cliente').toBe(enDash);
   });
 });

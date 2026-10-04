@@ -263,6 +263,8 @@ export interface ApiOrgDB {
   peek(cliente_id: string): Promise<Peek | null>;
   /** El cliente ligado a un usuario de la suite (`clientes.usuario_id`), si lo hay (0.64.3). */
   clientePorUsuario(usuario_id: string): Promise<Fila | null>;
+  /** El cliente con ese correo (normalizado), si lo hay (0.64.4). */
+  clientePorCorreo(correo: string): Promise<Fila | null>;
   estadoDeCuenta(cliente_id: string): Promise<{
     cliente: Fila;
     proyectos: Fila[];
@@ -4841,6 +4843,12 @@ export class OrgDB extends DurableObject<Env> {
 
   clientePorUsuario(usuario_id: string): Fila | null {
     return (this.sql.exec(`SELECT * FROM clientes WHERE usuario_id = ? LIMIT 1`, usuario_id).toArray()[0] as Fila | undefined) ?? null;
+  }
+
+  clientePorCorreo(correo: string): Fila | null {
+    const c = String(correo || '').trim().toLowerCase();
+    if (!c) return null;
+    return (this.sql.exec(`SELECT * FROM clientes WHERE lower(trim(correo)) = ? LIMIT 1`, c).toArray()[0] as Fila | undefined) ?? null;
   }
 
   peek(cliente_id: string): Peek | null {

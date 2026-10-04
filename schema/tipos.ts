@@ -17,6 +17,13 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
+ * Versión del contrato: 0.64.4 (/peek TAMBIÉN RESCATA POR CORREO. Mike,
+ * 4-oct, segundo intento: con 0.64.3 seguía sin entrar, porque en la
+ * empresa ya no hay ningún cliente con su usuario. Si el acceso apunta a un
+ * cliente que no está y ninguno trae el usuario, se busca por el correo de
+ * la sesión (el de la invitación), se le vuelve a colgar el usuario y se
+ * repara el acceso. Sin cambios de forma.)
+ *
  * Versión del contrato: 0.64.3 (EL ACCESO AL PORTAL SIGUE AL CLIENTE QUE SE
  * QUEDA. Mike, 4-oct: «No podemos entrar en Peek como cliente y ya está
  * invitado». Al fusionar dos clientes, el que se queda heredaba el
@@ -1010,7 +1017,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.64.3';
+export const VERSION_CONTRATO = '0.64.4';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
