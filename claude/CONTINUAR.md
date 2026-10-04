@@ -419,6 +419,16 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **Un cliente por correo, en las tres apps (4-oct, API 0.65.0 #227).**
+  Mike: «El cliente se debe poder crear desde quell, dash o quote … en
+  caso de querer generar un nuevo cliente con el email de otro que ya
+  existe, avisar … presentar su info y preguntar». La API contesta 409
+  `correo_en_uso` con el cliente (POST/PATCH clientes, invitar sin
+  `usar_existente`) y `parecidos?correo=` trae `por_correo`. dash101 #132
+  (+#133: la prueba de navegador pedía /clientes sin /orgs/demo y tiró
+  producción), quote101 G107 #76 (campo de correo en «+ Nuevo cliente»),
+  quell101 #107 (el 409 en «Invitar cliente»). Mismo aviso y mismas dos
+  salidas en las tres. Muro `2026-10-04-0610-jr-un-cliente-por-correo.md`.
 - **El acceso al portal tras fusionar clientes (4-oct, API 0.64.3 #223).**
   Mike: «No podemos entrar en Peek como cliente y ya está invitado». El
   acceso de la base maestra apuntaba al cliente borrado por la fusión
