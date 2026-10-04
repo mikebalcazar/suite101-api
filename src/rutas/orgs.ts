@@ -179,10 +179,18 @@ rutas.get('/:o/peek', async (c) => {
    * fusionar lo re-apunta; y si una cuenta ya venía chueca de antes, aquí se
    * busca el cliente por su usuario y se repara el acceso al pasar. */
   if (!datos && quien.clase === 'cliente') {
-    const mio = await stub(c).clientePorUsuario(quien.usuario_id);
+    /* 0.64.4 · Y si ningún cliente trae su usuario (Mike, 4-oct, segundo
+     * intento: el cliente se borró o se volvió a capturar sin la liga), se
+     * busca por el correo de la sesión, que es el mismo con el que se
+     * invitó, y se le vuelve a colgar el usuario. */
+    const correo = c.get('sesion')?.correo ?? '';
+    const mio = (await stub(c).clientePorUsuario(quien.usuario_id)) ?? (correo ? await stub(c).clientePorCorreo(correo) : null);
     if (mio) {
       datos = await stub(c).peek(String(mio.id));
-      if (datos) await ponerAcceso(c.env, { usuario_id: quien.usuario_id, org_id: c.get('org_id'), tipo: 'cliente', ref_id: String(mio.id) });
+      if (datos) {
+        await ponerAcceso(c.env, { usuario_id: quien.usuario_id, org_id: c.get('org_id'), tipo: 'cliente', ref_id: String(mio.id) });
+        if (mio.usuario_id !== quien.usuario_id) await stub(c).actualizar('clientes', String(mio.id), { usuario_id: quien.usuario_id, portal_activo: true }, { app: c.get('app'), usuario_id: 'sistema' });
+      }
     }
   }
   if (!datos) return err(c, 'no_encontrado', 404);
