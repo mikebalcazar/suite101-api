@@ -17,6 +17,15 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
+ * Versión del contrato: 0.64.3 (EL ACCESO AL PORTAL SIGUE AL CLIENTE QUE SE
+ * QUEDA. Mike, 4-oct: «No podemos entrar en Peek como cliente y ya está
+ * invitado». Al fusionar dos clientes, el que se queda heredaba el
+ * `usuario_id` pero `accesos.ref_id` (base maestra) se quedaba en el que se
+ * borró, y /peek contestaba no_encontrado. Ahora `POST /clientes/:id/fusionar`
+ * re-apunta el acceso al que se queda, y `GET /peek` repara al pasar una
+ * cuenta que ya venía chueca: busca el cliente por `usuario_id` y vuelve a
+ * poner el acceso. Sin cambios de forma.)
+ *
  * Versión del contrato: 0.64.2 (LOS REQUERIMIENTOS SIN ÍTEM. Mike, 2-oct:
  * «los requerimientos levantados en quell (…) tienen que aparecer en la
  * lista de quote de ítems pendientes. Ahorita hay unos requerimientos del
@@ -1001,7 +1010,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.64.2';
+export const VERSION_CONTRATO = '0.64.3';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

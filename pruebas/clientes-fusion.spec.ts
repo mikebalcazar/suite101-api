@@ -21,8 +21,11 @@
  *     probó.
  */
 
-import { SELF } from 'cloudflare:test';
+import { SELF, env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
+import type { Env } from '../src/entorno';
+
+const e = env as unknown as Env;
 
 const CORREO = 'mike@forespot.com';
 const ORG = 'un-solo-cliente';
@@ -58,7 +61,7 @@ let negocio = '', cuenta = '', enDash = '', enQuote = '', proyecto = '', item = 
 
 beforeAll(async () => {
   await entrar('mike', CORREO);
-  const alta = await pedir('mike', '/admin/orgs', { method: 'POST', json: { id: ORG, nombre: 'Un solo cliente', apps: { dash: true, cotizador: true } }, app: '' });
+  const alta = await pedir('mike', '/admin/orgs', { method: 'POST', json: { id: ORG, nombre: 'Un solo cliente', apps: { dash: true, cotizador: true, peek: true } }, app: '' });
   expect(alta.estado, JSON.stringify(alta)).toBe(201);
   const m = await pedir('mike', `/admin/orgs/${ORG}/miembros`, { method: 'POST', json: { correo: GENTE.tin.correo, rol: GENTE.tin.rol, nombre: GENTE.tin.nombre, apps: ['dash'] }, app: '' });
   expect(m.estado, JSON.stringify(m)).toBe(201);
@@ -72,6 +75,12 @@ beforeAll(async () => {
    * describió. */
   enDash = (await o('mike', '/clientes', { method: 'POST', json: { negocio_id: negocio, nombre: 'Muebles Luna SA de CV', telefono: '5555555555' } })).data.id;
   enQuote = (await o('mike', '/clientes', { method: 'POST', json: { negocio_id: negocio, nombre: 'Muebles Luna', correo: 'compras@luna.mx' }, app: 'cotizador101' })).data.id;
+
+  /* Y el acceso al portal, también del lado que se va: la invitación encuentra
+   * al cliente por su correo (compras@luna.mx) y le cuelga el usuario. */
+  const inv = await o('mike', '/clientes/invitar', { method: 'POST', json: { correo: 'compras@luna.mx', nombre: 'Muebles Luna' } });
+  expect(inv.estado, JSON.stringify(inv)).toBe(201);
+  expect(inv.data.cliente_id).toBe(enQuote);
 
   // Y su historia, colgada del que se capturó en el cotizador.
   proyecto = (await o('mike', '/proyectos', { method: 'POST', json: { negocio_id: negocio, cliente_id: enQuote, nombre: 'Cocina Luna' } })).data.id;
@@ -146,5 +155,29 @@ describe('fusionar', () => {
   it('el que se fue ya no está, y queda uno solo', async () => {
     expect((await o('mike', `/clientes/${enQuote}`)).estado).toBe(404);
     expect((await o('mike', '/clientes')).data.filas).toHaveLength(1);
+  });
+
+  /* Mike, 4-oct-2026: «No podemos entrar en Peek como cliente y ya está
+   * invitado. No con contraseña ni con código.» El acceso de la base maestra
+   * apuntaba al cliente que se borró al fusionar, y /peek contestaba
+   * no_encontrado. */
+  it('el acceso al portal sigue al que se queda: la invitada abre /peek después de fusionar (0.64.3)', async () => {
+    const a = await e.MASTER.prepare(`SELECT ref_id FROM accesos WHERE org_id = ? AND tipo = 'cliente'`).bind(ORG).first<{ ref_id: string }>();
+    expect(a?.ref_id, 'el acceso ya apunta al que se queda').toBe(enDash);
+    await entrar('luna', 'compras@luna.mx');
+    const peek = await o('luna', '/peek', { app: 'peek101' });
+    expect(peek.estado, JSON.stringify(peek)).toBe(200);
+    expect(peek.data.cliente.id).toBe(enDash);
+    expect(peek.data.proyectos.map((p: any) => p.nombre)).toEqual(['Cocina Luna']);
+  });
+
+  it('una cuenta que ya venía chueca se repara al abrir /peek: busca al cliente por su usuario y vuelve a poner el acceso', async () => {
+    // Como quedó la de Mike el 4-oct: el acceso apunta a un cliente que ya no existe.
+    await e.MASTER.prepare(`UPDATE accesos SET ref_id = ? WHERE org_id = ? AND tipo = 'cliente'`).bind(enQuote, ORG).run();
+    const peek = await o('luna', '/peek', { app: 'peek101' });
+    expect(peek.estado, JSON.stringify(peek)).toBe(200);
+    expect(peek.data.cliente.id).toBe(enDash);
+    const a = await e.MASTER.prepare(`SELECT ref_id FROM accesos WHERE org_id = ? AND tipo = 'cliente'`).bind(ORG).first<{ ref_id: string }>();
+    expect(a?.ref_id, 'y el acceso quedó reparado').toBe(enDash);
   });
 });

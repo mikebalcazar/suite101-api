@@ -171,7 +171,20 @@ rutas.get('/:o/peek', async (c) => {
   const cliente_id = quien.clase === 'cliente' ? quien.ref_id! : c.req.query('cliente_id');
   if (!cliente_id) return err(c, 'datos_invalidos', 400, { falta: 'cliente_id' });
   if (quien.clase === 'personal') return err(c, 'sin_permiso', 403);
-  const datos = await stub(c).peek(cliente_id);
+  let datos = await stub(c).peek(cliente_id);
+  /* 0.64.3 · El acceso apunta a un cliente que ya no está (Mike, 4-oct: «No
+   * podemos entrar en Peek como cliente y ya está invitado»). Pasaba al
+   * fusionar dos clientes: el que se queda heredaba el `usuario_id`, pero el
+   * `accesos.ref_id` de la base maestra se quedaba en el que se borró. Ahora
+   * fusionar lo re-apunta; y si una cuenta ya venía chueca de antes, aquí se
+   * busca el cliente por su usuario y se repara el acceso al pasar. */
+  if (!datos && quien.clase === 'cliente') {
+    const mio = await stub(c).clientePorUsuario(quien.usuario_id);
+    if (mio) {
+      datos = await stub(c).peek(String(mio.id));
+      if (datos) await ponerAcceso(c.env, { usuario_id: quien.usuario_id, org_id: c.get('org_id'), tipo: 'cliente', ref_id: String(mio.id) });
+    }
+  }
   if (!datos) return err(c, 'no_encontrado', 404);
   return ok(c, datos);
 });
@@ -504,6 +517,11 @@ rutas.post('/:o/clientes/:id/fusionar', async (c) => {
   if (!b.se_va_id) return err(c, 'datos_invalidos', 400, { falta: 'se_va_id' });
   const r = await stub(c).fusionarClientes(c.req.param('id'), b.se_va_id);
   if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 400, r.detalle);
+  /* 0.64.3 · Si el que se va tenía acceso al portal, el acceso (base maestra)
+   * sigue al que se queda: fusionar no deja al cliente sin poder entrar a
+   * peek101. El DO no puede tocar la maestra; se hace aquí. */
+  const portal = await accesoDe(c.env, c.get('org_id'), 'cliente', b.se_va_id);
+  if (portal) await ponerAcceso(c.env, { usuario_id: portal.usuario_id, org_id: c.get('org_id'), tipo: 'cliente', ref_id: c.req.param('id') });
   return ok(c, { cliente: r.cliente, movidos: r.movidos });
 });
 
