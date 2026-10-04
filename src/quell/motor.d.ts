@@ -7,7 +7,7 @@ export interface SesionQuell {
   correo: string;
   nombre: string | null;
   superadmin: boolean;
-  quien: { clase: 'miembro' | 'personal' | 'cliente'; rol?: string; usuario_id: string };
+  quien: { clase: 'miembro' | 'personal' | 'cliente'; rol?: string; usuario_id: string; ref_id?: string | null };
 }
 
 /** La cara de D1 que el motor espera. La da `baseSobreSql` (org-db.ts). */

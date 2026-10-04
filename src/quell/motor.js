@@ -60,6 +60,20 @@ async function usuarioDe(env) {
     if (row.role === 'cli') return s.quien?.clase === 'cliente' ? row : null;
     return s.quien?.clase === 'miembro' ? row : null;
   }
+  /* 0.66.0 · El cliente de la suite entra aunque nadie lo haya invitado desde
+   * aquí (Mike, 4-oct: «para el cliente es muy tedioso irse metiendo a
+   * diferentes plataformas»): ya es cliente de la empresa y peek101 le abre
+   * con la misma cuenta, así que aquí nace como `cli`. Qué obras ve lo decide
+   * canAccessProject: las ligadas a sus proyectos y las donde lo apuntaron.
+   * Un renglón que el taller DESACTIVÓ no revive solo: sigue fuera. */
+  if (s.quien?.clase === 'cliente') {
+    const dormido = await env.DB.prepare(`SELECT 1 FROM quell_users WHERE email = ?`).bind(s.correo).first();
+    if (dormido) return null;
+    const id = uid();
+    await env.DB.prepare(`INSERT INTO quell_users (id, email, name, role, company, usuario_id) VALUES (?,?,?,?,?,?)`)
+      .bind(id, s.correo, s.nombre || s.correo.split('@')[0], 'cli', '', s.quien.usuario_id || null).run();
+    return await env.DB.prepare(`SELECT * FROM quell_users WHERE id = ?`).bind(id).first();
+  }
   const manda = s.quien?.clase === 'miembro' && (s.superadmin === true || s.quien.rol === 'owner' || s.quien.rol === 'admin');
   if (!manda) return null;
   const id = uid();
@@ -91,6 +105,10 @@ const rutaDeCliente = (m, seg) =>
   (seg[0] === 'projects' && m === 'GET' && (!seg[1] || !seg[2] || seg[2] === 'dudas')) ||
   (seg[0] === 'projects' && m === 'POST' && seg[1] && seg[2] === 'dudas') ||
   (seg[0] === 'elements' && m === 'GET' && seg[1] && !seg[2]) ||
+  // 0.66.0 · la documentación del ítem, de leer: el plano principal, los de
+  // soporte, sus versiones y las marcas. Subir y anotar siguen siendo del taller.
+  (seg[0] === 'elements' && m === 'GET' && seg[1] && seg[2] === 'docs') ||
+  (seg[0] === 'docs' && m === 'GET' && seg[1] && (seg[2] === 'versiones' || seg[2] === 'marcas')) ||
   (seg[0] === 'dudas' && m === 'POST' && seg[1] && seg[2] === 'respuestas');
 
 // El correo de invitación. Dar de alta a alguien y no avisarle no es invitar:
@@ -280,7 +298,19 @@ const ALCANCE_SQL = `CASE
 async function canAccessProject(env, user, projectId) {
   if (isStaff(user)) return true;
   const r = await env.DB.prepare(`SELECT 1 FROM quell_project_members WHERE project_id = ? AND user_id = ?`).bind(projectId, user.id).first();
-  return !!r;
+  if (r) return true;
+  // 0.66.0 · El cliente entra también a la obra ligada a SU proyecto de la
+  // suite, sin que nadie lo apunte aquí: es el mismo cliente en las tres apps.
+  if (esCli(user)) return !!(await obraDelCliente(env, projectId));
+  return false;
+}
+/** El id del cliente en la suite (`clientes.id`) que trae la sesión, o null. */
+const clienteDeLaSuite = (env) => (env.SESION?.quien?.clase === 'cliente' && env.SESION.quien.ref_id ? String(env.SESION.quien.ref_id) : null);
+/** ¿Esta obra está ligada a un proyecto del cliente que viene en la sesión? */
+async function obraDelCliente(env, projectId) {
+  const ref = clienteDeLaSuite(env);
+  if (!ref) return null;
+  return env.DB.prepare(`SELECT 1 FROM quell_projects o JOIN proyectos p ON p.id = o.proyecto_id WHERE o.id = ? AND p.cliente_id = ?`).bind(projectId, ref).first();
 }
 /** 0, 90, 180 o 270; cualquier otra cosa es 0. */
 function giroValido(v) {
@@ -655,11 +685,16 @@ export async function atender(req, env, url, path) {
       if (m === 'GET') {
         // El cliente ve sus obras, y el número de cada tarjeta son los puntos
         // que el taller le pidió definir y siguen sin respuesta.
+        // 0.66.0 · Las obras donde lo apuntaron Y las ligadas a sus proyectos
+        // de la suite: la misma regla que canAccessProject.
         if (esCli(user)) {
           const { results } = await env.DB.prepare(
-            `SELECT p.id, p.name, p.client, p.status, pm.rol AS mi_rol,
+            `SELECT p.id, p.name, p.client, p.status, 'cli' AS mi_rol, p.proyecto_id,
                (SELECT COUNT(*) FROM quell_dudas d WHERE d.project_id = p.id AND d.para = 'cliente' AND d.estado = 'abierta') AS open_count
-             FROM quell_projects p JOIN quell_project_members pm ON pm.project_id = p.id AND pm.user_id = ? AND pm.rol = 'cli' ORDER BY p.status, p.name`).bind(user.id).all();
+             FROM quell_projects p
+             WHERE p.id IN (SELECT pm.project_id FROM quell_project_members pm WHERE pm.user_id = ? AND pm.rol = 'cli')
+                OR (p.proyecto_id IS NOT NULL AND p.proyecto_id IN (SELECT id FROM proyectos WHERE cliente_id = ?))
+             ORDER BY p.status, p.name`).bind(user.id, clienteDeLaSuite(env) || '').all();
           return json({ projects: results });
         }
         // Quien no dirige la obra ve nada más las obras donde está metido. Y el
@@ -1196,7 +1231,7 @@ export async function atender(req, env, url, path) {
        * al contratista, y eso lo decide Mike, no este archivo. */
       const element = await env.DB.prepare(
         `SELECT e.*, pl.name AS plan_name, ${ALCANCE_SQL}, it.descripcion AS item_descripcion,
-                it.monto AS item_monto, it.cantidad AS item_cantidad,
+                it.monto AS item_monto, it.cantidad AS item_cantidad, it.etapa AS item_etapa,
                 it.fecha_entrega AS item_fecha_entrega
          FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id
               LEFT JOIN items it ON it.id = e.item_id
@@ -1209,9 +1244,12 @@ export async function atender(req, env, url, path) {
        * MANDA —un supervisor o un contratista no reciben el número, no es
        * que la pantalla se lo esconda—. Esconderlo al pintar deja el dato
        * viajando, y lo que viaja se lee. */
+      /* 0.66.0 · Y el CLIENTE sí lo recibe (Mike, 4-oct: «al cliente sí le
+       * debe aparecer el precio de cada ítem cuando lo selecciona en quell»):
+       * es lo que él paga, y peek101 ya se lo enseña en su estado de cuenta. */
       if (element) {
         const rol = env.SESION?.quien?.rol;
-        if (!(rol === 'owner' || rol === 'admin' || rol === 'socio')) {
+        if (!(rol === 'owner' || rol === 'admin' || rol === 'socio' || esCli(user))) {
           delete element.item_monto;
           delete element.item_cantidad;
         }
@@ -1237,7 +1275,13 @@ export async function atender(req, env, url, path) {
             WHERE d.element_id = ? AND d.para = 'cliente'
             ORDER BY CASE d.estado WHEN 'abierta' THEN 0 ELSE 1 END, d.created_at`).bind(eid).all();
         await armaDudas(env, dudas);
-        return json({ element: { ...soloUbicacion(element), plan_name: element.plan_name }, recorte: true, cliente: true, dudas, log: [], punch: [], etapas: [], hechas: [] });
+        /* 0.66.0 · Con lo del ítem que es suyo: precio, descripción, etapa y
+         * entrega. Nada de la obra por dentro: ni fase, ni pendientes, ni quién. */
+        const delItem = {
+          item_id: element.item_id ?? null, item_monto: element.item_monto ?? null, item_descripcion: element.item_descripcion ?? null,
+          item_etapa: element.item_etapa ?? null, item_fecha_entrega: element.item_fecha_entrega ?? null, item_entrega_falta: element.item_entrega_falta ?? null,
+        };
+        return json({ element: { ...soloUbicacion(element), plan_name: element.plan_name, ...delItem }, recorte: true, cliente: true, dudas, log: [], punch: [], etapas: [], hechas: [] });
       }
       // Un ítem que no es suyo: sólo para ubicarse (decisión 4). El recorte se
       // hace aquí, y nada más sale: ni un pendiente, ni un renglón, ni una foto.

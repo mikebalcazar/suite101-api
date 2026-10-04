@@ -838,3 +838,140 @@ describe('el requerimiento, que está en revisión', () => {
     expect(marca.estado, JSON.stringify(marca)).toBe(400);
   });
 });
+
+/* peek101 junta lo del cliente · contrato 0.66.0
+ *
+ * Mike, 4-oct-2026: «para el cliente es muy tedioso irse metiendo a diferentes
+ * plataformas para ver diferente información. Juntemos dentro de Peek la info
+ * de su estado de cuenta y la info que le aparece en quell (…) al cliente sí
+ * le debe aparecer el precio de cada ítem cuando lo selecciona en quell (…) en
+ * su pantalla de inicio de Peek debe estar hasta arriba la lista de las dudas
+ * que tiene que responder».
+ *
+ * LO QUE DE VERDAD APORTA:
+ *
+ *   · que /peek diga de cada proyecto cuál es su obra en quell, de cada ítem
+ *     qué pieza del plano le cuelga y cuántos planos tiene, y arriba los
+ *     puntos que el taller le pidió definir —y NO los que él mismo preguntó—;
+ *   · que el cliente vea el precio de SU pieza en quell y pueda leer su
+ *     documentación, pero siga sin poder subir ni anotar;
+ *   · que un cliente de la suite al que nadie invitó desde quell entre a la
+ *     obra ligada a su proyecto, y a ninguna otra: el mismo cliente en las
+ *     tres apps es también la misma puerta;
+ *   · que el estado de cuenta general lo abra el propio cliente, y sólo el suyo.
+ */
+describe('peek101 junta lo del cliente (0.66.0)', () => {
+  let clienteId = '', proyecto = '', item = '', punto = '', miDuda = '';
+  let cliente2 = '', proyecto2 = '', obraC = '';
+  const OTRO = { correo: 'solo-suite@ejemplo.mx', nombre: 'Sólo en la suite' };
+
+  beforeAll(async () => {
+    const lista = await pedir('mike', `/orgs/${ORG}/clientes`, { app: 'dash101' });
+    clienteId = lista.data.filas.find((f: any) => f.correo === CLIENTE.correo).id;
+    /* La obra A ya quedó ligada arriba («Obra con fechas», con la pieza m1
+     * colgada del ítem «Gradas» de $50,000). Ese proyecto se le pasa al
+     * cliente invitado: así es SU proyecto, su obra y su pieza. */
+    proyecto = (await q('mike', `/projects/${obraA}`)).project.proyecto_id;
+    expect(proyecto, 'la obra A viene ligada de las pruebas de la fecha de entrega').toBeTruthy();
+    const pasa = await pedir('mike', `/orgs/${ORG}/proyectos/${proyecto}`, { app: 'dash101', method: 'PATCH', json: { cliente_id: clienteId } });
+    expect(pasa.estado, JSON.stringify(pasa)).toBe(200);
+    item = (await q('mike', `/elements/${m1}`)).element.item_id;
+    expect(item).toBeTruthy();
+    const mueve = await pedir('mike', `/orgs/${ORG}/items/${item}`, { app: 'dash101', method: 'PATCH', json: { cliente_id: clienteId } });
+    expect(mueve.estado, JSON.stringify(mueve)).toBe(200);
+    // Un punto del taller para el cliente, sobre esa pieza, y una pregunta del propio cliente.
+    punto = (await q('mike', `/projects/${obraA}/dudas`, { method: 'POST', body: forma({ texto: '¿El mueble de TV lleva zoclo?', element_id: m1, para: 'cliente' }) })).id;
+    miDuda = (await q('cliente', `/projects/${obraA}/dudas`, { method: 'POST', body: forma({ texto: '¿Cuándo lo instalan?', element_id: m1 }) })).id;
+    expect(punto && miDuda).toBeTruthy();
+  }, 60000);
+
+  it('/peek trae la obra del proyecto, la pieza de cada ítem con sus planos, y los puntos por definir', async () => {
+    const r = await pedir('cliente', `/orgs/${ORG}/peek`, { app: 'peek101' });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    const p = r.data.proyectos.find((x: any) => x.id === proyecto);
+    expect(p.obra).toEqual({ id: obraA, nombre: 'Obra de prueba A', estado: expect.any(String) });
+    const i = p.items.find((x: any) => x.id === item);
+    expect(i.piezas).toHaveLength(1);
+    // Cuántos planos vivos tiene la pieza: los mismos que ve el taller (el de soporte se archivó arriba).
+    const vivos = await q('mike', `/elements/${m1}/docs`);
+    const cuantos = (vivos.principal ? 1 : 0) + vivos.soporte.length;
+    expect(cuantos).toBeGreaterThan(0);
+    expect(i.piezas[0]).toMatchObject({ id: m1, obra_id: obraA, docs: cuantos });
+    expect(i.piezas[0].codigo).toMatch(/^[A-Z]+-\d+$/);
+    // Los pendientes: el del taller sí; la pregunta del cliente no es algo que él tenga que responder.
+    const ids = r.data.pendientes.map((d: any) => d.id);
+    expect(ids).toContain(punto);
+    expect(ids).not.toContain(miDuda);
+    const d = r.data.pendientes.find((x: any) => x.id === punto);
+    expect(d).toMatchObject({ obra_id: obraA, obra: 'Obra de prueba A', element_id: m1, pieza: expect.any(String), texto: '¿El mueble de TV lleva zoclo?' });
+    expect(d.codigo).toMatch(/^[A-Z]+-\d+$/);
+    expect(d.quien).toBeTruthy();
+    // La más vieja primero.
+    const fechas = r.data.pendientes.map((x: any) => x.created_at);
+    expect([...fechas].sort()).toEqual(fechas);
+    // Y sigue sin traer nada de costos.
+    expect(JSON.stringify(r.data)).not.toMatch(/pagado_prov|compromiso|partida/);
+  });
+
+  it('el cliente ve el precio de su pieza y lee su documentación; subir y anotar siguen siendo del taller', async () => {
+    const e = await q('cliente', `/elements/${m1}`);
+    expect(e.estado, JSON.stringify(e)).toBe(200);
+    expect(e.cliente).toBe(true);
+    expect(e.element.item_monto).toBe(50_000_00);
+    expect(e.element.item_id).toBe(item);
+    expect('item_etapa' in e.element).toBe(true);
+    expect(e.punch).toEqual([]);
+    expect(e.log).toEqual([]);
+    expect('fase' in e.element).toBe(false);
+    const docs = await q('cliente', `/elements/${m1}/docs`);
+    expect(docs.estado, JSON.stringify(docs)).toBe(200);
+    expect(docs.principal.rol).toBe('principal');
+    expect(Array.isArray(docs.soporte)).toBe(true);
+    expect(Array.isArray(docs.marcas)).toBe(true);
+    expect((await q('cliente', `/docs/${docs.principal.id}/marcas`)).estado).toBe(200);
+    expect((await q('cliente', `/docs/${docs.principal.id}/versiones`)).estado).toBe(200);
+    expect((await q('cliente', `/elements/${m1}/docs`, { method: 'POST', body: forma({ archivo: new File([PNG], 'x.pdf', { type: 'application/pdf' }), rol: 'soporte' }) })).estado).toBe(403);
+    expect((await q('cliente', `/docs/${docs.principal.id}/marcas`, { method: 'POST', json: { tipo: 'nota', pagina: 1, x: 0.5, y: 0.5, texto: 'me colé', op_id: crypto.randomUUID() } })).estado).toBe(403);
+    // El contratista sigue sin ver el precio: el cambio es para el cliente, no para la obra.
+    const g = await q('goyo', `/elements/${m1}`);
+    expect(g.estado).toBe(200);
+    expect('item_monto' in g.element).toBe(false);
+  });
+
+  it('un cliente de la suite al que nadie invitó desde quell entra a la obra ligada a su proyecto, y a ninguna otra', async () => {
+    const inv = await pedir('mike', `/orgs/${ORG}/clientes/invitar`, { app: 'dash101', method: 'POST', json: { correo: OTRO.correo, nombre: OTRO.nombre } });
+    expect(inv.estado, JSON.stringify(inv)).toBe(201);
+    cliente2 = inv.data.cliente_id;
+    proyecto2 = (await pedir('mike', `/orgs/${ORG}/proyectos`, { app: 'dash101', method: 'POST', json: { cliente_id: cliente2, nombre: 'Departamento' } })).data.id;
+    obraC = (await q('mike', '/projects', { method: 'POST', json: { name: 'Obra de prueba C', client: OTRO.nombre } })).id;
+    expect((await pedir('mike', `/orgs/${ORG}/obras/${obraC}/ligar`, { app: 'dash101', method: 'POST', json: { proyecto_id: proyecto2 } })).estado).toBe(200);
+    expect((await q('mike', '/clientes')).clientes.some((c: any) => c.email === OTRO.correo), 'nadie lo invitó desde quell').toBe(false);
+
+    await entrar('cli2', OTRO.correo);
+    const yo = await q('cli2', '/me');
+    expect(yo.estado, JSON.stringify(yo)).toBe(200);
+    expect(yo.user.role).toBe('cli');
+    const obras = await q('cli2', '/projects');
+    expect(obras.projects.map((p: any) => p.id)).toEqual([obraC]);
+    expect((await q('cli2', `/projects/${obraC}`)).estado).toBe(200);
+    expect((await q('cli2', `/projects/${obraA}`)).estado).toBe(403);
+    expect((await q('cli2', `/elements/${m1}`)).estado).toBe(403);
+    // Y el primer cliente ahora ve la obra A dos veces no: una sola, aunque esté apuntado Y ligado.
+    const delPrimero = await q('cliente', '/projects');
+    expect(delPrimero.projects.filter((p: any) => p.id === obraA)).toHaveLength(1);
+    expect(delPrimero.projects.some((p: any) => p.id === obraC)).toBe(false);
+  });
+
+  it('el estado de cuenta general lo abre el propio cliente, y sólo el suyo', async () => {
+    const mio = await pedir('cliente', `/orgs/${ORG}/clientes/${clienteId}/estado-de-cuenta`, { app: 'peek101' });
+    expect(mio.estado, JSON.stringify(mio)).toBe(200);
+    expect(mio.data.proyectos.some((p: any) => p.id === proyecto)).toBe(true);
+    expect((await pedir('cliente', `/orgs/${ORG}/clientes/${cliente2}/estado-de-cuenta`, { app: 'peek101' })).estado).toBe(403);
+    const xlsx = await SELF.fetch(`https://api.local/orgs/${ORG}/clientes/${clienteId}/estado.xlsx`, { headers: { Cookie: galletas.cliente, 'X-App': 'peek101' } });
+    expect(xlsx.status).toBe(200);
+    const b = new Uint8Array(await xlsx.arrayBuffer());
+    expect(b[0] === 0x50 && b[1] === 0x4b, 'baja un .xlsx de verdad').toBe(true);
+    const ajeno = await SELF.fetch(`https://api.local/orgs/${ORG}/clientes/${cliente2}/estado.xlsx`, { headers: { Cookie: galletas.cliente, 'X-App': 'peek101' } });
+    expect(ajeno.status).toBe(403);
+  });
+});
