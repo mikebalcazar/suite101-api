@@ -423,8 +423,10 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   Mike: «No podemos entrar en Peek como cliente y ya está invitado». El
   acceso de la base maestra apuntaba al cliente borrado por la fusión
   (/peek → no_encontrado). Ahora fusionar re-apunta el acceso y /peek
-  repara al pasar una cuenta chueca (`clientePorUsuario`). Falta que Mike
-  confirme que entra. Muro `2026-10-04-0440-jr-acceso-tras-fusionar.md`.
+  repara al pasar una cuenta chueca (`clientePorUsuario`); 0.64.4 (#225)
+  además rescata por el correo de la sesión. Falta que Mike confirme que
+  entra; si no, re-invitar desde dash101. Muro
+  `2026-10-04-0440-jr-acceso-tras-fusionar.md`.
 - **El pin del requerimiento se ve (3-oct, bitacora-obra #106).** Mike:
   «los círculos de los requerimientos en quell no se ven … un amarillo
   relleno con círculo verde». Era gris y, por estar fuera del alcance,
