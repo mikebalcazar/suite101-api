@@ -419,6 +419,14 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **DEFECTO: un POST del navegador al motor de quell contestaba 500 con lo pedido ya escrito (5-oct, API 0.66.2 #233, peek101 #25).**
+  El navegador manda `Origin` en todo POST; el CORS de index.ts le ponía
+  cabeceras a la respuesta que `/orgs/:o/quell/*` devolvía tal cual del
+  objeto (inmutables) → «Can't modify immutable headers». Ahora la ruta la
+  envuelve (`new Response(r.body, r)`). quell101 no lo veía (su Worker no
+  reenvía Origin); peek101 sí (reenvía la petición entera). OJO: `/:o/ws`
+  devuelve igual la respuesta del objeto y no se tocó. Muro
+  `2026-10-05-0534-jr-origen-y-cabeceras-inmutables.md`.
 - **peek101 es el único visor del cliente (5-oct, API 0.66.1 #231, peek101
   #24, bitacora-obra #109, dash101 #134).** Mike: «Quiero que el único
   visor del cliente sea Peek y que ahí mismo pueda ver el plano general y
