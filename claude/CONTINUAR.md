@@ -419,6 +419,20 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **El cronograma de la obra en quell101 y el tipo del proveedor en todas las apps (5-oct, API 0.68.0 #241, bitacora-obra #111, dash101 #137).**
+  Mike: «configurar un cronograma, pero algo muy amigable (…) tiempo de
+  fabricación total, o entrega de material / fabricación / instalación con
+  su proveedor o contratista (…) encadenar tareas, sólo las instalaciones
+  (…) exportar a Microsoft Project o Excel». Días de lunes a sábado
+  (decisión suya). Las cuentas en `src/quell/cronograma.js` (puro); tabla
+  `quell_tareas` (etapa de un proceso de una pieza, `depende_de`); rutas
+  `GET/PUT …/projects/:id/cronograma`, `.xlsx`, `.xml` (MSPDI), sólo staff.
+  `proveedores.tipo` materiales|servicios (materiales por omisión; nada se
+  reclasifica solo). quell101: vista `cronograma` con «Tiempo total»,
+  «Desglosar», «+ Otro proceso», «Después de…», guardado solo. dash101 y
+  supply101 preguntan el tipo. Falta a propósito: festivos, `inicio_fijo` en
+  la pantalla, el botón en la barra de abajo del celular. Muro
+  `2026-10-05-2320-jr-el-cronograma-de-la-obra.md`.
 - **quote101: el ítem de la obra se ve a la derecha, de sólo lectura (5-oct, API 0.67.1 #239, cotizador-t101 #77).**
   Mike: «si le doy click [a un requerimiento], a la derecha me abra la
   barra de quell de los detalles del ítem (…) y en el formato de cotización
