@@ -17,6 +17,14 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
+ * Versión del contrato: 0.66.2 (DEFECTO. Un POST del navegador al motor de
+ * quell (`/orgs/:o/quell/*`) contestaba 500 «falla_interna» con lo pedido ya
+ * escrito: el navegador manda `Origin` en todo POST, la entrada le ponía las
+ * cabeceras CORS a la respuesta que venía tal cual del objeto de la empresa,
+ * y esas cabeceras son inmutables. Ahora la respuesta se vuelve a envolver.
+ * Lo destapó peek101 al estrenar «preguntar» desde su pantalla; quell101 no
+ * lo veía porque su Worker no reenvía `Origin`. Sin cambios de forma.)
+ *
  * Versión del contrato: 0.66.1 (EL PORTAL DEL CLIENTE ES peek101. Mike, 5-oct:
  * «Quiero que el único visor del cliente sea Peek y que ahí mismo pueda ver
  * el plano general y aparte contestar los puntos de dudas. Y el generar sus
@@ -1055,7 +1063,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.66.1';
+export const VERSION_CONTRATO = '0.66.2';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

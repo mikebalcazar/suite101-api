@@ -981,3 +981,24 @@ describe('peek101 junta lo del cliente (0.66.0)', () => {
     expect(ajeno.status).toBe(403);
   });
 });
+
+/* 0.66.2 · El navegador manda `Origin` en todo POST, aunque sea al mismo
+ * origen. La entrada le ponía las cabeceras CORS a la respuesta que venía tal
+ * cual del objeto de la empresa —inmutables— y tiraba 500 con la duda ya
+ * escrita. Lo vio el corredor de peek101 el 5-oct-2026; con curl, sin Origin,
+ * no se veía. Esta prueba manda la misma petición que el navegador. */
+describe('la pregunta del cliente llega con Origin (0.66.2)', () => {
+  it('un POST al motor con Origin contesta 200, con las cabeceras CORS, y la duda queda una sola vez', async () => {
+    const texto = `¿Pregunta con Origin ${Date.now()}?`;
+    const r = await SELF.fetch(`https://api.local/orgs/${ORG}/quell/projects/${obraA}/dudas`, {
+      method: 'POST', body: forma({ texto }),
+      headers: { 'X-App': 'peek101', Cookie: galletas.cliente, Origin: 'https://peek101.taller101.com' },
+    });
+    expect(r.status, await r.clone().text()).toBe(200);
+    expect(r.headers.get('Access-Control-Allow-Origin')).toBe('https://peek101.taller101.com');
+    const c = (await r.json()) as any;
+    expect(c.ok).toBe(true);
+    const lista = await q('cliente', `/projects/${obraA}/dudas`);
+    expect(lista.dudas.filter((d: any) => d.texto === texto)).toHaveLength(1);
+  });
+});
