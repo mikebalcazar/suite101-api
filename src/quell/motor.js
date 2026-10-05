@@ -1234,6 +1234,22 @@ export async function atender(req, env, url, path) {
   }
 
   // ----- elements -----
+  /* 0.67.1 · De un ítem de la suite a su pieza del plano. quote101 (Mike,
+   * 5-oct): «cuando estoy en quote viendo la lista de requerimientos nuevos,
+   * quiero que si le doy click, a la derecha me abra la barra de quell de los
+   * detalles del ítem». El cotizador tiene el ítem; la pieza la tiene esta
+   * base. Sólo lo justo para ir a buscarla (`/elements/:id`); 404 si el ítem
+   * no está en ningún plano, y el acceso a la obra se revisa como siempre. */
+  if (seg[0] === 'items' && seg[1] && seg[2] === 'pieza' && m === 'GET') {
+    const e = await env.DB.prepare(
+      `SELECT e.id, e.project_id, e.plan_id, e.code, e.name, e.type, e.fase, e.padre_id, p.name AS project_name, pl.name AS plan_name
+         FROM quell_elements e JOIN quell_projects p ON p.id = e.project_id JOIN quell_plans pl ON pl.id = e.plan_id
+        WHERE e.item_id = ? ORDER BY e.id LIMIT 1`).bind(seg[1]).first();
+    if (!e) return err('Este ítem no está en ningún plano.', 404);
+    if (!(await canAccessProject(env, user, e.project_id))) return err('sin acceso', 403);
+    return json({ ok: true, pieza: { element_id: e.id, project_id: e.project_id, project_name: e.project_name, plan_id: e.plan_id, plan_name: e.plan_name, code: e.code, name: e.name, type: e.type, fase: e.fase, padre_id: e.padre_id } });
+  }
+
   if (seg[0] === 'elements' && seg[1]) {
     const eid = seg[1];
     const pid = await projectOfElement(env, eid);

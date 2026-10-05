@@ -1002,3 +1002,32 @@ describe('la pregunta del cliente llega con Origin (0.66.2)', () => {
     expect(lista.dudas.filter((d: any) => d.texto === texto)).toHaveLength(1);
   });
 });
+
+/* 0.67.1 · quote101 llega con el ítem y necesita la pieza del plano para
+ * abrir su detalle a la derecha (Mike, 5-oct). */
+describe('del ítem a su pieza del plano (0.67.1)', () => {
+  it('quote101 pide la pieza de un ítem con su propio X-App y recibe lo justo para abrir el detalle', async () => {
+    const item = (await q('mike', `/elements/${m1}`)).element.item_id;
+    expect(item, 'm1 es un ítem vendido').toBeTruthy();
+    const r = await pedir('mike', `/orgs/${ORG}/quell/items/${item}/pieza`, { app: 'cotizador101' });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.pieza).toMatchObject({ element_id: m1, project_id: obraA, project_name: 'Obra de prueba A' });
+    expect(r.pieza.code).toMatch(/^[A-Z]+-\d+$/);
+    expect(typeof r.pieza.plan_name).toBe('string');
+    // Y de ahí, el detalle completo con el mismo X-App: la bitácora, los pendientes, los archivos.
+    const d = await pedir('mike', `/orgs/${ORG}/quell/elements/${r.pieza.element_id}`, { app: 'cotizador101' });
+    expect(d.estado).toBe(200);
+    expect(d.element.id).toBe(m1);
+    expect(Array.isArray(d.log) && Array.isArray(d.punch)).toBe(true);
+    const docs = await pedir('mike', `/orgs/${ORG}/quell/elements/${r.pieza.element_id}/docs`, { app: 'cotizador101' });
+    expect(docs.estado).toBe(200);
+  });
+
+  it('un ítem que no está en ningún plano contesta 404, y un cliente no abre esta puerta', async () => {
+    const nada = await pedir('mike', `/orgs/${ORG}/quell/items/no-existe/pieza`, { app: 'cotizador101' });
+    expect(nada.estado).toBe(404);
+    const item = (await q('mike', `/elements/${m1}`)).element.item_id;
+    const cli = await pedir('cliente', `/orgs/${ORG}/quell/items/${item}/pieza`, { app: 'peek101' });
+    expect(cli.estado).toBe(403);
+  });
+});
