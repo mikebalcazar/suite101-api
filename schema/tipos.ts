@@ -17,6 +17,15 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
+ * Versión del contrato: 0.66.1 (EL PORTAL DEL CLIENTE ES peek101. Mike, 5-oct:
+ * «Quiero que el único visor del cliente sea Peek y que ahí mismo pueda ver
+ * el plano general y aparte contestar los puntos de dudas. Y el generar sus
+ * propias dudas desde Peek». Los correos al cliente que manda el motor de
+ * quell (la invitación y los puntos por definir) llevan a peek101
+ * (`#/obra/OBRA`), con la dirección deducida de la de quell (`sitioPeek`).
+ * Sin cambios de forma: peek101 usa las rutas de cliente del motor que ya
+ * existían, con `X-App: peek101`.)
+ *
  * Versión del contrato: 0.66.0 (PEEK JUNTA LO DEL CLIENTE. Mike, 4-oct: «para
  * el cliente es muy tedioso irse metiendo a diferentes plataformas (…)
  * Juntemos dentro de Peek la info de su estado de cuenta y la info que le
@@ -1046,7 +1055,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.66.0';
+export const VERSION_CONTRATO = '0.66.1';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

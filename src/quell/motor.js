@@ -146,20 +146,37 @@ async function invita(env, req, quien, obra, rol) {
   catch (e) { return { ok: false, error: String(e.message || e) }; }
 }
 
+/* EL PORTAL DEL CLIENTE ES peek101 (Mike, 5-oct-2026: «Quiero que el único
+ * visor del cliente sea Peek y que ahí mismo pueda ver el plano general y
+ * aparte contestar los puntos de dudas»). Los correos al cliente lo mandan
+ * allá, no a esta bitácora. La dirección de peek101 se deduce de la de esta
+ * app (`SITIO`, el origen desde el que se pidió): `quell101.X` → `peek101.X`,
+ * sea X taller101.com o el dominio propio de una empresa; staging manda al
+ * peek101 de staging; cualquier otra cosa, al de producción. Las rutas de
+ * peek101 son `#/obra/OBRA` (el plano y los puntos) y `#/pieza/PIEZA`. */
+export function sitioPeek(sitioQuell) {
+  let h = '';
+  try { h = new URL(sitioQuell).hostname.toLowerCase(); } catch { /* sin dirección */ }
+  if (h.startsWith('quell101.')) return `https://peek101.${h.slice('quell101.'.length)}`;
+  if (h.endsWith('.workers.dev') || h === 'localhost' || h === '127.0.0.1') return 'https://peek101-staging.mike-929.workers.dev';
+  return 'https://peek101.taller101.com';
+}
+
 // El correo al cliente invitado. Entra por la misma puerta que todos —la de la
 // suite—, con «Mándame un código» la primera vez, porque no tiene contraseña
-// todavía: la pone ahí mismo.
+// todavía: la pone ahí mismo. Desde el 5-oct lo manda a peek101, que es su
+// único portal: ahí ve el estado de cuenta, el plano y los puntos por definir.
 async function invitaCliente(env, req, quien, obras) {
-  const sitio = env.SITIO;
-  const app = env.APP_NAME || 'quell101';
+  const sitio = sitioPeek(env.SITIO);
   const lista = obras.map((o) => `<li><b>${o.name}</b>${o.client ? ` (${o.client})` : ''}</li>`).join('');
   const html = `
     <p>Hola${quien.name ? ' ' + quien.name : ''},</p>
-    <p>El taller te invitó a ver ${obras.length === 1 ? 'tu obra' : 'tus obras'} en <b>${app}</b>:</p>
+    <p>El taller te invitó a ver ${obras.length === 1 ? 'tu obra' : 'tus obras'} en tu portal <b>peek101</b>:</p>
     <ul>${lista}</ul>
-    <p>Ahí vas a ver el plano con tus muebles y los puntos que el taller necesita
-       que definas; contestas sobre cada uno, con foto si hace falta, y también
-       puedes preguntar lo que quieras. Lo interno del taller no sale ahí.</p>
+    <p>Ahí vas a ver tu estado de cuenta, el plano con tus muebles y los puntos
+       que el taller necesita que definas; contestas sobre cada uno, con foto si
+       hace falta, y también puedes preguntar lo que quieras. Lo interno del
+       taller no sale ahí.</p>
     <p><b>Para entrar la primera vez:</b></p>
     <ol>
       <li>Abre <a href="${sitio}">${sitio}</a></li>
@@ -167,9 +184,8 @@ async function invitaCliente(env, req, quien, obras) {
       <li>Como todavía no tienes contraseña, pica <b>«No tengo contraseña o la olvidé»</b>: te
           llega uno de 6 dígitos y con él pones tu contraseña.</li>
     </ol>
-    <p>De ahí en adelante entras con tu correo y tu contraseña. Es la misma
-       cuenta con la que ves tu estado de cuenta en peek101.</p>`;
-  try { await sendMail(env, quien.email, `Te invitaron a ver tu obra en ${app}`, html); return { ok: true }; }
+    <p>De ahí en adelante entras con tu correo y tu contraseña.</p>`;
+  try { await sendMail(env, quien.email, 'Te invitaron a ver tu obra en peek101', html); return { ok: true }; }
   catch (e) { return { ok: false, error: String(e.message || e) }; }
 }
 
@@ -177,13 +193,14 @@ async function invitaCliente(env, req, quien, obras) {
 // medirlo. Mike, 1-oct-2026: «quiero que en el correo venga el texto de la
 // duda y abajo un link que diga "responder" y te mande a la url necesaria
 // para responder. Obvio logueándote con tu cuenta de cliente». Cada punto va
-// con su pieza (código y nombre) si la tiene, y la liga lleva a la lista de
-// puntos de la obra: `#/p/OBRA/dudas`. quell101 pide la cuenta al entrar y
-// conserva la liga, así que después de entrar cae justo ahí.
+// con su pieza (código y nombre) si la tiene, y la liga lleva a la obra en
+// peek101: `#/obra/OBRA`, con el plano y los puntos por definir (5-oct: el
+// portal del cliente es peek101). peek101 pide la cuenta al entrar y conserva
+// la liga, así que después de entrar cae justo ahí. `sitio` ya es el de peek.
 const escapaHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export function correoDePuntos({ sitio, quien, obra, dudas }) {
   const cuantos = dudas.length;
-  const liga = `${sitio}/#/p/${obra.id}/dudas`;
+  const liga = `${sitio}/#/obra/${obra.id}`;
   const lista = dudas.map((d) => `
       <li style="margin:0 0 10px 0">
         ${d.pieza ? `<div style="font-size:12px;color:#666">${escapaHtml(d.pieza)}</div>` : ''}
@@ -206,7 +223,7 @@ export function correoDePuntos({ sitio, quien, obra, dudas }) {
 // El aviso al cliente de que tiene puntos por definir. Un solo correo, cuando
 // el taller aprieta el botón; nada automático por punto (decisión 8 de Mike).
 async function avisaCliente(env, req, quien, obra, dudas) {
-  const { asunto, html } = correoDePuntos({ sitio: env.SITIO, quien, obra, dudas });
+  const { asunto, html } = correoDePuntos({ sitio: sitioPeek(env.SITIO), quien, obra, dudas });
   try { await sendMail(env, quien.email, asunto, html); return { ok: true }; }
   catch (e) { return { ok: false, error: String(e.message || e) }; }
 }
@@ -898,7 +915,7 @@ export async function atender(req, env, url, path) {
         if (r.ok) enviados++; else avisos.push(`${c.email}: ${r.error}`);
       }
       await apunta(env, b.op_id);
-      const { liga } = correoDePuntos({ sitio: env.SITIO, quien: {}, obra, dudas });
+      const { liga } = correoDePuntos({ sitio: sitioPeek(env.SITIO), quien: {}, obra, dudas });
       return json({ ok: true, puntos: cuantos, enviados, aviso: avisos.length ? avisos.join(' · ') : null, liga, dudas });
     }
 
