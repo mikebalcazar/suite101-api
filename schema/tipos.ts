@@ -17,6 +17,16 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
+ * Versión del contrato: 0.67.1 (DEL ÍTEM A SU PIEZA DEL PLANO, para quote101.
+ * Mike, 5-oct: «cuando estoy en quote viendo la lista de requerimientos
+ * nuevos, quiero que si le doy click, a la derecha me abra la barra de quell
+ * de los detalles del ítem». Ruta nueva del motor de obra:
+ * `GET /orgs/:o/quell/items/:item_id/pieza` → `{ pieza: { element_id,
+ * project_id, project_name, plan_id, plan_name, code, name, type, fase,
+ * padre_id } }`; 404 si el ítem no está en ningún plano. Con eso quote101 pide
+ * `/quell/elements/:id` y `/quell/elements/:id/docs` como cualquier app de la
+ * empresa, con su propio `X-App`. Un cliente no la abre. Sólo se agrega.)
+ *
  * Versión del contrato: 0.67.0 (LOS DATOS DE PAGO DEL PROVEEDOR EN LA ORDEN.
  * Mike, 5-oct: «en las órdenes de compra, ahí mismo en la orden (desde dash)
  * aparezcan los datos bancarios o de pago del proveedor para hacer ese
@@ -1073,7 +1083,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.67.0';
+export const VERSION_CONTRATO = '0.67.1';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
