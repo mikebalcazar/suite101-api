@@ -15,6 +15,7 @@ import { SELF, env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Env } from '../src/entorno';
 import { correoDePuntos, sitioPeek } from '../src/quell/motor.js';
+import { finDe, laborablesEntre, programar, siguienteLaborable, sumarLaborables } from '../src/quell/cronograma.js';
 
 const CORREO = 'mike@forespot.com';
 const ORG = 'obra';
@@ -1029,5 +1030,163 @@ describe('del ítem a su pieza del plano (0.67.1)', () => {
     const item = (await q('mike', `/elements/${m1}`)).element.item_id;
     const cli = await pedir('cliente', `/orgs/${ORG}/quell/items/${item}/pieza`, { app: 'peek101' });
     expect(cli.estado).toBe(403);
+  });
+});
+
+/* 0.68.0 · El cronograma de la obra (Mike, 5-oct-2026). Primero las cuentas
+ * puras —el calendario de lunes a sábado y las cadenas— y luego las rutas. */
+describe('el cronograma: las cuentas (0.68.0)', () => {
+  it('cuenta de lunes a sábado: el domingo no existe', () => {
+    // 2026-10-04 es domingo; 2026-10-05, lunes; 2026-10-10, sábado.
+    expect(siguienteLaborable('2026-10-04')).toBe('2026-10-05');
+    expect(siguienteLaborable('2026-10-10')).toBe('2026-10-10');
+    expect(sumarLaborables('2026-10-10', 1), 'el día después del sábado es el lunes').toBe('2026-10-12');
+    // «5 días» que arrancan jueves 8 terminan el miércoles 14: jue, vie, sáb, lun, mar… no: jue 8, vie 9, sáb 10, lun 12, mar 13.
+    expect(finDe('2026-10-08', 5)).toBe('2026-10-13');
+    expect(finDe('2026-10-08', 1), 'un día termina el mismo día').toBe('2026-10-08');
+    expect(laborablesEntre('2026-10-05', '2026-10-17'), 'dos semanas de lunes a sábado').toBe(12);
+  });
+
+  it('encadena las etapas de una sección en orden fijo y lo demás sólo cuando se pide', () => {
+    const t = (id: string, element_id: string, seccion: string, etapa: string, dias: number, extra: Record<string, unknown> = {}) => ({ id, element_id, seccion, orden: 0, etapa, dias, depende_de: null, inicio_fijo: null, ...extra });
+    const r = programar([
+      t('h-fab', 'e1', 'Herrería', 'fabricacion', 3),
+      t('h-ins', 'e1', 'Herrería', 'instalacion', 1),
+      t('h-mat', 'e1', 'Herrería', 'material', 2),
+      t('g-fab', 'e1', 'Gabinetes', 'fabricacion', 4),
+      t('g-ins', 'e1', 'Gabinetes', 'instalacion', 2, { depende_de: 'h-ins' }),
+      t('otra', 'e2', '', 'fabricacion', 6, { inicio_fijo: '2026-10-14' }),
+    ], '2026-10-05');
+    const por = Object.fromEntries(r.tareas.map((x) => [x.id, x]));
+    // La herrería: material lun 5–mar 6, fabricación mié 7–vie 9, instalación sáb 10.
+    expect([por['h-mat'].inicio, por['h-mat'].fin]).toEqual(['2026-10-05', '2026-10-06']);
+    expect([por['h-fab'].inicio, por['h-fab'].fin]).toEqual(['2026-10-07', '2026-10-09']);
+    expect([por['h-ins'].inicio, por['h-ins'].fin]).toEqual(['2026-10-10', '2026-10-10']);
+    // Los gabinetes se fabrican desde el arranque (en paralelo), pero su instalación espera a la de la herrería.
+    expect(por['g-fab'].inicio).toBe('2026-10-05');
+    expect(por['g-ins'].inicio, 'arranca el lunes después del sábado en que terminó la herrería').toBe('2026-10-12');
+    expect(por['g-ins'].fin).toBe('2026-10-13');
+    expect(por['g-ins'].previas).toEqual(['g-fab', 'h-ins']);
+    // Una fecha fija es un piso, no un techo.
+    expect(por['otra'].inicio).toBe('2026-10-14');
+    expect(r.fin).toBe('2026-10-20');
+    expect(r.dias_laborables).toBe(14);
+    expect(() => programar([t('a', 'e', '', 'fabricacion', 1, { depende_de: 'b' }), t('b', 'e', 'otra', 'fabricacion', 1, { depende_de: 'a' })], '2026-10-05')).toThrow('ciclo');
+  });
+});
+
+describe('el cronograma: las rutas (0.68.0)', () => {
+  let maderas = '', herrero = '', cronograma: any = null;
+
+  it('el proveedor tiene tipo: materiales o servicios, y nada más', async () => {
+    const malo = await pedir('mike', `/orgs/${ORG}/proveedores`, { app: 'dash101', method: 'POST', json: { nombre: 'Raro', tipo: 'otro' } });
+    expect(malo.estado).toBe(400);
+    expect(malo.detalle?.errores?.tipo ?? malo.detalle?.tipo ?? JSON.stringify(malo)).toMatch(/materiales|servicios/);
+    const m = await pedir('mike', `/orgs/${ORG}/proveedores`, { app: 'dash101', method: 'POST', json: { nombre: 'Maderas del cronograma' } });
+    expect(m.estado, JSON.stringify(m)).toBe(201);
+    expect(m.data.tipo, 'sin decirlo, es de materiales').toBe('materiales');
+    maderas = m.data.id;
+    const h = await pedir('mike', `/orgs/${ORG}/proveedores`, { app: 'supply101', method: 'POST', json: { nombre: 'Herrería Pérez', tipo: 'servicios' } });
+    expect(h.estado, JSON.stringify(h)).toBe(201);
+    expect(h.data.tipo).toBe('servicios');
+    herrero = h.data.id;
+    const lista = await pedir('mike', `/orgs/${ORG}/proveedores?tipo=servicios`, { app: 'dash101' });
+    expect(lista.data.filas.map((f: any) => f.id)).toContain(herrero);
+    expect(lista.data.filas.map((f: any) => f.id)).not.toContain(maderas);
+  });
+
+  it('una obra sin cronograma trae sus piezas (sin requerimientos), los proveedores con tipo y cero tareas', async () => {
+    const r = await q('mike', `/projects/${obraA}/cronograma`);
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.calendario).toBe('lunes-sabado');
+    expect(r.tareas).toEqual([]);
+    expect(r.items.map((i: any) => i.element_id)).toContain(m1);
+    expect(r.items.every((i: any) => i.type !== 'Requerimiento')).toBe(true);
+    expect(r.proveedores.find((p: any) => p.id === herrero)?.tipo).toBe('servicios');
+    expect(r.inicio_guardado).toBeNull();
+    expect(r.dias_objetivo).toBeNull();
+  });
+
+  it('se guarda entero: secciones con sus etapas, proveedores, una cadena, y vuelve con fechas de lunes a sábado', async () => {
+    const r = await q('mike', `/projects/${obraA}/cronograma`, { method: 'PUT', json: {
+      inicio: '2026-10-05', dias_objetivo: 10,
+      tareas: [
+        { id: 'nuevo-0', element_id: m1, seccion: 'Herrería', orden: 0, etapa: 'material', dias: 2, proveedor_id: maderas },
+        { id: 'nuevo-1', element_id: m1, seccion: 'Herrería', orden: 0, etapa: 'fabricacion', dias: 3, proveedor_id: herrero },
+        { id: 'nuevo-2', element_id: m1, seccion: 'Herrería', orden: 0, etapa: 'instalacion', dias: 1, proveedor_id: herrero },
+        { id: 'nuevo-3', element_id: m1, seccion: 'Gabinetes', orden: 1, etapa: 'fabricacion', dias: 4 },
+        { id: 'nuevo-4', element_id: m1, seccion: 'Gabinetes', orden: 1, etapa: 'instalacion', dias: 2, depende_de: 'nuevo-2' },
+        { element_id: m2, seccion: '', orden: 0, etapa: 'fabricacion', dias: 6, inicio_fijo: '2026-10-14', notas: 'cuando llegue la chapa' },
+      ],
+    } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.inicio).toBe('2026-10-05');
+    expect(r.dias_objetivo).toBe(10);
+    expect(r.tareas).toHaveLength(6);
+    expect(r.tareas.every((t: any) => typeof t.id === 'string' && !t.id.startsWith('nuevo-')), 'los ids provisionales estrenan').toBe(true);
+    const gIns = r.tareas.find((t: any) => t.seccion === 'Gabinetes' && t.etapa === 'instalacion');
+    const hIns = r.tareas.find((t: any) => t.seccion === 'Herrería' && t.etapa === 'instalacion');
+    expect(gIns.depende_de, 'la cadena apunta al id real').toBe(hIns.id);
+    expect([hIns.inicio, hIns.fin]).toEqual(['2026-10-10', '2026-10-10']);
+    expect([gIns.inicio, gIns.fin]).toEqual(['2026-10-12', '2026-10-13']);
+    expect(gIns.proveedor_nombre).toBeNull();
+    expect(r.tareas.find((t: any) => t.etapa === 'material').proveedor_nombre).toBe('Maderas del cronograma');
+    expect(r.fin).toBe('2026-10-20');
+    expect(r.dias_laborables).toBe(14);
+    expect(r.excede, '14 días contra un objetivo de 10').toBe(true);
+    const pieza = r.items.find((i: any) => i.element_id === m1);
+    expect(pieza.tareas).toHaveLength(5);
+    expect([pieza.inicio, pieza.fin, pieza.dias]).toEqual(['2026-10-05', '2026-10-13', 8]);
+    cronograma = r;
+    // Y se vuelve a leer igual.
+    const otra = await q('mike', `/projects/${obraA}/cronograma`);
+    expect(otra.tareas.map((t: any) => t.id).sort()).toEqual(r.tareas.map((t: any) => t.id).sort());
+    expect(otra.inicio_guardado).toBe('2026-10-05');
+  });
+
+  it('lo que no cuadra se rechaza con palabras: etapa repetida, pieza ajena, ciclo, días en cero', async () => {
+    const base = { inicio: '2026-10-05', dias_objetivo: 10 };
+    const repetida = await q('mike', `/projects/${obraA}/cronograma`, { method: 'PUT', json: { ...base, tareas: [
+      { element_id: m1, seccion: '', etapa: 'fabricacion', dias: 1 }, { element_id: m1, seccion: '', etapa: 'fabricacion', dias: 2 }] } });
+    expect(repetida.estado).toBe(400); expect(repetida.error).toMatch(/repite la etapa/);
+    const otra = await q('mike', '/projects', { method: 'POST', json: { name: 'Obra sin cronograma', client: 'Nadie' } });
+    const ajena = await q('mike', `/projects/${otra.id}/cronograma`, { method: 'PUT', json: { ...base, tareas: [{ element_id: m1, seccion: '', etapa: 'fabricacion', dias: 1 }] } });
+    expect(ajena.estado).toBe(400); expect(ajena.error).toMatch(/no es de esta obra/);
+    const ciclo = await q('mike', `/projects/${obraA}/cronograma`, { method: 'PUT', json: { ...base, tareas: [
+      { id: 'nuevo-a', element_id: m1, seccion: 'A', etapa: 'fabricacion', dias: 1, depende_de: 'nuevo-b' }, { id: 'nuevo-b', element_id: m2, seccion: '', etapa: 'fabricacion', dias: 1, depende_de: 'nuevo-a' }] } });
+    expect(ciclo.estado).toBe(400); expect(ciclo.error).toMatch(/muerden la cola/);
+    const cero = await q('mike', `/projects/${obraA}/cronograma`, { method: 'PUT', json: { ...base, tareas: [{ element_id: m1, seccion: '', etapa: 'fabricacion', dias: 0 }] } });
+    expect(cero.estado).toBe(400); expect(cero.error).toMatch(/de 1 en adelante/);
+    // Nada de eso tocó lo guardado.
+    expect((await q('mike', `/projects/${obraA}/cronograma`)).tareas).toHaveLength(6);
+  });
+
+  it('se exporta a Excel y a Microsoft Project con las mismas fechas', async () => {
+    const x = await SELF.fetch(`https://api.local/orgs/${ORG}/quell/projects/${obraA}/cronograma.xlsx`, { headers: { Cookie: galletas.mike, 'X-App': 'quell101' } });
+    expect(x.status).toBe(200);
+    expect(x.headers.get('content-type')).toContain('spreadsheetml');
+    expect(x.headers.get('content-disposition')).toMatch(/cronograma-Obra-de-prueba-A\.xlsx/);
+    const bytes = new Uint8Array(await x.arrayBuffer());
+    expect(bytes[0]).toBe(0x50); expect(bytes[1]).toBe(0x4b);   // «PK»: es un zip
+    const texto = new TextDecoder().decode(bytes);
+    expect(texto).toContain('Herrería'); expect(texto).toContain('Maderas del cronograma'); expect(texto).toContain('2026-10-13');
+    expect(texto).toContain('Entrega de material');
+    const p = await SELF.fetch(`https://api.local/orgs/${ORG}/quell/projects/${obraA}/cronograma.xml`, { headers: { Cookie: galletas.mike, 'X-App': 'quell101' } });
+    expect(p.status).toBe(200);
+    expect(p.headers.get('content-type')).toContain('application/xml');
+    const xml = await p.text();
+    expect(xml).toContain('<Project xmlns="http://schemas.microsoft.com/project">');
+    expect(xml).toContain('<Name>Lunes a sábado</Name>');
+    expect(xml).toContain('<DayType>1</DayType><DayWorking>0</DayWorking>');
+    expect((xml.match(/<Task>/g) || []).length, '6 etapas + 2 piezas + 2 secciones').toBe(10);
+    expect(xml).toContain('<Start>2026-10-12T08:00:00</Start><Finish>2026-10-13T17:00:00</Finish><Duration>PT16H0M0S</Duration>');
+    expect(xml).toContain('<PredecessorLink><PredecessorUID>');
+    expect(xml).toContain('<Name>Instalación · Herrería Pérez</Name>');
+  });
+
+  it('quien no dirige la obra no lo arma ni lo ve: contratista 403, cliente 403', async () => {
+    expect((await q('goyo', `/projects/${obraA}/cronograma`)).estado).toBe(403);
+    expect((await q('cliente', `/projects/${obraA}/cronograma`)).estado).toBe(403);
+    expect((await q('goyo', `/projects/${obraA}/cronograma`, { method: 'PUT', json: { tareas: [] } })).estado).toBe(403);
   });
 });

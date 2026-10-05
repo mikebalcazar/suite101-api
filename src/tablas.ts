@@ -62,9 +62,12 @@ export const DEFS: Record<Tabla, Def> = {
       telefono: 'texto', terminos_pago: 'texto', notas: 'texto', creado_en_app: 'texto',
       // 0022 · para pagarle y encontrarlo (Mike, 29-sep-2026, desde supply101).
       clabe: 'texto', banco: 'texto', beneficiario: 'texto', direccion: 'texto', maps_url: 'texto',
+      // 0031 · materiales o servicios (Mike, 5-oct-2026: «en proveedores hay 2
+      // tipos»). La API sólo acepta esos dos (revisarProveedor).
+      tipo: 'texto',
     },
     requeridos: ['nombre'],
-    filtros: ['categoria'],
+    filtros: ['categoria', 'tipo'],
     orden: 'nombre_norm',
   },
   /* 0023 · Las cuentas bancarias del proveedor, una fila por cuenta y con
