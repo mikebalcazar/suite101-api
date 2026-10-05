@@ -73,7 +73,7 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
   proveedores: {
     dash101: '*',
     cotizador101: ['nombre', 'nombre_norm', 'correo', 'telefono'],
-    supply101: ['nombre', 'rfc', 'correo', 'telefono', 'clabe', 'banco', 'beneficiario', 'direccion', 'maps_url', 'notas'],
+    supply101: ['nombre', 'rfc', 'correo', 'telefono', 'clabe', 'banco', 'beneficiario', 'direccion', 'maps_url', 'notas', 'tipo'],
   },
   /* 0.55.0 · Las cuentas del proveedor (0023): las da de alta quien lo da de
    * alta (supply101) y administración (dash101). `proveedor_id` sí va: es a

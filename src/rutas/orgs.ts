@@ -24,7 +24,7 @@ import { montarObras } from './obras';
 import { montarNomina } from './nomina';
 import { err, ok, type Ctx, type Quien, type Vars } from '../http';
 import type { Env } from '../entorno';
-import { APPS, LLAVE_APP, type App, type Tabla } from '../../schema/tipos';
+import { APPS, LLAVE_APP, type App, type Tabla, TIPOS_PROVEEDOR, type TipoProveedor } from '../../schema/tipos';
 
 const rutas = new Hono<{ Bindings: Env; Variables: Vars }>();
 
@@ -1512,6 +1512,14 @@ export function revisarProveedor(datos: Record<string, unknown>): Record<string,
   for (const k of ['banco', 'beneficiario', 'direccion', 'telefono', 'nombre']) {
     const v = texto(k);
     if (v !== undefined) datos[k] = v || (k === 'nombre' ? v : null);
+  }
+  /* 0.68.0 · El tipo es uno de dos (Mike, 5-oct: «en proveedores hay 2 tipos:
+   * 1. materiales 2. servicios»). Un contratista es un proveedor de servicios. */
+  const tipo = texto('tipo');
+  if (tipo !== undefined) {
+    const limpio = tipo.toLowerCase();
+    if (limpio && !TIPOS_PROVEEDOR.includes(limpio as TipoProveedor)) errores.tipo = 'El tipo del proveedor es «materiales» o «servicios».';
+    datos.tipo = limpio || 'materiales';
   }
   return Object.keys(errores).length ? errores : null;
 }

@@ -17,6 +17,19 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
+ * Versión del contrato: 0.68.0 (EL CRONOGRAMA DE LA OBRA Y EL TIPO DEL
+ * PROVEEDOR. Mike, 5-oct: «necesito en quell poder configurar un cronograma
+ * (…) tiempo de fabricación total (…) entrega de material, fabricación e
+ * instalación (…) a cada una asignarle un proveedor o contratista (los
+ * contratistas debemos darlos de alta como proveedores, pero en proveedores
+ * hay 2 tipos: materiales y servicios) (…) encadenar tareas (…) exportar en
+ * Microsoft Project o en un Excel». Migración org 0031: `proveedores.tipo`
+ * (materiales | servicios; lo que había queda como materiales; la API sólo
+ * acepta esos dos y supply101 también lo escribe), `quell_projects.
+ * cronograma_inicio` y `cronograma_dias`, y la tabla `quell_tareas`. Rutas
+ * del motor: GET/PUT `/quell/projects/:id/cronograma`, GET `cronograma.xlsx`
+ * y `cronograma.xml` (ver `Cronograma`). Días laborables de lunes a sábado.)
+ *
  * Versión del contrato: 0.67.1 (DEL ÍTEM A SU PIEZA DEL PLANO, para quote101.
  * Mike, 5-oct: «cuando estoy en quote viendo la lista de requerimientos
  * nuevos, quiero que si le doy click, a la derecha me abra la barra de quell
@@ -1083,7 +1096,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.67.1';
+export const VERSION_CONTRATO = '0.68.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1491,8 +1504,68 @@ export interface Proveedor {
   beneficiario: string | null;
   direccion: string | null;
   maps_url: string | null;
+  /* 0031 · materiales (lo que se compra) o servicios (un contratista:
+   * herrería, instalación…). Mike, 5-oct-2026: «en proveedores hay 2 tipos».
+   * Lo que ya existía quedó como materiales. */
+  tipo: TipoProveedor;
   creado_en_app: string;
   creado_at: string;
+}
+export const TIPOS_PROVEEDOR = ['materiales', 'servicios'] as const;
+export type TipoProveedor = (typeof TIPOS_PROVEEDOR)[number];
+
+/* ─────────────── el cronograma de la obra (0.68.0) ───────────────
+ *
+ * Mike, 5-oct-2026: «necesito en quell poder configurar un cronograma (…)
+ * asignar tiempo de fabricación total, y dar la opción a definir tiempo de
+ * entrega de material, fabricación e instalación (…) a cada una asignarle un
+ * proveedor o contratista (…) poder encadenar tareas (…) exportar (…)
+ * Microsoft Project o Excel». Vive en el motor de obra:
+ *
+ *   GET  /orgs/:o/quell/projects/:id/cronograma        → Cronograma
+ *   PUT  /orgs/:o/quell/projects/:id/cronograma        { inicio?, dias_objetivo?, tareas: TareaEntrada[] } → Cronograma
+ *   GET  /orgs/:o/quell/projects/:id/cronograma.xlsx   el Excel (dos hojas)
+ *   GET  /orgs/:o/quell/projects/:id/cronograma.xml    el archivo de Microsoft Project (MSPDI)
+ *
+ * Sólo quien dirige la obra. Los días son LABORABLES DE LUNES A SÁBADO
+ * (decisión de Mike, 5-oct); las fechas no se guardan: se calculan cada vez.
+ * Una tarea es una etapa de una sección de una pieza; dentro de la sección
+ * las etapas van material → fabricación → instalación; entre secciones y
+ * piezas lo que encadena es `depende_de` (arranca cuando ésa termina). */
+export type EtapaCronograma = 'material' | 'fabricacion' | 'instalacion';
+export interface TareaEntrada {
+  /** Se conserva si viene; sin él, o con uno que empiece con «nuevo-», estrena. */
+  id?: string;
+  element_id: string;
+  seccion?: string;
+  orden?: number;
+  etapa: EtapaCronograma;
+  /** Laborables, de 1 en adelante. */
+  dias: number;
+  proveedor_id?: string | null;
+  /** El id (o el id provisional) de la tarea que tiene que terminar antes. */
+  depende_de?: string | null;
+  inicio_fijo?: string | null;
+  notas?: string | null;
+}
+export interface TareaCronograma {
+  id: string; project_id: string; element_id: string; code: string; name: string;
+  seccion: string; orden: number; etapa: EtapaCronograma; dias: number;
+  proveedor_id: string | null; proveedor_nombre: string | null; proveedor_tipo: TipoProveedor | null;
+  depende_de: string | null; inicio_fijo: string | null; notas: string | null;
+  /** Calculados: AAAA-MM-DD, y las tareas de las que depende (implícitas y explícitas). */
+  inicio: string; fin: string; previas: string[];
+}
+export interface Cronograma {
+  id: string; nombre: string;
+  /** El arranque ya movido a día laborable; `inicio_guardado` es lo que se escribió (o null = hoy). */
+  inicio: string; inicio_guardado: string | null;
+  dias_objetivo: number | null; fin: string; dias_laborables: number; excede: boolean;
+  calendario: 'lunes-sabado';
+  etapas: Array<{ clave: EtapaCronograma; nombre: string }>;
+  items: Array<{ element_id: string; code: string; name: string; type: string; plan_name: string; padre_id: string | null; inicio: string | null; fin: string | null; dias: number; tareas: TareaCronograma[] }>;
+  tareas: TareaCronograma[];
+  proveedores: Array<Pick<Proveedor, 'id' | 'nombre' | 'tipo'>>;
 }
 
 export interface Personal {
@@ -1843,6 +1916,7 @@ export const TABLAS_INTERNAS = [
    * cada ruta de /orgs/:o/nomina/*; el CRUD genérico entregaría la tabla
    * entera a quien pueda leer la empresa. */
   'rayas', 'raya_pagos',
+  'quell_tareas',   // 0031 · el cronograma de la obra (0.68.0)
 ] as const;
 
 /* ─────────────── lo que devuelven las rutas con nombre ─────────────── */

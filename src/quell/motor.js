@@ -29,6 +29,8 @@ import { PREFIJOS, REQUERIMIENTO, esRequerimiento, siguienteCodigo } from './cod
  * celular con la fecha mal puesta diría que faltan tres días cuando ya
  * venció. */
 import { faltaParaEntrega } from '../../schema/tipos';
+import { ETAPAS, NOMBRE_ETAPA, fechaValida, hojasDelCronograma, laborablesEntre, programar, xmlDeProject } from './cronograma.js';
+import { TIPO_XLSX, xlsx } from '../xlsx';
 
 const JSON_H = { 'content-type': 'application/json; charset=utf-8' };
 const json = (data, status = 200, extra = {}) => new Response(JSON.stringify(data), { status, headers: { ...JSON_H, ...extra } });
@@ -576,6 +578,39 @@ async function armaDudas(env, dudas) {
   return dudas;
 }
 
+/* El cronograma de una obra, con las fechas ya contadas (0.68.0). Trae las
+ * piezas de la obra (sin los requerimientos, que todavía no son trabajo) para
+ * que la pantalla las enseñe aunque no tengan tareas, los proveedores con su
+ * tipo para los menús, y cada tarea con su inicio y su fin. */
+async function leerCronograma(env, pid) {
+  const project = await env.DB.prepare(`SELECT id, name, cronograma_inicio, cronograma_dias FROM quell_projects WHERE id = ?`).bind(pid).first();
+  const { results: piezas } = await env.DB.prepare(
+    `SELECT e.id, e.code, e.name, e.type, e.plan_id, e.padre_id, pl.name AS plan_name
+       FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id
+      WHERE pl.project_id = ? AND e.type <> 'Requerimiento' ORDER BY e.code`).bind(pid).all();
+  const { results: crudas } = await env.DB.prepare(
+    `SELECT t.*, e.code, e.name, p.nombre AS proveedor_nombre, p.tipo AS proveedor_tipo
+       FROM quell_tareas t JOIN quell_elements e ON e.id = t.element_id LEFT JOIN proveedores p ON p.id = t.proveedor_id
+      WHERE t.project_id = ? ORDER BY e.code, t.orden, t.seccion`).bind(pid).all();
+  const { results: proveedores } = await env.DB.prepare(`SELECT id, nombre, tipo FROM proveedores ORDER BY nombre_norm`).all();
+  const inicio = project.cronograma_inicio || now().slice(0, 10);
+  const c = programar(crudas, inicio);
+  // Las tareas en el orden de las piezas, y cada pieza con cuántos días suma.
+  const porPieza = new Map();
+  for (const t of c.tareas) { if (!porPieza.has(t.element_id)) porPieza.set(t.element_id, []); porPieza.get(t.element_id).push(t); }
+  const items = piezas.map((e) => {
+    const ts = porPieza.get(e.id) || [];
+    const ini = ts.length ? ts.reduce((m, t) => (m < t.inicio ? m : t.inicio), ts[0].inicio) : null;
+    const fin = ts.length ? ts.reduce((m, t) => (m > t.fin ? m : t.fin), ts[0].fin) : null;
+    return { element_id: e.id, code: e.code, name: e.name, type: e.type, plan_name: e.plan_name, padre_id: e.padre_id, inicio: ini, fin, dias: ini ? laborablesEntre(ini, fin) : 0, tareas: ts };
+  });
+  const objetivo = project.cronograma_dias ?? null;
+  return {
+    id: pid, nombre: project.name, inicio: c.inicio, inicio_guardado: project.cronograma_inicio || null, dias_objetivo: objetivo, fin: c.fin, dias_laborables: c.dias_laborables,
+    excede: objetivo != null && c.dias_laborables > objetivo, calendario: 'lunes-sabado', etapas: ETAPAS.map((k) => ({ clave: k, nombre: NOMBRE_ETAPA[k] })),
+    items, tareas: c.tareas, proveedores,
+  };
+}
 export async function atender(req, env, url, path) {
   const m = req.method;
   const seg = path.replace(/^\/quell\/?/, '').split('/').filter(Boolean); // después de /quell/
@@ -740,6 +775,85 @@ export async function atender(req, env, url, path) {
     }
     const pid = seg[1];
     if (!(await canAccessProject(env, user, pid))) return err('sin acceso al proyecto', 403);
+
+    /* ─────────────── el cronograma (0.68.0) ───────────────
+     *
+     * Mike, 5-oct: «necesito en quell poder configurar un cronograma (…)
+     * asignar tiempo de fabricación total, y (…) definir tiempo de entrega
+     * de material, fabricación e instalación, y a cada una asignarle un
+     * proveedor o contratista (…) poder encadenar tareas (…) exportar (…)
+     * Microsoft Project o Excel». Las cuentas viven en cronograma.js; aquí
+     * se lee, se guarda entero (PUT reemplaza todas las tareas de la obra) y
+     * se exporta. Sólo quien dirige la obra. */
+    if (seg[2] === 'cronograma' || seg[2] === 'cronograma.xlsx' || seg[2] === 'cronograma.xml') {
+      if (!isStaff(user)) return err('El cronograma lo arma quien dirige la obra.', 403);
+      if (m === 'PUT' && seg[2] === 'cronograma') {
+        const b = await req.json().catch(() => ({}));
+        const project = await env.DB.prepare(`SELECT id, cronograma_inicio, cronograma_dias FROM quell_projects WHERE id = ?`).bind(pid).first();
+        if (!project) return err('no encontrado', 404);
+        const inicio = b.inicio === undefined ? project.cronograma_inicio : b.inicio;
+        if (inicio !== null && inicio !== undefined && !fechaValida(inicio)) return err('La fecha de arranque va como AAAA-MM-DD.');
+        const objetivo = b.dias_objetivo === undefined ? project.cronograma_dias : b.dias_objetivo;
+        if (objetivo !== null && objetivo !== undefined && !(Number.isInteger(objetivo) && objetivo >= 0)) return err('El objetivo son días enteros.');
+        const lista = Array.isArray(b.tareas) ? b.tareas : null;
+        if (!lista) return err('Faltan las tareas (una lista, aunque sea vacía).');
+        const { results: piezas } = await env.DB.prepare(`SELECT e.id FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id WHERE pl.project_id = ?`).bind(pid).all();
+        const delProyecto = new Set(piezas.map((e) => e.id));
+        const { results: provs } = await env.DB.prepare(`SELECT id FROM proveedores`).all();
+        const proveedores = new Set(provs.map((p) => p.id));
+        // Los ids: se conservan los que vienen (la pantalla los reusa); los que no traen, o traen uno de «nuevo-», estrenan.
+        const idDe = new Map();
+        const limpias = [];
+        for (const [i, t] of lista.entries()) {
+          if (!t || typeof t !== 'object') return err(`La tarea ${i + 1} no se entiende.`);
+          if (!delProyecto.has(t.element_id)) return err(`La tarea ${i + 1} apunta a una pieza que no es de esta obra.`);
+          if (!ETAPAS.includes(t.etapa)) return err(`La etapa de la tarea ${i + 1} es material, fabricacion o instalacion.`);
+          const dias = Number(t.dias);
+          if (!Number.isInteger(dias) || dias < 1 || dias > 3650) return err(`Los días de la tarea ${i + 1} son un entero de 1 en adelante.`);
+          if (t.proveedor_id && !proveedores.has(t.proveedor_id)) return err(`El proveedor de la tarea ${i + 1} no existe.`);
+          if (t.inicio_fijo && !fechaValida(t.inicio_fijo)) return err(`La fecha fija de la tarea ${i + 1} va como AAAA-MM-DD.`);
+          const viejo = typeof t.id === 'string' && t.id ? t.id : `nuevo-${i}`;
+          const id = viejo.startsWith('nuevo-') ? uid() : viejo;
+          if (idDe.has(viejo)) return err(`La tarea ${i + 1} repite el id de otra.`);
+          idDe.set(viejo, id);
+          limpias.push({ id, element_id: t.element_id, seccion: String(t.seccion || '').trim().slice(0, 60), orden: Number.isInteger(t.orden) ? t.orden : 0, etapa: t.etapa, dias, proveedor_id: t.proveedor_id || null, depende_de: t.depende_de || null, inicio_fijo: t.inicio_fijo || null, notas: typeof t.notas === 'string' ? t.notas.slice(0, 500) : null });
+        }
+        // Dentro de una sección no se repite la etapa: es una por sección.
+        const vistas = new Set();
+        for (const t of limpias) {
+          const k = `${t.element_id}\u0000${t.seccion}\u0000${t.etapa}`;
+          if (vistas.has(k)) return err(`La sección «${t.seccion || 'de la pieza'}» repite la etapa ${NOMBRE_ETAPA[t.etapa]}.`);
+          vistas.add(k);
+        }
+        for (const t of limpias) {
+          if (!t.depende_de) continue;
+          if (!idDe.has(t.depende_de)) return err('Una tarea depende de otra que no viene en la lista.');
+          t.depende_de = idDe.get(t.depende_de);
+          if (t.depende_de === t.id) return err('Una tarea no puede depender de sí misma.');
+        }
+        try { programar(limpias, inicio || now().slice(0, 10)); } catch (e) {
+          if (e.message === 'ciclo') return err('Las cadenas se muerden la cola: una tarea termina dependiendo de sí misma.');
+          throw e;
+        }
+        const t0 = now();
+        await env.DB.prepare(`DELETE FROM quell_tareas WHERE project_id = ?`).bind(pid).run();
+        for (const t of limpias) {
+          await env.DB.prepare(`INSERT INTO quell_tareas (id, project_id, element_id, seccion, orden, etapa, dias, proveedor_id, depende_de, inicio_fijo, notas, creado_at, actualizado_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+            .bind(t.id, pid, t.element_id, t.seccion, t.orden, t.etapa, t.dias, t.proveedor_id, t.depende_de, t.inicio_fijo, t.notas, t0, t0).run();
+        }
+        await env.DB.prepare(`UPDATE quell_projects SET cronograma_inicio = ?, cronograma_dias = ? WHERE id = ?`).bind(inicio ?? null, objetivo ?? null, pid).run();
+        return json({ ok: true, ...(await leerCronograma(env, pid)) });
+      }
+      if (m !== 'GET') return err('no encontrado', 404);
+      const c = await leerCronograma(env, pid);
+      if (seg[2] === 'cronograma') return json({ ok: true, ...c });
+      const limpio = String(c.nombre || 'obra').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'obra';
+      if (seg[2] === 'cronograma.xlsx') {
+        const libro = xlsx(hojasDelCronograma(c));
+        return new Response(libro, { headers: { 'content-type': TIPO_XLSX, 'content-disposition': `attachment; filename="cronograma-${limpio}.xlsx"`, 'cache-control': 'no-store' } });
+      }
+      return new Response(xmlDeProject(c), { headers: { 'content-type': 'application/xml; charset=utf-8', 'content-disposition': `attachment; filename="cronograma-${limpio}.xml"`, 'cache-control': 'no-store' } });
+    }
 
     if (!seg[2] && m === 'GET') {
       const project = await env.DB.prepare(`SELECT * FROM quell_projects WHERE id = ?`).bind(pid).first();
