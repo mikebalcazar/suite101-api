@@ -419,6 +419,12 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **quell101: «Imprimir» y «Compartir» del plano son puro ícono (5-oct, bitacora-obra #110).**
+  Mike, con una captura de escritorio donde los selectores de la derecha
+  se salían del borde. `.btn.ico` (32 px, dibujo, palabra en title y
+  aria-label; `BotonCompartir` acepta `etiqueta`); en la barra del plano
+  el botón de planos es el único que cede (`flex:0 1 auto;min-width:120px`).
+  Muro `2026-10-05-2226-jr-iconos-del-plano.md`.
 - **Los datos de pago del proveedor, en la orden de compra (5-oct, API 0.67.0 #236, dash101 #135).**
   Mike: «ahí mismo en la orden (desde dash) aparezcan los datos bancarios
   o de pago del proveedor para hacer ese pago». `GET /ordenes/:id` trae
