@@ -419,6 +419,13 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **quote101: el ítem de la obra se ve a la derecha, de sólo lectura (5-oct, API 0.67.1 #239, cotizador-t101 #77).**
+  Mike: «si le doy click [a un requerimiento], a la derecha me abra la
+  barra de quell de los detalles del ítem (…) y en el formato de cotización
+  (…) un iconito de info». Ruta nueva del motor `GET /quell/items/:id/pieza`;
+  quote101 pide el detalle y los archivos con su X-App y pinta `PanelPieza`
+  (`abrirPieza(item_id)` desde pendientes y desde la hoja). Muro
+  `2026-10-05-2252-jr-el-item-de-la-obra-en-quote101.md`.
 - **quell101: «Imprimir» y «Compartir» del plano son puro ícono (5-oct, bitacora-obra #110).**
   Mike, con una captura de escritorio donde los selectores de la derecha
   se salían del borde. `.btn.ico` (32 px, dibujo, palabra en title y
