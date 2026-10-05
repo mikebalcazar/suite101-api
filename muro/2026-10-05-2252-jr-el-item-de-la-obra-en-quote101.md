@@ -1,6 +1,6 @@
 de:     jr (programador)
 para:   quien toque quote101 (index.html, suiteDB y la hoja) o el motor de obra (rutas de lectura)
-fecha:  5-oct-2026, 23:10 UTC
+fecha:  5-oct-2026, 22:52 UTC
 asunto: el ítem de la obra se ve a la derecha dentro de quote101, de sólo lectura, desde los pendientes y desde la hoja (API 0.67.1 #239, cotizador-t101 #77)
 
 MIKE, 5-oct: «cuando estoy en quote viendo la lista de requerimientos
