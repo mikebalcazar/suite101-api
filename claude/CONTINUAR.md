@@ -419,6 +419,18 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **peek101 es el único visor del cliente (5-oct, API 0.66.1 #231, peek101
+  #24, bitacora-obra #109, dash101 #134).** Mike: «Quiero que el único
+  visor del cliente sea Peek y que ahí mismo pueda ver el plano general y
+  aparte contestar los puntos de dudas. Y el generar sus propias dudas desde
+  Peek». peek101 pinta la obra desde el MISMO motor de obra de la suite
+  (/orgs/:o/quell/*, cara de cliente, X-App peek101): `public/obra.js` con
+  v-obra (plano con pines, piezas, puntos contestables, preguntar) y v-pieza
+  (precio, etapa, archivos, puntos, preguntar); honduras 3 y 4; ligas
+  #/obra/ID y #/pieza/ID. Los correos del motor al cliente van a peek
+  (`sitioPeek`). quell101 manda al cliente a peek. La demo de staging tiene
+  obra (sembrar-demo). OJO: cada corrida de portal.spec deja una «Pregunta
+  de prueba» en la demo. Muro `2026-10-05-0516-jr-la-obra-en-peek.md`.
 - **peek101 junta lo del cliente (4-oct, API 0.66.0 #229).** Mike: «para
   el cliente es muy tedioso irse metiendo a diferentes plataformas (…)
   Juntemos dentro de Peek la info de su estado de cuenta y la info que le
