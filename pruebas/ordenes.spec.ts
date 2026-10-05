@@ -725,3 +725,55 @@ describe('0.47.0 · reembolsos: la misma orden, de otro tipo', () => {
     expect(ana.data.puede_comprar).toBe(true);
   });
 });
+
+/* 0.67.0 · Mike, 5-oct-2026: «en las órdenes de compra, ahí mismo en la
+ * orden (desde dash) aparezcan los datos bancarios o de pago del proveedor
+ * para hacer ese pago». La orden trae `proveedor` con sus cuentas. */
+describe('0.67.0 · los datos de pago del proveedor vienen en la orden', () => {
+  // Una CLABE que cuadra: 17 dígitos y su verificador calculado.
+  const clabeDe = (base17: string) => {
+    const pesos = [3, 7, 1];
+    let suma = 0;
+    for (let i = 0; i < 17; i++) suma += (Number(base17[i]) * pesos[i % 3]) % 10;
+    return base17 + String((10 - (suma % 10)) % 10);
+  };
+  const PRINCIPAL = clabeDe('01218000555566667');
+  const DOLARES = clabeDe('00218000111122223');
+  let herrajes = '';
+
+  it('una orden a un proveedor dado de alta trae su ficha de pago y todas sus cuentas', async () => {
+    const alta = await o('mike', '/proveedores', { method: 'POST', json: { nombre: 'Herrajes del Norte', rfc: 'HNO010101AB1', correo: 'pagos@herrajes.mx', terminos_pago: '50 % anticipo', clabe: PRINCIPAL, banco: 'Banorte', beneficiario: 'Herrajes del Norte SA' } });
+    expect(alta.estado, JSON.stringify(alta)).toBe(201);
+    herrajes = alta.data.id;
+    const otra = await o('mike', '/proveedor_cuentas', { method: 'POST', json: { proveedor_id: herrajes, alias: 'Dólares', clabe: DOLARES, banco: 'BBVA', beneficiario: 'Herrajes del Norte SA', notas: 'sólo para importaciones' } });
+    expect(otra.estado, JSON.stringify(otra)).toBe(201);
+
+    const oc = await o('ana', '/ordenes', { method: 'POST', json: { proveedor_id: herrajes, proveedor_nombre: 'Herrajes del Norte', concepto: 'Bisagras', monto: 2_320_00, con_factura: true } });
+    expect(oc.estado, JSON.stringify(oc)).toBe(201);
+
+    for (const quien of ['ana', 'beto'] as const) {   // quien la pidió y quien paga
+      const r = await o(quien, `/ordenes/${oc.data.id}`);
+      expect(r.estado, JSON.stringify(r)).toBe(200);
+      const p = r.data.proveedor;
+      expect(p, `${quien} ve al proveedor`).toBeTruthy();
+      expect(p).toMatchObject({ id: herrajes, nombre: 'Herrajes del Norte', rfc: 'HNO010101AB1', correo: 'pagos@herrajes.mx', terminos_pago: '50 % anticipo' });
+      // Las cuentas: la principal (de la ficha) y la otra, sin repetir la principal.
+      expect(p.cuentas.map((c: any) => c.clabe).sort()).toEqual([PRINCIPAL, DOLARES].sort());
+      const principal = p.cuentas.find((c: any) => c.clabe === PRINCIPAL);
+      expect(principal).toMatchObject({ alias: 'Principal', banco: 'Banorte', beneficiario: 'Herrajes del Norte SA' });
+      const dolares = p.cuentas.find((c: any) => c.clabe === DOLARES);
+      expect(dolares).toMatchObject({ alias: 'Dólares', banco: 'BBVA', notas: 'sólo para importaciones' });
+      // Para pagar, no la ficha entera.
+      expect('direccion' in p).toBe(false);
+      expect('maps_url' in p).toBe(false);
+    }
+  });
+
+  it('una orden con el proveedor escrito a mano no tiene de dónde: proveedor null', async () => {
+    const oc = await o('ana', '/ordenes', { method: 'POST', json: { proveedor_nombre: 'El de la esquina', concepto: 'Lijas', monto: 150_00 } });
+    expect(oc.estado, JSON.stringify(oc)).toBe(201);
+    const r = await o('ana', `/ordenes/${oc.data.id}`);
+    expect(r.estado).toBe(200);
+    expect(r.data.proveedor).toBeNull();
+  });
+});

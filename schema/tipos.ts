@@ -17,6 +17,16 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
+ * Versión del contrato: 0.67.0 (LOS DATOS DE PAGO DEL PROVEEDOR EN LA ORDEN.
+ * Mike, 5-oct: «en las órdenes de compra, ahí mismo en la orden (desde dash)
+ * aparezcan los datos bancarios o de pago del proveedor para hacer ese
+ * pago». `GET /orgs/:o/ordenes/:id` trae además `proveedor`
+ * (`ProveedorDePago`): nombre, RFC, correo, teléfono, términos de pago y sus
+ * cuentas (alias, CLABE, banco, beneficiario, notas), o `null` si la orden
+ * sólo trae el nombre escrito a mano. Lo ve quien puede abrir la orden: quien
+ * la pidió o quien paga, igual que supply101 enseña la ficha del proveedor a
+ * quien pide. Sólo se agrega un campo: nada cambia de forma.)
+ *
  * Versión del contrato: 0.66.2 (DEFECTO. Un POST del navegador al motor de
  * quell (`/orgs/:o/quell/*`) contestaba 500 «falla_interna» con lo pedido ya
  * escrito: el navegador manda `Origin` en todo POST, la entrada le ponía las
@@ -1063,7 +1073,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.66.2';
+export const VERSION_CONTRATO = '0.67.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1401,6 +1411,25 @@ export interface ProveedorCuenta {
   beneficiario: string | null;
   notas: string | null;
   creado_at: string;
+}
+
+/** 0.67.0 · Lo que hace falta para pagarle al proveedor de una orden, en la
+ *  orden misma (Mike, 5-oct-2026: «en las órdenes de compra, ahí mismo en la
+ *  orden (desde dash) aparezcan los datos bancarios o de pago del proveedor
+ *  para hacer ese pago»). Viene en `GET /orgs/:o/ordenes/:id` como
+ *  `proveedor`; es `null` cuando la orden sólo trae el nombre escrito a mano
+ *  (`proveedor_id` nulo) o el proveedor ya no existe. `cuentas` son sus
+ *  filas de `proveedor_cuentas` (0023, donde vive la verdad); si el
+ *  proveedor sólo trae la cuenta en sus columnas, sale como «Principal». Sin
+ *  dirección ni notas: es para pagar, no la ficha entera. */
+export interface ProveedorDePago {
+  id: string;
+  nombre: string;
+  rfc: string | null;
+  correo: string | null;
+  telefono: string | null;
+  terminos_pago: string | null;
+  cuentas: Array<Pick<ProveedorCuenta, 'id' | 'alias' | 'clabe' | 'banco' | 'beneficiario' | 'notas'>>;
 }
 
 /** Un accionista de la empresa (0025, contrato 0.57.0). Mike, 30-sep-2026:
