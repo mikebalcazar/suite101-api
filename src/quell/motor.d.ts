@@ -44,6 +44,8 @@ export interface EntornoQuell {
 export function atender(req: Request, env: EntornoQuell, url: URL, path: string): Promise<Response>;
 
 /** 0.59.1 · El correo al cliente con sus puntos por definir, armado aparte para medirlo. */
+/** La dirección de peek101 deducida de la de quell101 (5-oct-2026). */
+export function sitioPeek(sitioQuell: string): string;
 export function correoDePuntos(args: {
   sitio: string;
   quien: { name?: string | null };

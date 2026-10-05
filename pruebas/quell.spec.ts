@@ -14,7 +14,7 @@
 import { SELF, env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Env } from '../src/entorno';
-import { correoDePuntos } from '../src/quell/motor.js';
+import { correoDePuntos, sitioPeek } from '../src/quell/motor.js';
 
 const CORREO = 'mike@forespot.com';
 const ORG = 'obra';
@@ -364,13 +364,19 @@ describe('B · la cara de cliente, con la invitación pasando por la suite', () 
     expect(aviso.enviados).toBe(1); // sin Resend aquí: se intenta y se cuenta, no sale
     /* Mike, 1-oct-2026: el correo trae el texto de cada punto, con su pieza,
      * y abajo «Responder» con la liga a los puntos de la obra. */
-    expect(aviso.liga).toMatch(new RegExp(`/#/p/${obraA}/dudas$`));
+    /* 5-oct: el portal del cliente es peek101. La liga va a la obra en peek
+     * (`#/obra/OBRA`), y la dirección de peek se deduce de la de quell. */
+    expect(aviso.liga).toMatch(new RegExp(`^https://peek101[^/]*/#/obra/${obraA}$`));
+    expect(sitioPeek('https://quell101.taller101.com')).toBe('https://peek101.taller101.com');
+    expect(sitioPeek('https://quell101.acme.com.mx')).toBe('https://peek101.acme.com.mx');
+    expect(sitioPeek('https://bitacora-obra-staging.mike-929.workers.dev')).toBe('https://peek101-staging.mike-929.workers.dev');
+    expect(sitioPeek('')).toBe('https://peek101.taller101.com');
     expect(aviso.dudas).toEqual([{ texto: '¿De qué color va el mueble de TV?', pieza: expect.stringMatching(/^[A-Z]+-\d+ · /) }]);
-    const correo = correoDePuntos({ sitio: 'https://quell101.taller101.com', quien: { name: 'Cliente' }, obra: { id: obraA, name: 'Obra <A>' }, dudas: aviso.dudas });
+    const correo = correoDePuntos({ sitio: 'https://peek101.taller101.com', quien: { name: 'Cliente' }, obra: { id: obraA, name: 'Obra <A>' }, dudas: aviso.dudas });
     expect(correo.asunto).toBe('1 punto por definir en Obra <A>');
     expect(correo.html).toContain('¿De qué color va el mueble de TV?');
     expect(correo.html).toContain(aviso.dudas[0].pieza);
-    expect(correo.html).toContain(`<a href="https://quell101.taller101.com/#/p/${obraA}/dudas"`);
+    expect(correo.html).toContain(`<a href="https://peek101.taller101.com/#/obra/${obraA}"`);
     expect(correo.html).toMatch(/>Responder<\/a>/);
     expect(correo.html, 'el nombre de la obra va escapado').toContain('Obra &lt;A&gt;');
     expect((await q('mike', `/projects/${obraB}/avisar-cliente`, { method: 'POST', json: {} })).estado).toBe(400);
