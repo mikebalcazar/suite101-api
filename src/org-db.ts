@@ -57,7 +57,7 @@ import type { Quien } from './http';
 import { DEFS, type Def, type Tipo } from './tablas';
 import { ahora, normalizar, ulid } from './lib';
 import { alcanceDeItem, type MovimientoAlcance } from '../schema/tipos';
-import { TABLAS, type Aviso, type ConteoQuote, type Etapa, type Peek, type Pool, type Tabla } from '../schema/tipos';
+import { TABLAS, type Aviso, type ConteoQuote, type Etapa, type Peek, type Pool, type ProveedorDePago, type Tabla } from '../schema/tipos';
 import type { Env } from './entorno';
 
 /* Las migraciones del OrgDB, en orden. Para agregar una: se escribe el .sql,
@@ -317,7 +317,7 @@ export interface ApiOrgDB {
    *  accionista jalándolo de ahí (0.60.0). */
   accionistasDeRoster(): Promise<Array<{ id: string; nombre: string; rfc: string; correo: string; puesto: string }>>;
   pendientesDeOrdenes(): Promise<{ compras: { total: number; cuantas: number }; reembolsos: { total: number; cuantas: number } }>;
-  verOrden(id: string): Promise<{ orden: Fila; eventos: Fila[]; archivos: Fila[] } | null>;
+  verOrden(id: string): Promise<{ orden: Fila; eventos: Fila[]; archivos: Fila[]; proveedor: ProveedorDePago | null } | null>;
   /** 0.56.1 · La orden que dejó ese egreso (o null): para que desde el movimiento se llegue a la orden con toda su historia y sus papeles. */
   ordenDeMovimiento(movimiento_id: string): Promise<{ orden: Fila; eventos: Fila[]; archivos: Fila[] } | null>;
   pagarOrden(args: Record<string, unknown>): Promise<{ ok: true; orden: Fila; movimiento: Fila; partida_id: string | null } | { error: string; detalle?: unknown }>;
@@ -2285,9 +2285,16 @@ export class OrgDB extends DurableObject<Env> {
     return f ? this.verOrden(String(f.id)) : null;
   }
 
-  verOrden(id: string): { orden: Fila; eventos: Fila[]; archivos: Fila[] } | null {
+  verOrden(id: string): { orden: Fila; eventos: Fila[]; archivos: Fila[]; proveedor: ProveedorDePago | null } | null {
     const orden = this.leerInterna('ordenes', id);
     if (!orden) return null;
+    /* 0.67.0 · Con la orden viene lo que hace falta para pagarle (Mike,
+     * 5-oct: «ahí mismo en la orden (desde dash) aparezcan los datos
+     * bancarios o de pago del proveedor»). Las cuentas son las filas de
+     * `proveedor_cuentas` (0023: ahí vive la verdad); si un proveedor sólo
+     * trae la cuenta en sus columnas, ésa sale como «Principal». Un nombre
+     * escrito a mano (`proveedor_id` nulo) no tiene de dónde: `null`. */
+    const proveedor = orden.proveedor_id ? this.proveedorDePago(String(orden.proveedor_id)) : null;
     const papeles = (tabla: string, de_id: string, de: 'orden' | 'pago') =>
       (this.sql.exec(`SELECT * FROM archivos WHERE de_tabla = ? AND de_id = ? ORDER BY creado_at`, tabla, de_id)
         .toArray() as Fila[]).map((f) => ({ ...f, de }));
@@ -2297,6 +2304,24 @@ export class OrgDB extends DurableObject<Env> {
       orden,
       eventos: this.sql.exec(`SELECT * FROM orden_eventos WHERE orden_id = ? ORDER BY ts`, id).toArray() as Fila[],
       archivos,
+      proveedor,
+    };
+  }
+
+  /** El proveedor como se le paga: su ficha y sus cuentas, sin notas ni dirección. */
+  private proveedorDePago(id: string): ProveedorDePago | null {
+    const p = this.sql.exec(`SELECT * FROM proveedores WHERE id = ?`, id).toArray()[0] as Fila | undefined;
+    if (!p) return null;
+    const texto = (v: unknown) => (v == null || String(v).trim() === '' ? null : String(v));
+    const cuentas = (this.sql.exec(`SELECT * FROM proveedor_cuentas WHERE proveedor_id = ? ORDER BY creado_at, alias`, id).toArray() as Fila[])
+      .map((c) => ({ id: String(c.id), alias: String(c.alias ?? ''), clabe: String(c.clabe ?? ''), banco: texto(c.banco), beneficiario: texto(c.beneficiario), notas: texto(c.notas) }));
+    const clabe = texto(p.clabe);
+    if (clabe && !cuentas.some((c) => c.clabe === clabe)) {
+      cuentas.unshift({ id: `principal-${id}`, alias: 'Principal', clabe, banco: texto(p.banco), beneficiario: texto(p.beneficiario), notas: null });
+    }
+    return {
+      id: String(p.id), nombre: String(p.nombre ?? ''), rfc: texto(p.rfc), correo: texto(p.correo), telefono: texto(p.telefono),
+      terminos_pago: texto(p.terminos_pago), cuentas,
     };
   }
 
