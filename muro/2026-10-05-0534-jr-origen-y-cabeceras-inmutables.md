@@ -38,6 +38,17 @@ real (BASE=https://peek101-staging…), no sólo por el proxy: la diferencia
 estaba justo ahí.
 
 OJO:
+- EL HUMO DE «PUBLICAR API» LLEVABA CUATRO DESPLIEGUES EN ROJO SIN QUE NADIE
+  LO VIERA (#227 0.65.0, #229, #231 y #233): 203/204, por la comprobación
+  «invitarlo otra vez no duplica al cliente», que esperaba 201 y desde 0.65.0
+  la API contesta 409 correo_en_uso a propósito (Mike, 4-oct: «avisar que ya
+  existe un cliente … preguntar si es ése»). El despliegue a producción y a
+  staging SÍ se hacía (va antes del humo): lo que estaba mal era la
+  comprobación, no la API. Se actualizó (pruebas/humo.mjs: 409 con el
+  resumen, luego `usar_existente` → 201 sin duplicar); corrido aquí contra
+  staging: 205/205. La lección es de proceso: «desplegado» no es «en verde»;
+  después de cada «Publicar API» hay que leer el RESULTADO del humo (es el
+  comentario en el commit), no sólo /salud.
 - `rutas.get('/:o/ws')` (WebSocket) también devuelve la respuesta del objeto
   tal cual. No se tocó: una respuesta 101 no se puede envolver así, y no hay
   medición de que falle (el handshake del WebSocket también lleva Origin).

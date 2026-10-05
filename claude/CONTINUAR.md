@@ -425,7 +425,10 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   objeto (inmutables) → «Can't modify immutable headers». Ahora la ruta la
   envuelve (`new Response(r.body, r)`). quell101 no lo veía (su Worker no
   reenvía Origin); peek101 sí (reenvía la petición entera). OJO: `/:o/ws`
-  devuelve igual la respuesta del objeto y no se tocó. Muro
+  devuelve igual la respuesta del objeto y no se tocó. Y EL HUMO: iba rojo
+  desde 0.65.0 (203/204, «invitarlo otra vez» esperaba 201 y la API
+  contesta 409 correo_en_uso a propósito) sin que se leyera; se actualizó
+  la comprobación. Tras cada «Publicar API», leer el RESULTADO del humo. Muro
   `2026-10-05-0534-jr-origen-y-cabeceras-inmutables.md`.
 - **peek101 es el único visor del cliente (5-oct, API 0.66.1 #231, peek101
   #24, bitacora-obra #109, dash101 #134).** Mike: «Quiero que el único
