@@ -1071,7 +1071,14 @@ rutas.all('/:o/quell/*', async (c) => {
   // stream» en el registro. Un plano son unos MB; cabe.
   const cuerpo = c.req.method === 'GET' || c.req.method === 'HEAD' ? null : await c.req.raw.arrayBuffer();
   const peticion = new Request(interna.toString(), { method: c.req.method, headers: cabeceras, body: cuerpo });
-  return stub(c).fetch(peticion);
+  // La respuesta se vuelve a envolver antes de salir: la que viene del objeto
+  // trae las cabeceras inmutables, y el CORS de la entrada (index.ts) le pone
+  // las suyas cuando la petición trajo `Origin` —que el navegador manda en
+  // todo POST, aunque sea al mismo origen—. Sin esto, la duda quedaba escrita
+  // y la pantalla recibía un 500 «Can't modify immutable headers» (lo vio el
+  // corredor de peek101 el 5-oct-2026; con curl, sin Origin, no se veía).
+  const respuesta = await stub(c).fetch(peticion);
+  return new Response(respuesta.body, respuesta);
 });
 
 /* ─────────────── consecutivos por serie ───────────────
