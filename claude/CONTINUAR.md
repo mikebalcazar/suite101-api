@@ -419,6 +419,14 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **Los datos de pago del proveedor, en la orden de compra (5-oct, API 0.67.0 #236, dash101 #135).**
+  Mike: «ahí mismo en la orden (desde dash) aparezcan los datos bancarios
+  o de pago del proveedor para hacer ese pago». `GET /ordenes/:id` trae
+  `proveedor` (ProveedorDePago: ficha + `cuentas[]` de proveedor_cuentas;
+  la de las columnas sale como «Principal»; a mano → null). dash101 pinta
+  «Para pagarle» con CLABE legible y «Copiar»; reembolso sin bloque.
+  sembrar-demo deja a Maderas del Sur con cuenta. Muro
+  `2026-10-05-1552-jr-pago-del-proveedor-en-la-orden.md`.
 - **DEFECTO: un POST del navegador al motor de quell contestaba 500 con lo pedido ya escrito (5-oct, API 0.66.2 #233, peek101 #25).**
   El navegador manda `Origin` en todo POST; el CORS de index.ts le ponía
   cabeceras a la respuesta que `/orgs/:o/quell/*` devolvía tal cual del
