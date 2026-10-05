@@ -235,8 +235,12 @@ async function recorrido() {
   rev(negI.estado === 201, 'hay un negocio de dónde colgar clientes', `${negI.estado}`);
   const inv = await pedir(STAGING, `/orgs/${ORG}/clientes/invitar`, { app: 'quell101', method: 'POST', body: { correo: `cliente-${ORG}@ejemplo.mx`, nombre: 'Cliente Invitado' } });
   rev(inv.estado === 201 && inv.data?.nuevo_usuario === true && inv.data?.nuevo_cliente === true, 'quell101 invita a un cliente: cliente nuevo, persona nueva, acceso de cliente', `${inv.estado} ${inv.error || ''}`);
-  const inv2 = await pedir(STAGING, `/orgs/${ORG}/clientes/invitar`, { app: 'quell101', method: 'POST', body: { correo: `cliente-${ORG}@ejemplo.mx`, nombre: 'Cliente Invitado' } });
-  rev(inv2.estado === 201 && inv2.data?.cliente_id === inv.data?.cliente_id && inv2.data?.nuevo_cliente === false, 'invitarlo otra vez no duplica al cliente', `${inv2.estado}`);
+  // 0.65.0: con el correo de un cliente que ya existe, primero se pregunta
+  // (409 correo_en_uso con su resumen) y con `usar_existente` se usa ése.
+  const pregunta = await pedir(STAGING, `/orgs/${ORG}/clientes/invitar`, { app: 'quell101', method: 'POST', body: { correo: `cliente-${ORG}@ejemplo.mx`, nombre: 'Cliente Invitado' } });
+  rev(pregunta.estado === 409 && pregunta.error === 'correo_en_uso' && pregunta.detalle?.cliente?.id === inv.data?.cliente_id, 'invitarlo otra vez pregunta si es ése (409 correo_en_uso con su resumen)', `${pregunta.estado} ${pregunta.error || ''}`);
+  const inv2 = await pedir(STAGING, `/orgs/${ORG}/clientes/invitar`, { app: 'quell101', method: 'POST', body: { correo: `cliente-${ORG}@ejemplo.mx`, nombre: 'Cliente Invitado', usar_existente: true } });
+  rev(inv2.estado === 201 && inv2.data?.cliente_id === inv.data?.cliente_id && inv2.data?.nuevo_cliente === false, 'y con usar_existente no duplica al cliente', `${inv2.estado}`);
   const mikeCli = await pedir(STAGING, `/orgs/${ORG}/clientes/invitar`, { app: 'quell101', method: 'POST', body: { correo: CORREO, nombre: 'Mike' } });
   rev(mikeCli.estado === 409 && mikeCli.error === 'es_miembro', 'el superadmin no se vuelve cliente', `${mikeCli.estado} ${mikeCli.error}`);
   const galletaAntes = galleta;
