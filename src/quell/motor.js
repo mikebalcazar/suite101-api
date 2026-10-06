@@ -29,7 +29,7 @@ import { PREFIJOS, REQUERIMIENTO, esRequerimiento, siguienteCodigo } from './cod
  * celular con la fecha mal puesta diría que faltan tres días cuando ya
  * venció. */
 import { faltaParaEntrega } from '../../schema/tipos';
-import { ETAPAS, NOMBRE_ETAPA, fechaValida, hojasDelCronograma, laborablesEntre, programar, xmlDeProject } from './cronograma.js';
+import { ETAPAS, ETAPAS_VALIDAS, NOMBRE_ETAPA, fechaValida, hojasDelCronograma, laborablesEntre, programar, xmlDeProject } from './cronograma.js';
 import { TIPO_XLSX, xlsx } from '../xlsx';
 
 const JSON_H = { 'content-type': 'application/json; charset=utf-8' };
@@ -591,7 +591,7 @@ async function leerCronograma(env, pid) {
   const { results: crudas } = await env.DB.prepare(
     `SELECT t.*, e.code, e.name, p.nombre AS proveedor_nombre, p.tipo AS proveedor_tipo
        FROM quell_tareas t JOIN quell_elements e ON e.id = t.element_id LEFT JOIN proveedores p ON p.id = t.proveedor_id
-      WHERE t.project_id = ? ORDER BY e.code, t.orden, t.seccion`).bind(pid).all();
+      WHERE t.project_id = ? ORDER BY e.code, t.orden, t.seccion, t.pos`).bind(pid).all();
   const { results: proveedores } = await env.DB.prepare(`SELECT id, nombre, tipo FROM proveedores ORDER BY nombre_norm`).all();
   const inicio = project.cronograma_inicio || now().slice(0, 10);
   const c = programar(crudas, inicio);
@@ -807,7 +807,9 @@ export async function atender(req, env, url, path) {
         for (const [i, t] of lista.entries()) {
           if (!t || typeof t !== 'object') return err(`La tarea ${i + 1} no se entiende.`);
           if (!delProyecto.has(t.element_id)) return err(`La tarea ${i + 1} apunta a una pieza que no es de esta obra.`);
-          if (!ETAPAS.includes(t.etapa)) return err(`La etapa de la tarea ${i + 1} es material, fabricacion o instalacion.`);
+          if (!ETAPAS_VALIDAS.includes(t.etapa)) return err(`La etapa de la tarea ${i + 1} es material, fabricacion, instalacion u otra.`);
+          if (t.nombre != null && typeof t.nombre !== 'string') return err(`El nombre de la tarea ${i + 1} no se entiende.`);
+          if (t.pos != null && !Number.isInteger(t.pos)) return err(`La posición de la tarea ${i + 1} es un entero.`);
           const dias = Number(t.dias);
           if (!Number.isInteger(dias) || dias < 1 || dias > 3650) return err(`Los días de la tarea ${i + 1} son un entero de 1 en adelante.`);
           if (t.proveedor_id && !proveedores.has(t.proveedor_id)) return err(`El proveedor de la tarea ${i + 1} no existe.`);
@@ -816,11 +818,12 @@ export async function atender(req, env, url, path) {
           const id = viejo.startsWith('nuevo-') ? uid() : viejo;
           if (idDe.has(viejo)) return err(`La tarea ${i + 1} repite el id de otra.`);
           idDe.set(viejo, id);
-          limpias.push({ id, element_id: t.element_id, seccion: String(t.seccion || '').trim().slice(0, 60), orden: Number.isInteger(t.orden) ? t.orden : 0, etapa: t.etapa, dias, proveedor_id: t.proveedor_id || null, depende_de: t.depende_de || null, inicio_fijo: t.inicio_fijo || null, notas: typeof t.notas === 'string' ? t.notas.slice(0, 500) : null });
+          limpias.push({ id, element_id: t.element_id, seccion: String(t.seccion || '').trim().slice(0, 60), orden: Number.isInteger(t.orden) ? t.orden : 0, etapa: t.etapa, nombre: (t.nombre && String(t.nombre).trim().slice(0, 60)) || null, pos: Number.isInteger(t.pos) ? t.pos : ETAPAS.indexOf(t.etapa) * 10, dias, proveedor_id: t.proveedor_id || null, depende_de: t.depende_de || null, inicio_fijo: t.inicio_fijo || null, notas: typeof t.notas === 'string' ? t.notas.slice(0, 500) : null });
         }
-        // Dentro de una sección no se repite la etapa: es una por sección.
+        // Dentro de una sección no se repite la etapa fija: es una por sección ('otra' sí se repite).
         const vistas = new Set();
         for (const t of limpias) {
+          if (t.etapa === 'otra') continue;
           const k = `${t.element_id}\u0000${t.seccion}\u0000${t.etapa}`;
           if (vistas.has(k)) return err(`La sección «${t.seccion || 'de la pieza'}» repite la etapa ${NOMBRE_ETAPA[t.etapa]}.`);
           vistas.add(k);
@@ -838,8 +841,8 @@ export async function atender(req, env, url, path) {
         const t0 = now();
         await env.DB.prepare(`DELETE FROM quell_tareas WHERE project_id = ?`).bind(pid).run();
         for (const t of limpias) {
-          await env.DB.prepare(`INSERT INTO quell_tareas (id, project_id, element_id, seccion, orden, etapa, dias, proveedor_id, depende_de, inicio_fijo, notas, creado_at, actualizado_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-            .bind(t.id, pid, t.element_id, t.seccion, t.orden, t.etapa, t.dias, t.proveedor_id, t.depende_de, t.inicio_fijo, t.notas, t0, t0).run();
+          await env.DB.prepare(`INSERT INTO quell_tareas (id, project_id, element_id, seccion, orden, etapa, nombre, pos, dias, proveedor_id, depende_de, inicio_fijo, notas, creado_at, actualizado_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+            .bind(t.id, pid, t.element_id, t.seccion, t.orden, t.etapa, t.nombre, t.pos, t.dias, t.proveedor_id, t.depende_de, t.inicio_fijo, t.notas, t0, t0).run();
         }
         await env.DB.prepare(`UPDATE quell_projects SET cronograma_inicio = ?, cronograma_dias = ? WHERE id = ?`).bind(inicio ?? null, objetivo ?? null, pid).run();
         return json({ ok: true, ...(await leerCronograma(env, pid)) });
