@@ -29,7 +29,7 @@ import { PREFIJOS, REQUERIMIENTO, esRequerimiento, siguienteCodigo } from './cod
  * celular con la fecha mal puesta diría que faltan tres días cuando ya
  * venció. */
 import { faltaParaEntrega } from '../../schema/tipos';
-import { ETAPAS, ETAPAS_VALIDAS, NOMBRE_ETAPA, fechaValida, hojasDelCronograma, laborablesEntre, programar, xmlDeProject, fasesDefault, fechaDePago, nombreDeFase, costoDefault, precioPorPieza } from './cronograma.js';
+import { ETAPAS, ETAPAS_VALIDAS, NOMBRE_ETAPA, fechaValida, hojasDelCronograma, laborablesEntre, programar, xmlDeProject, fasesDefault, fechaDePago, nombreDeFase, costoDefault, precioPorPieza, DIAS_DEFAULT } from './cronograma.js';
 import { TIPO_XLSX, xlsx } from '../xlsx';
 
 const JSON_H = { 'content-type': 'application/json; charset=utf-8' };
@@ -764,6 +764,58 @@ export async function poblarCostosDefault(env) {
         if (deEtapa.every((f) => !Number(f.costo))) {
           await env.DB.prepare(`UPDATE quell_tareas SET costo = ?, actualizado_at = ? WHERE id = ?`).bind(bien, now(), deEtapa[0].id).run();
           deEtapa[0].costo = bien; hecho.fases_con_costo++; cambio = true;
+        }
+      }
+    }
+    if (cambio) {
+      hecho.obras++;
+      await sincronizarPartidas(env, o.id, await leerCronograma(env, o.id, { completar: false }));
+    }
+  }
+  return hecho;
+}
+
+/* 0.75.0 · Los tiempos default en lo que ya estaba (Mike, 6-oct: «ponla
+ * también todos los ítems que hay ahorita en alcance con los defaults de
+ * tiempos»; escogió con botones «sólo donde falten»). Corre UNA vez por
+ * empresa, al arrancar después de la migración 0037:
+ *
+ *   · Las piezas EN ALCANCE —la misma regla que enseña quell101: sin ítem, o
+ *     con su ítem vendido— que no tienen ninguna fase reciben las tres
+ *     default (10/24/12 días) con el costo por pieza.
+ *   · Una fase de material, fabricación o instalación de esas piezas que
+ *     sigue en 1 día —con lo que nace una fase agregada a mano: nadie le puso
+ *     días— pasa a 10, 24 o 12.
+ *   · Lo capturado se queda: otros días, las cadenas, las fechas fijas y las
+ *     fases de más («otra») no se tocan. Fuera de alcance, tampoco.
+ *   · Las obras que cambiaron rehacen sus compromisos (las fechas se mueven).
+ *
+ * Devuelve lo que hizo, para dejarlo anotado. */
+export async function ponerTiemposDefault(env) {
+  const hecho = { obras: 0, piezas_con_fases: 0, fases_con_dias: 0 };
+  const { results: obras } = await env.DB.prepare(`SELECT id FROM quell_projects ORDER BY id`).all();
+  for (const o of obras) {
+    let cambio = false;
+    const { results: piezas } = await env.DB.prepare(
+      `SELECT e.id, e.type, it.monto, it.cantidad FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id LEFT JOIN items it ON it.id = e.item_id
+        WHERE pl.project_id = ? AND e.type <> 'Requerimiento' AND (it.id IS NULL OR it.estado = 'vendido')`).bind(o.id).all();
+    for (const e of piezas) {
+      const { results: fases } = await env.DB.prepare(`SELECT id, etapa, dias FROM quell_tareas WHERE element_id = ?`).bind(e.id).all();
+      const t0 = now();
+      if (!fases.length) {
+        for (const f of fasesDefault({ element_id: e.id, type: e.type, precio: precioPorPieza(e.monto, e.cantidad) })) {
+          await env.DB.prepare(`INSERT INTO quell_tareas (id, project_id, element_id, seccion, orden, etapa, nombre, pos, dias, proveedor_id, contratista_id, costo, depende_de, inicio_fijo, notas, creado_at, actualizado_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+            .bind(uid(), o.id, e.id, '', 0, f.etapa, null, f.pos, f.dias, null, null, f.costo, null, null, null, t0, t0).run();
+        }
+        await env.DB.prepare(`UPDATE quell_elements SET fases_dadas = 1 WHERE id = ?`).bind(e.id).run();
+        hecho.piezas_con_fases++; cambio = true;
+        continue;
+      }
+      for (const f of fases) {
+        const bien = DIAS_DEFAULT[f.etapa];
+        if (bien && Number(f.dias) === 1) {
+          await env.DB.prepare(`UPDATE quell_tareas SET dias = ?, actualizado_at = ? WHERE id = ?`).bind(bien, t0, f.id).run();
+          hecho.fases_con_dias++; cambio = true;
         }
       }
     }

@@ -47,6 +47,8 @@ export interface EntornoQuell {
 export function atender(req: Request, env: EntornoQuell, url: URL, path: string): Promise<Response>;
 /** 0.74.0 · Poblar una vez los costos default de lo que ya estaba (ver motor.js). */
 export function poblarCostosDefault(env: Pick<EntornoQuell, 'DB' | 'RECALCULAR_PROYECTO'>): Promise<{ obras: number; fases_nuevas: number; fases_con_costo: number; fases_corregidas: number }>;
+/** 0.75.0 · Poner una vez los tiempos default donde falten (ver motor.js). */
+export function ponerTiemposDefault(env: Pick<EntornoQuell, 'DB' | 'RECALCULAR_PROYECTO'>): Promise<{ obras: number; piezas_con_fases: number; fases_con_dias: number }>;
 
 /** 0.59.1 · El correo al cliente con sus puntos por definir, armado aparte para medirlo. */
 /** La dirección de peek101 deducida de la de quell101 (5-oct-2026). */

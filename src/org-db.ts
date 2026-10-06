@@ -49,7 +49,8 @@ import candados from '../migrations/org/0033_candados.sql';
 import planPagos from '../migrations/org/0034_plan_pagos.sql';
 import fasesDefault from '../migrations/org/0035_fases_default.sql';
 import poblarCostos from '../migrations/org/0036_poblar_costos.sql';
-import { atender as atenderQuell, poblarCostosDefault, type BaseQuell, type SesionQuell } from './quell/motor.js';
+import tiemposDefault from '../migrations/org/0037_tiempos_default.sql';
+import { atender as atenderQuell, poblarCostosDefault, ponerTiemposDefault, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { PREFIJOS, esRequerimiento, siguienteCodigo } from './quell/codigos.js';
 
 /** El tipo del ítem (minúsculas, como lo guarda `items.tipo`) dicho como lo
@@ -75,7 +76,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault];
 
 /** La 0027 y la 0030 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
@@ -552,19 +553,19 @@ export class OrgDB extends DurableObject<Env> {
   async correrPendientes(): Promise<void> {
     let pendientes: Fila[] = [];
     try {
-      pendientes = this.sql.exec(`SELECT clave FROM pendientes_arranque WHERE hecho_at IS NULL ORDER BY creado_at`).toArray() as Fila[];
+      pendientes = this.sql.exec(`SELECT clave FROM pendientes_arranque WHERE hecho_at IS NULL ORDER BY creado_at, rowid`).toArray() as Fila[];
     } catch {
       return; // una base sin la 0036 todavía: nada pendiente
     }
     for (const p of pendientes) {
       try {
         let resultado: unknown = null;
-        if (p.clave === 'poblar_costos_default') {
-          resultado = await poblarCostosDefault({
-            DB: baseSobreSql(this.sql),
-            RECALCULAR_PROYECTO: async (id: string) => { this.recalcularProyecto(id); },
-          });
-        }
+        const entornoQuell = {
+          DB: baseSobreSql(this.sql),
+          RECALCULAR_PROYECTO: async (id: string) => { this.recalcularProyecto(id); },
+        };
+        if (p.clave === 'poblar_costos_default') resultado = await poblarCostosDefault(entornoQuell);
+        else if (p.clave === 'tiempos_default') resultado = await ponerTiemposDefault(entornoQuell);
         this.sql.exec(`UPDATE pendientes_arranque SET hecho_at = ?, resultado = ? WHERE clave = ?`, new Date().toISOString(), JSON.stringify(resultado), String(p.clave));
       } catch (e) {
         console.error('pendiente', p.clave, e);
