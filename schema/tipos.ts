@@ -17,7 +17,18 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.70.0 (LOS DOS CANDADOS DEL ÍTEM EN EL CRONOGRAMA.
+ * Versión del contrato: 0.71.0 (LA NÓMINA PROGRAMADA. Mike, 6-oct: «hay que
+ * ver en nómina el programar la nómina para que también se considere en los
+ * gastos para proyectar los flujos». `GET`/`PUT /orgs/:o/nomina/programa`:
+ * una por empresa {activo, frecuencia semanal|quincenal|mensual, dia_semana,
+ * dia_del_mes, monto en CENTAVOS, nota}. No es un corte ni mueve dinero: es
+ * lo que el flujo proyectado pone como gasto en cada fecha de pago futura.
+ * El GET trae además `ultimo_total` (el último corte pagado, para proponerlo)
+ * y `borradores` (cortes abiertos con su total, que la proyección usa en vez
+ * de la estimación). Vive en `ajustes` bajo la app `nomina`, fuera del CRUD
+ * genérico, con el permiso de la raya.) Antes:
+ *
+ * 0.70.0 (LOS DOS CANDADOS DEL ÍTEM EN EL CRONOGRAMA.
  * Mike, 6-oct: «todos los ítems necesitan cumplir 2 parámetros para que se
  * fije su fecha de inicio (…) anticipo y definición de diseño. Mientras los
  * parámetros no se cumplan la fecha de inicio se sigue recorriendo al día
@@ -1117,7 +1128,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.70.0';
+export const VERSION_CONTRATO = '0.71.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1446,6 +1457,30 @@ export interface Cliente {
  *  «Nómina»…). La CLABE son 18 dígitos que cuadran; la API los revisa. Los
  *  documentos de respaldo (carátula, foto de la tarjeta) van en `archivos`
  *  con de_tabla = 'proveedores' y de_id = el proveedor. */
+/** 0.71.0 · La nómina programada: cada cuánto se paga la raya, qué día y
+ *  cuánto suele ser. `GET`/`PUT /orgs/:o/nomina/programa`. `monto` en
+ *  CENTAVOS. `dia_semana` sólo con 'semanal' (0 domingo … 6 sábado);
+ *  `dia_del_mes` sólo con 'mensual' (1–31, se recorta al mes corto); la
+ *  quincenal paga el 15 y el último día del mes. */
+export interface ProgramaDeNomina {
+  activo: boolean;
+  frecuencia: 'semanal' | 'quincenal' | 'mensual';
+  dia_semana: number | null;
+  dia_del_mes: number | null;
+  monto: number;
+  nota: string;
+  actualizado_at: string | null;
+}
+
+/** 0.71.0 · Lo que contesta `GET /orgs/:o/nomina/programa`. */
+export interface NominaProgramada {
+  programa: ProgramaDeNomina | null;
+  /** El total (centavos) del último corte pagado, o null si nunca se ha pagado uno. */
+  ultimo_total: number | null;
+  /** Los cortes abiertos: ya tienen total y fecha, la proyección los usa tal cual. */
+  borradores: Array<{ id: string; periodo_inicio: string; periodo_fin: string; total: number }>;
+}
+
 /** 0.70.0 · Lo que de un pago le toca a un ítem (el anticipo). */
 export interface MovimientoItem {
   id: string;

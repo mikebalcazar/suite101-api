@@ -141,6 +141,60 @@ describe('el permiso aparte', () => {
   });
 });
 
+describe('la nómina programada (0.71.0)', () => {
+  /* Mike, 6-oct: «hay que ver en nómina el programar la nómina para que
+   * también se considere en los gastos para proyectar los flujos». Lo que
+   * de verdad aporta: que se guarde y se lea ENTERA por su ruta, que el
+   * permiso sea el mismo de la raya, y que el CRUD genérico de `ajustes`
+   * NO la entregue a dash101 (vive bajo la app `nomina`). */
+  it('sin la etiqueta no se ve ni se escribe', async () => {
+    await o('mike', '/nomina/encargados', { method: 'POST', json: { usuario_id: (await o('mike', '/nomina/encargados')).data.gente.find((g: any) => g.correo === GENTE.sol.correo).usuario_id, valor: false } });
+    expect((await o('sol', '/nomina/programa')).estado).toBe(403);
+    expect((await o('sol', '/nomina/programa', { method: 'PUT', json: { frecuencia: 'semanal', dia_semana: 6, monto: 1 } })).estado).toBe(403);
+    const laSol = (await o('mike', '/nomina/encargados')).data.gente.find((g: any) => g.correo === GENTE.sol.correo);
+    await o('mike', '/nomina/encargados', { method: 'POST', json: { personal_id: laSol.personal_id, valor: true } });
+  });
+
+  it('antes de programarla no hay nada, y lo dice sin error', async () => {
+    const r = await o('mike', '/nomina/programa');
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.programa).toBeNull();
+    expect(r.data.ultimo_total).toBeNull();
+    expect(r.data.borradores).toEqual([]);
+  });
+
+  it('se rechaza con palabras por campo: frecuencia desconocida, monto con centavos partidos, día fuera de rango', async () => {
+    const r = await o('mike', '/nomina/programa', { method: 'PUT', json: { frecuencia: 'diaria', dia_semana: 9, monto: 10.5 } });
+    expect(r.estado).toBe(400);
+    expect(r.error).toBe('datos_invalidos');
+    expect(Object.keys(r.detalle.errores).sort()).toEqual(['frecuencia', 'monto']);
+    const d = await o('mike', '/nomina/programa', { method: 'PUT', json: { frecuencia: 'semanal', dia_semana: 9, monto: 100 } });
+    expect(d.estado).toBe(400);
+    expect(d.detalle.errores).toEqual({ dia_semana: 'de 0 (domingo) a 6 (sábado)' });
+    const m = await o('mike', '/nomina/programa', { method: 'PUT', json: { frecuencia: 'mensual', dia_del_mes: 0, monto: 100 } });
+    expect(m.detalle.errores).toEqual({ dia_del_mes: 'de 1 a 31' });
+  });
+
+  it('se guarda entera, se vuelve a leer igual, y la quincenal no lleva día', async () => {
+    const r = await o('sol', '/nomina/programa', { method: 'PUT', json: { frecuencia: 'semanal', dia_semana: 6, monto: 18_500_00, nota: 'los sábados', activo: true } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.programa).toMatchObject({ activo: true, frecuencia: 'semanal', dia_semana: 6, dia_del_mes: null, monto: 18_500_00, nota: 'los sábados' });
+    expect(r.data.programa.actualizado_at).toBeTruthy();
+    expect((await o('mike', '/nomina/programa')).data.programa).toMatchObject({ frecuencia: 'semanal', dia_semana: 6, monto: 18_500_00 });
+
+    const q = await o('mike', '/nomina/programa', { method: 'PUT', json: { frecuencia: 'quincenal', dia_semana: 3, dia_del_mes: 10, monto: 40_000_00, activo: false } });
+    expect(q.estado, JSON.stringify(q)).toBe(200);
+    expect(q.data.programa).toMatchObject({ activo: false, frecuencia: 'quincenal', dia_semana: null, dia_del_mes: null, monto: 40_000_00 });
+  });
+
+  it('el CRUD genérico de ajustes NO la entrega a dash101', async () => {
+    const lista = await o('mike', '/ajustes');
+    expect(lista.estado, JSON.stringify(lista)).toBe(200);
+    expect(lista.data.filas.some((f: any) => f.id === 'nomina:programa' || f.app === 'nomina')).toBe(false);
+    expect((await o('mike', '/ajustes/nomina:programa')).estado).toBe(404);
+  });
+});
+
 describe('abrir el corte', () => {
   it('el neto y el total los calcula el servidor, no la pantalla', async () => {
     const r = await o('sol', '/nomina/rayas', { method: 'POST', json: {
