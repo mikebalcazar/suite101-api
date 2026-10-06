@@ -421,6 +421,39 @@ async function correoDeOtroCliente(c: Ctx, datos: Record<string, unknown>, salvo
   return err(c, 'correo_en_uso', 409, { motivo: 'ese correo ya es de otro cliente', cliente: resumenCliente(otro) });
 }
 
+/** 0.70.0 · Lo que de un pago le toca a un ítem (Mike, 6-oct: «a la hora de
+ *  registrar un pago, se debe poder alocar cantidades a cada ítem»). Cuadra o
+ *  no entra: el movimiento existe y es un INGRESO; el ítem existe y es del
+ *  mismo proyecto que el movimiento; el monto es mayor que cero; y la suma
+ *  de lo repartido de ese movimiento no pasa de su monto. `proyecto_id` lo
+ *  pone esto con el del movimiento: ninguna app lo escribe. Al corregir
+ *  (`salvo`), el renglón que se corrige no se cuenta dos veces. */
+async function anticipoQueNoCuadra(c: Ctx, datos: Record<string, unknown>, salvo: string | null): Promise<Response | null> {
+  const previo = salvo ? await stub(c).obtener('movimiento_items', salvo) : null;
+  if (salvo && !previo) return err(c, 'no_encontrado', 404);
+  const movimiento_id = String(datos.movimiento_id ?? previo?.movimiento_id ?? '');
+  const item_id = String(datos.item_id ?? previo?.item_id ?? '');
+  const monto = datos.monto === undefined ? Number(previo?.monto ?? 0) : Number(datos.monto);
+  const errores: Record<string, string> = {};
+  const mov = movimiento_id ? await stub(c).obtener('movimientos', movimiento_id) : null;
+  if (!mov) errores.movimiento_id = 'Ese pago no existe.';
+  else if (mov.tipo !== 'ingreso') errores.movimiento_id = 'El anticipo se reparte de un ingreso, no de un egreso.';
+  const item = item_id ? await stub(c).obtener('items', item_id) : null;
+  if (!item) errores.item_id = 'Ese ítem no existe.';
+  else if (mov && String(item.proyecto_id ?? '') !== String(mov.proyecto_id ?? '')) errores.item_id = 'El ítem no es del proyecto de ese pago.';
+  if (!Number.isInteger(monto) || monto <= 0) errores.monto = 'El monto son centavos enteros, mayor que cero.';
+  if (mov && Number.isInteger(monto) && monto > 0) {
+    const { filas } = await stub(c).listar('movimiento_items', { movimiento_id });
+    const repartido = filas.filter((f) => String(f.id) !== salvo).reduce((s, f) => s + Number(f.monto || 0), 0);
+    if (repartido + monto > Number(mov.monto)) {
+      errores.monto = `Repartido ${repartido + monto} de ${mov.monto}: el pago no alcanza para eso.`;
+    }
+  }
+  if (Object.keys(errores).length) return err(c, 'datos_invalidos', 400, { errores });
+  datos.proyecto_id = mov!.proyecto_id ?? null;
+  return null;
+}
+
 /** 0.66.0 · El cliente abre SU estado de cuenta general (Mike, 4-oct: «que
  *  cuando el cliente entre en Peek pueda ver estados de cuentas (general y de
  *  proyectos)»). Sólo el suyo: el id de la ruta tiene que ser el de su acceso.
@@ -1448,6 +1481,7 @@ rutas.post('/:o/:tabla', async (c) => {
   const malProveedor = tabla === 'proveedores' ? revisarProveedor(datos) : tabla === 'proveedor_cuentas' ? revisarCuenta(datos) : tabla === 'accionistas' ? revisarAccionista(datos) : null;
   if (malProveedor) return err(c, 'datos_invalidos', 400, { errores: malProveedor });
   if (tabla === 'clientes') { const repetido = await correoDeOtroCliente(c, datos, null); if (repetido) return repetido; }
+  if (tabla === 'movimiento_items') { const mal = await anticipoQueNoCuadra(c, datos, null); if (mal) return mal; }
 
   const fila = await stub(c).crear(tabla, datos, { app: c.get('app'), usuario_id: quien.usuario_id, correo: c.get('sesion')?.correo ?? null });
   return ok(c, podar(quien, tabla, fila), 201);
@@ -1562,6 +1596,7 @@ rutas.patch('/:o/:tabla/:id', async (c) => {
   const malProveedor = tabla === 'proveedores' ? revisarProveedor(datos) : tabla === 'proveedor_cuentas' ? revisarCuenta(datos) : tabla === 'accionistas' ? revisarAccionista(datos) : null;
   if (malProveedor) return err(c, 'datos_invalidos', 400, { errores: malProveedor });
   if (tabla === 'clientes') { const repetido = await correoDeOtroCliente(c, datos, c.req.param('id')!); if (repetido) return repetido; }
+  if (tabla === 'movimiento_items') { const mal = await anticipoQueNoCuadra(c, datos, c.req.param('id')!); if (mal) return mal; }
 
   /* 0.46.0 · Una cotización aprobada es lo que se vendió: sus piezas ya están
    * en el proyecto. Si se pudiera seguir editando, el papel y la obra dirían

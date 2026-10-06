@@ -67,10 +67,14 @@ const mayor = (a, b) => (a > b ? a : b);
 /**
  * `tareas`: [{ id, element_id, seccion, orden, etapa, dias, depende_de, inicio_fijo }].
  * `inicio`: el día de arranque de la obra (AAAA-MM-DD).
+ * `pisos`: Map element_id → AAAA-MM-DD desde cuándo pueden correr las fases de
+ *   esa pieza (0.70.0: los candados; con los dos, la fecha más tardía; sin
+ *   alguno, hoy). Un piso es eso: ni la obra ni las cadenas adelantan una
+ *   fase antes de él, y nada le impide correr después.
  * Devuelve { tareas: [{ ...t, inicio, fin, previas: [ids] }], fin, dias_laborables }.
  * Tira `Error('ciclo')` si las cadenas se muerden la cola.
  */
-export function programar(tareas, inicio) {
+export function programar(tareas, inicio, pisos = new Map()) {
   const arranque = siguienteLaborable(inicio);
   const porId = new Map(tareas.map((t) => [t.id, t]));
   const previas = new Map(tareas.map((t) => [t.id, []]));
@@ -102,6 +106,8 @@ export function programar(tareas, inicio) {
   for (const id of orden) {
     const t = porId.get(id);
     let ini = arranque;
+    const piso = pisos.get(t.element_id);
+    if (piso && fechaValida(piso)) ini = mayor(ini, siguienteLaborable(piso));
     if (t.inicio_fijo && fechaValida(t.inicio_fijo)) ini = mayor(ini, siguienteLaborable(t.inicio_fijo));
     for (const p of previas.get(id)) ini = mayor(ini, sumarLaborables(fechas.get(p).fin, 1));
     const dias = Math.max(1, Number(t.dias) || 1);

@@ -79,6 +79,16 @@ export const DEFS: Record<Tabla, Def> = {
     filtros: ['proveedor_id'],
     orden: 'creado_at',
   },
+  /* 0033 · Un pago (ingreso) repartido entre los ítems del proyecto (Mike,
+   * 6-oct-2026: «a la hora de registrar un pago, se debe poder alocar
+   * cantidades a cada ítem»). Es el primero de los dos candados del
+   * cronograma. `proyecto_id` lo pone la API con el del movimiento. */
+  movimiento_items: {
+    cols: { ...IDENT, movimiento_id: 'texto', item_id: 'texto', proyecto_id: 'texto', monto: 'dinero' },
+    requeridos: ['movimiento_id', 'item_id', 'monto'],
+    filtros: ['movimiento_id', 'item_id', 'proyecto_id'],
+    orden: 'creado_at',
+  },
   /* 0025 · Los accionistas de la empresa (Mike, 30-sep-2026: «un módulo de
    * accionistas donde se registren pagos a los accionistas como retiro de
    * utilidades»). El retiro NO tiene tabla: es un egreso en `movimientos` con

@@ -1095,6 +1095,59 @@ describe('el cronograma: las rutas (0.68.0)', () => {
     expect(lista.data.filas.map((f: any) => f.id)).not.toContain(maderas);
   });
 
+  /* 0.70.0 · Los dos candados (Mike, 6-oct): anticipo y diseño definido. Se
+   * dejan puestos ANTES de las pruebas de fechas de abajo, con fechas
+   * anteriores al arranque de la obra, para que esas sigan contando desde
+   * el 5 de octubre. */
+  it('los candados: el anticipo se reparte de un pago entre ítems, el diseño se fecha en la pieza, y la pieza arranca en la fecha más tardía (0.70.0)', async () => {
+    const itemM1 = (await q('mike', `/elements/${m1}`)).element.item_id as string;
+    expect(itemM1, 'm1 quedó ligado a un ítem en las pruebas de la entrega').toBeTruthy();
+    const it1 = (await pedir('mike', `/orgs/${ORG}/items/${itemM1}`, { app: 'dash101' })).data;
+    const item2 = (await pedir('mike', `/orgs/${ORG}/items`, { method: 'POST', json: { cliente_id: it1.cliente_id, proyecto_id: it1.proyecto_id, nombre: 'Barra', monto: 40_000_00, cantidad: 1, estado: 'vendido', tipo: 'mueble' }, app: 'dash101' })).data.id;
+    const liga = await pedir('mike', `/orgs/${ORG}/obras/${obraA}/items`, { method: 'POST', json: { ligar: [{ element_id: m2, item_id: item2 }] }, app: 'dash101' });
+    expect(liga.estado, JSON.stringify(liga)).toBe(200);
+    const cuenta = (await pedir('mike', `/orgs/${ORG}/cuentas`, { method: 'POST', json: { nombre: 'Caja del cronograma', tipo: 'caja' }, app: 'dash101' })).data.id;
+    const pago = await pedir('mike', `/orgs/${ORG}/movimientos`, { method: 'POST', json: { tipo: 'ingreso', monto: 100_000_00, fecha: '2026-10-01', cuenta_id: cuenta, proyecto_id: it1.proyecto_id, contraparte_tipo: 'cliente', contraparte_id: it1.cliente_id, descripcion: 'Anticipo' }, app: 'dash101' });
+    expect(pago.estado, JSON.stringify(pago)).toBe(201);
+    // Se reparte: 30 mil a m1, 20 mil a m2. `proyecto_id` lo pone la API.
+    const a1 = await pedir('mike', `/orgs/${ORG}/movimiento_items`, { method: 'POST', json: { movimiento_id: pago.data.id, item_id: itemM1, monto: 30_000_00 }, app: 'dash101' });
+    expect(a1.estado, JSON.stringify(a1)).toBe(201);
+    expect(a1.data.proyecto_id).toBe(it1.proyecto_id);
+    const a2 = await pedir('mike', `/orgs/${ORG}/movimiento_items`, { method: 'POST', json: { movimiento_id: pago.data.id, item_id: item2, monto: 20_000_00 }, app: 'dash101' });
+    expect(a2.estado, JSON.stringify(a2)).toBe(201);
+    // Lo que no cuadra: más de lo que trae el pago; un egreso; un ítem de otro proyecto.
+    const pasa = await pedir('mike', `/orgs/${ORG}/movimiento_items`, { method: 'POST', json: { movimiento_id: pago.data.id, item_id: itemM1, monto: 60_000_00 }, app: 'dash101' });
+    expect(pasa.estado).toBe(400); expect(pasa.detalle?.errores?.monto).toMatch(/no alcanza/);
+    const egreso = (await pedir('mike', `/orgs/${ORG}/movimientos`, { method: 'POST', json: { tipo: 'egreso', monto: 5_000_00, fecha: '2026-10-01', cuenta_id: cuenta, proyecto_id: it1.proyecto_id, contraparte_tipo: 'proveedor' }, app: 'dash101' })).data.id;
+    const deEgreso = await pedir('mike', `/orgs/${ORG}/movimiento_items`, { method: 'POST', json: { movimiento_id: egreso, item_id: itemM1, monto: 1_00 }, app: 'dash101' });
+    expect(deEgreso.estado).toBe(400); expect(deEgreso.detalle?.errores?.movimiento_id).toMatch(/ingreso/);
+    const otroProy = (await pedir('mike', `/orgs/${ORG}/proyectos`, { method: 'POST', json: { cliente_id: it1.cliente_id, nombre: 'Otro proyecto' }, app: 'dash101' })).data.id;
+    const ajeno = (await pedir('mike', `/orgs/${ORG}/items`, { method: 'POST', json: { cliente_id: it1.cliente_id, proyecto_id: otroProy, nombre: 'Ajeno', monto: 1_00, estado: 'vendido', tipo: 'mueble' }, app: 'dash101' })).data.id;
+    const deOtro = await pedir('mike', `/orgs/${ORG}/movimiento_items`, { method: 'POST', json: { movimiento_id: pago.data.id, item_id: ajeno, monto: 1_00 }, app: 'dash101' });
+    expect(deOtro.estado).toBe(400); expect(deOtro.detalle?.errores?.item_id).toMatch(/proyecto/);
+    // Corregir un reparto no se cuenta dos veces: subir el de m1 a 50 mil (50 + 20 ≤ 100).
+    const sube = await pedir('mike', `/orgs/${ORG}/movimiento_items/${a1.data.id}`, { method: 'PATCH', json: { monto: 50_000_00 }, app: 'dash101' });
+    expect(sube.estado, JSON.stringify(sube)).toBe(200);
+    // Se lista por proyecto, sin JOIN.
+    const lista = await pedir('mike', `/orgs/${ORG}/movimiento_items?proyecto_id=${it1.proyecto_id}`, { app: 'dash101' });
+    expect(lista.data.filas.map((f: any) => [f.item_id, f.monto]).sort()).toEqual([[itemM1, 50_000_00], [item2, 20_000_00]].sort());
+    // El diseño: una fecha en la pieza, editable; mal escrita se rechaza.
+    const mal = await q('mike', `/elements/${m1}`, { method: 'PATCH', json: { diseno_definido: '2026-13-40', op_id: crypto.randomUUID() } });
+    expect(mal.estado).toBe(400); expect(mal.error).toMatch(/AAAA-MM-DD/);
+    for (const e of [m1, m2]) expect((await q('mike', `/elements/${e}`, { method: 'PATCH', json: { diseno_definido: '2026-10-02', op_id: crypto.randomUUID() } })).estado).toBe(200);
+    // La pieza lo cuenta: anticipo del 1-oct, diseño del 2-oct → arranca el 2-oct.
+    const r = await q('mike', `/projects/${obraA}/cronograma`);
+    const p1 = r.items.find((i: any) => i.element_id === m1);
+    expect(p1.candados).toEqual({ anticipo: '2026-10-01', anticipo_monto: 50_000_00, diseno: '2026-10-02', ligado: true, listo: true, arranque: '2026-10-02' });
+    expect(r.items.find((i: any) => i.element_id === m2).candados.listo).toBe(true);
+    // Y el detalle de la pieza trae el anticipo; a quien no ve dinero, sin el monto.
+    const det = (await q('mike', `/elements/${m1}`)).element;
+    expect([det.diseno_definido, det.anticipo_fecha, det.anticipo_monto]).toEqual(['2026-10-02', '2026-10-01', 50_000_00]);
+    const paraGoyo = (await q('goyo', `/elements/${m1}`)).element;
+    expect(paraGoyo.anticipo_fecha).toBe('2026-10-01');
+    expect(paraGoyo.anticipo_monto, 'el dinero no se le enseña al contratista').toBeUndefined();
+  });
+
   it('una obra sin cronograma trae sus piezas (sin requerimientos), los proveedores con tipo y cero tareas', async () => {
     const r = await q('mike', `/projects/${obraA}/cronograma`);
     expect(r.estado, JSON.stringify(r)).toBe(200);
@@ -1239,5 +1292,48 @@ describe('el cronograma: fases adicionales con nombre y orden (0.69.0)', () => {
     const rara = await q('mike', `/projects/${obraA}/cronograma`, { method: 'PUT', json: { tareas: [{ element_id: m1, seccion: '', etapa: 'pintura', dias: 1 }] } });
     expect(rara.estado).toBe(400); expect(rara.error).toMatch(/u otra/);
     expect((await q('mike', `/projects/${obraA}/cronograma`)).tareas, 'nada de eso tocó lo guardado').toHaveLength(5);
+  });
+});
+
+/* 0.70.0 · Sin los dos candados, la pieza corre desde hoy. */
+describe('el cronograma: sin anticipo o sin diseño la pieza arranca hoy y se recorre sola (0.70.0)', () => {
+  it('una pieza sin ítem de dash101 no puede tener anticipo: arranca hoy aunque la obra arranque antes; con diseño nada más, sigue igual', async () => {
+    const planos = (await q('mike', `/projects/${obraA}`)).plans;
+    const nueva = await q('mike', `/plans/${planos[0].id}/elements`, { method: 'POST', json: { op_id: crypto.randomUUID(), name: 'Sin candados', type: 'Mueble', x: 0.7, y: 0.7 } });
+    expect(nueva.estado, JSON.stringify(nueva)).toBe(200);
+    const hoy = new Date().toISOString().slice(0, 10);
+    const r = await q('mike', `/projects/${obraA}/cronograma`, { method: 'PUT', json: { inicio: '2026-10-05', tareas: [
+      { element_id: nueva.id, seccion: '', etapa: 'fabricacion', dias: 2 },
+      { element_id: m1, seccion: '', etapa: 'fabricacion', dias: 2 },
+    ] } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    const sin = r.items.find((i: any) => i.element_id === nueva.id);
+    expect(sin.candados).toEqual({ anticipo: null, anticipo_monto: 0, diseno: null, ligado: false, listo: false, arranque: hoy });
+    const t = r.tareas.find((x: any) => x.element_id === nueva.id);
+    expect(t.inicio, 'corre desde hoy, no desde el 5 de octubre').toBe(siguienteLaborable(hoy));
+    // La que sí tiene los dos sigue contando desde la obra (5-oct), porque sus candados son anteriores.
+    expect(r.tareas.find((x: any) => x.element_id === m1).inicio).toBe('2026-10-05');
+    // Con el diseño fechado y sin anticipo, sigue en hoy.
+    await q('mike', `/elements/${nueva.id}`, { method: 'PATCH', json: { diseno_definido: '2026-10-01', op_id: crypto.randomUUID() } });
+    const otra = await q('mike', `/projects/${obraA}/cronograma`);
+    const k = otra.items.find((i: any) => i.element_id === nueva.id).candados;
+    expect([k.diseno, k.listo, k.arranque]).toEqual(['2026-10-01', false, hoy]);
+    // Y si se quita la fecha, queda en nulo.
+    await q('mike', `/elements/${nueva.id}`, { method: 'PATCH', json: { diseno_definido: '', op_id: crypto.randomUUID() } });
+    expect((await q('mike', `/elements/${nueva.id}`)).element.diseno_definido).toBeNull();
+  });
+
+  it('la etapa 2 «Anticipo pagado» del ítem también cuenta como anticipo', async () => {
+    const itemM1 = (await q('mike', `/elements/${m1}`)).element.item_id as string;
+    const it1 = (await pedir('mike', `/orgs/${ORG}/items/${itemM1}`, { app: 'dash101' })).data;
+    const item3 = (await pedir('mike', `/orgs/${ORG}/items`, { method: 'POST', json: { cliente_id: it1.cliente_id, proyecto_id: it1.proyecto_id, nombre: 'Con etapa', monto: 1_000_00, cantidad: 1, estado: 'vendido', tipo: 'mueble' }, app: 'dash101' })).data.id;
+    const planos = (await q('mike', `/projects/${obraA}`)).plans;
+    const pieza = await q('mike', `/plans/${planos[0].id}/elements`, { method: 'POST', json: { op_id: crypto.randomUUID(), name: 'Con etapa', type: 'Mueble', x: 0.8, y: 0.8 } });
+    await pedir('mike', `/orgs/${ORG}/obras/${obraA}/items`, { method: 'POST', json: { ligar: [{ element_id: pieza.id, item_id: item3 }] }, app: 'dash101' });
+    for (const n of [1, 2]) expect((await pedir('mike', `/orgs/${ORG}/items/${item3}/etapa`, { method: 'POST', json: { etapa: n }, app: 'dash101' })).estado).toBe(200);
+    const k = (await q('mike', `/projects/${obraA}/cronograma`)).items.find((i: any) => i.element_id === pieza.id).candados;
+    expect(k.ligado).toBe(true);
+    expect(k.anticipo, 'la fecha de la etapa').toBe(new Date().toISOString().slice(0, 10));
+    expect(k.anticipo_monto).toBe(0);
   });
 });

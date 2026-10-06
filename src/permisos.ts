@@ -82,6 +82,10 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
     dash101: '*',
     supply101: ['proveedor_id', 'alias', 'clabe', 'banco', 'beneficiario', 'notas'],
   },
+  /* 0033 · El anticipo por ítem se reparte desde dash101 (Mike, 6-oct). */
+  movimiento_items: {
+    dash101: ['movimiento_id', 'item_id', 'monto'],
+  },
   estaciones: { quell101: '*' },
   // Las escribe la ruta POST /orgs/:o/conciliaciones, no el CRUD genérico:
   // aquí está para que quede dicho de quién son, y para el 403 con la lista.
