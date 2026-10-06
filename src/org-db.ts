@@ -50,6 +50,8 @@ import planPagos from '../migrations/org/0034_plan_pagos.sql';
 import fasesDefault from '../migrations/org/0035_fases_default.sql';
 import poblarCostos from '../migrations/org/0036_poblar_costos.sql';
 import tiemposDefault from '../migrations/org/0037_tiempos_default.sql';
+import descripcionDePieza from '../migrations/org/0038_descripcion_de_pieza.sql';
+import obrasALaSuite from '../migrations/org/0039_obras_a_la_suite.sql';
 import { atender as atenderQuell, poblarCostosDefault, ponerTiemposDefault, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { PREFIJOS, esRequerimiento, siguienteCodigo } from './quell/codigos.js';
 
@@ -76,14 +78,15 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite];
 
-/** La 0027 y la 0030 no son SQL: corren en código, porque lo que hacen
+/** La 0027, la 0030 y la 0039 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
  *  en la lista; el archivo .sql es sólo la nota que lo dice. */
-const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos'> = {
+const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas'> = {
   [MIGRACIONES.indexOf(sinNegocios)]: 'quitarNegocios',
   [MIGRACIONES.indexOf(requerimientosHuerfanos)]: 'migrarRequerimientosHuerfanos',
+  [MIGRACIONES.indexOf(obrasALaSuite)]: 'migrarObrasSueltas',
 };
 
 /** La tabla `empresa` (0027): UN renglón, con id fijo, que es lo que antes
@@ -261,7 +264,7 @@ export interface ApiOrgDB {
   aprobarCotizacion(args: AprobarCotizacion): Promise<ResultadoAprobar>;
   /** 0.49.0: un requerimiento levantado en la obra nace como ítem cotizado del
    *  proyecto ligado y cae en el borrador de requerimientos de quote101. */
-  levantarRequerimiento(d: { element_id: string; obra_id: string; code: string; name: string; usuario_id: string; padre_item_id?: string | null }): Promise<{ item_id: string | null; cotizacion_id: string | null }>;
+  levantarRequerimiento(d: { element_id: string; obra_id: string; code: string; name: string; usuario_id: string; padre_item_id?: string | null; descripcion?: string | null }): Promise<{ item_id: string | null; cotizacion_id: string | null }>;
   registrarArchivo(datos: {
     id: string; r2_key: string; nombre: string; mime: string | null; bytes: number;
     de_tabla: string; de_id: string; subido_por: string;
@@ -1632,18 +1635,22 @@ export class OrgDB extends DurableObject<Env> {
 
   /** Un requerimiento recién levantado en la obra: su ítem y su renglón en
    *  el borrador. Lo llama el motor de quell al dar de alta la pieza. */
-  levantarRequerimiento(d: { element_id: string; obra_id: string; code: string; name: string; usuario_id: string; padre_item_id?: string | null }): { item_id: string | null; cotizacion_id: string | null } {
+  levantarRequerimiento(d: { element_id: string; obra_id: string; code: string; name: string; usuario_id: string; padre_item_id?: string | null; descripcion?: string | null }): { item_id: string | null; cotizacion_id: string | null } {
     const obra = this.sql.exec(`SELECT proyecto_id FROM quell_projects WHERE id = ?`, d.obra_id).toArray()[0] as Fila | undefined;
     if (!obra?.proyecto_id) return { item_id: null, cotizacion_id: null };
     const proyecto = this.obtener('proyectos', String(obra.proyecto_id));
     if (!proyecto) return { item_id: null, cotizacion_id: null };
     const contexto = { app: 'quell101', usuario_id: d.usuario_id };
+    /* 0.77.0 · Mike, 6-oct: la descripción se escribe en quell al levantar
+     * el requerimiento y es la que sale en quote101; si viene vacía, se
+     * llena allá. */
+    const descripcion = String(d.descripcion ?? '').trim();
 
     const item = this.crear('items', {
       proyecto_id: proyecto.id, cliente_id: proyecto.cliente_id,
       clave: d.code || '', nombre: String(d.name).trim() || 'Requerimiento', tipo: 'requerimiento',
       monto: 0, cantidad: 1, moneda: 'MXN', estado: 'cotizado',
-      descripcion: 'Requerimiento levantado en la obra. Falta cotizarlo.',
+      descripcion: descripcion || 'Requerimiento levantado en la obra. Falta cotizarlo.',
       origen: { de: 'quell', element_id: d.element_id, obra_id: d.obra_id, requerimiento: true },
       /* 0024 · Si nació como complemento de una pieza que ya es un ítem, el
        * ítem nuevo cuelga de ése (subítem). Se pone directo y no por el
@@ -1661,7 +1668,7 @@ export class OrgDB extends DurableObject<Env> {
      * que al aprobar se sepa que es éste y no uno nuevo. */
     const mueble = {
       id: String(item.id), manual: true, item_id: String(item.id), tipo: 'mueble',
-      codigo: d.code || '', nombre: String(item.nombre), descripcion: '',
+      codigo: d.code || '', nombre: String(item.nombre), descripcion,
       qty: 1, precio: 0, total: 0, componentes: [], imagenes: [],
     };
     const primera = { ...versiones[0], muebles: [...(Array.isArray(versiones[0].muebles) ? versiones[0].muebles : []), mueble] };
@@ -3108,7 +3115,9 @@ export class OrgDB extends DurableObject<Env> {
   levantarRequerimientosHuerfanos(obra_id: string | null = null, usuario_id = 'sistema'): number {
     const piezas = this.sql
       .exec(
-        `SELECT e.id, e.project_id, e.code, e.name, e.padre_id
+        /* La 0030 corre esto en código ANTES de que la 0038 agregue la
+         * descripción: en una empresa nueva la columna todavía no existe. */
+        `SELECT e.id, e.project_id, e.code, e.name, e.padre_id, ${this.tieneColumna('quell_elements', 'descripcion') ? 'e.descripcion' : 'NULL AS descripcion'}
            FROM quell_elements e JOIN quell_projects o ON o.id = e.project_id
           WHERE e.item_id IS NULL AND o.proyecto_id IS NOT NULL
             AND lower(trim(e.type)) = 'requerimiento'` + (obra_id ? ` AND e.project_id = ?` : '') + ` ORDER BY e.created_at, e.code`,
@@ -3123,15 +3132,72 @@ export class OrgDB extends DurableObject<Env> {
       const r = this.levantarRequerimiento({
         element_id: String(pz.id), obra_id: String(pz.project_id), code: String(pz.code ?? ''), name: String(pz.name ?? ''),
         usuario_id, padre_item_id: padre?.item_id ? String(padre.item_id) : null,
+        descripcion: pz.descripcion == null ? null : String(pz.descripcion),
       });
       if (r.item_id) levantados++;
     }
     return levantados;
   }
 
+  private tieneColumna(tabla: string, columna: string): boolean {
+    return (this.sql.exec(`SELECT name FROM pragma_table_info(?)`, tabla).toArray() as Fila[]).some((c) => c.name === columna);
+  }
+
   /** 0030, en código: repara las obras ya ligadas de la empresa. */
   private migrarRequerimientosHuerfanos(): void {
     this.levantarRequerimientosHuerfanos(null, 'migracion-0030');
+  }
+
+  /* ─────────────── la obra de quell101 nace también en la suite (0.77.0) ───────────────
+   *
+   * Mike, 6-oct: «Cree un nuevo proyecto en Quell, con un cliente nuevo. Pero
+   * no me aparece ni el cliente ni el proyecto ni en quote ni en dash.»
+   *
+   * «+ Proyecto» en quell guardaba sólo la obra con el cliente como texto.
+   * Ahora la obra nace con su cliente —el que se escogió, el que ya existe
+   * con ese mismo nombre, o uno nuevo— y su proyecto, ligados: lo mismo que
+   * haría quien activa la obra en dash101, sin tener que ir a hacerlo.
+   *
+   * Sin cliente no hay proyecto (la suite no tiene proyectos sin cliente), y
+   * la obra se queda como antes, suelta. Una obra ya ligada no se toca. */
+  altaDeObraEnLaSuite(d: { obra_id: string; cliente_id?: string | null; cliente_nombre?: string | null; usuario_id: string }):
+    { proyecto_id: string; cliente_id: string; cliente_nombre: string; cliente_nuevo: boolean } | null {
+    const obra = this.sql.exec(`SELECT id, name, client, status, proyecto_id FROM quell_projects WHERE id = ?`, d.obra_id).toArray()[0] as Fila | undefined;
+    if (!obra || obra.proyecto_id) return null;
+    const contexto = { app: 'quell101', usuario_id: d.usuario_id };
+    let cliente = d.cliente_id ? this.obtener('clientes', String(d.cliente_id)) : null;
+    let nuevo = false;
+    if (!cliente) {
+      const nombre = String(d.cliente_nombre ?? '').trim();
+      if (!nombre) return null;
+      // El mismo nombre (sin acentos ni mayúsculas) es el mismo cliente: no se duplica.
+      cliente = (this.sql.exec(`SELECT * FROM clientes WHERE nombre_norm = ? ORDER BY creado_at LIMIT 1`, normalizar(nombre)).toArray()[0] as Fila | undefined) ?? null;
+      if (!cliente) { cliente = this.crear('clientes', { nombre } as Fila, contexto); nuevo = true; }
+    }
+    const proyecto = this.crear('proyectos', {
+      nombre: String(obra.name ?? '').trim() || 'Obra de quell101', cliente_id: cliente.id,
+      estado: obra.status === 'cerrado' ? 'cerrado' : 'activo',
+    } as Fila, contexto);
+    const r = this.ligarObra(String(obra.id), String(proyecto.id), d.usuario_id);
+    if ('error' in r) throw new Error(`no se pudo ligar la obra ${obra.id}: ${r.error}`);
+    // El texto del cliente en la tarjeta de quell dice el nombre como quedó en la suite.
+    this.sql.exec(`UPDATE quell_projects SET client = ? WHERE id = ?`, String(cliente.nombre), String(obra.id));
+    return { proyecto_id: String(proyecto.id), cliente_id: String(cliente.id), cliente_nombre: String(cliente.nombre), cliente_nuevo: nuevo };
+  }
+
+  /** 0039, en código: las obras que ya existían sin proyecto (decisión de
+   *  Mike, 6-oct: «darlos de alta todos»). Las que no traen cliente escrito
+   *  se quedan sueltas. */
+  private migrarObrasSueltas(): void {
+    const sueltas = this.sql
+      .exec(`SELECT id, client FROM quell_projects WHERE proyecto_id IS NULL AND trim(coalesce(client, '')) <> '' ORDER BY created_at, id`)
+      .toArray() as Fila[];
+    for (const o of sueltas) {
+      // Una obra que no se pueda dar de alta se queda suelta como estaba; la
+      // empresa tiene que abrir igual, y en dash101 se activa a mano.
+      try { this.altaDeObraEnLaSuite({ obra_id: String(o.id), cliente_nombre: String(o.client), usuario_id: 'migracion-0039' }); }
+      catch (e) { console.error('0039', o.id, e); }
+    }
   }
 
   /* ─────────────── los ítems, uno solo de los dos lados (§91) ───────────────
@@ -5034,6 +5100,9 @@ export class OrgDB extends DurableObject<Env> {
           invitarClienteEnSuite(e, org, { ...sesion.quien, ve_dinero: true, ve_costos: true } as Quien, this as unknown as ApiOrgDB, 'quell101', correo, nombre, usarExistente),
         // 0.49.0: el requerimiento nace como ítem y cae en el borrador de quote101.
         LEVANTAR_REQUERIMIENTO: (d) => this.levantarRequerimiento({ ...d, usuario_id: sesion.quien.usuario_id }),
+        // 0.77.0: la obra que nace en quell nace también con su cliente y su proyecto.
+        ALTA_EN_LA_SUITE: async (d: { obra_id: string; cliente_id?: string | null; cliente_nombre?: string | null }) =>
+          this.altaDeObraEnLaSuite({ ...d, usuario_id: sesion.quien.usuario_id }),
         // 0.73.0: las partidas que nacen de las fases del cronograma mueven el compromiso del proyecto.
         RECALCULAR_PROYECTO: async (id: string) => { this.recalcularProyecto(id); },
       }, url, url.pathname);

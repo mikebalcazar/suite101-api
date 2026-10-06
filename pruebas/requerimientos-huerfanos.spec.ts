@@ -43,7 +43,8 @@ describe('la migración 0030 sobre una obra ligada con un requerimiento sin íte
       x(`INSERT INTO clientes (id, negocio_id, nombre, nombre_norm, creado_en_app, creado_at) VALUES ('cl1','n-a','Depto','depto','dash101',?)`, T);
       x(`INSERT INTO proyectos (id, negocio_id, cliente_id, nombre, estado, creado_at) VALUES ('p1','n-a','cl1','Bosques','activo',?)`, T);
       x(`INSERT INTO quell_projects (id, name, client, proyecto_id, created_at) VALUES ('o1','Bosques (obra)','Depto','p1',?)`, T);
-      x(`INSERT INTO quell_projects (id, name, client, proyecto_id, created_at) VALUES ('o2','Suelta','Nadie',NULL,?)`, T);
+      // Sin cliente escrito: la 0039 (obras sueltas a la suite) tampoco la liga.
+      x(`INSERT INTO quell_projects (id, name, client, proyecto_id, created_at) VALUES ('o2','Suelta','',NULL,?)`, T);
       x(`INSERT INTO quell_plans (id, project_id, name, image_key, width, height, created_at) VALUES ('pl1','o1','Planta','k1',1000,800,?)`, T);
       x(`INSERT INTO quell_plans (id, project_id, name, image_key, width, height, created_at) VALUES ('pl2','o2','Planta','k2',1000,800,?)`, T);
       // El huérfano: requerimiento sin ítem en la obra ligada.

@@ -25,6 +25,8 @@ describe('la 0037 pone los tiempos default donde faltan', () => {
       db.migrar();
       await db.correrPendientes(); // la 0036, sobre la base vacía
       db.sql.exec(`DELETE FROM _migraciones WHERE version > ?`, HASTA);
+      // Lo que agregaron las migraciones de después (0038), para que vuelvan a correr limpias.
+      db.sql.exec(`ALTER TABLE quell_elements DROP COLUMN descripcion`);
       db.sql.exec(`DELETE FROM pendientes_arranque WHERE clave = 'tiempos_default'`);
       const x = (q: string, ...a: unknown[]) => db.sql.exec(q, ...a);
       x(`INSERT INTO clientes (id, nombre, nombre_norm, creado_en_app, creado_at) VALUES ('cl1','Depto','depto','dash101',?)`, T);

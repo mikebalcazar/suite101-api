@@ -17,7 +17,21 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.76.0 (EL AVANCE DE OBRA POR ÍTEM, PARA LA LISTA DE
+ * Versión del contrato: 0.77.0 (LA OBRA DE QUELL101 NACE CON CLIENTE Y
+ * PROYECTO EN LA SUITE, Y EL REQUERIMIENTO LLEVA SU DESCRIPCIÓN. Mike, 6-oct:
+ * «Cree un nuevo proyecto en Quell, con un cliente nuevo. Pero no me aparece
+ * ni el cliente ni el proyecto ni en quote ni en dash.» `POST /orgs/:o/quell/
+ * projects` con `suite: true` acepta `cliente_id` (uno de la suite) o
+ * `client` (el nombre: el mismo nombre es el mismo cliente; si no existe,
+ * nace) y crea el proyecto ligado a la obra; contesta `proyecto_id`, `cliente_id` y `cliente_nuevo`.
+ * `GET /orgs/:o/quell/clientes-suite` da los clientes para escogerlos. La
+ * migración 0039 hace lo mismo con las obras que ya estaban sueltas y traían
+ * cliente escrito (decisión de Mike: «darlos de alta todos»). Y Mike, 6-oct:
+ * «agregar un campo de descripción en la ventana de Nuevo requerimiento,
+ * donde se escribe lo que aparecerá como descripción en quote»: la pieza
+ * nueva acepta `descripcion` (columna nueva en `quell_elements`, 0038), que
+ * va al ítem y al renglón del borrador de quote101). Antes:
+ * 0.76.0 (EL AVANCE DE OBRA POR ÍTEM, PARA LA LISTA DE
  * DASH101. Mike, 6-oct, con la lista de quell101 enfrente: «en dash quiero
  * que la lista de ítems tenga el mismo estilo». `GET /orgs/:o/quell/
  * avance-items?proyecto_id=` (sólo quien dirige) devuelve el catálogo de
@@ -1186,7 +1200,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.76.0';
+export const VERSION_CONTRATO = '0.77.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

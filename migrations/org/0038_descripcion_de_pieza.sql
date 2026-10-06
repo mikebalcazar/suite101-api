@@ -1,0 +1,12 @@
+-- OrgDB v38 — la descripción de la pieza del plano.
+--
+-- Mike, 6-oct-2026: «Cuando se crea un requerimiento nuevo, agregar un
+-- campo de descripción en la ventana de Nuevo requerimiento, donde se
+-- escribe lo que aparecerá como descripción en quote. (…) En caso de que no
+-- se llene en quell, se puede llenar en quote.»
+--
+-- El requerimiento nace como ítem cotizado y renglón del borrador de
+-- quote101 si la obra ya tiene proyecto (0.49.0); ahí la descripción viaja
+-- directo. Se guarda también en la pieza para que, si la obra se liga
+-- después, el ítem que nace al ligar la lleve igual.
+ALTER TABLE quell_elements ADD COLUMN descripcion TEXT;
