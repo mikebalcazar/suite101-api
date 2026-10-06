@@ -201,6 +201,93 @@ export function montarNomina(rutas: App): void {
     return ok(c, { persona: { id: fila.id, nombre: fila.nombre, puesto: fila.puesto ?? '' } }, 201);
   });
 
+  /* ─────────────── la nómina programada (0.71.0) ───────────────
+   *
+   * Mike, 6-oct: «hay que ver en nómina el programar la nómina para que
+   * también se considere en los gastos para proyectar los flujos».
+   *
+   * Es UNA sola cosa por empresa: cada cuánto se paga la raya, qué día, y
+   * cuánto suele ser. No es un corte —no tiene gente ni renglones— y no
+   * mueve dinero: es lo que el flujo proyectado de dash101 pone como gasto
+   * en cada fecha de pago futura. El corte de verdad se sigue abriendo y
+   * pagando igual; cuando ya existe en borrador, la proyección usa su total
+   * y no la estimación.
+   *
+   * Vive en `ajustes` bajo la app `nomina` (id `nomina:programa`), y por eso
+   * el CRUD genérico no la entrega: `GET /:o/ajustes` sobreescribe el filtro
+   * `app` con la cabecera X-App, y ninguna app se llama `nomina`. Se lee y
+   * se escribe sólo por aquí, con el permiso de la raya: cuánto se paga de
+   * nómina al mes es un dato que tampoco anda suelto. */
+
+  const FRECUENCIAS = ['semanal', 'quincenal', 'mensual'] as const;
+  type Programa = {
+    activo: boolean; frecuencia: (typeof FRECUENCIAS)[number];
+    dia_semana: number | null; dia_del_mes: number | null; monto: number; nota: string; actualizado_at: string | null;
+  };
+
+  const leerPrograma = async (c: Ctx): Promise<Programa | null> => {
+    const fila = await stub(c).obtener('ajustes', 'nomina:programa');
+    if (!fila) return null;
+    const v = (typeof fila.valor === 'string' ? JSON.parse(fila.valor) : fila.valor) as Partial<Programa> | null;
+    if (!v) return null;
+    return {
+      activo: v.activo !== false,
+      frecuencia: (FRECUENCIAS as readonly string[]).includes(String(v.frecuencia)) ? (v.frecuencia as Programa['frecuencia']) : 'semanal',
+      dia_semana: typeof v.dia_semana === 'number' ? v.dia_semana : null,
+      dia_del_mes: typeof v.dia_del_mes === 'number' ? v.dia_del_mes : null,
+      monto: Number(v.monto ?? 0),
+      nota: String(v.nota ?? ''),
+      actualizado_at: (fila.actualizado_at as string | null) ?? null,
+    };
+  };
+
+  /** GET /orgs/:o/nomina/programa — la nómina programada, el total del
+   *  último corte pagado (para proponerlo como estimación) y los cortes en
+   *  borrador (ya tienen total: la proyección los usa tal cual). */
+  rutas.get('/:o/nomina/programa', async (c) => {
+    if (!(await puedeNomina(c))) return err(c, 'sin_permiso', 403, { motivo: 'la raya la ve quien la lleva' });
+    const rayas = await stub(c).rayas();
+    const pagadas = rayas.filter((r) => r.estado === 'pagada')
+      .sort((a, b) => String(b.pagada_at ?? '').localeCompare(String(a.pagada_at ?? '')));
+    const borradores = rayas.filter((r) => r.estado === 'borrador').map((r) => ({
+      id: r.id, periodo_inicio: r.periodo_inicio, periodo_fin: r.periodo_fin, total: Number(r.total ?? 0),
+    }));
+    return ok(c, {
+      programa: await leerPrograma(c),
+      ultimo_total: pagadas[0] ? Number(pagadas[0].total ?? 0) : null,
+      borradores,
+    });
+  });
+
+  /** PUT /orgs/:o/nomina/programa {activo, frecuencia, dia_semana?,
+   *  dia_del_mes?, monto, nota?} — se guarda entera; `monto` en CENTAVOS. */
+  rutas.put('/:o/nomina/programa', async (c) => {
+    if (!(await puedeNomina(c))) return err(c, 'sin_permiso', 403, { motivo: 'la raya la lleva quien tiene el permiso' });
+    const b = await c.req.json<Partial<Record<keyof Programa, unknown>>>().catch(() => ({}) as Partial<Record<keyof Programa, unknown>>);
+    const errores: Record<string, string> = {};
+    const frecuencia = String(b.frecuencia ?? '');
+    if (!(FRECUENCIAS as readonly string[]).includes(frecuencia)) errores.frecuencia = 'semanal, quincenal o mensual';
+    const monto = Number(b.monto);
+    if (!Number.isInteger(monto) || monto < 0) errores.monto = 'centavos enteros, cero o más';
+    let dia_semana: number | null = null;
+    let dia_del_mes: number | null = null;
+    if (frecuencia === 'semanal') {
+      dia_semana = Number(b.dia_semana);
+      if (!Number.isInteger(dia_semana) || dia_semana < 0 || dia_semana > 6) errores.dia_semana = 'de 0 (domingo) a 6 (sábado)';
+    }
+    if (frecuencia === 'mensual') {
+      dia_del_mes = Number(b.dia_del_mes);
+      if (!Number.isInteger(dia_del_mes) || dia_del_mes < 1 || dia_del_mes > 31) errores.dia_del_mes = 'de 1 a 31';
+    }
+    if (Object.keys(errores).length) return err(c, 'datos_invalidos', 400, { errores });
+    const valor = {
+      activo: b.activo !== false, frecuencia, dia_semana, dia_del_mes, monto,
+      nota: typeof b.nota === 'string' ? b.nota.trim().slice(0, 200) : '',
+    };
+    await stub(c).crear('ajustes', { clave: 'programa', valor }, { app: 'nomina', usuario_id: c.get('quien').usuario_id });
+    return ok(c, { programa: await leerPrograma(c) });
+  });
+
   /* ─────────────── los cortes ─────────────── */
 
   /** GET /orgs/:o/nomina/rayas — los cortes de la empresa. `?negocio_id=`
