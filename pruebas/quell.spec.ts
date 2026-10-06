@@ -1190,3 +1190,54 @@ describe('el cronograma: las rutas (0.68.0)', () => {
     expect((await q('goyo', `/projects/${obraA}/cronograma`, { method: 'PUT', json: { tareas: [] } })).estado).toBe(403);
   });
 });
+
+describe('el cronograma: fases adicionales con nombre y orden (0.69.0)', () => {
+  it('un proceso lleva las fases que haga falta, cada una con su nombre, en el orden de `pos`; se exportan con ese nombre', async () => {
+    const pintor = await pedir('mike', `/orgs/${ORG}/proveedores`, { app: 'dash101', method: 'POST', json: { nombre: 'Pinturas Lara', tipo: 'servicios' } });
+    const r = await q('mike', `/projects/${obraA}/cronograma`, { method: 'PUT', json: {
+      inicio: '2026-10-05', dias_objetivo: 30,
+      tareas: [
+        { id: 'nuevo-m', element_id: m1, seccion: 'Herrería', etapa: 'material', pos: 0, dias: 1 },
+        { id: 'nuevo-f', element_id: m1, seccion: 'Herrería', etapa: 'fabricacion', nombre: 'Herrería gruesa', pos: 10, dias: 2 },
+        { id: 'nuevo-p', element_id: m1, seccion: 'Herrería', etapa: 'otra', nombre: 'Pintura', pos: 15, dias: 2, proveedor_id: pintor.data.id },
+        { id: 'nuevo-u', element_id: m1, seccion: 'Herrería', etapa: 'otra', nombre: 'Pulido', pos: 16, dias: 1 },
+        { id: 'nuevo-i', element_id: m1, seccion: 'Herrería', etapa: 'instalacion', pos: 20, dias: 1 },
+      ],
+    } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.tareas).toHaveLength(5);
+    const de = (nombre: string) => r.tareas.find((t: any) => t.nombre === nombre);
+    const mat = r.tareas.find((t: any) => t.etapa === 'material');
+    const ins = r.tareas.find((t: any) => t.etapa === 'instalacion');
+    expect([mat.inicio, mat.fin]).toEqual(['2026-10-05', '2026-10-05']);
+    expect([de('Herrería gruesa').inicio, de('Herrería gruesa').fin]).toEqual(['2026-10-06', '2026-10-07']);
+    expect([de('Pintura').inicio, de('Pintura').fin], 'la pintura sigue a la fabricación').toEqual(['2026-10-08', '2026-10-09']);
+    expect([de('Pulido').inicio, de('Pulido').fin], 'y el pulido a la pintura').toEqual(['2026-10-10', '2026-10-10']);
+    expect([ins.inicio, ins.fin], 'la instalación espera al pulido (el domingo 11 no cuenta)').toEqual(['2026-10-12', '2026-10-12']);
+    expect(ins.previas).toEqual([de('Pulido').id]);
+    expect(de('Pintura').proveedor_nombre).toBe('Pinturas Lara');
+    expect(r.tareas.map((t: any) => t.pos)).toEqual([0, 10, 15, 16, 20]);
+    expect(mat.nombre).toBeNull();
+    // Se vuelve a leer con nombre y pos.
+    const otra = await q('mike', `/projects/${obraA}/cronograma`);
+    expect(otra.tareas.map((t: any) => [t.etapa, t.nombre, t.pos])).toEqual([['material', null, 0], ['fabricacion', 'Herrería gruesa', 10], ['otra', 'Pintura', 15], ['otra', 'Pulido', 16], ['instalacion', null, 20]]);
+    // Excel y Project llevan los nombres.
+    const x = await SELF.fetch(`https://api.local/orgs/${ORG}/quell/projects/${obraA}/cronograma.xlsx`, { headers: { Cookie: galletas.mike, 'X-App': 'quell101' } });
+    const texto = new TextDecoder().decode(new Uint8Array(await x.arrayBuffer()));
+    expect(texto).toContain('Pintura'); expect(texto).toContain('Herrería gruesa'); expect(texto).toContain('Pulido');
+    const p = await SELF.fetch(`https://api.local/orgs/${ORG}/quell/projects/${obraA}/cronograma.xml`, { headers: { Cookie: galletas.mike, 'X-App': 'quell101' } });
+    const xml = await p.text();
+    expect(xml).toContain('<Name>Pintura · Pinturas Lara</Name>');
+    expect(xml).toContain('<Name>Herrería gruesa</Name>');
+    expect((xml.match(/<Task>/g) || []).length, '5 fases + 1 pieza + 1 sección').toBe(7);
+  });
+
+  it('las tres fases fijas siguen siendo una por proceso; «otra» se repite; una etapa inventada se rechaza', async () => {
+    const dos = await q('mike', `/projects/${obraA}/cronograma`, { method: 'PUT', json: { tareas: [
+      { element_id: m1, seccion: '', etapa: 'instalacion', dias: 1 }, { element_id: m1, seccion: '', etapa: 'instalacion', dias: 1 }] } });
+    expect(dos.estado).toBe(400); expect(dos.error).toMatch(/repite la etapa Instalación/);
+    const rara = await q('mike', `/projects/${obraA}/cronograma`, { method: 'PUT', json: { tareas: [{ element_id: m1, seccion: '', etapa: 'pintura', dias: 1 }] } });
+    expect(rara.estado).toBe(400); expect(rara.error).toMatch(/u otra/);
+    expect((await q('mike', `/projects/${obraA}/cronograma`)).tareas, 'nada de eso tocó lo guardado').toHaveLength(5);
+  });
+});

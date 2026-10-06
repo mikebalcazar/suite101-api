@@ -25,9 +25,15 @@
  */
 
 export const ETAPAS = ['material', 'fabricacion', 'instalacion'];
-export const NOMBRE_ETAPA = { material: 'Entrega de material', fabricacion: 'Fabricación', instalacion: 'Instalación' };
+/* 0.69.0: un proceso puede llevar fases de más ('otra'), con su nombre. */
+export const ETAPAS_VALIDAS = [...ETAPAS, 'otra'];
+export const NOMBRE_ETAPA = { material: 'Entrega de material', fabricacion: 'Fabricación', instalacion: 'Instalación', otra: 'Otra fase' };
+/** Cómo se llama una fase: el nombre que le pusieron, o el de su etapa. */
+export const nombreDeFase = (t) => (t.nombre && String(t.nombre).trim()) || NOMBRE_ETAPA[t.etapa] || t.etapa;
+/** El orden dentro del proceso: `pos`, y a igual pos el de la etapa. */
+export const posDe = (t) => (Number.isInteger(t.pos) ? t.pos : ETAPAS.indexOf(t.etapa) * 10);
 /** Qué tipo de proveedor le toca a cada etapa: lo que se compra o quien lo hace. */
-export const TIPO_PROVEEDOR_DE = { material: 'materiales', fabricacion: 'servicios', instalacion: 'servicios' };
+export const TIPO_PROVEEDOR_DE = { material: 'materiales', fabricacion: 'servicios', instalacion: 'servicios', otra: 'servicios' };
 
 /* ─────────────── el calendario ─────────────── */
 const aFecha = (s) => new Date(`${s}T00:00:00Z`);
@@ -76,7 +82,7 @@ export function programar(tareas, inicio) {
     grupos.get(llave).push(t);
   }
   for (const g of grupos.values()) {
-    g.sort((a, b) => ETAPAS.indexOf(a.etapa) - ETAPAS.indexOf(b.etapa));
+    g.sort((a, b) => posDe(a) - posDe(b) || ETAPAS.indexOf(a.etapa) - ETAPAS.indexOf(b.etapa));
     for (let i = 1; i < g.length; i++) previas.get(g[i].id).push(g[i - 1].id);
   }
   // Las explícitas.
@@ -110,9 +116,9 @@ export function programar(tareas, inicio) {
 /** Las hojas para `xlsx()` (src/xlsx.ts): una con las tareas y otra con el resumen. */
 export function hojasDelCronograma(c) {
   const filas = [['Código', 'Pieza', 'Sección', 'Etapa', 'Proveedor', 'Días', 'Inicio', 'Fin', 'Después de', 'Notas']];
-  const nombreDe = new Map(c.tareas.map((t) => [t.id, `${t.code || ''} ${t.seccion ? t.seccion + ' · ' : ''}${NOMBRE_ETAPA[t.etapa]}`.trim()]));
+  const nombreDe = new Map(c.tareas.map((t) => [t.id, `${t.code || ''} ${t.seccion ? t.seccion + ' · ' : ''}${nombreDeFase(t)}`.trim()]));
   for (const t of c.tareas) {
-    filas.push([t.code || '', t.name || '', t.seccion || '', NOMBRE_ETAPA[t.etapa] || t.etapa, t.proveedor_nombre || '', t.dias, t.inicio, t.fin, t.depende_de ? (nombreDe.get(t.depende_de) || '') : '', t.notas || '']);
+    filas.push([t.code || '', t.name || '', t.seccion || '', nombreDeFase(t), t.proveedor_nombre || '', t.dias, t.inicio, t.fin, t.depende_de ? (nombreDe.get(t.depende_de) || '') : '', t.notas || '']);
   }
   const resumen = [
     ['Obra', c.nombre || ''],
@@ -165,7 +171,7 @@ export function xmlDeProject(c) {
         tarea(nombre, 2, { resumen: true, inicio: si, fin: sf, id: `seccion-${uid}` });
         nivel = 3;
       }
-      for (const t of ts) tarea(`${NOMBRE_ETAPA[t.etapa]}${t.proveedor_nombre ? ' · ' + t.proveedor_nombre : ''}`, nivel, t);
+      for (const t of ts) tarea(`${nombreDeFase(t)}${t.proveedor_nombre ? ' · ' + t.proveedor_nombre : ''}`, nivel, t);
     }
   }
   const cuerpo = tareas.map(({ uid: u, nombre, nivel, t }) => {

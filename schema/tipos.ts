@@ -17,7 +17,14 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.68.0 (EL CRONOGRAMA DE LA OBRA Y EL TIPO DEL
+ * Versión del contrato: 0.69.0 (FASES ADICIONALES EN EL CRONOGRAMA. Mike,
+ * 6-oct: «poder agregar otra fase a los procesos en caso de ser necesario, y
+ * editar el nombre de la fase del proceso». Migración org 0032: `quell_tareas`
+ * se rehace con etapa 'otra', `nombre` y `pos`; el orden dentro del proceso es
+ * `pos` (lo que había queda 0/10/20 por etapa). 'otra' puede repetirse en un
+ * proceso; las tres fijas siguen siendo una por proceso.)
+ *
+ * 0.68.0 (EL CRONOGRAMA DE LA OBRA Y EL TIPO DEL
  * PROVEEDOR. Mike, 5-oct: «necesito en quell poder configurar un cronograma
  * (…) tiempo de fabricación total (…) entrega de material, fabricación e
  * instalación (…) a cada una asignarle un proveedor o contratista (los
@@ -1096,7 +1103,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.68.0';
+export const VERSION_CONTRATO = '0.69.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1532,7 +1539,8 @@ export type TipoProveedor = (typeof TIPOS_PROVEEDOR)[number];
  * Una tarea es una etapa de una sección de una pieza; dentro de la sección
  * las etapas van material → fabricación → instalación; entre secciones y
  * piezas lo que encadena es `depende_de` (arranca cuando ésa termina). */
-export type EtapaCronograma = 'material' | 'fabricacion' | 'instalacion';
+/** 'otra' desde 0.69.0: una fase de más, con su nombre. */
+export type EtapaCronograma = 'material' | 'fabricacion' | 'instalacion' | 'otra';
 export interface TareaEntrada {
   /** Se conserva si viene; sin él, o con uno que empiece con «nuevo-», estrena. */
   id?: string;
@@ -1540,6 +1548,10 @@ export interface TareaEntrada {
   seccion?: string;
   orden?: number;
   etapa: EtapaCronograma;
+  /** 0.69.0: cómo se llama la fase (si no, el nombre de su etapa). */
+  nombre?: string | null;
+  /** 0.69.0: el orden dentro del proceso; sin él, el de la etapa (0, 10, 20). */
+  pos?: number;
   /** Laborables, de 1 en adelante. */
   dias: number;
   proveedor_id?: string | null;
@@ -1550,7 +1562,7 @@ export interface TareaEntrada {
 }
 export interface TareaCronograma {
   id: string; project_id: string; element_id: string; code: string; name: string;
-  seccion: string; orden: number; etapa: EtapaCronograma; dias: number;
+  seccion: string; orden: number; etapa: EtapaCronograma; nombre: string | null; pos: number; dias: number;
   proveedor_id: string | null; proveedor_nombre: string | null; proveedor_tipo: TipoProveedor | null;
   depende_de: string | null; inicio_fijo: string | null; notas: string | null;
   /** Calculados: AAAA-MM-DD, y las tareas de las que depende (implícitas y explícitas). */
