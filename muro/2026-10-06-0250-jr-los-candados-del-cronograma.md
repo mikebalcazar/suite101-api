@@ -87,6 +87,12 @@ MEDIDO.
     simulada (27): rótulos en gráfica y lista, el eslabón, voltear la
     cadena.
 
+Y EL MENÚ DE VISTA (bitacora-obra #115, después). Mike, con captura: «No
+se ven las opciones, hazlo un dropdown menu». Los cuatro botones de arriba
+(Plano / Lista / Dudas / Cronograma) se cortaban con el panel del ítem
+abierto; ahora es un <select> con el estilo de «Las dos fases», que ocupa
+lo mismo tenga dos opciones o cinco. En producción.
+
 LO QUE NO SE HIZO (a propósito). El reparto no se enseña todavía en la
 pantalla del proyecto de dash101 ni en el estado de cuenta: sólo en el
 movimiento y, sumado, en el ítem (`anticipo`). No hay aviso al cliente. Un
