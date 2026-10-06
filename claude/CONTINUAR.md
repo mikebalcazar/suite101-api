@@ -432,7 +432,9 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   bloque «Repartir este pago como anticipo entre ítems» en el movimiento.
   quell101: «Diseño definido el» al editar el ítem; rótulos en lista y
   gráfica; y el eslabón ⛓ que quita una cadena (soltar del otro lado la
-  voltea). Muro `2026-10-06-0250-jr-los-candados-del-cronograma.md`.
+  voltea). Y la vista de la obra (plano/lista/dudas/cronograma) es un
+  menú desplegable (#115): los botones se cortaban. Muro
+  `2026-10-06-0250-jr-los-candados-del-cronograma.md`.
 - **El cronograma gráfico que se arrastra, y procesos con fases de más y con nombre (6-oct, API 0.69.0 #243, bitacora-obra #112).**
   Mike: «en el cronograma gráfico poder "arrastrar" la tarea (fase del
   ítem) que se encadena con otra fase de otro ítem ya sea antes o después»;
