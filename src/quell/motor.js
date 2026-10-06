@@ -582,11 +582,29 @@ async function armaDudas(env, dudas) {
  * piezas de la obra (sin los requerimientos, que todavía no son trabajo) para
  * que la pantalla las enseñe aunque no tengan tareas, los proveedores con su
  * tipo para los menús, y cada tarea con su inicio y su fin. */
+/* El anticipo de una pieza (0.70.0): lo que de los pagos le ha tocado a su
+ * ítem (`movimiento_items`), con la fecha del pago más antiguo. Son dos
+ * subconsultas sobre `e.item_id`; una pieza sin ítem queda en nulo. */
+const ANTICIPO_SQL = `(SELECT MIN(m.fecha) FROM movimiento_items mi JOIN movimientos m ON m.id = mi.movimiento_id WHERE mi.item_id = e.item_id AND mi.monto > 0) AS anticipo_fecha,
+            (SELECT COALESCE(SUM(mi.monto), 0) FROM movimiento_items mi WHERE mi.item_id = e.item_id) AS anticipo_monto`;
+/** Los dos candados de una pieza y desde cuándo pueden correr sus fases. */
+function candados(e, hoy) {
+  const ligado = !!e.item_id;
+  // El anticipo también cuenta si el ítem ya va en «Anticipo pagado» (etapa 2) o más allá.
+  let anticipo = e.anticipo_fecha ? String(e.anticipo_fecha).slice(0, 10) : null;
+  if (!anticipo && ligado && Number(e.item_etapa) >= 2) anticipo = String(e.item_etapa_at || hoy).slice(0, 10);
+  const diseno = e.diseno_definido && fechaValida(e.diseno_definido) ? e.diseno_definido : null;
+  const listo = !!(anticipo && diseno);
+  const arranque = listo ? (anticipo > diseno ? anticipo : diseno) : hoy;
+  return { anticipo, anticipo_monto: Number(e.anticipo_monto || 0), diseno, ligado, listo, arranque };
+}
+
 async function leerCronograma(env, pid) {
   const project = await env.DB.prepare(`SELECT id, name, cronograma_inicio, cronograma_dias FROM quell_projects WHERE id = ?`).bind(pid).first();
   const { results: piezas } = await env.DB.prepare(
-    `SELECT e.id, e.code, e.name, e.type, e.plan_id, e.padre_id, pl.name AS plan_name
-       FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id
+    `SELECT e.id, e.code, e.name, e.type, e.plan_id, e.padre_id, e.item_id, e.diseno_definido, pl.name AS plan_name,
+            it.etapa AS item_etapa, it.etapa_at AS item_etapa_at, ${ANTICIPO_SQL}
+       FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id LEFT JOIN items it ON it.id = e.item_id
       WHERE pl.project_id = ? AND e.type <> 'Requerimiento' ORDER BY e.code`).bind(pid).all();
   const { results: crudas } = await env.DB.prepare(
     `SELECT t.*, e.code, e.name, p.nombre AS proveedor_nombre, p.tipo AS proveedor_tipo
@@ -594,7 +612,12 @@ async function leerCronograma(env, pid) {
       WHERE t.project_id = ? ORDER BY e.code, t.orden, t.seccion, t.pos`).bind(pid).all();
   const { results: proveedores } = await env.DB.prepare(`SELECT id, nombre, tipo FROM proveedores ORDER BY nombre_norm`).all();
   const inicio = project.cronograma_inicio || now().slice(0, 10);
-  const c = programar(crudas, inicio);
+  /* Los candados (0.70.0): cada pieza arranca cuando tiene anticipo Y diseño
+   * definido, en la fecha más tardía de los dos; sin alguno, arranca HOY y
+   * se recorre sola día con día. */
+  const hoy = now().slice(0, 10);
+  const candadosDe = new Map(piezas.map((e) => [e.id, candados(e, hoy)]));
+  const c = programar(crudas, inicio, new Map([...candadosDe].map(([id, k]) => [id, k.arranque])));
   // Las tareas en el orden de las piezas, y cada pieza con cuántos días suma.
   const porPieza = new Map();
   for (const t of c.tareas) { if (!porPieza.has(t.element_id)) porPieza.set(t.element_id, []); porPieza.get(t.element_id).push(t); }
@@ -602,7 +625,7 @@ async function leerCronograma(env, pid) {
     const ts = porPieza.get(e.id) || [];
     const ini = ts.length ? ts.reduce((m, t) => (m < t.inicio ? m : t.inicio), ts[0].inicio) : null;
     const fin = ts.length ? ts.reduce((m, t) => (m > t.fin ? m : t.fin), ts[0].fin) : null;
-    return { element_id: e.id, code: e.code, name: e.name, type: e.type, plan_name: e.plan_name, padre_id: e.padre_id, inicio: ini, fin, dias: ini ? laborablesEntre(ini, fin) : 0, tareas: ts };
+    return { element_id: e.id, code: e.code, name: e.name, type: e.type, plan_name: e.plan_name, padre_id: e.padre_id, inicio: ini, fin, dias: ini ? laborablesEntre(ini, fin) : 0, candados: candadosDe.get(e.id), tareas: ts };
   });
   const objetivo = project.cronograma_dias ?? null;
   return {
@@ -1381,8 +1404,8 @@ export async function atender(req, env, url, path) {
        * al contratista, y eso lo decide Mike, no este archivo. */
       const element = await env.DB.prepare(
         `SELECT e.*, pl.name AS plan_name, ${ALCANCE_SQL}, it.descripcion AS item_descripcion,
-                it.monto AS item_monto, it.cantidad AS item_cantidad, it.etapa AS item_etapa,
-                it.fecha_entrega AS item_fecha_entrega
+                it.monto AS item_monto, it.cantidad AS item_cantidad, it.etapa AS item_etapa, it.etapa_at AS item_etapa_at,
+                it.fecha_entrega AS item_fecha_entrega, ${ANTICIPO_SQL}
          FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id
               LEFT JOIN items it ON it.id = e.item_id
          WHERE e.id = ?`).bind(eid).first();
@@ -1402,6 +1425,7 @@ export async function atender(req, env, url, path) {
         if (!(rol === 'owner' || rol === 'admin' || rol === 'socio' || esCli(user))) {
           delete element.item_monto;
           delete element.item_cantidad;
+          delete element.anticipo_monto;   // 0.70.0: dinero, misma regla
         }
       }
       if (!element) return err('no encontrado', 404);
@@ -1511,6 +1535,16 @@ export async function atender(req, env, url, path) {
       const b = await req.json();
       if (await yaHecha(env, b.op_id)) return json({ ok: true, repetida: true });
       const codigo = b.code === undefined || b.code === null ? null : String(b.code).trim();
+      /* 0.70.0 · La fecha en que quedó definido el diseño (Mike, 6-oct: «poder
+       * marcar en el ítem la fecha de definición de diseño, y si hay cambios,
+       * poder editarla»). Vacía la quita. Mueve la pieza entera en el
+       * cronograma, porque es uno de sus dos candados. */
+      let diseno; // undefined = no se toca
+      if (b.diseno_definido !== undefined) {
+        if (b.diseno_definido === null || b.diseno_definido === '') diseno = null;
+        else if (fechaValida(b.diseno_definido)) diseno = b.diseno_definido;
+        else return err('La fecha de definición de diseño va como AAAA-MM-DD.');
+      }
       // Reubicar: sólo cambian x y y, que ya existen. Pasa por la fila (op_id)
       // para que funcione sin señal, y deja constancia en la bitácora del
       // ítem: quién lo movió y cuándo (encargo A.4).
@@ -1518,6 +1552,7 @@ export async function atender(req, env, url, path) {
       return await conCodigoUnico(async () => {
         await env.DB.prepare(`UPDATE quell_elements SET code = COALESCE(?, code), type = COALESCE(?, type), name = COALESCE(?, name), resp = COALESCE(?, resp), x = COALESCE(?, x), y = COALESCE(?, y) WHERE id = ?`)
           .bind(codigo, b.type ?? null, b.name ?? null, b.resp ?? null, b.x ?? null, b.y ?? null, eid).run();
+        if (diseno !== undefined) await env.DB.prepare(`UPDATE quell_elements SET diseno_definido = ? WHERE id = ?`).bind(diseno, eid).run();
         if (reubica) {
           await env.DB.prepare(`INSERT INTO quell_log_entries (id, element_id, user_id, kind, text) VALUES (?,?,?,?,?)`)
             .bind(uid(), eid, user.id, 'trabajo', 'Reubicado en el plano.').run();

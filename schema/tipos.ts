@@ -17,7 +17,21 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.69.0 (FASES ADICIONALES EN EL CRONOGRAMA. Mike,
+ * Versión del contrato: 0.70.0 (LOS DOS CANDADOS DEL ÍTEM EN EL CRONOGRAMA.
+ * Mike, 6-oct: «todos los ítems necesitan cumplir 2 parámetros para que se
+ * fije su fecha de inicio (…) anticipo y definición de diseño. Mientras los
+ * parámetros no se cumplan la fecha de inicio se sigue recorriendo al día
+ * presente». Migración org 0033: tabla `movimiento_items` (un pago repartido
+ * entre ítems; CRUD genérico con validación: sólo ingresos, ítems del mismo
+ * proyecto, la suma no pasa del monto) y `quell_elements.diseno_definido`
+ * (AAAA-MM-DD, por PATCH /quell/elements/:id). El cronograma trae por pieza
+ * `candados` {anticipo, anticipo_monto, diseno, listo, arranque, ligado}:
+ * con los dos, arranca en la fecha más tardía de los dos; sin alguno,
+ * arranca HOY y se recorre solo. Una pieza sin ítem de dash101 no puede
+ * tener anticipo. El anticipo también cuenta si el ítem ya va en la etapa
+ * 2 «Anticipo pagado» o más allá.)
+ *
+ * 0.69.0 (FASES ADICIONALES EN EL CRONOGRAMA. Mike,
  * 6-oct: «poder agregar otra fase a los procesos en caso de ser necesario, y
  * editar el nombre de la fase del proceso». Migración org 0032: `quell_tareas`
  * se rehace con etapa 'otra', `nombre` y `pos`; el orden dentro del proceso es
@@ -1103,7 +1117,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.69.0';
+export const VERSION_CONTRATO = '0.70.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1432,6 +1446,18 @@ export interface Cliente {
  *  «Nómina»…). La CLABE son 18 dígitos que cuadran; la API los revisa. Los
  *  documentos de respaldo (carátula, foto de la tarjeta) van en `archivos`
  *  con de_tabla = 'proveedores' y de_id = el proveedor. */
+/** 0.70.0 · Lo que de un pago le toca a un ítem (el anticipo). */
+export interface MovimientoItem {
+  id: string;
+  movimiento_id: string;
+  item_id: string;
+  /** El del movimiento; lo pone la API. */
+  proyecto_id: string | null;
+  /** Centavos, mayor que cero. La suma de un movimiento no pasa de su monto. */
+  monto: number;
+  creado_at: string;
+}
+
 export interface ProveedorCuenta {
   id: string;
   proveedor_id: string;
@@ -1560,6 +1586,21 @@ export interface TareaEntrada {
   inicio_fijo?: string | null;
   notas?: string | null;
 }
+/** 0.70.0 · Los dos candados de una pieza. */
+export interface CandadosPieza {
+  /** La fecha del anticipo (la del pago más antiguo que le tocó, o la de la etapa 2), o null. */
+  anticipo: string | null;
+  /** Centavos que le han tocado en pagos. */
+  anticipo_monto: number;
+  /** La fecha en que quedó definido el diseño, o null. */
+  diseno: string | null;
+  /** Si tiene ítem en dash101 (sin él no hay dónde registrar el anticipo). */
+  ligado: boolean;
+  /** Los dos cumplidos. */
+  listo: boolean;
+  /** Desde cuándo pueden correr sus fases: con los dos, la fecha más tardía; sin alguno, hoy. */
+  arranque: string;
+}
 export interface TareaCronograma {
   id: string; project_id: string; element_id: string; code: string; name: string;
   seccion: string; orden: number; etapa: EtapaCronograma; nombre: string | null; pos: number; dias: number;
@@ -1575,7 +1616,7 @@ export interface Cronograma {
   dias_objetivo: number | null; fin: string; dias_laborables: number; excede: boolean;
   calendario: 'lunes-sabado';
   etapas: Array<{ clave: EtapaCronograma; nombre: string }>;
-  items: Array<{ element_id: string; code: string; name: string; type: string; plan_name: string; padre_id: string | null; inicio: string | null; fin: string | null; dias: number; tareas: TareaCronograma[] }>;
+  items: Array<{ element_id: string; code: string; name: string; type: string; plan_name: string; padre_id: string | null; inicio: string | null; fin: string | null; dias: number; candados: CandadosPieza; tareas: TareaCronograma[] }>;
   tareas: TareaCronograma[];
   proveedores: Array<Pick<Proveedor, 'id' | 'nombre' | 'tipo'>>;
 }
@@ -1866,6 +1907,7 @@ export const TABLAS = [
   'clientes',
   'proveedores',
   'proveedor_cuentas',
+  'movimiento_items',
   'accionistas',
   'personal',
   'estaciones',
