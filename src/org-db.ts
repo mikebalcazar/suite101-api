@@ -47,6 +47,7 @@ import cronograma from '../migrations/org/0031_cronograma.sql';
 import fases from '../migrations/org/0032_fases.sql';
 import candados from '../migrations/org/0033_candados.sql';
 import planPagos from '../migrations/org/0034_plan_pagos.sql';
+import fasesDefault from '../migrations/org/0035_fases_default.sql';
 import { atender as atenderQuell, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { PREFIJOS, esRequerimiento, siguienteCodigo } from './quell/codigos.js';
 
@@ -73,7 +74,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault];
 
 /** La 0027 y la 0030 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
@@ -4998,6 +4999,8 @@ export class OrgDB extends DurableObject<Env> {
           invitarClienteEnSuite(e, org, { ...sesion.quien, ve_dinero: true, ve_costos: true } as Quien, this as unknown as ApiOrgDB, 'quell101', correo, nombre, usarExistente),
         // 0.49.0: el requerimiento nace como ítem y cae en el borrador de quote101.
         LEVANTAR_REQUERIMIENTO: (d) => this.levantarRequerimiento({ ...d, usuario_id: sesion.quien.usuario_id }),
+        // 0.73.0: las partidas que nacen de las fases del cronograma mueven el compromiso del proyecto.
+        RECALCULAR_PROYECTO: async (id: string) => { this.recalcularProyecto(id); },
       }, url, url.pathname);
     }
     // roster101: igual que quell101, pero la sesión de la suite puede venir

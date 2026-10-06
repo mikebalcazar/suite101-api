@@ -107,7 +107,7 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
  * mutación. Si una app manda uno, se rechaza aunque su lista lo trajera. */
 export const CACHES: Partial<Record<Tabla, readonly string[]>> = {
   proyectos: ['precio_venta', 'cobrado', 'pagado_prov', 'compromiso', 'avance'],
-  partidas: ['monto_pagado', 'estado'],
+  partidas: ['monto_pagado', 'estado', 'tarea_id', 'obra_id', 'fecha_esperada'],
   /* `aprobado_at` y `cancelado_at` los pone la API al cambiar el estado, y
    * `cancelado_motivo` la ruta de cancelar. Ninguna app los manda: de
    * `aprobado_at` depende que un descartado no se lea como una venta

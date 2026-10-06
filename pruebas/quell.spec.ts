@@ -1148,11 +1148,20 @@ describe('el cronograma: las rutas (0.68.0)', () => {
     expect(paraGoyo.anticipo_monto, 'el dinero no se le enseña al contratista').toBeUndefined();
   });
 
-  it('una obra sin cronograma trae sus piezas (sin requerimientos), los proveedores con tipo y cero tareas', async () => {
+  it('una obra sin cronograma trae sus piezas (sin requerimientos), los proveedores con tipo, y cada pieza NACE con sus tres fases default (0.73.0)', async () => {
     const r = await q('mike', `/projects/${obraA}/cronograma`);
     expect(r.estado, JSON.stringify(r)).toBe(200);
     expect(r.calendario).toBe('lunes-sabado');
-    expect(r.tareas).toEqual([]);
+    /* 0.73.0 · Mike, 6-oct: «el cronograma se debe llenar en automático».
+     * Hasta 0.72.0 aquí venía `[]`; ahora cada pieza trae material 10,
+     * fabricación 24 e instalación 12 días, y el costo por tipo sobre el
+     * precio del ítem ligado (Isla/m1 es Mueble: 30 % y 30 %). */
+    const deM1 = r.tareas.filter((t: any) => t.element_id === m1);
+    expect(deM1.map((t: any) => [t.etapa, t.dias])).toEqual([['material', 10], ['fabricacion', 24], ['instalacion', 12]]);
+    const precioM1 = Number((await pedir('mike', `/orgs/${ORG}/items/${(await q('mike', `/elements/${m1}`)).element.item_id}`, { app: 'dash101' })).data.monto);
+    expect(deM1.map((t: any) => t.costo)).toEqual([Math.round(precioM1 * 0.3), Math.round(precioM1 * 0.3), 0]);
+    expect(r.items.find((i: any) => i.element_id === m1).costo).toBe(2 * Math.round(precioM1 * 0.3));
+    expect(r.contratistas.map((u: any) => u.nombre)).toContain(GENTE.goyo.name);
     expect(r.items.map((i: any) => i.element_id)).toContain(m1);
     expect(r.items.every((i: any) => i.type !== 'Requerimiento')).toBe(true);
     expect(r.proveedores.find((p: any) => p.id === herrero)?.tipo).toBe('servicios');
@@ -1296,6 +1305,82 @@ describe('el cronograma: fases adicionales con nombre y orden (0.69.0)', () => {
 });
 
 /* 0.70.0 · Sin los dos candados, la pieza corre desde hoy. */
+describe('el cronograma que se llena solo, con responsable y costo por fase, y los compromisos que nacen (0.73.0)', () => {
+  /* Mike, 6-oct: «cada ítem tiene fecha de entrega default de 6 semanas en
+   * sitio y 2 semanas de instalación (…) material 10 días, fabricación 4
+   * semanas, instalación 2 (…) responsable (proveedor o contratista) de cada
+   * fase (…) el costo de cada fase, así de ahí se pobla la lista de
+   * compromisos de gastos en el proyecto para la proyección del flujo». */
+  let puerta = '', itemPuerta = '', proyecto = '', goyoId = '';
+  const entrada = (t: any) => ({ id: t.id, element_id: t.element_id, seccion: t.seccion, orden: t.orden, etapa: t.etapa, nombre: t.nombre, pos: t.pos, dias: t.dias, proveedor_id: t.proveedor_id, contratista_id: t.contratista_id, costo: t.costo, depende_de: t.depende_de, inicio_fijo: t.inicio_fijo, notas: t.notas });
+
+  it('una pieza nueva recibe sus fases UNA vez: 10/24/12 días y el costo por tipo (Puerta: 35 % y 35 % del precio)', async () => {
+    const itemM1 = (await q('mike', `/elements/${m1}`)).element.item_id as string;
+    const it1 = (await pedir('mike', `/orgs/${ORG}/items/${itemM1}`, { app: 'dash101' })).data;
+    proyecto = it1.proyecto_id;
+    itemPuerta = (await pedir('mike', `/orgs/${ORG}/items`, { method: 'POST', json: { cliente_id: it1.cliente_id, proyecto_id: proyecto, nombre: 'Puerta del patio', monto: 1_000_00, cantidad: 1, estado: 'vendido', tipo: 'puerta' }, app: 'dash101' })).data.id;
+    const planos = (await q('mike', `/projects/${obraA}`)).plans;
+    const nueva = await q('mike', `/plans/${planos[0].id}/elements`, { method: 'POST', json: { op_id: crypto.randomUUID(), name: 'Puerta del patio', type: 'Puerta', x: 0.6, y: 0.6 } });
+    expect(nueva.estado, JSON.stringify(nueva)).toBe(200);
+    puerta = nueva.id;
+    expect((await pedir('mike', `/orgs/${ORG}/obras/${obraA}/items`, { method: 'POST', json: { ligar: [{ element_id: puerta, item_id: itemPuerta }] }, app: 'dash101' })).estado).toBe(200);
+    const antes = Number((await pedir('mike', `/orgs/${ORG}/proyectos/${proyecto}`, { app: 'dash101' })).data.compromiso);
+
+    const r = await q('mike', `/projects/${obraA}/cronograma`);
+    const mias = r.tareas.filter((t: any) => t.element_id === puerta);
+    expect(mias.map((t: any) => [t.etapa, t.dias, t.costo])).toEqual([['material', 10, 350_00], ['fabricacion', 24, 350_00], ['instalacion', 12, 0]]);
+    expect(r.items.find((i: any) => i.element_id === puerta).costo).toBe(700_00);
+    // Las dos fases con costo son dos compromisos del proyecto, con fecha: el material al arrancar, la mano de obra al terminar.
+    const partidas = (await pedir('mike', `/orgs/${ORG}/partidas?proyecto_id=${proyecto}`, { app: 'dash101' })).data.filas.filter((p: any) => p.item_id === itemPuerta);
+    expect(partidas.map((p: any) => [p.concepto, p.monto_acordado, p.obra_id]).sort()).toEqual([['PT-02 · Entrega de material', 350_00, obraA], ['PT-02 · Fabricación', 350_00, obraA]]);
+    const mat = mias.find((t: any) => t.etapa === 'material'); const fab = mias.find((t: any) => t.etapa === 'fabricacion');
+    expect(partidas.find((p: any) => p.tarea_id === mat.id).fecha_esperada).toBe(mat.inicio);
+    expect(partidas.find((p: any) => p.tarea_id === fab.id).fecha_esperada).toBe(fab.fin);
+    expect(partidas.every((p: any) => p.estado === 'pendiente' && p.monto_pagado === 0)).toBe(true);
+    const despues = Number((await pedir('mike', `/orgs/${ORG}/proyectos/${proyecto}`, { app: 'dash101' })).data.compromiso);
+    expect(despues - antes, 'el compromiso del proyecto creció con las dos fases').toBe(700_00);
+
+    // Se quitan las tres a mano y NO vuelven: las fases default se dan una sola vez.
+    const sinPuerta = r.tareas.filter((t: any) => t.element_id !== puerta).map(entrada);
+    expect((await q('mike', `/projects/${obraA}/cronograma`, { method: 'PUT', json: { tareas: sinPuerta } })).estado).toBe(200);
+    const otra = await q('mike', `/projects/${obraA}/cronograma`);
+    expect(otra.tareas.some((t: any) => t.element_id === puerta), 'lo que se quita se queda quitado').toBe(false);
+    expect((await pedir('mike', `/orgs/${ORG}/partidas?proyecto_id=${proyecto}`, { app: 'dash101' })).data.filas.some((p: any) => p.item_id === itemPuerta), 'y sus compromisos se fueron con ellas').toBe(false);
+    expect(Number((await pedir('mike', `/orgs/${ORG}/proyectos/${proyecto}`, { app: 'dash101' })).data.compromiso)).toBe(antes);
+  });
+
+  it('el responsable es un proveedor O un contratista; el costo se captura; dash101 no toca la partida que nace de la fase (409 del_cronograma)', async () => {
+    goyoId = (await q('goyo', '/me')).user.id;
+    const r0 = await q('mike', `/projects/${obraA}/cronograma`);
+    const base = r0.tareas.map(entrada);
+    const dos = await q('mike', `/projects/${obraA}/cronograma`, { method: 'PUT', json: { tareas: [...base, { element_id: puerta, seccion: '', etapa: 'instalacion', dias: 3, proveedor_id: base[0].proveedor_id || (r0.proveedores[0] || {}).id, contratista_id: goyoId, costo: 100 }] } });
+    expect(dos.estado).toBe(400); expect(dos.error).toMatch(/proveedor o contratista, no los dos/);
+    const ajeno = await q('mike', `/projects/${obraA}/cronograma`, { method: 'PUT', json: { tareas: [...base, { element_id: puerta, seccion: '', etapa: 'instalacion', dias: 3, contratista_id: 'nadie', costo: 100 }] } });
+    expect(ajeno.estado).toBe(400); expect(ajeno.error).toMatch(/contratista/);
+    const negativo = await q('mike', `/projects/${obraA}/cronograma`, { method: 'PUT', json: { tareas: [...base, { element_id: puerta, seccion: '', etapa: 'instalacion', dias: 3, costo: -1 }] } });
+    expect(negativo.estado).toBe(400); expect(negativo.error).toMatch(/costo/);
+
+    const r = await q('mike', `/projects/${obraA}/cronograma`, { method: 'PUT', json: { tareas: [...base, { element_id: puerta, seccion: '', etapa: 'instalacion', dias: 3, contratista_id: goyoId, costo: 1_200_00, nombre: 'Colgar la puerta' }] } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    const ins = r.tareas.find((t: any) => t.element_id === puerta);
+    expect([ins.contratista_id, ins.contratista_nombre, ins.proveedor_id, ins.costo]).toEqual([goyoId, GENTE.goyo.name, null, 1_200_00]);
+    const partida = (await pedir('mike', `/orgs/${ORG}/partidas?proyecto_id=${proyecto}`, { app: 'dash101' })).data.filas.find((p: any) => p.tarea_id === ins.id);
+    expect(partida, 'la fase con costo es un compromiso').toBeTruthy();
+    expect([partida.proveedor_id, partida.proveedor_nombre, partida.concepto, partida.monto_acordado, partida.fecha_esperada]).toEqual([null, GENTE.goyo.name, 'PT-02 · Colgar la puerta', 1_200_00, ins.fin]);
+    // dash101 no la edita ni la borra: se cambia en el cronograma.
+    const toca = await pedir('mike', `/orgs/${ORG}/partidas/${partida.id}`, { method: 'PATCH', json: { monto_acordado: 1 }, app: 'dash101' });
+    expect(toca.estado).toBe(409); expect(toca.error).toBe('del_cronograma');
+    expect((await pedir('mike', `/orgs/${ORG}/partidas/${partida.id}`, { method: 'DELETE', app: 'dash101' })).estado).toBe(409);
+    // Y con el costo en cero, el compromiso se va.
+    const cero = await q('mike', `/projects/${obraA}/cronograma`, { method: 'PUT', json: { tareas: r.tareas.map(entrada).map((t: any) => (t.element_id === puerta ? { ...t, costo: 0 } : t)) } });
+    expect(cero.estado, JSON.stringify(cero)).toBe(200);
+    expect((await pedir('mike', `/orgs/${ORG}/partidas/${partida.id}`, { app: 'dash101' })).estado).toBe(404);
+    // El Excel lleva responsable y costo.
+    const x = await pedir('mike', `/orgs/${ORG}/quell/projects/${obraA}/cronograma.xlsx`);
+    expect(x.estado).toBe(200);
+  });
+});
+
 describe('el cronograma: sin anticipo o sin diseño la pieza arranca hoy y se recorre sola (0.70.0)', () => {
   it('una pieza sin ítem de dash101 no puede tener anticipo: arranca hoy aunque la obra arranque antes; con diseño nada más, sigue igual', async () => {
     const planos = (await q('mike', `/projects/${obraA}`)).plans;

@@ -39,6 +39,9 @@ export interface EntornoQuell {
   /** 0.49.0: al levantar un requerimiento en una obra ligada, la suite le
    *  hace su ítem y lo mete al borrador de quote101 (org-db.ts). */
   LEVANTAR_REQUERIMIENTO?: (d: { element_id: string; obra_id: string; code: string; name: string; padre_item_id?: string | null }) => { item_id: string | null; cotizacion_id: string | null } | Promise<{ item_id: string | null; cotizacion_id: string | null }>;
+  /** 0.73.0: las partidas que nacen de las fases del cronograma mueven el
+   *  compromiso del proyecto de dash101 (org-db.ts recalcularProyecto). */
+  RECALCULAR_PROYECTO?: (proyecto_id: string) => void | Promise<void>;
 }
 
 export function atender(req: Request, env: EntornoQuell, url: URL, path: string): Promise<Response>;
