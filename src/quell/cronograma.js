@@ -59,6 +59,16 @@ export function costoDefault(type, precio, etapa) {
   const p = Number(precio) || 0;
   return p > 0 && pct > 0 ? Math.round((p * pct) / 100) : 0;
 }
+/** El precio de UNA pieza, en centavos. El `monto` de un ítem es el de todas
+ *  sus piezas (precio por pieza × cantidad), y cada pieza del plano es una
+ *  unidad: el costo default de sus fases sale de su parte, no del total
+ *  (defecto del 6-oct: una puerta de un ítem × 20 nacía con el costo de las
+ *  veinte). */
+export function precioPorPieza(monto, cantidad) {
+  const m = Number(monto) || 0;
+  const n = Math.max(1, Math.trunc(Number(cantidad) || 1));
+  return Math.round(m / n);
+}
 /** Las tres fases con las que nace una pieza: días default y costo por tipo. */
 export function fasesDefault({ element_id, type, precio }) {
   return ETAPAS.map((etapa) => ({

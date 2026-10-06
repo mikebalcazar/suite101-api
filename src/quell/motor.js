@@ -29,7 +29,7 @@ import { PREFIJOS, REQUERIMIENTO, esRequerimiento, siguienteCodigo } from './cod
  * celular con la fecha mal puesta diría que faltan tres días cuando ya
  * venció. */
 import { faltaParaEntrega } from '../../schema/tipos';
-import { ETAPAS, ETAPAS_VALIDAS, NOMBRE_ETAPA, fechaValida, hojasDelCronograma, laborablesEntre, programar, xmlDeProject, fasesDefault, fechaDePago, nombreDeFase } from './cronograma.js';
+import { ETAPAS, ETAPAS_VALIDAS, NOMBRE_ETAPA, fechaValida, hojasDelCronograma, laborablesEntre, programar, xmlDeProject, fasesDefault, fechaDePago, nombreDeFase, costoDefault, precioPorPieza } from './cronograma.js';
 import { TIPO_XLSX, xlsx } from '../xlsx';
 
 const JSON_H = { 'content-type': 'application/json; charset=utf-8' };
@@ -606,14 +606,14 @@ function candados(e, hoy) {
  * usuario quite después se queda quitado. Devuelve si cambió algo. */
 async function completarFases(env, pid) {
   const { results: sinFases } = await env.DB.prepare(
-    `SELECT e.id, e.type, it.monto AS precio FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id LEFT JOIN items it ON it.id = e.item_id
+    `SELECT e.id, e.type, it.monto, it.cantidad FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id LEFT JOIN items it ON it.id = e.item_id
       WHERE pl.project_id = ? AND e.type <> 'Requerimiento' AND COALESCE(e.fases_dadas, 0) = 0`).bind(pid).all();
   if (!sinFases.length) return false;
   const t0 = now();
   for (const e of sinFases) {
     const ya = await env.DB.prepare(`SELECT COUNT(*) AS n FROM quell_tareas WHERE element_id = ?`).bind(e.id).first();
     if (!Number(ya?.n || 0)) {
-      for (const f of fasesDefault({ element_id: e.id, type: e.type, precio: Number(e.precio || 0) })) {
+      for (const f of fasesDefault({ element_id: e.id, type: e.type, precio: precioPorPieza(e.monto, e.cantidad) })) {
         await env.DB.prepare(`INSERT INTO quell_tareas (id, project_id, element_id, seccion, orden, etapa, nombre, pos, dias, proveedor_id, contratista_id, costo, depende_de, inicio_fijo, notas, creado_at, actualizado_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
           .bind(uid(), pid, e.id, '', 0, f.etapa, null, f.pos, f.dias, null, null, f.costo, null, null, null, t0, t0).run();
       }
@@ -715,6 +715,66 @@ async function leerCronograma(env, pid, { completar = true } = {}) {
   if (completadas) await sincronizarPartidas(env, pid, salida);
   return salida;
 }
+/* 0.74.0 · Poblar los costos default de lo que ya estaba (Mike, 6-oct:
+ * «necesito que pobles por mí todos los ítems que tenemos en alcance, que no
+ * tengan precio, con los costos predeterminados»). Corre UNA vez por empresa,
+ * al arrancar después de la migración 0036 (org-db.ts, `correrPendientes`):
+ *
+ *   1. Toda obra recibe sus fases default donde falten, lo mismo que pasaría
+ *      al abrir su cronograma (`completarFases`): así sus compromisos entran
+ *      al flujo sin que nadie tenga que abrir cada obra.
+ *   2. Cada pieza ligada a un ítem EN ALCANCE (vendido) con precio: por
+ *      etapa —material y fabricación—, si ninguna fase de esa etapa tiene
+ *      costo, la primera recibe el default por tipo sobre el precio de UNA
+ *      pieza. Si alguna ya tiene costo, se respeta: lo capturado no se toca.
+ *      La instalación no tiene porcentaje y se queda como esté.
+ *   3. El defecto del mismo día: con cantidad > 1, una fase cuyo costo es
+ *      exactamente el default calculado sobre el TOTAL del ítem se corrige
+ *      al de una pieza.
+ *   4. Las obras que cambiaron rehacen sus compromisos (partidas con fecha)
+ *      y su proyecto se recalcula.
+ *
+ * Devuelve lo que hizo, para dejarlo anotado. */
+export async function poblarCostosDefault(env) {
+  const hecho = { obras: 0, fases_nuevas: 0, fases_con_costo: 0, fases_corregidas: 0 };
+  const { results: obras } = await env.DB.prepare(`SELECT id FROM quell_projects ORDER BY id`).all();
+  for (const o of obras) {
+    const antes = Number((await env.DB.prepare(`SELECT COUNT(*) AS n FROM quell_tareas WHERE project_id = ?`).bind(o.id).first())?.n || 0);
+    let cambio = await completarFases(env, o.id);
+    if (cambio) hecho.fases_nuevas += Number((await env.DB.prepare(`SELECT COUNT(*) AS n FROM quell_tareas WHERE project_id = ?`).bind(o.id).first())?.n || 0) - antes;
+    const { results: piezas } = await env.DB.prepare(
+      `SELECT e.id, e.type, it.monto, it.cantidad FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id JOIN items it ON it.id = e.item_id
+        WHERE pl.project_id = ? AND e.type <> 'Requerimiento' AND it.estado = 'vendido' AND it.monto > 0`).bind(o.id).all();
+    for (const e of piezas) {
+      const { results: fases } = await env.DB.prepare(
+        `SELECT id, etapa, costo FROM quell_tareas WHERE element_id = ? ORDER BY orden, seccion, pos`).bind(e.id).all();
+      const cantidad = Math.max(1, Math.trunc(Number(e.cantidad) || 1));
+      const precio = precioPorPieza(e.monto, cantidad);
+      for (const etapa of ['material', 'fabricacion']) {
+        const deEtapa = fases.filter((f) => f.etapa === etapa);
+        const bien = costoDefault(e.type, precio, etapa);
+        if (!deEtapa.length || !bien) continue;
+        const inflado = cantidad > 1 ? costoDefault(e.type, Number(e.monto), etapa) : 0;
+        for (const f of deEtapa) {
+          if (inflado && inflado !== bien && Number(f.costo) === inflado) {
+            await env.DB.prepare(`UPDATE quell_tareas SET costo = ?, actualizado_at = ? WHERE id = ?`).bind(bien, now(), f.id).run();
+            f.costo = bien; hecho.fases_corregidas++; cambio = true;
+          }
+        }
+        if (deEtapa.every((f) => !Number(f.costo))) {
+          await env.DB.prepare(`UPDATE quell_tareas SET costo = ?, actualizado_at = ? WHERE id = ?`).bind(bien, now(), deEtapa[0].id).run();
+          deEtapa[0].costo = bien; hecho.fases_con_costo++; cambio = true;
+        }
+      }
+    }
+    if (cambio) {
+      hecho.obras++;
+      await sincronizarPartidas(env, o.id, await leerCronograma(env, o.id, { completar: false }));
+    }
+  }
+  return hecho;
+}
+
 export async function atender(req, env, url, path) {
   const m = req.method;
   const seg = path.replace(/^\/quell\/?/, '').split('/').filter(Boolean); // después de /quell/
