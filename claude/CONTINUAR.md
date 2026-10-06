@@ -419,6 +419,17 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **El flujo proyectado por bloques (semana, quincena, mes, trimestre, semestre, año) con lo planeado de cada bloque, y la nómina programada (6-oct, API 0.71.0 #249, dash101 #140).**
+  Mike: «presentar por bloques de tiempo (…) ver todos los gastos y los
+  cobros que están planeados para esa semana (…) programar la nómina para
+  que también se considere en los gastos». Motor puro en
+  dash101/lib/proyeccion.ts (`proyectar`, `lapsos`, `planear`); entran
+  OPEX, nómina programada (un corte abierto sustituye la estimación) y
+  órdenes pendientes por fecha máxima; el primer bloque cuenta desde HOY;
+  un bloque nunca se parte. API: GET/PUT /orgs/:o/nomina/programa en
+  `ajustes` app `nomina` (fuera del CRUD), permiso de la raya. Los cobros
+  de proyectos NO tienen fecha todavía: se le preguntó a Mike cómo
+  fecharlos. Muro `2026-10-06-1437-jr-el-flujo-por-bloques.md`.
 - **dash101: el panel del ítem a la derecha, lo que se ve en quell, desde cualquier lista, con «Abrir en quell101» (6-oct, dash101 #139).**
   Mike: «me abra la barra lateral de detalle de los ítems cuando doy click
   sobre uno o sobre el ícono de info. No importa en dónde esté viendo el
