@@ -17,7 +17,15 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.75.0 (LOS TIEMPOS DEFAULT EN LO QUE YA ESTABA. Mike,
+ * Versión del contrato: 0.76.0 (EL AVANCE DE OBRA POR ÍTEM, PARA LA LISTA DE
+ * DASH101. Mike, 6-oct, con la lista de quell101 enfrente: «en dash quiero
+ * que la lista de ítems tenga el mismo estilo». `GET /orgs/:o/quell/
+ * avance-items?proyecto_id=` (sólo quien dirige) devuelve el catálogo de
+ * etapas y, por ítem del proyecto, `AvanceDeItem`: cuántas piezas tiene en
+ * algún plano, la suma de etapas cumplidas, la MENOR (la etapa en la que va
+ * el ítem es la de su pieza más atrasada) y sus pendientes de punchlist.
+ * Sin cambios de forma en lo demás). Antes:
+ * 0.75.0 (LOS TIEMPOS DEFAULT EN LO QUE YA ESTABA. Mike,
  * 6-oct: «ponla también todos los ítems que hay ahorita en alcance con los
  * defaults de tiempos»; escogió con botones «sólo donde falten». La
  * migración org 0037 deja el pendiente `tiempos_default` en
@@ -1178,7 +1186,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.75.0';
+export const VERSION_CONTRATO = '0.76.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -2187,6 +2195,24 @@ export type AlcanceItem = 'dentro' | 'fuera';
  */
 export function alcanceDeItem(item: { estado?: string | null }): AlcanceItem {
   return String(item.estado ?? 'cotizado') === 'vendido' ? 'dentro' : 'fuera';
+}
+
+/** El avance de obra de UN ítem (0.76.0, `GET /orgs/:o/quell/avance-items`).
+ *  Un ítem de cantidad 20 son 20 piezas: `hechas` suma las etapas cumplidas
+ *  de todas, y `menor` es la de la pieza más atrasada. */
+export interface AvanceDeItem {
+  piezas: number;
+  hechas: number;
+  menor: number;
+  en_punchlist: number;
+  n_pend: number;
+  n_proc: number;
+  n_total: number;
+}
+/** La respuesta de `GET /orgs/:o/quell/avance-items?proyecto_id=`. */
+export interface AvanceDeItems {
+  etapas: { clave: string; nombre: string; abre_punchlist: boolean }[];
+  items: Record<string, AvanceDeItem>;
 }
 
 /** Un renglón de la bitácora del alcance (`GET /orgs/:o/items/:id/alcance`). */

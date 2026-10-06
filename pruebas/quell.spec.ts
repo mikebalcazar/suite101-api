@@ -1422,3 +1422,36 @@ describe('el cronograma: sin anticipo o sin diseño la pieza arranca hoy y se re
     expect(k.anticipo_monto).toBe(0);
   });
 });
+
+describe('el avance de obra por ítem, para la lista de dash101 (0.76.0)', () => {
+  /* Mike, 6-oct, con la lista de quell101 enfrente: «en dash quiero que la
+   * lista de ítems tenga el mismo estilo». Esa lista enseña por pieza las
+   * etapas cumplidas; dash101 lista ítems, así que pide el avance de todos
+   * los ítems de un proyecto de un jalón. */
+  it('por ítem: piezas, etapas cumplidas, la menor, y el catálogo de etapas; se mueve al marcar una etapa', async () => {
+    const itemM1 = (await q('mike', `/elements/${m1}`)).element.item_id as string;
+    const proyecto = (await pedir('mike', `/orgs/${ORG}/items/${itemM1}`, { app: 'dash101' })).data.proyecto_id as string;
+    const antes = await q('mike', `/avance-items?proyecto_id=${proyecto}`);
+    expect(antes.estado, JSON.stringify(antes)).toBe(200);
+    expect(antes.etapas.length).toBeGreaterThan(0);
+    expect(antes.etapas.every((x: any) => typeof x.clave === 'string' && typeof x.nombre === 'string')).toBe(true);
+    const a0 = antes.items[itemM1];
+    expect(a0, 'el ítem de la pieza sale').toBeTruthy();
+    expect(a0.piezas).toBeGreaterThanOrEqual(1);
+    expect(a0.menor).toBeLessThanOrEqual(a0.hechas);
+    const total = antes.etapas.length;
+    // Se marca la siguiente etapa que le falte (o se desmarca la última si ya llevaba todas).
+    const avanza = a0.menor < total;
+    const clave = avanza ? antes.etapas[a0.menor].clave : antes.etapas[total - 1].clave;
+    const marca = await q('mike', `/elements/${m1}/etapas`, { method: 'POST', json: { clave, hecha: avanza, op_id: crypto.randomUUID() } });
+    expect(marca.estado, JSON.stringify(marca)).toBe(200);
+    const a1 = (await q('mike', `/avance-items?proyecto_id=${proyecto}`)).items[itemM1];
+    if (avanza) expect(a1.hechas, 'marcar una etapa sube el avance del ítem').toBeGreaterThan(a0.hechas);
+    else expect(a1.hechas, 'desmarcar la última lo baja').toBeLessThan(a0.hechas);
+  });
+
+  it('es sólo para quien dirige, y pide el proyecto', async () => {
+    expect((await q('goyo', `/avance-items?proyecto_id=x`)).estado).toBe(403);
+    expect((await q('mike', `/avance-items`)).estado).toBe(400);
+  });
+});
