@@ -17,7 +17,24 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.72.0 (EL PLAN DE PAGOS DEL PROYECTO. Mike, 6-oct, con
+ * Versión del contrato: 0.73.0 (EL CRONOGRAMA QUE SE LLENA SOLO, CON RESPONSABLE Y
+ * COSTO POR FASE, Y LOS COMPROMISOS QUE DE AHÍ NACEN. Mike, 6-oct: «cada ítem
+ * tiene fecha de entrega default de 6 semanas en sitio y 2 semanas de
+ * instalación (…) material 10 días, fabricación 4 semanas, instalación 2 (…)
+ * el cronograma se debe llenar en automático (…) responsable (proveedor o
+ * contratista) de cada fase (…) el costo de cada fase, así de ahí se pobla
+ * la lista de compromisos». Migración org 0035: quell_tareas.contratista_id y
+ * .costo (centavos), quell_elements.fases_dadas, partidas.tarea_id/obra_id/
+ * fecha_esperada. Una pieza sin fases las recibe solas UNA vez al abrir el
+ * cronograma (10/24/12 días; costo por tipo: Mueble 30/30, Puerta 35/35,
+ * Servicio 5/55, Acabado 40/20 % del precio del ítem, material y mano de
+ * obra en fabricación). Cada fase con costo de una pieza ligada a un ítem es
+ * una partida de su proyecto (monto = costo, fecha_esperada = inicio del
+ * material o fin de las demás), que dash101 no edita ni borra (409
+ * del_cronograma). GET trae `contratistas` y `costo` por pieza y total.)
+ * Antes:
+ *
+ * 0.72.0 (EL PLAN DE PAGOS DEL PROYECTO. Mike, 6-oct, con
  * botones: «plan de pagos por proyecto». Migración org 0034: tabla
  * `plan_pagos` {proyecto_id, concepto, fecha AAAA-MM-DD, monto en centavos}
  * por el CRUD genérico, la escribe dash101, filtro por proyecto_id, orden
@@ -1138,7 +1155,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.72.0';
+export const VERSION_CONTRATO = '0.73.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1639,6 +1656,10 @@ export interface TareaEntrada {
   /** Laborables, de 1 en adelante. */
   dias: number;
   proveedor_id?: string | null;
+  /** 0.73.0: el responsable cuando es un contratista de la obra (usuario de quell101 con rol 'con'). Proveedor o contratista, no los dos. */
+  contratista_id?: string | null;
+  /** 0.73.0: lo que cuesta la fase, en CENTAVOS. Nace del porcentaje por tipo de ítem; se corrige a mano. */
+  costo?: number;
   /** El id (o el id provisional) de la tarea que tiene que terminar antes. */
   depende_de?: string | null;
   inicio_fijo?: string | null;
@@ -1663,6 +1684,8 @@ export interface TareaCronograma {
   id: string; project_id: string; element_id: string; code: string; name: string;
   seccion: string; orden: number; etapa: EtapaCronograma; nombre: string | null; pos: number; dias: number;
   proveedor_id: string | null; proveedor_nombre: string | null; proveedor_tipo: TipoProveedor | null;
+  /** 0.73.0 */
+  contratista_id: string | null; contratista_nombre: string | null; costo: number;
   depende_de: string | null; inicio_fijo: string | null; notas: string | null;
   /** Calculados: AAAA-MM-DD, y las tareas de las que depende (implícitas y explícitas). */
   inicio: string; fin: string; previas: string[];
@@ -1674,9 +1697,13 @@ export interface Cronograma {
   dias_objetivo: number | null; fin: string; dias_laborables: number; excede: boolean;
   calendario: 'lunes-sabado';
   etapas: Array<{ clave: EtapaCronograma; nombre: string }>;
-  items: Array<{ element_id: string; code: string; name: string; type: string; plan_name: string; padre_id: string | null; inicio: string | null; fin: string | null; dias: number; candados: CandadosPieza; tareas: TareaCronograma[] }>;
+  items: Array<{ element_id: string; code: string; name: string; type: string; plan_name: string; padre_id: string | null; inicio: string | null; fin: string | null; dias: number; candados: CandadosPieza; /** 0.73.0: la suma de los costos de sus fases, centavos. */ costo: number; tareas: TareaCronograma[] }>;
   tareas: TareaCronograma[];
   proveedores: Array<Pick<Proveedor, 'id' | 'nombre' | 'tipo'>>;
+  /** 0.73.0: los contratistas vivos de la obra, para «responsable». */
+  contratistas: Array<{ id: string; nombre: string; empresa: string | null }>;
+  /** 0.73.0: la suma de los costos de todas las fases, centavos. */
+  costo: number;
 }
 
 export interface Personal {
@@ -1733,6 +1760,12 @@ export interface Partida {
   /** centavos */
   monto_pagado: number;
   estado: 'pendiente' | 'parcial' | 'pagado';
+  /** 0.73.0 · Si nace de una fase del cronograma de quell101: de qué fase y
+   *  de qué obra, y cuándo se espera pagarla (AAAA-MM-DD). Las escribe el
+   *  motor; dash101 no edita ni borra esa partida (409 del_cronograma). */
+  tarea_id: string | null;
+  obra_id: string | null;
+  fecha_esperada: string | null;
   creado_at: string;
   actualizado_at: string | null;
 }

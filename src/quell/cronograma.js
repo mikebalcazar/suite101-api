@@ -35,6 +35,41 @@ export const posDe = (t) => (Number.isInteger(t.pos) ? t.pos : ETAPAS.indexOf(t.
 /** Qué tipo de proveedor le toca a cada etapa: lo que se compra o quien lo hace. */
 export const TIPO_PROVEEDOR_DE = { material: 'materiales', fabricacion: 'servicios', instalacion: 'servicios', otra: 'servicios' };
 
+/* ─────────────── las fases default (0.73.0) ───────────────
+ *
+ * Mike, 6-oct: «cada ítem tiene fecha de entrega default de 6 semanas en
+ * sitio y 2 semanas de instalación (…) compra de material 10 días, fabricación
+ * 4 semanas aprox, y de ahí las 2 semanas de instalación». En días laborables
+ * de lunes a sábado: 10 + 24 = 34 (las seis semanas en sitio) y 12 más de
+ * instalación. Y los costos, como porcentaje del precio del ítem, por tipo:
+ * «Muebles 30% materiales, 30% mano de obra; Puertas 35/35; Servicios 5%
+ * insumos, 55% mano de obra; Acabados 40/20». La mano de obra cae en la fase
+ * de fabricación; la instalación nace en cero y se captura a mano. */
+export const DIAS_DEFAULT = { material: 10, fabricacion: 24, instalacion: 12 };
+export const PORCENTAJES = {
+  Mueble: { material: 30, fabricacion: 30 },
+  Puerta: { material: 35, fabricacion: 35 },
+  Servicio: { material: 5, fabricacion: 55 },
+  Acabado: { material: 40, fabricacion: 20 },
+};
+/** El costo default de una etapa, en centavos, para una pieza de `type` con
+ *  ese precio (centavos). Sin tipo conocido o sin precio, cero. */
+export function costoDefault(type, precio, etapa) {
+  const pct = (PORCENTAJES[type] || {})[etapa] || 0;
+  const p = Number(precio) || 0;
+  return p > 0 && pct > 0 ? Math.round((p * pct) / 100) : 0;
+}
+/** Las tres fases con las que nace una pieza: días default y costo por tipo. */
+export function fasesDefault({ element_id, type, precio }) {
+  return ETAPAS.map((etapa) => ({
+    element_id, seccion: '', orden: 0, etapa, nombre: null, pos: ETAPAS.indexOf(etapa) * 10,
+    dias: DIAS_DEFAULT[etapa], proveedor_id: null, contratista_id: null, costo: costoDefault(type, precio, etapa),
+    depende_de: null, inicio_fijo: null, notas: null,
+  }));
+}
+/** Cuándo se espera pagar una fase: el material al arrancar; lo demás al terminar. */
+export const fechaDePago = (t) => (t.etapa === 'material' ? t.inicio : t.fin);
+
 /* ─────────────── el calendario ─────────────── */
 const aFecha = (s) => new Date(`${s}T00:00:00Z`);
 const aTexto = (d) => d.toISOString().slice(0, 10);
@@ -121,10 +156,10 @@ export function programar(tareas, inicio, pisos = new Map()) {
 /* ─────────────── el Excel ─────────────── */
 /** Las hojas para `xlsx()` (src/xlsx.ts): una con las tareas y otra con el resumen. */
 export function hojasDelCronograma(c) {
-  const filas = [['Código', 'Pieza', 'Sección', 'Etapa', 'Proveedor', 'Días', 'Inicio', 'Fin', 'Después de', 'Notas']];
+  const filas = [['Código', 'Pieza', 'Sección', 'Etapa', 'Responsable', 'Costo', 'Días', 'Inicio', 'Fin', 'Después de', 'Notas']];
   const nombreDe = new Map(c.tareas.map((t) => [t.id, `${t.code || ''} ${t.seccion ? t.seccion + ' · ' : ''}${nombreDeFase(t)}`.trim()]));
   for (const t of c.tareas) {
-    filas.push([t.code || '', t.name || '', t.seccion || '', nombreDeFase(t), t.proveedor_nombre || '', t.dias, t.inicio, t.fin, t.depende_de ? (nombreDe.get(t.depende_de) || '') : '', t.notas || '']);
+    filas.push([t.code || '', t.name || '', t.seccion || '', nombreDeFase(t), t.proveedor_nombre || t.contratista_nombre || '', Number(t.costo || 0) / 100, t.dias, t.inicio, t.fin, t.depende_de ? (nombreDe.get(t.depende_de) || '') : '', t.notas || '']);
   }
   const resumen = [
     ['Obra', c.nombre || ''],

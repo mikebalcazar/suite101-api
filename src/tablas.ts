@@ -221,6 +221,10 @@ export const DEFS: Record<Tabla, Def> = {
     cols: {
       ...IDENT, proyecto_id: 'texto', item_id: 'texto', proveedor_id: 'texto', proveedor_nombre: 'texto',
       concepto: 'texto', monto_acordado: 'dinero', monto_pagado: 'dinero', estado: 'texto', actualizado_at: 'texto',
+      /* 0035 · La partida que nace de una fase del cronograma (0.73.0): de
+       * qué fase, de qué obra y cuándo se espera pagarla. Las escribe el
+       * motor de quell; ninguna app (CACHES). */
+      tarea_id: 'texto', obra_id: 'texto', fecha_esperada: 'texto',
     },
     requeridos: ['proyecto_id'],
     filtros: ['proyecto_id', 'item_id', 'proveedor_id', 'estado'],

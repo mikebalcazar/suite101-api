@@ -454,6 +454,15 @@ async function anticipoQueNoCuadra(c: Ctx, datos: Record<string, unknown>, salvo
   return null;
 }
 
+/** 0.73.0 · Una partida que nace de una fase del cronograma se edita y se
+ *  quita en el cronograma de quell101, no aquí: si dash101 la cambiara, el
+ *  siguiente guardado del cronograma la pisaría y nadie sabría cuál vale. */
+async function partidaDelCronograma(c: Ctx, id: string): Promise<Response | null> {
+  const fila = await stub(c).obtener('partidas', id);
+  if (fila && fila.tarea_id) return err(c, 'del_cronograma', 409, { motivo: 'esta partida nace de una fase del cronograma de quell101: el costo, el responsable y la fecha se cambian ahí', tarea_id: fila.tarea_id, obra_id: fila.obra_id ?? null });
+  return null;
+}
+
 /** 0.72.0 · Una parcialidad del plan de pagos (Mike, 6-oct, con botones:
  *  «plan de pagos por proyecto»). Lo que se revisa: que el proyecto exista,
  *  que la fecha sea un día de verdad, que el monto sean centavos enteros
@@ -1612,6 +1621,7 @@ rutas.patch('/:o/:tabla/:id', async (c) => {
   }
   const ajeno = ajusteAjeno(c, tabla, c.req.param('id')!);
   if (ajeno) return ajeno;
+  if (tabla === 'partidas') { const del = await partidaDelCronograma(c, c.req.param('id')!); if (del) return del; }
 
   const datos = sinNegocio(await c.req.json<Record<string, unknown>>().catch(() => ({}) as never));
   const veredicto = revisarEscritura(tabla, c.get('app'), Object.keys(datos));
@@ -1656,6 +1666,7 @@ rutas.delete('/:o/:tabla/:id', async (c) => {
   if ((APPEND_ONLY as string[]).includes(tabla)) return err(c, 'sin_permiso', 403, { motivo: `${tabla} es append-only` });
   const ajeno = ajusteAjeno(c, tabla, c.req.param('id')!);
   if (ajeno) return ajeno;
+  if (tabla === 'partidas') { const del = await partidaDelCronograma(c, c.req.param('id')!); if (del) return del; }
 
   const veredicto = revisarEscritura(tabla, c.get('app'), []);
   if (!veredicto.ok) return err(c, veredicto.error, 403, veredicto.detalle);

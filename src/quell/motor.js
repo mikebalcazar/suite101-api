@@ -29,7 +29,7 @@ import { PREFIJOS, REQUERIMIENTO, esRequerimiento, siguienteCodigo } from './cod
  * celular con la fecha mal puesta diría que faltan tres días cuando ya
  * venció. */
 import { faltaParaEntrega } from '../../schema/tipos';
-import { ETAPAS, ETAPAS_VALIDAS, NOMBRE_ETAPA, fechaValida, hojasDelCronograma, laborablesEntre, programar, xmlDeProject } from './cronograma.js';
+import { ETAPAS, ETAPAS_VALIDAS, NOMBRE_ETAPA, fechaValida, hojasDelCronograma, laborablesEntre, programar, xmlDeProject, fasesDefault, fechaDePago, nombreDeFase } from './cronograma.js';
 import { TIPO_XLSX, xlsx } from '../xlsx';
 
 const JSON_H = { 'content-type': 'application/json; charset=utf-8' };
@@ -599,7 +599,82 @@ function candados(e, hoy) {
   return { anticipo, anticipo_monto: Number(e.anticipo_monto || 0), diseno, ligado, listo, arranque };
 }
 
-async function leerCronograma(env, pid) {
+/* 0.73.0 · Una pieza sin fases las recibe solas, UNA vez (Mike, 6-oct: «el
+ * cronograma se debe llenar en automático con esta info»): material 10 días,
+ * fabricación 24, instalación 12, con el costo por tipo de ítem sobre el
+ * precio del ítem ligado. `fases_dadas` recuerda que ya se dieron: lo que el
+ * usuario quite después se queda quitado. Devuelve si cambió algo. */
+async function completarFases(env, pid) {
+  const { results: sinFases } = await env.DB.prepare(
+    `SELECT e.id, e.type, it.monto AS precio FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id LEFT JOIN items it ON it.id = e.item_id
+      WHERE pl.project_id = ? AND e.type <> 'Requerimiento' AND COALESCE(e.fases_dadas, 0) = 0`).bind(pid).all();
+  if (!sinFases.length) return false;
+  const t0 = now();
+  for (const e of sinFases) {
+    const ya = await env.DB.prepare(`SELECT COUNT(*) AS n FROM quell_tareas WHERE element_id = ?`).bind(e.id).first();
+    if (!Number(ya?.n || 0)) {
+      for (const f of fasesDefault({ element_id: e.id, type: e.type, precio: Number(e.precio || 0) })) {
+        await env.DB.prepare(`INSERT INTO quell_tareas (id, project_id, element_id, seccion, orden, etapa, nombre, pos, dias, proveedor_id, contratista_id, costo, depende_de, inicio_fijo, notas, creado_at, actualizado_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .bind(uid(), pid, e.id, '', 0, f.etapa, null, f.pos, f.dias, null, null, f.costo, null, null, null, t0, t0).run();
+      }
+    }
+    await env.DB.prepare(`UPDATE quell_elements SET fases_dadas = 1 WHERE id = ?`).bind(e.id).run();
+  }
+  return true;
+}
+
+/* 0.73.0 · Los compromisos que nacen de las fases (Mike, 6-oct: «así de ahí
+ * se pobla la lista de compromisos de gastos en el proyecto para la
+ * proyección del flujo»). Cada fase con costo de una pieza LIGADA a un ítem
+ * de dash101 es una partida de su proyecto: con el responsable, el concepto
+ * «código · fase», el costo como monto acordado y la fecha en que se espera
+ * pagarla (material al arrancar, lo demás al terminar). Se escribe por
+ * `tarea_id`: la fase manda, la partida la sigue; sin fase (o sin costo) la
+ * partida se va. Las partidas capturadas a mano en dash101 no se tocan. */
+async function sincronizarPartidas(env, pid, c) {
+  const { results: ligadas } = await env.DB.prepare(
+    `SELECT e.id AS element_id, e.code, it.id AS item_id, it.proyecto_id FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id JOIN items it ON it.id = e.item_id
+      WHERE pl.project_id = ? AND it.proyecto_id IS NOT NULL`).bind(pid).all();
+  const porPieza = new Map(ligadas.map((l) => [l.element_id, l]));
+  const { results: provs } = await env.DB.prepare(`SELECT id, nombre FROM proveedores`).all();
+  const proveedores = new Map(provs.map((p) => [p.id, p.nombre]));
+  const { results: cons } = await env.DB.prepare(`SELECT id, name FROM quell_users WHERE role = 'con'`).all();
+  const contratistas = new Map(cons.map((u) => [u.id, u.name]));
+  const { results: existentes } = await env.DB.prepare(`SELECT id, tarea_id, proyecto_id FROM partidas WHERE obra_id = ?`).bind(pid).all();
+  const porTarea = new Map(existentes.map((p) => [p.tarea_id, p]));
+  const tocados = new Set(existentes.map((p) => p.proyecto_id).filter(Boolean));
+  const vivas = new Set();
+  const t0 = now();
+  for (const t of c.tareas) {
+    const liga = porPieza.get(t.element_id);
+    const costo = Number(t.costo || 0);
+    if (!liga || costo <= 0) continue;
+    vivas.add(t.id);
+    const concepto = `${liga.code || ''} · ${nombreDeFase(t)}${t.seccion ? ' (' + t.seccion + ')' : ''}`.trim();
+    const proveedor_id = t.proveedor_id || null;
+    const proveedor_nombre = proveedor_id ? (proveedores.get(proveedor_id) || null) : (t.contratista_id ? contratistas.get(t.contratista_id) || null : null);
+    const fecha = fechaDePago(t) || null;
+    tocados.add(liga.proyecto_id);
+    const previa = porTarea.get(t.id);
+    if (previa) {
+      await env.DB.prepare(`UPDATE partidas SET proyecto_id = ?, item_id = ?, proveedor_id = ?, proveedor_nombre = ?, concepto = ?, monto_acordado = ?, fecha_esperada = ?, actualizado_at = ? WHERE id = ?`)
+        .bind(liga.proyecto_id, liga.item_id, proveedor_id, proveedor_nombre, concepto, costo, fecha, t0, previa.id).run();
+    } else {
+      await env.DB.prepare(`INSERT INTO partidas (id, proyecto_id, item_id, proveedor_id, proveedor_nombre, concepto, monto_acordado, monto_pagado, estado, tarea_id, obra_id, fecha_esperada, creado_at, actualizado_at) VALUES (?,?,?,?,?,?,?,0,'pendiente',?,?,?,?,?)`)
+        .bind(uid(), liga.proyecto_id, liga.item_id, proveedor_id, proveedor_nombre, concepto, costo, t.id, pid, fecha, t0, t0).run();
+    }
+  }
+  for (const p of existentes) {
+    if (vivas.has(p.tarea_id)) continue;
+    await env.DB.prepare(`UPDATE ordenes SET partida_id = NULL WHERE partida_id = ?`).bind(p.id).run();
+    await env.DB.prepare(`UPDATE movimientos SET partida_id = NULL WHERE partida_id = ?`).bind(p.id).run();
+    await env.DB.prepare(`DELETE FROM partidas WHERE id = ?`).bind(p.id).run();
+  }
+  if (env.RECALCULAR_PROYECTO) for (const proyecto of tocados) await env.RECALCULAR_PROYECTO(proyecto);
+}
+
+async function leerCronograma(env, pid, { completar = true } = {}) {
+  const completadas = completar ? await completarFases(env, pid) : false;
   const project = await env.DB.prepare(`SELECT id, name, cronograma_inicio, cronograma_dias FROM quell_projects WHERE id = ?`).bind(pid).first();
   const { results: piezas } = await env.DB.prepare(
     `SELECT e.id, e.code, e.name, e.type, e.plan_id, e.padre_id, e.item_id, e.diseno_definido, pl.name AS plan_name,
@@ -607,10 +682,12 @@ async function leerCronograma(env, pid) {
        FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id LEFT JOIN items it ON it.id = e.item_id
       WHERE pl.project_id = ? AND e.type <> 'Requerimiento' ORDER BY e.code`).bind(pid).all();
   const { results: crudas } = await env.DB.prepare(
-    `SELECT t.*, e.code, e.name, p.nombre AS proveedor_nombre, p.tipo AS proveedor_tipo
-       FROM quell_tareas t JOIN quell_elements e ON e.id = t.element_id LEFT JOIN proveedores p ON p.id = t.proveedor_id
+    `SELECT t.*, e.code, e.name, p.nombre AS proveedor_nombre, p.tipo AS proveedor_tipo, u.name AS contratista_nombre
+       FROM quell_tareas t JOIN quell_elements e ON e.id = t.element_id LEFT JOIN proveedores p ON p.id = t.proveedor_id LEFT JOIN quell_users u ON u.id = t.contratista_id
       WHERE t.project_id = ? ORDER BY e.code, t.orden, t.seccion, t.pos`).bind(pid).all();
   const { results: proveedores } = await env.DB.prepare(`SELECT id, nombre, tipo FROM proveedores ORDER BY nombre_norm`).all();
+  // 0.73.0 · Los contratistas de la obra, para «responsable» de una fase.
+  const { results: contratistas } = await env.DB.prepare(`SELECT id, name AS nombre, company AS empresa FROM quell_users WHERE role = 'con' AND active = 1 ORDER BY name`).all();
   const inicio = project.cronograma_inicio || now().slice(0, 10);
   /* Los candados (0.70.0): cada pieza arranca cuando tiene anticipo Y diseño
    * definido, en la fecha más tardía de los dos; sin alguno, arranca HOY y
@@ -625,14 +702,18 @@ async function leerCronograma(env, pid) {
     const ts = porPieza.get(e.id) || [];
     const ini = ts.length ? ts.reduce((m, t) => (m < t.inicio ? m : t.inicio), ts[0].inicio) : null;
     const fin = ts.length ? ts.reduce((m, t) => (m > t.fin ? m : t.fin), ts[0].fin) : null;
-    return { element_id: e.id, code: e.code, name: e.name, type: e.type, plan_name: e.plan_name, padre_id: e.padre_id, inicio: ini, fin, dias: ini ? laborablesEntre(ini, fin) : 0, candados: candadosDe.get(e.id), tareas: ts };
+    return { element_id: e.id, code: e.code, name: e.name, type: e.type, plan_name: e.plan_name, padre_id: e.padre_id, inicio: ini, fin, dias: ini ? laborablesEntre(ini, fin) : 0, candados: candadosDe.get(e.id), costo: ts.reduce((s, t) => s + Number(t.costo || 0), 0), tareas: ts };
   });
   const objetivo = project.cronograma_dias ?? null;
-  return {
+  const salida = {
     id: pid, nombre: project.name, inicio: c.inicio, inicio_guardado: project.cronograma_inicio || null, dias_objetivo: objetivo, fin: c.fin, dias_laborables: c.dias_laborables,
     excede: objetivo != null && c.dias_laborables > objetivo, calendario: 'lunes-sabado', etapas: ETAPAS.map((k) => ({ clave: k, nombre: NOMBRE_ETAPA[k] })),
-    items, tareas: c.tareas, proveedores,
+    costo: c.tareas.reduce((s, t) => s + Number(t.costo || 0), 0),
+    items, tareas: c.tareas, proveedores, contratistas,
   };
+  // Las fases que acaban de nacer ya tienen fechas: sus compromisos también.
+  if (completadas) await sincronizarPartidas(env, pid, salida);
+  return salida;
 }
 export async function atender(req, env, url, path) {
   const m = req.method;
@@ -824,6 +905,8 @@ export async function atender(req, env, url, path) {
         const delProyecto = new Set(piezas.map((e) => e.id));
         const { results: provs } = await env.DB.prepare(`SELECT id FROM proveedores`).all();
         const proveedores = new Set(provs.map((p) => p.id));
+        const { results: cons } = await env.DB.prepare(`SELECT id FROM quell_users WHERE role = 'con'`).all();
+        const contratistas = new Set(cons.map((u) => u.id));
         // Los ids: se conservan los que vienen (la pantalla los reusa); los que no traen, o traen uno de «nuevo-», estrenan.
         const idDe = new Map();
         const limpias = [];
@@ -836,12 +919,16 @@ export async function atender(req, env, url, path) {
           const dias = Number(t.dias);
           if (!Number.isInteger(dias) || dias < 1 || dias > 3650) return err(`Los días de la tarea ${i + 1} son un entero de 1 en adelante.`);
           if (t.proveedor_id && !proveedores.has(t.proveedor_id)) return err(`El proveedor de la tarea ${i + 1} no existe.`);
+          if (t.contratista_id && !contratistas.has(t.contratista_id)) return err(`El contratista de la tarea ${i + 1} no es contratista de esta empresa.`);
+          if (t.proveedor_id && t.contratista_id) return err(`La tarea ${i + 1} tiene un responsable: proveedor o contratista, no los dos.`);
+          const costo = t.costo === undefined || t.costo === null ? 0 : Number(t.costo);
+          if (!Number.isInteger(costo) || costo < 0) return err(`El costo de la tarea ${i + 1} son centavos enteros, cero o más.`);
           if (t.inicio_fijo && !fechaValida(t.inicio_fijo)) return err(`La fecha fija de la tarea ${i + 1} va como AAAA-MM-DD.`);
           const viejo = typeof t.id === 'string' && t.id ? t.id : `nuevo-${i}`;
           const id = viejo.startsWith('nuevo-') ? uid() : viejo;
           if (idDe.has(viejo)) return err(`La tarea ${i + 1} repite el id de otra.`);
           idDe.set(viejo, id);
-          limpias.push({ id, element_id: t.element_id, seccion: String(t.seccion || '').trim().slice(0, 60), orden: Number.isInteger(t.orden) ? t.orden : 0, etapa: t.etapa, nombre: (t.nombre && String(t.nombre).trim().slice(0, 60)) || null, pos: Number.isInteger(t.pos) ? t.pos : ETAPAS.indexOf(t.etapa) * 10, dias, proveedor_id: t.proveedor_id || null, depende_de: t.depende_de || null, inicio_fijo: t.inicio_fijo || null, notas: typeof t.notas === 'string' ? t.notas.slice(0, 500) : null });
+          limpias.push({ id, element_id: t.element_id, seccion: String(t.seccion || '').trim().slice(0, 60), orden: Number.isInteger(t.orden) ? t.orden : 0, etapa: t.etapa, nombre: (t.nombre && String(t.nombre).trim().slice(0, 60)) || null, pos: Number.isInteger(t.pos) ? t.pos : ETAPAS.indexOf(t.etapa) * 10, dias, proveedor_id: t.proveedor_id || null, contratista_id: t.contratista_id || null, costo, depende_de: t.depende_de || null, inicio_fijo: t.inicio_fijo || null, notas: typeof t.notas === 'string' ? t.notas.slice(0, 500) : null });
         }
         // Dentro de una sección no se repite la etapa fija: es una por sección ('otra' sí se repite).
         const vistas = new Set();
@@ -864,11 +951,15 @@ export async function atender(req, env, url, path) {
         const t0 = now();
         await env.DB.prepare(`DELETE FROM quell_tareas WHERE project_id = ?`).bind(pid).run();
         for (const t of limpias) {
-          await env.DB.prepare(`INSERT INTO quell_tareas (id, project_id, element_id, seccion, orden, etapa, nombre, pos, dias, proveedor_id, depende_de, inicio_fijo, notas, creado_at, actualizado_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-            .bind(t.id, pid, t.element_id, t.seccion, t.orden, t.etapa, t.nombre, t.pos, t.dias, t.proveedor_id, t.depende_de, t.inicio_fijo, t.notas, t0, t0).run();
+          await env.DB.prepare(`INSERT INTO quell_tareas (id, project_id, element_id, seccion, orden, etapa, nombre, pos, dias, proveedor_id, contratista_id, costo, depende_de, inicio_fijo, notas, creado_at, actualizado_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+            .bind(t.id, pid, t.element_id, t.seccion, t.orden, t.etapa, t.nombre, t.pos, t.dias, t.proveedor_id, t.contratista_id, t.costo, t.depende_de, t.inicio_fijo, t.notas, t0, t0).run();
         }
+        // Guardar es decidir: lo que no viene no vuelve solo (0.73.0).
+        await env.DB.prepare(`UPDATE quell_elements SET fases_dadas = 1 WHERE id IN (SELECT e.id FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id WHERE pl.project_id = ?)`).bind(pid).run();
         await env.DB.prepare(`UPDATE quell_projects SET cronograma_inicio = ?, cronograma_dias = ? WHERE id = ?`).bind(inicio ?? null, objetivo ?? null, pid).run();
-        return json({ ok: true, ...(await leerCronograma(env, pid)) });
+        const leido = await leerCronograma(env, pid, { completar: false });
+        await sincronizarPartidas(env, pid, leido);
+        return json({ ok: true, ...leido });
       }
       if (m !== 'GET') return err('no encontrado', 404);
       const c = await leerCronograma(env, pid);
