@@ -419,6 +419,14 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **El ítem de quell101 se abre sin salir de la vista, y desde el cronograma sí carga; la leyenda del cronograma es un ícono de info (6-oct, bitacora-obra #118 y #119).**
+  Mike: «no quiero que me regrese a la pantalla de plano, quiero sólo que
+  me abra la barra lateral». La dirección del ítem va después de la vista
+  («…/cronograma/e/ITEM»); cambiar de vista lo deja abierto; cerrar deja la
+  vista de ahora (`history.state.base`); «Reubicar» pasa al plano al mismo
+  nivel; «…/e/ITEM» sigue siendo el plano. El cronograma abría «undefined»
+  (sus renglones traen `element_id`, no `id`). Muro
+  `2026-10-06-2247-jr-el-item-sin-salir-de-la-vista.md`.
 - **Los costos default por PIEZA (defecto del 0.73.0: salían del total del ítem) y los costos y tiempos default poblados una vez en lo que ya estaba (6-oct, API 0.74.0 #255/#256, 0.75.0 #257, bitacora-obra #117).**
   Mike: «pobles por mí todos los ítems que tenemos en alcance (…) con los
   costos predeterminados» y «con los defaults de tiempos»; con botones,
