@@ -25,7 +25,7 @@ describe('la 0036 puebla los costos default de lo que ya estaba', () => {
       // Al día y luego sin la 0036: así quedan también las que corren en código.
       db.migrar();
       db.sql.exec(`DELETE FROM _migraciones WHERE version > ?`, HASTA);
-      db.sql.exec(`DROP TABLE _pendientes`);
+      db.sql.exec(`DROP TABLE pendientes_arranque`);
       const x = (q: string, ...a: unknown[]) => db.sql.exec(q, ...a);
       x(`INSERT INTO clientes (id, nombre, nombre_norm, creado_en_app, creado_at) VALUES ('cl1','Depto','depto','dash101',?)`, T);
       x(`INSERT INTO proyectos (id, cliente_id, nombre, estado, creado_at) VALUES ('p1','cl1','Bosques','activo',?)`, T);
@@ -84,7 +84,7 @@ describe('la 0036 puebla los costos default de lo que ya estaba', () => {
         d: db.sql.exec(`SELECT etapa, costo FROM quell_tareas WHERE element_id = 'eD1' ORDER BY pos`).toArray().map((t: any) => [t.etapa, Number(t.costo)]),
         partidas: db.sql.exec(`SELECT tarea_id, monto_acordado, obra_id, fecha_esperada FROM partidas ORDER BY tarea_id`).toArray(),
         compromiso: Number(db.sql.exec(`SELECT compromiso FROM proyectos WHERE id = 'p1'`).one().compromiso),
-        pendiente: db.sql.exec(`SELECT hecho_at, resultado FROM _pendientes WHERE clave = 'poblar_costos_default'`).one(),
+        pendiente: db.sql.exec(`SELECT hecho_at, resultado FROM pendientes_arranque WHERE clave = 'poblar_costos_default'`).one(),
       };
     });
     expect(r.version).toBe(VERSION_ORG_DB);

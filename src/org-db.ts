@@ -546,13 +546,13 @@ export class OrgDB extends DurableObject<Env> {
    *
    * Una migración corre síncrona; hay arreglos que necesitan el motor de
    * quell101, que es asíncrono. La migración anota el pendiente en
-   * `_pendientes` y aquí se corre, una vez, al arrancar la empresa. Si
+   * `pendientes_arranque` y aquí se corre, una vez, al arrancar la empresa. Si
    * truena, se queda pendiente y se reintenta al siguiente arranque: un
    * arreglo fallido nunca debe dejar a la empresa sin abrir. */
   async correrPendientes(): Promise<void> {
     let pendientes: Fila[] = [];
     try {
-      pendientes = this.sql.exec(`SELECT clave FROM _pendientes WHERE hecho_at IS NULL ORDER BY creado_at`).toArray() as Fila[];
+      pendientes = this.sql.exec(`SELECT clave FROM pendientes_arranque WHERE hecho_at IS NULL ORDER BY creado_at`).toArray() as Fila[];
     } catch {
       return; // una base sin la 0036 todavía: nada pendiente
     }
@@ -565,7 +565,7 @@ export class OrgDB extends DurableObject<Env> {
             RECALCULAR_PROYECTO: async (id: string) => { this.recalcularProyecto(id); },
           });
         }
-        this.sql.exec(`UPDATE _pendientes SET hecho_at = ?, resultado = ? WHERE clave = ?`, new Date().toISOString(), JSON.stringify(resultado), String(p.clave));
+        this.sql.exec(`UPDATE pendientes_arranque SET hecho_at = ?, resultado = ? WHERE clave = ?`, new Date().toISOString(), JSON.stringify(resultado), String(p.clave));
       } catch (e) {
         console.error('pendiente', p.clave, e);
       }

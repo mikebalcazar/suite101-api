@@ -23,7 +23,7 @@
  * una fase sale del precio de UNA pieza —el `monto` del ítem entre su
  * `cantidad`—, no del total: hasta aquí una puerta de un ítem × 20 nacía con
  * el costo de las veinte. La migración org 0036 deja un pendiente en
- * `_pendientes` que el OrgDB corre una vez al arrancar (`correrPendientes`):
+ * `pendientes_arranque` que el OrgDB corre una vez al arrancar (`correrPendientes`):
  * toda obra recibe sus fases default donde falten; cada pieza ligada a un
  * ítem en alcance (vendido) con precio recibe, por etapa —material y
  * fabricación—, el default en la primera fase si ninguna de esa etapa tiene
@@ -2046,7 +2046,7 @@ export const TABLAS_INTERNAS = [
   'folios',
   /* Lo que una migración deja para correr al arrancar (0036): la base lo
    * corre una vez y anota cuándo y qué hizo. No sale por ninguna ruta. */
-  '_pendientes',
+  'pendientes_arranque',
   /* La empresa (0027): un solo renglón con nombre, RFC, moneda y día de
    * conciliación. No sale por el CRUD genérico: va por GET/PATCH /empresa. */
   'empresa',
