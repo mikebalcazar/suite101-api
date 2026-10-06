@@ -892,6 +892,15 @@ export async function atender(req, env, url, path) {
     }
   }
 
+  /* 0.77.0 · Los clientes de la suite, para escoger en «+ Proyecto»: uno
+   * solo en las tres apps. Sólo nombre: el taller ya los ve en dash101.
+   * (`/clientes` de aquí abajo es otra cosa: las cuentas del portal.) */
+  if (seg[0] === 'clientes-suite' && !seg[1] && m === 'GET') {
+    if (!isStaff(user)) return err('sin acceso', 403);
+    const { results } = await env.DB.prepare(`SELECT id, nombre FROM clientes ORDER BY nombre_norm`).all();
+    return json({ ok: true, clientes: results });
+  }
+
   // ----- clientes (dueño) -----
   // Invitar a un cliente: correo, nombre como va a aparecer aquí, y a qué
   // obras. Va desde la pantalla de inicio, no desde «Usuarios y accesos»
@@ -986,7 +995,18 @@ export async function atender(req, env, url, path) {
         if (!b.name) return err('nombre requerido');
         const id = uid();
         await env.DB.prepare(`INSERT INTO quell_projects (id, name, client, created_by) VALUES (?,?,?,?)`).bind(id, b.name, b.client || '', user.id).run();
-        return json({ ok: true, id });
+        /* 0.77.0 · Mike, 6-oct: «Cree un nuevo proyecto en Quell, con un
+         * cliente nuevo. Pero no me aparece ni el cliente ni el proyecto ni
+         * en quote ni en dash.» La obra nace también con su cliente (el que
+         * se escogió, el que ya existe con ese nombre, o uno nuevo) y su
+         * proyecto en la suite, ligados. Lo pide la pantalla con `suite:
+         * true`; sin eso la obra nace suelta como antes, para quien la va a
+         * ligar a un proyecto que ya existe (dash101, «Nuevo proyecto»). */
+        let suite = null;
+        if (b.suite === true && typeof env.ALTA_EN_LA_SUITE === 'function' && (b.cliente_id || String(b.client || '').trim())) {
+          suite = await env.ALTA_EN_LA_SUITE({ obra_id: id, cliente_id: b.cliente_id || null, cliente_nombre: b.client || null });
+        }
+        return json({ ok: true, id, proyecto_id: suite?.proyecto_id ?? null, cliente_id: suite?.cliente_id ?? null, cliente_nuevo: !!suite?.cliente_nuevo });
       }
     }
     const pid = seg[1];
@@ -1396,8 +1416,10 @@ export async function atender(req, env, url, path) {
       }
       // Nace en producción: todavía no hay nada entregado que corregir.
       const alta = await conCodigoUnico(async () => {
-        await env.DB.prepare(`INSERT INTO quell_elements (id, plan_id, project_id, code, type, name, resp, x, y, created_by, item_id, padre_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
-          .bind(id, seg[1], pid, codigo, tipo, b.name, b.resp || '', +b.x, +b.y, user.id, itemId, padreId).run();
+        // 0.77.0: la descripción que se escribe al levantar la pieza (la que sale en quote101).
+        const descripcion = String(b.descripcion ?? '').trim() || null;
+        await env.DB.prepare(`INSERT INTO quell_elements (id, plan_id, project_id, code, type, name, resp, x, y, created_by, item_id, padre_id, descripcion) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .bind(id, seg[1], pid, codigo, tipo, b.name, b.resp || '', +b.x, +b.y, user.id, itemId, padreId, descripcion).run();
         await apunta(env, b.op_id);
         /* 0.49.0 · Mike, 29-sep: «los requerimientos generados me deberían
          * generar un borrador en quote dentro del proyecto». Si la obra está
@@ -1407,7 +1429,7 @@ export async function atender(req, env, url, path) {
          * pieza y se vuelve ítem al ligar, como siempre. */
         let cotizacionId = null;
         if (esRequerimiento(tipo) && !itemId && typeof env.LEVANTAR_REQUERIMIENTO === 'function') {
-          const r = await env.LEVANTAR_REQUERIMIENTO({ element_id: id, obra_id: pid, code: codigo, name: b.name, padre_item_id: padreItemId });
+          const r = await env.LEVANTAR_REQUERIMIENTO({ element_id: id, obra_id: pid, code: codigo, name: b.name, padre_item_id: padreItemId, descripcion });
           itemId = r?.item_id || null;
           cotizacionId = r?.cotizacion_id || null;
         }

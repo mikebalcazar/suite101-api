@@ -38,10 +38,12 @@ export interface EntornoQuell {
   INVITAR_EN_SUITE: (correo: string, nombre: string, usarExistente?: boolean) => Promise<{ ok: true; data: unknown } | { ok: false; error: string; detalle?: unknown }>;
   /** 0.49.0: al levantar un requerimiento en una obra ligada, la suite le
    *  hace su ítem y lo mete al borrador de quote101 (org-db.ts). */
-  LEVANTAR_REQUERIMIENTO?: (d: { element_id: string; obra_id: string; code: string; name: string; padre_item_id?: string | null }) => { item_id: string | null; cotizacion_id: string | null } | Promise<{ item_id: string | null; cotizacion_id: string | null }>;
+  LEVANTAR_REQUERIMIENTO?: (d: { element_id: string; obra_id: string; code: string; name: string; padre_item_id?: string | null; descripcion?: string | null }) => { item_id: string | null; cotizacion_id: string | null } | Promise<{ item_id: string | null; cotizacion_id: string | null }>;
   /** 0.73.0: las partidas que nacen de las fases del cronograma mueven el
    *  compromiso del proyecto de dash101 (org-db.ts recalcularProyecto). */
   RECALCULAR_PROYECTO?: (proyecto_id: string) => void | Promise<void>;
+  /** 0.77.0: la obra recién creada nace con su cliente y su proyecto en la suite. */
+  ALTA_EN_LA_SUITE?: (d: { obra_id: string; cliente_id?: string | null; cliente_nombre?: string | null }) => Promise<{ proyecto_id: string; cliente_id: string; cliente_nombre: string; cliente_nuevo: boolean } | null>;
 }
 
 export function atender(req: Request, env: EntornoQuell, url: URL, path: string): Promise<Response>;

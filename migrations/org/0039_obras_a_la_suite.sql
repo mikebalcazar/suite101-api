@@ -1,0 +1,16 @@
+-- OrgDB v39 — las obras de quell101 sin proyecto, dadas de alta en la suite.
+--
+-- Mike, 6-oct-2026: «Cree un nuevo proyecto en Quell, con un cliente nuevo.
+-- Pero no me aparece ni el cliente ni el proyecto ni en quote ni en dash.»
+--
+-- «+ Proyecto» en quell101 guardaba sólo la obra, con el cliente como texto
+-- suelto: ni cliente ni proyecto en la suite, y por eso ni dash101 ni
+-- quote101 tenían qué enseñar. Desde la 0.77.0 la alta en quell crea los
+-- dos y los liga (OrgDB.altaDeObraEnLaSuite).
+--
+-- Para lo que ya existía, Mike decidió el 6-oct «darlos de alta todos»:
+-- ESTA MIGRACIÓN CORRE EN CÓDIGO (OrgDB.migrarObrasSueltas). Cada obra sin
+-- proyecto que tenga un cliente escrito queda con su cliente —el que ya
+-- exista con ese mismo nombre, o uno nuevo— y su proyecto, ligados. Una obra
+-- archivada nace con su proyecto cerrado. Las obras sin cliente escrito no
+-- se tocan: no hay a quién colgarles el proyecto.

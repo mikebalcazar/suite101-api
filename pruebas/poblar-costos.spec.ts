@@ -26,6 +26,8 @@ describe('la 0036 puebla los costos default de lo que ya estaba', () => {
       // Al día y luego sin la 0036: así quedan también las que corren en código.
       db.migrar();
       db.sql.exec(`DELETE FROM _migraciones WHERE version > ?`, HASTA);
+      // Lo que agregaron las migraciones de después (0038), para que vuelvan a correr limpias.
+      db.sql.exec(`ALTER TABLE quell_elements DROP COLUMN descripcion`);
       db.sql.exec(`DROP TABLE pendientes_arranque`);
       const x = (q: string, ...a: unknown[]) => db.sql.exec(q, ...a);
       x(`INSERT INTO clientes (id, nombre, nombre_norm, creado_en_app, creado_at) VALUES ('cl1','Depto','depto','dash101',?)`, T);
