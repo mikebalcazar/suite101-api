@@ -419,6 +419,20 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **Los dos candados del ítem en el cronograma: anticipo repartido de un pago (dash101) y diseño definido (quell101); sin los dos, la pieza corre desde hoy (6-oct, API 0.70.0 #245, dash101 #138, bitacora-obra #113 #114).**
+  Mike: «todos los ítems necesitan cumplir 2 parámetros para que se fije
+  su fecha de inicio (…) anticipo y definición de diseño (…) mientras no se
+  cumplan la fecha de inicio se sigue recorriendo al día presente (…) el
+  anticipo se marca desde dash al registrar un pago, alocando cantidades a
+  cada ítem por monto, porcentaje o distribuido». API: migración 0033
+  (`movimiento_items`, `quell_elements.diseno_definido`); el candado es un
+  PISO en `programar(tareas, inicio, pisos)` (la fecha más tardía de los
+  dos, o hoy); `candados` por pieza en el cronograma; la etapa 2 «Anticipo
+  pagado» también cuenta; sin ítem de dash101 no hay anticipo. dash101:
+  bloque «Repartir este pago como anticipo entre ítems» en el movimiento.
+  quell101: «Diseño definido el» al editar el ítem; rótulos en lista y
+  gráfica; y el eslabón ⛓ que quita una cadena (soltar del otro lado la
+  voltea). Muro `2026-10-06-0250-jr-los-candados-del-cronograma.md`.
 - **El cronograma gráfico que se arrastra, y procesos con fases de más y con nombre (6-oct, API 0.69.0 #243, bitacora-obra #112).**
   Mike: «en el cronograma gráfico poder "arrastrar" la tarea (fase del
   ítem) que se encadena con otra fase de otro ítem ya sea antes o después»;
