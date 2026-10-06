@@ -419,6 +419,15 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **El plan de pagos del proyecto: parcialidades con fecha, y los cobros entran al flujo con lo cobrado descontado en orden de fecha (6-oct, API 0.72.0 #251, dash101 #141).**
+  Mike lo escogió con botones entre cuatro opciones («plan de pagos por
+  proyecto»). Tabla `plan_pagos` por el CRUD genérico (migración 0034,
+  `parcialidadQueNoCuadra`); no toca `cobrado`. dash101:
+  `cobrosDeProyectos` en lib/proyeccion.ts (un solo cálculo para el flujo
+  y para la tarjeta del proyecto), lib/plan-pagos.ts,
+  components/plan-de-pagos.tsx. Lo por cobrar sin parcialidad queda sin
+  fecha y el flujo dice cuánto es. Muro
+  `2026-10-06-1840-jr-el-plan-de-pagos.md`.
 - **El flujo proyectado por bloques (semana, quincena, mes, trimestre, semestre, año) con lo planeado de cada bloque, y la nómina programada (6-oct, API 0.71.0 #249, dash101 #140).**
   Mike: «presentar por bloques de tiempo (…) ver todos los gastos y los
   cobros que están planeados para esa semana (…) programar la nómina para
