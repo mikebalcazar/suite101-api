@@ -419,6 +419,19 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **dash101: el panel del ítem a la derecha, lo que se ve en quell, desde cualquier lista, con «Abrir en quell101» (6-oct, dash101 #139).**
+  Mike: «me abra la barra lateral de detalle de los ítems cuando doy click
+  sobre uno o sobre el ícono de info. No importa en dónde esté viendo el
+  ítem en lista (…) debe haber un hiperlink al item en quell». Un solo
+  `PanelItemHost` en el layout escucha el evento `dash101:abrir-item`;
+  cualquier lista lo abre con `NombreDeItem` y `BotonVerItem`
+  (components/panel-item.tsx). Lee `GET /items/:id/pieza` + detalle +
+  docs (lib/pieza.ts); 404 → «Este ítem no está en ningún plano de la
+  obra.»; liga `casaQuell()/#/p/<obra>/e/<pieza>`. Sólo lectura, nada se
+  edita ahí. OJO: para correr navegador.spec en local hay que construir
+  con NEXT_PUBLIC_FUENTE=api NEXT_PUBLIC_ORG=demo, y la bajada del Excel
+  no pasa en local (el rewrite no pone X-App). Muro
+  `2026-10-06-0356-jr-el-panel-del-item-en-dash101.md`.
 - **Los dos candados del ítem en el cronograma: anticipo repartido de un pago (dash101) y diseño definido (quell101); sin los dos, la pieza corre desde hoy (6-oct, API 0.70.0 #245, dash101 #138, bitacora-obra #113 #114).**
   Mike: «todos los ítems necesitan cumplir 2 parámetros para que se fije
   su fecha de inicio (…) anticipo y definición de diseño (…) mientras no se
