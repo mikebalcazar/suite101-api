@@ -89,6 +89,18 @@ export const DEFS: Record<Tabla, Def> = {
     filtros: ['movimiento_id', 'item_id', 'proyecto_id'],
     orden: 'creado_at',
   },
+  /* 0034 · El plan de pagos de un proyecto (Mike, 6-oct, con botones: «plan
+   * de pagos por proyecto»): parcialidades con fecha y monto que el flujo
+   * proyectado pone como cobros, descontando lo ya cobrado en orden de
+   * fecha. No mueve dinero; la API lo valida al escribir
+   * (parcialidadQueNoCuadra). */
+  plan_pagos: {
+    cols: { ...IDENT, proyecto_id: 'texto', concepto: 'texto', fecha: 'texto', monto: 'dinero', actualizado_at: 'texto' },
+    requeridos: ['proyecto_id', 'fecha', 'monto'],
+    filtros: ['proyecto_id'],
+    orden: 'fecha',
+    fecha: 'fecha',
+  },
   /* 0025 · Los accionistas de la empresa (Mike, 30-sep-2026: «un módulo de
    * accionistas donde se registren pagos a los accionistas como retiro de
    * utilidades»). El retiro NO tiene tabla: es un egreso en `movimientos` con

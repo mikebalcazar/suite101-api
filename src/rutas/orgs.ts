@@ -454,6 +454,32 @@ async function anticipoQueNoCuadra(c: Ctx, datos: Record<string, unknown>, salvo
   return null;
 }
 
+/** 0.72.0 · Una parcialidad del plan de pagos (Mike, 6-oct, con botones:
+ *  «plan de pagos por proyecto»). Lo que se revisa: que el proyecto exista,
+ *  que la fecha sea un día de verdad, que el monto sean centavos enteros
+ *  mayores que cero y que el concepto quepa. No se compara contra
+ *  `precio_venta` a propósito: el plan puede capturarse antes de que haya
+ *  ítems, y un plan que suma de más se ve en la pantalla, no se prohíbe. */
+async function parcialidadQueNoCuadra(c: Ctx, datos: Record<string, unknown>, salvo: string | null): Promise<Response | null> {
+  const previo = salvo ? await stub(c).obtener('plan_pagos', salvo) : null;
+  if (salvo && !previo) return err(c, 'no_encontrado', 404);
+  const proyecto_id = String(datos.proyecto_id ?? previo?.proyecto_id ?? '');
+  const fecha = String(datos.fecha ?? previo?.fecha ?? '');
+  const monto = datos.monto === undefined ? Number(previo?.monto ?? 0) : Number(datos.monto);
+  const concepto = datos.concepto === undefined ? String(previo?.concepto ?? '') : String(datos.concepto ?? '');
+  const errores: Record<string, string> = {};
+  if (!proyecto_id || !(await stub(c).obtener('proyectos', proyecto_id))) errores.proyecto_id = 'Ese proyecto no existe.';
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fecha);
+  const d = m ? new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))) : null;
+  if (!m || !d || d.toISOString().slice(0, 10) !== fecha) errores.fecha = 'La fecha va como AAAA-MM-DD y tiene que ser un día de verdad.';
+  if (!Number.isInteger(monto) || monto <= 0) errores.monto = 'El monto son centavos enteros, mayor que cero.';
+  if (concepto.length > 80) errores.concepto = 'El concepto cabe en 80 letras.';
+  if (Object.keys(errores).length) return err(c, 'datos_invalidos', 400, { errores });
+  if (datos.concepto !== undefined) datos.concepto = concepto.trim();
+  if (previo) datos.actualizado_at = new Date().toISOString();
+  return null;
+}
+
 /** 0.66.0 · El cliente abre SU estado de cuenta general (Mike, 4-oct: «que
  *  cuando el cliente entre en Peek pueda ver estados de cuentas (general y de
  *  proyectos)»). Sólo el suyo: el id de la ruta tiene que ser el de su acceso.
@@ -1482,6 +1508,7 @@ rutas.post('/:o/:tabla', async (c) => {
   if (malProveedor) return err(c, 'datos_invalidos', 400, { errores: malProveedor });
   if (tabla === 'clientes') { const repetido = await correoDeOtroCliente(c, datos, null); if (repetido) return repetido; }
   if (tabla === 'movimiento_items') { const mal = await anticipoQueNoCuadra(c, datos, null); if (mal) return mal; }
+  if (tabla === 'plan_pagos') { const mal = await parcialidadQueNoCuadra(c, datos, null); if (mal) return mal; }
 
   const fila = await stub(c).crear(tabla, datos, { app: c.get('app'), usuario_id: quien.usuario_id, correo: c.get('sesion')?.correo ?? null });
   return ok(c, podar(quien, tabla, fila), 201);
@@ -1597,6 +1624,7 @@ rutas.patch('/:o/:tabla/:id', async (c) => {
   if (malProveedor) return err(c, 'datos_invalidos', 400, { errores: malProveedor });
   if (tabla === 'clientes') { const repetido = await correoDeOtroCliente(c, datos, c.req.param('id')!); if (repetido) return repetido; }
   if (tabla === 'movimiento_items') { const mal = await anticipoQueNoCuadra(c, datos, c.req.param('id')!); if (mal) return mal; }
+  if (tabla === 'plan_pagos') { const mal = await parcialidadQueNoCuadra(c, datos, c.req.param('id')!); if (mal) return mal; }
 
   /* 0.46.0 · Una cotización aprobada es lo que se vendió: sus piezas ya están
    * en el proyecto. Si se pudiera seguir editando, el papel y la obra dirían

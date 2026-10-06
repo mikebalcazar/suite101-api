@@ -86,6 +86,10 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
   movimiento_items: {
     dash101: ['movimiento_id', 'item_id', 'monto'],
   },
+  /* 0034 · El plan de pagos lo captura dash101 en el proyecto (Mike, 6-oct). */
+  plan_pagos: {
+    dash101: ['proyecto_id', 'concepto', 'fecha', 'monto'],
+  },
   estaciones: { quell101: '*' },
   // Las escribe la ruta POST /orgs/:o/conciliaciones, no el CRUD genérico:
   // aquí está para que quede dicho de quién son, y para el 403 con la lista.

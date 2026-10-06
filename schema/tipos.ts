@@ -17,7 +17,17 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.71.0 (LA NÓMINA PROGRAMADA. Mike, 6-oct: «hay que
+ * Versión del contrato: 0.72.0 (EL PLAN DE PAGOS DEL PROYECTO. Mike, 6-oct, con
+ * botones: «plan de pagos por proyecto». Migración org 0034: tabla
+ * `plan_pagos` {proyecto_id, concepto, fecha AAAA-MM-DD, monto en centavos}
+ * por el CRUD genérico, la escribe dash101, filtro por proyecto_id, orden
+ * por fecha. La API valida (proyecto que existe, fecha de verdad, monto
+ * entero > 0, concepto ≤ 80) y contesta con palabras por campo. No mueve
+ * dinero ni toca `cobrado`: el flujo proyectado de dash101 pone cada
+ * parcialidad en su fecha y descuenta lo ya cobrado del proyecto en orden
+ * de fecha, así sólo lo pendiente entra como cobro.) Antes:
+ *
+ * 0.71.0 (LA NÓMINA PROGRAMADA. Mike, 6-oct: «hay que
  * ver en nómina el programar la nómina para que también se considere en los
  * gastos para proyectar los flujos». `GET`/`PUT /orgs/:o/nomina/programa`:
  * una por empresa {activo, frecuencia semanal|quincenal|mensual, dia_semana,
@@ -1128,7 +1138,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.71.0';
+export const VERSION_CONTRATO = '0.72.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1457,6 +1467,19 @@ export interface Cliente {
  *  «Nómina»…). La CLABE son 18 dígitos que cuadran; la API los revisa. Los
  *  documentos de respaldo (carátula, foto de la tarjeta) van en `archivos`
  *  con de_tabla = 'proveedores' y de_id = el proveedor. */
+/** 0.72.0 · Una parcialidad del plan de pagos de un proyecto: cuándo se
+ *  espera cobrar cuánto. `monto` en CENTAVOS; `fecha` AAAA-MM-DD. CRUD
+ *  genérico `/orgs/:o/plan_pagos` (filtro `proyecto_id`). */
+export interface PlanDePago {
+  id: string;
+  proyecto_id: string;
+  concepto: string;
+  fecha: string;
+  monto: number;
+  creado_at: string;
+  actualizado_at: string | null;
+}
+
 /** 0.71.0 · La nómina programada: cada cuánto se paga la raya, qué día y
  *  cuánto suele ser. `GET`/`PUT /orgs/:o/nomina/programa`. `monto` en
  *  CENTAVOS. `dia_semana` sólo con 'semanal' (0 domingo … 6 sábado);
@@ -1943,6 +1966,7 @@ export const TABLAS = [
   'proveedores',
   'proveedor_cuentas',
   'movimiento_items',
+  'plan_pagos',
   'accionistas',
   'personal',
   'estaciones',
