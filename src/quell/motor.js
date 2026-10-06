@@ -1576,6 +1576,42 @@ export async function atender(req, env, url, path) {
     return json({ ok: true, marcas: await marcasDe(env, mk.doc_id) });
   }
 
+  /* 0.76.0 · El avance de obra de los ítems de un proyecto de dash101, de un
+   * jalón (Mike, 6-oct: «en dash quiero que la lista de ítems tenga el mismo
+   * estilo [que la de quell]»). La lista de quell enseña por pieza las etapas
+   * cumplidas; dash101 lista ÍTEMS, y un ítem de cantidad 20 son 20 piezas.
+   * Por ítem va: cuántas piezas tiene en algún plano, la suma de etapas
+   * cumplidas (para el porcentaje), la MENOR (la etapa en la que va el
+   * ítem es la de su pieza más atrasada), y sus pendientes de punchlist.
+   * Sólo para quien dirige: es la lista del dinero, no la de la obra. */
+  if (seg[0] === 'avance-items' && !seg[1] && m === 'GET') {
+    if (!isStaff(user)) return err('sin acceso', 403);
+    const proyecto = url.searchParams.get('proyecto_id');
+    if (!proyecto) return err('Falta proyecto_id.', 400);
+    const etapas = await catalogoEtapas(env);
+    const { results } = await env.DB.prepare(
+      `SELECT e.item_id, e.fase,
+         (SELECT COUNT(*) FROM quell_element_etapas ee JOIN quell_etapas t ON t.clave=ee.etapa AND t.activa=1 WHERE ee.element_id=e.id) AS n_etapas,
+         (SELECT COUNT(*) FROM quell_punch_items k WHERE k.element_id=e.id AND k.status='pend') AS n_pend,
+         (SELECT COUNT(*) FROM quell_punch_items k WHERE k.element_id=e.id AND k.status='proc') AS n_proc,
+         (SELECT COUNT(*) FROM quell_punch_items k WHERE k.element_id=e.id) AS n_total
+       FROM quell_elements e JOIN items it ON it.id = e.item_id
+       WHERE it.proyecto_id = ? AND e.type <> 'Requerimiento'`).bind(proyecto).all();
+    const items = {};
+    for (const r of results) {
+      const n = Number(r.n_etapas) || 0;
+      const a = items[r.item_id] || (items[r.item_id] = { piezas: 0, hechas: 0, menor: n, en_punchlist: 0, n_pend: 0, n_proc: 0, n_total: 0 });
+      a.piezas += 1;
+      a.hechas += n;
+      a.menor = Math.min(a.menor, n);
+      if (r.fase === 'punchlist') a.en_punchlist += 1;
+      a.n_pend += Number(r.n_pend) || 0;
+      a.n_proc += Number(r.n_proc) || 0;
+      a.n_total += Number(r.n_total) || 0;
+    }
+    return json({ ok: true, etapas: etapas.map((x) => ({ clave: x.clave, nombre: x.nombre, abre_punchlist: !!x.abre_punchlist })), items });
+  }
+
   // ----- elements -----
   /* 0.67.1 · De un ítem de la suite a su pieza del plano. quote101 (Mike,
    * 5-oct): «cuando estoy en quote viendo la lista de requerimientos nuevos,
