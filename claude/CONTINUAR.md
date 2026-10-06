@@ -419,6 +419,20 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **El cronograma que se llena solo (10/24/12 días), responsable (proveedor o contratista) y costo por fase, costos default por tipo de ítem, y los compromisos que de ahí nacen y entran al flujo (6-oct, API 0.73.0 #252, bitacora-obra #116, dash101 #142).**
+  Mike: «el cronograma se debe llenar en automático (…) responsable
+  (proveedor o contratista) de cada fase (…) el costo de cada fase, así de
+  ahí se pobla la lista de compromisos». Migración 0035;
+  `completarFases` (una vez por pieza, `fases_dadas`) y
+  `sincronizarPartidas` en motor.js: cada fase con costo de una pieza
+  ligada es una partida del proyecto (tarea_id, obra_id, fecha_esperada:
+  material al arrancar, lo demás al terminar); dash101 no la edita (409
+  del_cronograma). PORCENTAJES en cronograma.js (Mueble 30/30, Puerta
+  35/35, Servicio 5/55, Acabado 40/20; instalación en cero). El flujo de
+  dash101 pone lo que falta de cada partida en su fecha
+  (`compromisosDeProyectos`, resta las órdenes que ya apuntan a ella).
+  OJO: la fecha_esperada se escribe al leer/guardar el cronograma, no se
+  recalcula cada día. Muro `2026-10-06-1918-jr-el-cronograma-que-se-llena-solo.md`.
 - **El plan de pagos del proyecto: parcialidades con fecha, y los cobros entran al flujo con lo cobrado descontado en orden de fecha (6-oct, API 0.72.0 #251, dash101 #141).**
   Mike lo escogió con botones entre cuatro opciones («plan de pagos por
   proyecto»). Tabla `plan_pagos` por el CRUD genérico (migración 0034,
