@@ -17,7 +17,20 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.73.0 (EL CRONOGRAMA QUE SE LLENA SOLO, CON RESPONSABLE Y
+ * Versión del contrato: 0.74.0 (LOS COSTOS DEFAULT, POBLADOS Y POR PIEZA. Mike,
+ * 6-oct: «necesito que pobles por mí todos los ítems que tenemos en alcance,
+ * que no tengan precio, con los costos predeterminados». El costo default de
+ * una fase sale del precio de UNA pieza —el `monto` del ítem entre su
+ * `cantidad`—, no del total: hasta aquí una puerta de un ítem × 20 nacía con
+ * el costo de las veinte. La migración org 0036 deja un pendiente en
+ * `_pendientes` que el OrgDB corre una vez al arrancar (`correrPendientes`):
+ * toda obra recibe sus fases default donde falten; cada pieza ligada a un
+ * ítem en alcance (vendido) con precio recibe, por etapa —material y
+ * fabricación—, el default en la primera fase si ninguna de esa etapa tiene
+ * costo; lo capturado se respeta; la instalación se queda como esté; los
+ * costos que nacieron sobre el total se corrigen; y las obras que cambiaron
+ * rehacen sus compromisos. Sin cambios de forma en las rutas). Antes:
+ * 0.73.0 (EL CRONOGRAMA QUE SE LLENA SOLO, CON RESPONSABLE Y
  * COSTO POR FASE, Y LOS COMPROMISOS QUE DE AHÍ NACEN. Mike, 6-oct: «cada ítem
  * tiene fecha de entrega default de 6 semanas en sitio y 2 semanas de
  * instalación (…) material 10 días, fabricación 4 semanas, instalación 2 (…)
@@ -1155,7 +1168,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.73.0';
+export const VERSION_CONTRATO = '0.74.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -2031,6 +2044,9 @@ export type Tabla = (typeof TABLAS)[number];
  * la bitácora de obra por /orgs/:o/quell/*, con sus propias reglas. */
 export const TABLAS_INTERNAS = [
   'folios',
+  /* Lo que una migración deja para correr al arrancar (0036): la base lo
+   * corre una vez y anota cuándo y qué hizo. No sale por ninguna ruta. */
+  '_pendientes',
   /* La empresa (0027): un solo renglón con nombre, RFC, moneda y día de
    * conciliación. No sale por el CRUD genérico: va por GET/PATCH /empresa. */
   'empresa',
