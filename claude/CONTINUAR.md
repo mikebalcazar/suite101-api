@@ -419,6 +419,19 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **El cronograma gráfico que se arrastra, y procesos con fases de más y con nombre (6-oct, API 0.69.0 #243, bitacora-obra #112).**
+  Mike: «en el cronograma gráfico poder "arrastrar" la tarea (fase del
+  ítem) que se encadena con otra fase de otro ítem ya sea antes o después»;
+  «agregar otra fase a los procesos (…) y editar el nombre de la fase»; y
+  el campo del nombre del proceso perdía el foco a cada tecla (la llave de
+  React era el nombre; ahora es el id de la primera fase). API: migración
+  0032 rehace `quell_tareas` con etapa 'otra', `nombre`, `pos`; el orden
+  del proceso es `pos`. quell101: `Gantt.jsx` (barra por fase, día por
+  columna; soltar sobre la mitad derecha = después de, izquierda = antes
+  de, al vacío = fecha fija con alfiler), lista con nombre de proceso y de
+  fase editables, «+ Otra fase», ▲▼. Lección CSS: las clases de cada
+  pantalla llevan prefijo (`g-`); `tarea` e `item` chocaban. Muro
+  `2026-10-06-0220-jr-el-cronograma-grafico.md`.
 - **El cronograma de la obra en quell101 y el tipo del proveedor en todas las apps (5-oct, API 0.68.0 #241, bitacora-obra #111, dash101 #137).**
   Mike: «configurar un cronograma, pero algo muy amigable (…) tiempo de
   fabricación total, o entrega de material / fabricación / instalación con
