@@ -419,6 +419,17 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **Los costos default por PIEZA (defecto del 0.73.0: salían del total del ítem) y los costos y tiempos default poblados una vez en lo que ya estaba (6-oct, API 0.74.0 #255/#256, 0.75.0 #257, bitacora-obra #117).**
+  Mike: «pobles por mí todos los ítems que tenemos en alcance (…) con los
+  costos predeterminados» y «con los defaults de tiempos»; con botones,
+  «sólo donde falten». `precioPorPieza` (monto / cantidad) en cronograma.js.
+  Mecanismo nuevo: una migración SQL deja una fila en `pendientes_arranque`
+  y el constructor del OrgDB corre `correrPendientes()` después de migrar
+  (una vez, en orden, anota resultado; si truena, reintenta). 0036
+  `poblarCostosDefault`, 0037 `ponerTiemposDefault` (fase en 1 día = sin
+  capturar). OJO: una tabla con guion bajo no la cuenta la prueba del DO
+  recién nacido; por eso no se llama `_pendientes`. Muro
+  `2026-10-06-2058-jr-costos-y-tiempos-default-en-lo-que-ya-estaba.md`.
 - **El cronograma que se llena solo (10/24/12 días), responsable (proveedor o contratista) y costo por fase, costos default por tipo de ítem, y los compromisos que de ahí nacen y entran al flujo (6-oct, API 0.73.0 #252, bitacora-obra #116, dash101 #142).**
   Mike: «el cronograma se debe llenar en automático (…) responsable
   (proveedor o contratista) de cada fase (…) el costo de cada fase, así de
