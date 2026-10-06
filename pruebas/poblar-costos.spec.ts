@@ -16,7 +16,8 @@ describe('la 0036 puebla los costos default de lo que ya estaba', () => {
   const dentro = runInDurableObject as unknown as <T>(s: unknown, f: (o: any) => T | Promise<T>) => Promise<T>;
   const entorno = env as unknown as { ORG: DurableObjectNamespace };
   const elDO = () => entorno.ORG.get(entorno.ORG.idFromName('migracion-0036')) as unknown as DurableObjectStub;
-  const HASTA = MIGRACIONES.length - 1; // todo menos la 0036
+  // Todo lo de antes de la 0036 (se busca por lo que hace, no por número).
+  const HASTA = MIGRACIONES.findIndex((m) => m.includes("'poblar_costos_default'"));
   const T = '2026-10-01T00:00:00.000Z';
 
   beforeAll(async () => {

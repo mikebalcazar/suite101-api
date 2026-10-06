@@ -17,7 +17,17 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.74.0 (LOS COSTOS DEFAULT, POBLADOS Y POR PIEZA. Mike,
+ * Versión del contrato: 0.75.0 (LOS TIEMPOS DEFAULT EN LO QUE YA ESTABA. Mike,
+ * 6-oct: «ponla también todos los ítems que hay ahorita en alcance con los
+ * defaults de tiempos»; escogió con botones «sólo donde falten». La
+ * migración org 0037 deja el pendiente `tiempos_default` en
+ * `pendientes_arranque`: las piezas en alcance (sin ítem, o con su ítem
+ * vendido) que no tienen fases reciben las tres default con su costo por
+ * pieza, y una fase de material, fabricación o instalación que sigue en 1 día
+ * —con lo que nace la que se agrega a mano— pasa a 10, 24 o 12. Lo capturado,
+ * las cadenas y las fases de más se quedan; fuera de alcance no se toca. Sin
+ * cambios de forma en las rutas). Antes:
+ * 0.74.0 (LOS COSTOS DEFAULT, POBLADOS Y POR PIEZA. Mike,
  * 6-oct: «necesito que pobles por mí todos los ítems que tenemos en alcance,
  * que no tengan precio, con los costos predeterminados». El costo default de
  * una fase sale del precio de UNA pieza —el `monto` del ítem entre su
@@ -1168,7 +1178,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.74.0';
+export const VERSION_CONTRATO = '0.75.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
