@@ -1,3 +1,15 @@
+# 7-oct-2026 · cost101 entra a la suite (API 0.81.0)
+
+Lo hizo el chat de cost101. El detalle está en
+`muro/2026-10-07-1840-cost101-entra-a-la-suite.md`. En corto: app `cost101`
+(llave `cost`, licencia por empresa), tablas `costos_base` y `cuadrillas`
+(org/0041, en código), `productos` con receta (`apu`) y precio calculado por
+la API = precio unitario de cost101 SIN IVA (decisión de Mike, con botones).
+`src/costos.ts` es la cuenta; `pruebas/costos.spec.ts` la mide contra la del
+prototipo. Falta: tarjeta en `suite.html`, dominio de empresa para cost101.
+
+---
+
 # Fase 2 — qué quedó, medido
 
 Cierre del chat que construyó la importación desde Firestore. Lo de aquí está

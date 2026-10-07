@@ -20,6 +20,7 @@ import { guardarPin, normalizaCorreo, pinAceptable, ulid } from '../lib';
 import { TIPO_XLSX, xlsx, type Celda } from '../xlsx';
 import { empresaDe } from '../empresa';
 import { tituloDeLiga, urlPermitida } from '../titulo';
+import { ESTADOS_PRODUCTO, TIPOS_COSTO, limpiarMiembros } from '../costos';
 import { montarOrdenes } from './ordenes';
 import { montarObras } from './obras';
 import { montarNomina } from './nomina';
@@ -1531,6 +1532,144 @@ montarOrdenes(rutas);
 montarObras(rutas);
 montarNomina(rutas);
 
+/* ─────────────── cost101: costos base, cuadrillas y productos (0.81.0) ───────────────
+ *
+ * Mike, 7-oct-2026: «una base de datos de los costos base, la cual puedo
+ * editar (…) de ahí se generan los productos (…) Quote debe poder leer los
+ * precios base y el catálogo de productos».
+ *
+ * Las tres tablas salen por el CRUD genérico de abajo; aquí sólo están las
+ * dos rutas que no son de una tabla: leerlo todo de una vez, y cargarlo en
+ * bloque. Van ANTES del CRUD porque `/:o/costos` también cabe en `/:o/:tabla`. */
+
+/** Las apps que abren los costos: quien los arma y quien cotiza con ellos. */
+const APPS_DE_COSTOS: ReadonlySet<App> = new Set<App>(['cost101', 'cotizador101']);
+
+/** GET /orgs/:o/costos — todo lo que cost101 necesita para pintar, de una:
+ *  si fueran tres peticiones, entre una y otra podría cambiar un precio y la
+ *  pantalla sumaría renglones de dos momentos distintos. */
+rutas.get('/:o/costos', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'los costos los ven los miembros de la empresa' });
+  if (!APPS_DE_COSTOS.has(c.get('app'))) return err(c, 'sin_permiso', 403, { motivo: 'los costos se leen desde cost101 o quote101', app: c.get('app') });
+  const sujeto = { usuario_id: quien.usuario_id, clase: quien.clase, ref_id: quien.ref_id, ve_dinero: quien.ve_dinero };
+  const [costos, cuadrillas, productos] = await Promise.all([
+    stub(c).listar('costos_base', {}, sujeto, TOPE_MAXIMO),
+    stub(c).listar('cuadrillas', {}, sujeto, TOPE_MAXIMO),
+    stub(c).listar('productos', {}, sujeto, TOPE_MAXIMO),
+  ]);
+  return ok(c, {
+    costos_base: costos.filas,
+    cuadrillas: cuadrillas.filas,
+    // Sólo los que se arman con receta: los productos de siempre (un modelo
+    // de puerta con su precio escrito en dash101) no son de cost101.
+    productos: productos.filas.filter((p) => p.apu),
+    puede_aprobar: dirige(c),
+    rol: quien.rol ?? null,
+    iva: 0.16,
+  });
+});
+
+/** POST /orgs/:o/costos/importar — la carga en bloque (la semilla de
+ *  cost101). Idempotente por clave: lo que ya está no se duplica ni se pisa.
+ *  Sólo quien dirige: es poblar el catálogo de la empresa de un golpe. */
+rutas.post('/:o/costos/importar', async (c) => {
+  if (c.get('app') !== 'cost101') return err(c, 'sin_permiso', 403, { motivo: 'la carga de costos es de cost101' });
+  if (!dirige(c)) return err(c, 'sin_permiso', 403, { motivo: 'la carga de costos la hace quien dirige la empresa' });
+  const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const lista = (k: string) => (Array.isArray(b[k]) ? (b[k] as Array<Record<string, unknown>>) : []);
+  const costos = lista('costos'), cuadrillas = lista('cuadrillas'), productos = lista('productos');
+  if (!costos.length && !cuadrillas.length && !productos.length) return err(c, 'datos_invalidos', 400, { falta: 'costos, cuadrillas o productos' });
+  if (costos.length + cuadrillas.length + productos.length > 5000) return err(c, 'datos_invalidos', 400, { motivo: 'máximo 5000 renglones por carga' });
+  for (const x of costos) {
+    if (!String(x.nombre ?? '').trim() || !String(x.ref ?? '').trim()) return err(c, 'datos_invalidos', 400, { falta: 'ref y nombre en cada costo' });
+    if (typeof x.precio !== 'number' || !Number.isInteger(x.precio) || x.precio < 0) return err(c, 'dinero_no_entero', 400, { campo: 'precio', recibido: x.precio, de: x.ref, regla: 'centavos, INTEGER' });
+  }
+  for (const x of [...cuadrillas, ...productos]) {
+    if (!String(x.nombre ?? '').trim() || !String(x.ref ?? '').trim()) return err(c, 'datos_invalidos', 400, { falta: 'ref y nombre en cada renglón' });
+  }
+  const r = await stub(c).importarCostos({
+    costos: costos as never, cuadrillas: cuadrillas as never, productos: productos as never, usuario_id: c.get('quien').usuario_id,
+  });
+  if (!r.ok) return err(c, r.error, 400, r.detalle as Record<string, unknown>);
+  return ok(c, { nuevos: r.nuevos, ya_estaban: r.ya_estaban }, 201);
+});
+
+/** Lo que el CRUD genérico revisa de más cuando la tabla es de cost101.
+ *  Devuelve la respuesta de error, o null si todo pasa. Limpia `datos` en el
+ *  sitio (la receta y los miembros quedan como se van a guardar). */
+async function revisarCostos(c: Ctx, tabla: Tabla, datos: Record<string, unknown>, id: string | null) {
+  if (tabla !== 'costos_base' && tabla !== 'cuadrillas' && tabla !== 'productos') return null;
+  const quien = c.get('quien');
+  if (tabla !== 'productos' && quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'los costos son de los miembros de la empresa' });
+
+  const texto = (k: string) => { if (datos[k] !== undefined && datos[k] !== null) datos[k] = String(datos[k]).trim(); };
+  const errores: Record<string, string> = {};
+
+  if (tabla === 'costos_base') {
+    for (const k of ['clave', 'nombre', 'unidad', 'categoria', 'tipo']) texto(k);
+    if (datos.nombre !== undefined && !datos.nombre) errores.nombre = 'Escribe la descripción del insumo.';
+    if (datos.tipo !== undefined && !(TIPOS_COSTO as readonly string[]).includes(String(datos.tipo))) errores.tipo = 'El tipo es material, mo (mano de obra) o equipo.';
+    if (datos.precio !== undefined && (typeof datos.precio !== 'number' || datos.precio < 0)) errores.precio = 'El precio va en centavos, cero o más.';
+    /* El tipo no se cambia a uno que ya se usa: un material con 8% de
+     * desperdicio vuelto oficio dejaría la receta sumando mal sin avisar. */
+    if (id && datos.tipo !== undefined) {
+      const antes = await stub(c).obtener('costos_base', id);
+      if (antes && antes.tipo !== datos.tipo && (await stub(c).usosEnCostos('costos_base', id)).length) errores.tipo = 'Ya se usa en cuadrillas o productos: no se le cambia el tipo.';
+    }
+  }
+  if (tabla === 'cuadrillas') {
+    for (const k of ['clave', 'nombre', 'categoria']) texto(k);
+    if (datos.nombre !== undefined && !datos.nombre) errores.nombre = 'Ponle nombre a la cuadrilla.';
+    if (datos.horas !== undefined) {
+      const h = Number(datos.horas);
+      if (!Number.isFinite(h) || h <= 0 || h > 24) errores.horas = 'La jornada es de más de 0 y hasta 24 horas.'; else datos.horas = h;
+    }
+    if (datos.miembros !== undefined) {
+      const m = limpiarMiembros(datos.miembros);
+      if (!m.ok) Object.assign(errores, m.errores);
+      else {
+        const mal = await stub(c).revisarMiembros(m.miembros);
+        if (mal) Object.assign(errores, mal); else datos.miembros = m.miembros;
+      }
+    }
+  }
+  if (tabla === 'productos') {
+    const deCost = c.get('app') === 'cost101';
+    const actual = id ? await stub(c).obtener('productos', id) : null;
+    const conReceta = datos.apu !== undefined ? !!datos.apu : !!actual?.apu;
+    if (deCost) {
+      if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'los productos de cost101 los arman los miembros de la empresa' });
+      /* cost101 sólo toca productos con receta: los de siempre (un modelo
+       * con precio escrito en dash101) no son suyos. */
+      if (id && actual && !actual.apu) return err(c, 'sin_permiso', 403, { motivo: 'ese producto no se armó en cost101: su precio se escribe en dash101' });
+      if (!id && !datos.apu) errores.apu = 'Falta la receta del producto.';
+      for (const k of ['codigo', 'nombre', 'unidad', 'categoria', 'descripcion', 'tipo']) texto(k);
+      if (datos.nombre !== undefined && !datos.nombre) errores.nombre = 'Escribe la descripción de la partida.';
+      if (datos.estado !== undefined && !(ESTADOS_PRODUCTO as readonly string[]).includes(String(datos.estado))) errores.estado = 'El estado es borrador o aprobado.';
+      /* Aprobar es de quien dirige. Lo que guarda cualquier otro queda en
+       * borrador —también si estaba aprobado: lo que cambió ya no es lo que
+       * se aprobó—. Se decide aquí y no en la pantalla. */
+      if (!dirige(c)) datos.estado = 'borrador';
+      if (datos.apu !== undefined && datos.apu !== null) {
+        const r = await stub(c).revisarApu(datos.apu, id);
+        if (!r.ok) Object.assign(errores, r.errores); else datos.apu = r.apu;
+      }
+      if (id && datos.apu === null) errores.apu = 'A un producto de cost101 no se le quita la receta; se borra.';
+    } else if (conReceta && datos.precio !== undefined) {
+      // dash101 no le pone precio a mano a un producto que lo saca de su receta.
+      return err(c, 'campo_no_permitido', 403, { campo: 'precio', motivo: 'este producto se arma en cost101: su precio sale de sus costos' });
+    }
+  }
+  if (Object.keys(errores).length) return err(c, 'datos_invalidos', 400, { errores });
+
+  const clave = tabla === 'productos' ? datos.codigo : datos.clave;
+  if (clave && (await stub(c).claveOcupada(tabla, String(clave), id))) {
+    return err(c, 'clave_repetida', 409, { clave, motivo: 'esa clave ya es de otro renglón' });
+  }
+  return null;
+}
+
 rutas.get('/:o/:tabla', async (c) => {
   const tabla = c.req.param('tabla')!;
   const permiso = puedeLeer(c, tabla);
@@ -1615,6 +1754,7 @@ rutas.post('/:o/:tabla', async (c) => {
   if (tabla === 'clientes') { const repetido = await correoDeOtroCliente(c, datos, null); if (repetido) return repetido; }
   if (tabla === 'movimiento_items') { const mal = await anticipoQueNoCuadra(c, datos, null); if (mal) return mal; }
   if (tabla === 'plan_pagos') { const mal = await parcialidadQueNoCuadra(c, datos, null); if (mal) return mal; }
+  { const mal = await revisarCostos(c, tabla, datos, null); if (mal) return mal; }
 
   const fila = await stub(c).crear(tabla, datos, { app: c.get('app'), usuario_id: quien.usuario_id, correo: c.get('sesion')?.correo ?? null });
   return ok(c, podar(quien, tabla, fila), 201);
@@ -1732,6 +1872,7 @@ rutas.patch('/:o/:tabla/:id', async (c) => {
   if (tabla === 'clientes') { const repetido = await correoDeOtroCliente(c, datos, c.req.param('id')!); if (repetido) return repetido; }
   if (tabla === 'movimiento_items') { const mal = await anticipoQueNoCuadra(c, datos, c.req.param('id')!); if (mal) return mal; }
   if (tabla === 'plan_pagos') { const mal = await parcialidadQueNoCuadra(c, datos, c.req.param('id')!); if (mal) return mal; }
+  { const mal = await revisarCostos(c, tabla, datos, c.req.param('id')!); if (mal) return mal; }
 
   /* 0.46.0 · Una cotización aprobada es lo que se vendió: sus piezas ya están
    * en el proyecto. Si se pudiera seguir editando, el papel y la obra dirían
@@ -1768,6 +1909,19 @@ rutas.delete('/:o/:tabla/:id', async (c) => {
   const veredicto = revisarEscritura(tabla, c.get('app'), []);
   if (!veredicto.ok) return err(c, veredicto.error, 403, veredicto.detalle);
 
+  /* 0.81.0 · Lo de cost101 dice QUIÉN lo usa, para que la pantalla lo pueda
+   * explicar: «se usa en Muro de tablaroca y 3 más». Y cost101 sólo borra
+   * productos que él armó. */
+  if (tabla === 'costos_base' || tabla === 'cuadrillas' || tabla === 'productos') {
+    if (tabla === 'productos' && c.get('app') === 'cost101') {
+      const p = await stub(c).obtener('productos', c.req.param('id')!);
+      if (p && !p.apu) return err(c, 'sin_permiso', 403, { motivo: 'ese producto no se armó en cost101' });
+      if (p && p.estado === 'aprobado' && !dirige(c)) return err(c, 'sin_permiso', 403, { motivo: 'un producto aprobado lo borra quien dirige la empresa' });
+    }
+    const usos = await stub(c).usosEnCostos(tabla, c.req.param('id')!);
+    if (usos.length) return err(c, 'en_uso', 409, { tabla, usado_en: usos, motivo: 'otra receta lo usa; primero se quita de ahí' });
+  }
+
   // Las llaves foráneas del OrgDB se aplican: un proyecto con ítems o
   // movimientos no se va. Eso es un 409 que la app puede explicar, no un 500.
   const fue = await stub(c).borrar(tabla, c.req.param('id')!);
@@ -1803,6 +1957,12 @@ function puedeLeer(c: Ctx, tabla: string) {
   if (tabla === 'ajustes' && quien.clase !== 'miembro') {
     return err(c, 'sin_permiso', 403, { motivo: 'los ajustes son configuracion de la app: solo miembros de la empresa' });
   }
+  // 0.81.0 · Los costos base y las cuadrillas son lo que la empresa paga:
+  // sólo sus miembros, y sólo desde la app que los arma o la que cotiza.
+  if (tabla === 'costos_base' || tabla === 'cuadrillas') {
+    if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'los costos los ven los miembros de la empresa' });
+    if (!APPS_DE_COSTOS.has(c.get('app'))) return err(c, 'sin_permiso', 403, { motivo: 'los costos se leen desde cost101 o quote101', app: c.get('app') });
+  }
   return null;
 }
 
@@ -1822,6 +1982,14 @@ function podar(quien: Quien, tabla: Tabla, fila: Record<string, unknown>): Recor
   if (tabla === 'proyectos' && !quien.ve_costos) {
     delete f.pagado_prov;
     delete f.compromiso;
+  }
+  /* 0.81.0 · La receta y su desglose son costos (cuánto de material, cuánto
+   * de mano de obra, qué utilidad): al personal de piso se le da el producto
+   * y su precio, no cómo se forma. */
+  if (tabla === 'productos' && quien.clase !== 'miembro') {
+    delete f.apu;
+    delete f.desglose;
+    delete f.historial;
   }
   if (!quien.ve_dinero) {
     if (tabla === 'items') delete f.monto;

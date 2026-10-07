@@ -17,7 +17,33 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.80.0 (LA EMPRESA FIRMA SUS DOCUMENTOS, Y UN
+ * Versión del contrato: 0.81.0 (COST101 ENTRA A LA SUITE. Mike, 7-oct: «una
+ * base de datos de los costos base, la cual puedo editar (…) de ahí se
+ * generan los productos que son otra base de datos, los cuales van a
+ * alimentar los precios de los productos para quote. Quote debe poder leer
+ * los precios base y el catálogo de productos».
+ *   · App nueva `cost101`, llave `cost`: se prende por empresa (licencia) y se
+ *     reparte por persona. Una empresa nueva NO nace con ella.
+ *   · Tablas nuevas `costos_base` y `cuadrillas` (0041), por el CRUD genérico.
+ *     Las escribe cost101; las leen cost101 y cotizador101. Sólo MIEMBROS de
+ *     la empresa: son costos. `costos_base.precio` va en centavos CON IVA.
+ *     `historial` lo lleva la API. `clave` vacía → la pone la API (MAT-001,
+ *     MO-001, EQ-001, CUA-01). Repetida → 409 `clave_repetida`. Borrar uno
+ *     que otro usa → 409 `en_uso` con `usado_en`.
+ *   · `productos` gana `apu` (la receta), `unidad`, `categoria`, `estado`
+ *     ('borrador'|'aprobado'), y dos cachés que escribe la API: `desglose` e
+ *     `historial`. Con `apu`, `precio` YA NO SE MANDA: lo calcula la API =
+ *     precio unitario de cost101 SIN IVA (decisión de Mike con botones, 7-oct:
+ *     a quote101 llega «precio cost101 sin IVA», con indirectos y utilidad de
+ *     cost101 adentro; quote101 sólo le suma IVA). Se recalcula solo cuando
+ *     cambia un costo base, una cuadrilla o una subpartida.
+ *   · `estado: 'aprobado'` sólo lo pone quien dirige (owner o admin). Lo que
+ *     guarda cualquier otro queda en 'borrador', aunque estuviera aprobado.
+ *   · `GET /orgs/:o/costos` — todo de una: costos_base, cuadrillas, productos
+ *     con receta, `puede_aprobar`. `POST /orgs/:o/costos/importar` — carga en
+ *     bloque (la semilla de cost101), idempotente por clave; sólo quien dirige.
+ * Antes:
+ * 0.80.0 (LA EMPRESA FIRMA SUS DOCUMENTOS, Y UN
  * RENGLÓN SACADO SE BORRA SOLO. Mike, 7-oct, con la hoja de quote101: «el
  * logotipo del negocio que cotiza (…) que ese sea el que se ocupe para todos
  * los documentos que se generan en suite101», y los datos de contacto «se
@@ -1229,7 +1255,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.80.0';
+export const VERSION_CONTRATO = '0.81.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1398,6 +1424,10 @@ export const APPS = [
   'master101',
   'workshop101',
   'suite101',
+  /* cost101 (7-oct-2026): costos de obra por análisis de precio unitario.
+   * Llave propia, `cost`: es una app que se licencia por empresa y se
+   * reparte por persona, como las demás. */
+  'cost101',
 ] as const;
 export type App = (typeof APPS)[number];
 
@@ -1413,6 +1443,7 @@ export const LLAVE_APP: Record<App, string> = {
   master101: 'master',
   workshop101: 'workshop',
   suite101: 'suite',
+  cost101: 'cost',
 };
 
 /* ─────────────── D1 master: el directorio ─────────────── */
@@ -2087,6 +2118,10 @@ export const TABLAS = [
   'cotizaciones',
   'proyectos',
   'productos',
+  /* 0041 · cost101: lo que se compra o se paga por unidad, y los grupos de
+   * oficios con su jornada. El producto que se arma con ellos es `productos`. */
+  'costos_base',
+  'cuadrillas',
   'items',
   'partidas',
   'avances',
@@ -2216,7 +2251,11 @@ export type Aviso =
   | { t: 'conciliacion.nueva'; id: string; diferencia_total: number }
   /* 0.27.0 · se pagó una raya. Va al canal del dinero porque son N egresos
    * de golpe: una pantalla de saldos abierta tiene que enterarse. */
-  | { t: 'raya.pagada'; id: string };
+  | { t: 'raya.pagada'; id: string }
+  /* 0.81.0 · cambió un costo base, una cuadrilla o una receta, y con eso el
+   * precio de `productos` productos más. Quien tenga el catálogo abierto
+   * (cost101, quote101) lo vuelve a pedir. */
+  | { t: 'costos.cambio'; productos: number };
 
 /* ─────────────── el alcance de un ítem (0.64.0) ───────────────
  *

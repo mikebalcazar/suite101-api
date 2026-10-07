@@ -69,6 +69,63 @@ async function pedir(base, ruta, { app, method = 'GET', body, token } = {}) {
   return { estado: r.status, ms: Date.now() - t0, ...cuerpo };
 }
 
+/* ─────────────── cost101: los costos de la empresa demo (0.81.0) ───────────────
+ *
+ * Contra el Worker de verdad: que la app exista, que la empresa `demo` la
+ * traiga prendida (migración d1/0024), que la semilla entre y que la cuenta
+ * dé lo mismo que da la pantalla. La semilla se queda en `demo` a propósito:
+ * es contra lo que cost101 y quote101 se prueban y se capturan (D6). Correrla
+ * otra vez no duplica nada, así que cada despliegue la deja igual. */
+
+async function costos() {
+  linea('');
+  linea('== cost101: costos base, cuadrillas y productos (empresa demo) ==');
+  const { readFileSync } = await import('node:fs');
+  const lee = (f) => JSON.parse(readFileSync(new URL(`./datos/${f}`, import.meta.url), 'utf8'));
+  const semilla = lee('cost101-semilla.json');
+  const esperado = lee('cost101-esperado.json');
+
+  const sin = await fetch(`${STAGING}/orgs/demo/costos`, { headers: { 'X-App': 'cost101' } });
+  rev(sin.status === 401, 'sin sesión, los costos no se abren', String(sin.status));
+
+  galleta = '';
+  const cod = await pedir(STAGING, '/auth/codigo', { method: 'POST', body: { correo: CORREO } });
+  if (!cod.data?.codigo_prueba) { rev(false, 'entrar para medir costos', `${cod.estado} ${cod.error || ''}`); return; }
+  await pedir(STAGING, '/auth/entrar', { method: 'POST', body: { correo: CORREO, codigo: cod.data.codigo_prueba } });
+
+  const demo = await pedir(STAGING, '/orgs/demo', { app: 'cost101' });
+  rev(demo.estado === 200 && demo.data?.apps?.cost === true, 'la empresa demo trae cost101 prendida', `${demo.estado} ${JSON.stringify(demo.data?.apps || demo.error)}`);
+
+  const carga = await pedir(STAGING, '/orgs/demo/costos/importar', { app: 'cost101', method: 'POST', body: semilla });
+  rev(carga.estado === 201, 'la semilla entra (o ya estaba)', `${carga.estado} nuevos ${JSON.stringify(carga.data?.nuevos)} ya ${JSON.stringify(carga.data?.ya_estaban)} · ${carga.ms} ms`);
+  const recien = carga.data?.nuevos?.productos === 16;
+
+  const todo = await pedir(STAGING, '/orgs/demo/costos', { app: 'cost101' });
+  const d = todo.data || {};
+  rev(todo.estado === 200 && d.costos_base?.length >= 60 && d.cuadrillas?.length >= 6 && d.productos?.length >= 16,
+    'GET /costos trae todo de una', `${d.costos_base?.length} costos, ${d.cuadrillas?.length} cuadrillas, ${d.productos?.length} productos · ${todo.ms} ms`);
+  const muro = (d.productos || []).find((p) => p.codigo === 'PAR-302');
+  rev(!!muro && muro.precio > 0 && muro.desglose?.pu - muro.desglose?.iva === muro.precio,
+    'el precio del producto es su precio unitario sin IVA', muro ? `PAR-302: PU ${muro.desglose?.pu} · sin IVA ${muro.precio}` : 'no está PAR-302');
+  if (recien) {
+    // Sólo con la semilla recién puesta: después alguien pudo mover un precio en demo.
+    const mal = Object.keys(esperado).filter((k) => (d.productos.find((p) => p.codigo === k)?.desglose?.pu) !== esperado[k].pu);
+    rev(mal.length === 0, 'los 16 productos dan, al centavo, lo que da la pantalla', mal.join(', ') || `PAR-302 = ${esperado['PAR-302'].pu}`);
+  }
+
+  const quote = await pedir(STAGING, '/orgs/demo/productos?estado=aprobado&limite=5000', { app: 'cotizador101' });
+  rev(quote.estado === 200 && quote.data?.filas?.length >= 12, 'quote101 lee el catálogo de productos aprobados', `${quote.estado} · ${quote.data?.filas?.length}`);
+  const base = await pedir(STAGING, '/orgs/demo/costos_base?limite=5000', { app: 'cotizador101' });
+  rev(base.estado === 200 && base.data?.total >= 60, 'quote101 lee los precios base', `${base.estado} · ${base.data?.total}`);
+  const noEscribe = await pedir(STAGING, '/orgs/demo/costos_base', { app: 'cotizador101', method: 'POST', body: { nombre: 'X', tipo: 'material', precio: 1 } });
+  rev(noEscribe.estado === 403, 'quote101 no escribe costos', String(noEscribe.estado));
+  const dash = await pedir(STAGING, '/orgs/demo/costos_base', { app: 'dash101' });
+  rev(dash.estado === 403, 'dash101 no lee los costos base', String(dash.estado));
+
+  const prodSin = await fetch(`${PROD}/orgs/forespot/costos`, { headers: { 'X-App': 'cost101' } });
+  rev(prodSin.status === 401, 'producción: sin sesión, los costos no se abren', String(prodSin.status));
+}
+
 /* ─────────────── producción: que responda y que se calle el código ─────────────── */
 
 async function produccion() {
@@ -947,6 +1004,7 @@ try {
   await licencias();
   await ordenesYFiscal();
   await importacion();
+  await costos();
 } catch (e) {
   fallas++;
   linea(`  FALLA se rompió a medias: ${e?.message}`);
