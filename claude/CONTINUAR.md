@@ -419,6 +419,14 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **El requerimiento se arma por componentes, imagen en lo escrito a mano y notas internas a la bitácora del ítem; los cargos NO se duplican (7-oct, cotizador-t101 #78 y #79, API 0.78.0 #263).**
+  «armar por componentes» abre el renglón del requerimiento en el armador y
+  `conArmado()` le quita `manual` sin perder su item_id. «+ imagen» en los
+  renglones a mano. `notas_internas` por renglón: hoja y PDF interno, nunca
+  el cliente; al aprobar la API las escribe en la bitácora de cada pieza.
+  Lo del «70% más»: medido, cada cargo va una vez (pesa el flete mínimo de
+  $1,500); Mike escogió aclarar la caja, no cambiar números. Muro
+  `2026-10-07-0056-jr-requerimiento-por-componentes-y-notas.md`.
 - **La obra de quell101 nace con cliente y proyecto en la suite, el requerimiento trae descripción, y la lista de ítems de dash101 con el estilo de quell (6-oct, API 0.76.0 #260 y 0.77.0 #261, bitacora-obra #120, dash101 #144).**
   Mike: «Cree un nuevo proyecto en Quell, con un cliente nuevo. Pero no me
   aparece ni el cliente ni el proyecto ni en quote ni en dash». «+ Proyecto»
