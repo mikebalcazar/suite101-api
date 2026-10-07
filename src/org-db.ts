@@ -53,6 +53,7 @@ import tiemposDefault from '../migrations/org/0037_tiempos_default.sql';
 import descripcionDePieza from '../migrations/org/0038_descripcion_de_pieza.sql';
 import obrasALaSuite from '../migrations/org/0039_obras_a_la_suite.sql';
 import empresaLogoYDatos from '../migrations/org/0040_empresa_logo_y_datos.sql';
+import costos from '../migrations/org/0041_costos.sql';
 import { atender as atenderQuell, poblarCostosDefault, ponerTiemposDefault, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { PREFIJOS, esRequerimiento, siguienteCodigo } from './quell/codigos.js';
 
@@ -65,6 +66,7 @@ import { invitarClienteEnSuite } from './clientes';
 import { secretoDe } from './maestro';
 import type { Quien } from './http';
 import { DEFS, type Def, type Tipo } from './tablas';
+import { calcular, hoyMx, limpiarApu, usaA, type Apu, type Desglose, type Fuentes } from './costos';
 import { ahora, normalizar, ulid } from './lib';
 import { alcanceDeItem, type MovimientoAlcance } from '../schema/tipos';
 import { TABLAS, type Aviso, type ConteoQuote, type Etapa, type Peek, type Pool, type ProveedorDePago, type Tabla } from '../schema/tipos';
@@ -79,16 +81,17 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos];
 
 /** La 0027, la 0030, la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
  *  en la lista; el archivo .sql es sólo la nota que lo dice. */
-const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos'> = {
+const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra'> = {
   [MIGRACIONES.indexOf(sinNegocios)]: 'quitarNegocios',
   [MIGRACIONES.indexOf(requerimientosHuerfanos)]: 'migrarRequerimientosHuerfanos',
   [MIGRACIONES.indexOf(obrasALaSuite)]: 'migrarObrasSueltas',
   [MIGRACIONES.indexOf(empresaLogoYDatos)]: 'empresaLogoYDatos',
+  [MIGRACIONES.indexOf(costos)]: 'costosDeObra',
 };
 
 /** La tabla `empresa` (0027): UN renglón, con id fijo, que es lo que antes
@@ -458,8 +461,32 @@ export interface ApiOrgDB {
     piezas_sin_item: number; venta_antes: number; venta_despues: number;
   } | { error: string; detalle?: unknown }>;
 
+  /** cost101 (0.81.0). ¿Esa clave ya es de otro renglón de la tabla? */
+  claveOcupada(tabla: 'costos_base' | 'cuadrillas' | 'productos', clave: string, excepto?: string | null): Promise<boolean>;
+  /** Quién usa este costo base, cuadrilla o producto dentro de otra receta. */
+  usosEnCostos(tabla: 'costos_base' | 'cuadrillas' | 'productos', id: string): Promise<Array<{ que: 'cuadrilla' | 'producto'; id: string; clave: string; nombre: string }>>;
+  /** Que cada `ref` de la receta exista y que no se muerda la cola. */
+  revisarApu(apu: unknown, producto_id: string | null): Promise<{ ok: true; apu: Record<string, unknown> } | { ok: false; errores: Record<string, string> }>;
+  /** Que cada miembro de la cuadrilla sea un oficio (`mo`) que existe. */
+  revisarMiembros(miembros: Array<{ ref: string; cant: number }>): Promise<Record<string, string> | null>;
+  /** La carga en bloque de cost101 (la semilla): idempotente por clave. */
+  importarCostos(args: ImportarCostos): Promise<ResultadoImportarCostos>;
+
   fetch(req: Request): Promise<Response>;
 }
+
+/** Lo que manda `POST /orgs/:o/costos/importar`. `ref` es el nombre que cada
+ *  renglón trae en el archivo; las recetas y las cuadrillas se apuntan entre
+ *  sí con él, y aquí se cambia por el id de verdad. */
+export interface ImportarCostos {
+  costos?: Array<{ ref: string; clave?: string; nombre: string; tipo: string; unidad?: string; precio: number; categoria?: string; historial?: Array<{ f: string; precio: number }> }>;
+  cuadrillas?: Array<{ ref: string; clave?: string; nombre: string; categoria?: string; horas?: number; miembros: Array<{ ref: string; cant: number }> }>;
+  productos?: Array<{ ref: string; codigo?: string; nombre: string; descripcion?: string; tipo?: string; unidad?: string; categoria?: string; estado?: string; apu: unknown }>;
+  usuario_id: string;
+}
+export type ResultadoImportarCostos =
+  | { ok: true; nuevos: { costos: number; cuadrillas: number; productos: number }; ya_estaban: { costos: number; cuadrillas: number; productos: number } }
+  | { ok: false; error: string; detalle?: unknown };
 
 /* ─────────────── quell101 sobre el SqlStorage ───────────────
  * El motor de quell101 (src/quell/motor.js) habla D1: prepare · bind · first ·
@@ -772,8 +799,12 @@ export class OrgDB extends DurableObject<Env> {
     for (const [k, v] of Object.entries(fila)) {
       const t = cols[k] as Tipo | undefined;
       if (t === 'json') {
+        /* 0.81.0 · En `productos`, la receta que no existe es NULL y tiene
+         * que salir null, no `{}`: «¿tiene receta?» se pregunta con `!p.apu`
+         * en media docena de lugares, y un objeto vacío diría que sí. */
+        if ((v === null || v === undefined) && (k === 'apu' || k === 'desglose')) { out[k] = null; continue; }
         try {
-          out[k] = JSON.parse(String(v ?? (k === 'asignados' || k === 'etapas_permitidas' ? '[]' : '{}')));
+          out[k] = JSON.parse(String(v ?? (k === 'asignados' || k === 'etapas_permitidas' || k === 'historial' || k === 'miembros' ? '[]' : '{}')));
         } catch {
           out[k] = null;
         }
@@ -1010,6 +1041,34 @@ export class OrgDB extends DurableObject<Env> {
       if (String(fila.estado ?? '') === 'cancelado') fila.estado = 'cotizado';
       if (String(fila.estado ?? 'cotizado') === 'vendido' && !fila.aprobado_at) fila.aprobado_at = ahora();
     }
+    /* 0.81.0 · cost101. La clave que no viene la pone la base; el historial
+     * de un costo nace con su precio de alta; y un producto con receta nace
+     * en borrador si nadie dijo otra cosa, con el precio en cero hasta que
+     * `despuesDeCostos` haga la cuenta dos renglones abajo. */
+    if (tabla === 'costos_base') {
+      const tipo = String(fila.tipo ?? 'material');
+      fila.clave = String(fila.clave ?? '').trim() || this.siguienteClave('costos_base', 'clave', tipo === 'mo' ? 'MO-' : tipo === 'equipo' ? 'EQ-' : 'MAT-', 3);
+      if (tipo !== 'material') fila.unidad = 'h';
+      fila.unidad = String(fila.unidad ?? '').trim() || 'pza';
+      fila.precio = Math.max(0, Math.trunc(Number(fila.precio ?? 0)) || 0);
+      fila.categoria = String(fila.categoria ?? '').trim();
+      if (!Array.isArray(fila.historial)) fila.historial = [{ f: hoyMx(), precio: fila.precio }];
+    }
+    if (tabla === 'cuadrillas') {
+      fila.clave = String(fila.clave ?? '').trim() || this.siguienteClave('cuadrillas', 'clave', 'CUA-', 2);
+      fila.horas = Number(fila.horas) > 0 ? Number(fila.horas) : 8;
+      fila.categoria = String(fila.categoria ?? '').trim();
+      if (!Array.isArray(fila.miembros)) fila.miembros = [];
+    }
+    if (tabla === 'productos' && fila.apu) {
+      fila.codigo = String(fila.codigo ?? '').trim() || this.siguienteClave('productos', 'codigo', 'PAR-', 3);
+      fila.estado = fila.estado === 'aprobado' ? 'aprobado' : 'borrador';
+      fila.tipo = String(fila.tipo ?? '').trim() || 'servicio';
+      fila.moneda = String(fila.moneda ?? '').trim() || 'MXN';
+      fila.precio = 0;
+      fila.desglose = null;
+      fila.historial = [];
+    }
     if (def.cols.creado_at) fila.creado_at = ahora();
     if (def.cols.ts && !fila.ts) fila.ts = ahora();
     if (def.cols.creado_por) fila.creado_por = contexto.usuario_id;
@@ -1031,6 +1090,7 @@ export class OrgDB extends DurableObject<Env> {
     );
 
     this.despuesDeEscribir(tabla, fila.id as string);
+    this.despuesDeCostos(tabla, fila.id as string, null);
     // Un ítem que nace vendido entra al alcance al nacer: queda en la bitácora.
     if (tabla === 'items' && String(fila.estado ?? 'cotizado') === 'vendido') {
       this.anotarAlcance(String(fila.id), (fila.proyecto_id as string | null) ?? null, 'entra', contexto, null);
@@ -1086,6 +1146,31 @@ export class OrgDB extends DurableObject<Env> {
         if (datos.cancelado_at === undefined) { cols.push('cancelado_at'); datos.cancelado_at = ahora(); }
       }
     }
+    /* 0.81.0 · cost101. El precio de un costo base que cambia deja renglón en
+     * su historial —uno por día: el segundo cambio del mismo día pisa al
+     * primero, que si no un precio tecleado mal y corregido contaría como dos
+     * movimientos—. Y del producto se guarda cómo estaba, para que
+     * `despuesDeCostos` sepa decir si se editó o se aprobó. */
+    let productoAntes: Fila | null = null;
+    if (tabla === 'costos_base' && datos.precio !== undefined) {
+      const antes = this.obtener('costos_base', id);
+      const nuevo = Math.max(0, Math.trunc(Number(datos.precio)) || 0);
+      datos.precio = nuevo;
+      if (antes && Number(antes.precio) !== nuevo) {
+        const h = Array.isArray(antes.historial) ? [...(antes.historial as Array<{ f: string; precio: number }>)] : [];
+        const f = hoyMx();
+        if (h.length && h[h.length - 1].f === f) h[h.length - 1] = { f, precio: nuevo }; else h.push({ f, precio: nuevo });
+        if (!cols.includes('historial')) cols.push('historial');
+        datos.historial = h.slice(-60);
+      }
+    }
+    if (tabla === 'productos') {
+      productoAntes = this.obtener('productos', id);
+      // Un producto con receta no lleva precio escrito a mano: lo pone la cuenta.
+      const conReceta = datos.apu !== undefined ? !!datos.apu : !!productoAntes?.apu;
+      if (conReceta && cols.includes('precio')) cols.splice(cols.indexOf('precio'), 1);
+      if (!cols.length) return productoAntes;
+    }
     if (def.cols.actualizado_at) {
       cols.push('actualizado_at');
       datos.actualizado_at = ahora();
@@ -1094,6 +1179,7 @@ export class OrgDB extends DurableObject<Env> {
     this.sql.exec(`UPDATE ${tabla} SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`, ...valores, id);
 
     this.despuesDeEscribir(tabla, id);
+    this.despuesDeCostos(tabla, id, productoAntes);
     if (montoAntes !== undefined) this.huellaDePrecio(id, Number(montoAntes));
     if (mueveAlcance) this.anotarAlcance(id, proyectoDelItem, mueveAlcance, contexto, (datos.cancelado_motivo as string | null) ?? null);
     return this.obtener(tabla, id);
@@ -1128,6 +1214,11 @@ export class OrgDB extends DurableObject<Env> {
   borrar(tabla: Tabla, id: string): boolean | 'en_uso' {
     const antes = this.obtener(tabla, id);
     if (!antes) return false;
+    /* 0.81.0 · Un costo base, una cuadrilla o un producto que otra receta
+     * usa no se va: la receta se quedaría apuntando a nada y su precio
+     * bajaría solo, sin que nadie lo decidiera. Las recetas son JSON, así
+     * que esto no lo cuida una llave foránea: se cuida aquí. */
+    if ((tabla === 'costos_base' || tabla === 'cuadrillas' || tabla === 'productos') && this.usosEnCostos(tabla, id).length) return 'en_uso';
     // Las llaves foráneas se aplican. Se contesta con un valor y no con una
     // excepción: cruzar el RPC con una excepción deja «uncaught» en el registro
     // del Worker aunque el Worker la atrape.
@@ -1139,6 +1230,246 @@ export class OrgDB extends DurableObject<Env> {
     }
     if ((tabla === 'movimientos' || tabla === 'partidas') && antes.proyecto_id) this.recalcularProyecto(String(antes.proyecto_id));
     return true;
+  }
+
+  /* ─────────────── cost101: costos base, cuadrillas y la receta (0.81.0) ───────────────
+   *
+   * Mike, 7-oct-2026: «los generadores se alimentan de la base de datos de
+   * costos base, y de ahí se generan los productos (…) los cuales van a
+   * alimentar los precios de los productos para quote».
+   *
+   * El precio de un producto con receta es un CACHÉ: sale de sus costos. Lo
+   * recalcula la base cada vez que se toca cualquiera de las tres tablas, y
+   * no la pantalla, porque quote101 lo lee aunque nadie tenga cost101
+   * abierto. Los catálogos son chicos —cientos de renglones—, así que se
+   * recalcula todo: buscar «quién usa a quién» para ahorrarse la cuenta
+   * costaría más que hacerla. */
+
+  /** La siguiente clave libre con ese prefijo: MAT-044 después de MAT-043. */
+  private siguienteClave(tabla: 'costos_base' | 'cuadrillas' | 'productos', columna: 'clave' | 'codigo', prefijo: string, digitos: number): string {
+    const filas = this.sql.exec(`SELECT ${columna} AS c FROM ${tabla} WHERE ${columna} LIKE ?`, `${prefijo}%`).toArray() as Fila[];
+    let mayor = 0;
+    for (const f of filas) {
+      const n = Number(String(f.c).slice(prefijo.length));
+      if (Number.isInteger(n) && n > mayor) mayor = n;
+    }
+    return `${prefijo}${String(mayor + 1).padStart(digitos, '0')}`;
+  }
+
+  claveOcupada(tabla: 'costos_base' | 'cuadrillas' | 'productos', clave: string, excepto: string | null = null): boolean {
+    const c = String(clave ?? '').trim();
+    if (!c) return false;
+    const columna = tabla === 'productos' ? 'codigo' : 'clave';
+    return this.sql.exec(`SELECT 1 AS x FROM ${tabla} WHERE ${columna} = ? AND id <> ? LIMIT 1`, c, excepto ?? '').toArray().length > 0;
+  }
+
+  /** Todo lo que la cuenta necesita, leído una vez. */
+  private fuentesDeCostos(): { f: Fuentes; productos: Fila[]; cuadrillas: Fila[] } {
+    const costos = this.sql.exec(`SELECT id, tipo, precio, nombre FROM costos_base`).toArray() as Fila[];
+    const cuadrillas = (this.sql.exec(`SELECT * FROM cuadrillas`).toArray() as Fila[]).map((q) => this.afuera('cuadrillas', q)!);
+    const productos = (this.sql.exec(`SELECT * FROM productos WHERE apu IS NOT NULL AND apu <> 'null'`).toArray() as Fila[]).map((p) => this.afuera('productos', p)!);
+    const f: Fuentes = {
+      costos: new Map(costos.map((c) => [String(c.id), { id: String(c.id), tipo: String(c.tipo), precio: Number(c.precio), nombre: String(c.nombre) }])),
+      cuadrillas: new Map(cuadrillas.map((q) => [String(q.id), { id: String(q.id), horas: Number(q.horas), miembros: (q.miembros as Array<{ ref: string; cant: number }>) ?? [], nombre: String(q.nombre) }])),
+      productos: new Map(productos.map((p) => [String(p.id), { id: String(p.id), apu: (p.apu as Apu | null) ?? null, nombre: String(p.nombre) }])),
+    };
+    return { f, productos, cuadrillas };
+  }
+
+  usosEnCostos(tabla: 'costos_base' | 'cuadrillas' | 'productos', id: string): Array<{ que: 'cuadrilla' | 'producto'; id: string; clave: string; nombre: string }> {
+    const { productos, cuadrillas } = this.fuentesDeCostos();
+    const usos: Array<{ que: 'cuadrilla' | 'producto'; id: string; clave: string; nombre: string }> = [];
+    const tipoComp = tabla === 'costos_base' ? 'insumo' : tabla === 'cuadrillas' ? 'cuadrilla' : 'partida';
+    if (tabla === 'costos_base') {
+      for (const q of cuadrillas) {
+        if (((q.miembros as Array<{ ref: string }>) ?? []).some((m) => m.ref === id)) usos.push({ que: 'cuadrilla', id: String(q.id), clave: String(q.clave ?? ''), nombre: String(q.nombre) });
+      }
+    }
+    for (const p of productos) {
+      if (String(p.id) === id) continue;
+      if (((p.apu as Apu | null)?.comps ?? []).some((c) => c.tipo === tipoComp && c.ref === id)) usos.push({ que: 'producto', id: String(p.id), clave: String(p.codigo ?? ''), nombre: String(p.nombre) });
+    }
+    return usos;
+  }
+
+  revisarApu(apu: unknown, producto_id: string | null): { ok: true; apu: Record<string, unknown> } | { ok: false; errores: Record<string, string> } {
+    const limpio = limpiarApu(apu);
+    if (!limpio.ok) return limpio;
+    const { f } = this.fuentesDeCostos();
+    const errores: Record<string, string> = {};
+    limpio.apu.comps.forEach((c, i) => {
+      if (c.tipo === 'insumo' && !f.costos.has(c.ref)) errores[`comps.${i}.ref`] = 'Ese costo base ya no existe.';
+      if (c.tipo === 'cuadrilla' && !f.cuadrillas.has(c.ref)) errores[`comps.${i}.ref`] = 'Esa cuadrilla ya no existe.';
+      if (c.tipo === 'partida') {
+        const otro = f.productos.get(c.ref);
+        if (!otro) errores[`comps.${i}.ref`] = 'Ese producto no existe o no tiene receta.';
+        else if (producto_id && (c.ref === producto_id || usaA(otro, producto_id, f))) {
+          errores[`comps.${i}.ref`] = `«${otro.nombre}» ya usa a este producto: uno no puede ir dentro del otro.`;
+        }
+      }
+    });
+    return Object.keys(errores).length ? { ok: false, errores } : { ok: true, apu: limpio.apu as unknown as Record<string, unknown> };
+  }
+
+  revisarMiembros(miembros: Array<{ ref: string; cant: number }>): Record<string, string> | null {
+    const errores: Record<string, string> = {};
+    miembros.forEach((m, i) => {
+      const o = this.sql.exec(`SELECT tipo FROM costos_base WHERE id = ?`, m.ref).toArray()[0] as Fila | undefined;
+      if (!o) errores[`miembros.${i}.ref`] = 'Ese oficio ya no existe.';
+      else if (o.tipo !== 'mo') errores[`miembros.${i}.ref`] = 'Una cuadrilla se arma con oficios (mano de obra).';
+    });
+    return Object.keys(errores).length ? errores : null;
+  }
+
+  /** Vuelve a hacer la cuenta de TODOS los productos con receta y guarda los
+   *  que cambiaron. `motivo` es lo que queda escrito en su historial;
+   *  `propio` es el producto que se acaba de crear o editar, que lleva su
+   *  propio motivo y deja renglón aunque el número no se haya movido (al
+   *  nacer y al aprobarse). Devuelve cuántos OTROS cambiaron. */
+  private recalcularProductos(motivo: string, propio: { id: string; motivo: string | null } | null = null): number {
+    const { f, productos } = this.fuentesDeCostos();
+    const hoy = hoyMx();
+    let movidos = 0;
+    for (const p of productos) {
+      const id = String(p.id);
+      const d: Desglose = calcular(p.apu as Apu, f);
+      const antes = (p.desglose as Desglose | null) ?? null;
+      const esPropio = propio?.id === id;
+      const cambioNumero = !antes || antes.pu !== d.pu || Number(p.precio) !== d.precio;
+      const m = esPropio ? propio!.motivo : cambioNumero && antes ? motivo : null;
+      const igual = antes && JSON.stringify(antes) === JSON.stringify(d) && Number(p.precio) === d.precio;
+      if (igual && !m) continue;
+      let h = Array.isArray(p.historial) ? [...(p.historial as Array<{ f: string; pu: number; m: string }>)] : [];
+      if (m) {
+        const ultimo = h[h.length - 1];
+        if (ultimo && ultimo.f === hoy && ultimo.m === m) h[h.length - 1] = { f: hoy, pu: d.pu, m }; else h.push({ f: hoy, pu: d.pu, m });
+        h = h.slice(-60);
+      }
+      this.sql.exec(
+        `UPDATE productos SET precio = ?, desglose = ?, historial = ?, actualizado_at = ? WHERE id = ?`,
+        d.precio, JSON.stringify(d), JSON.stringify(h), ahora(), id,
+      );
+      if (!esPropio && cambioNumero) movidos++;
+    }
+    if (movidos || propio) this.avisar({ t: 'costos.cambio', productos: movidos }, 'todos');
+    return movidos;
+  }
+
+  /** Después de tocar un costo base, una cuadrilla o un producto con receta. */
+  private despuesDeCostos(tabla: Tabla, id: string, antes: Fila | null): void {
+    if (tabla === 'costos_base') {
+      const c = this.obtener('costos_base', id);
+      this.recalcularProductos(`Precio base: ${c?.nombre ?? ''}`);
+    } else if (tabla === 'cuadrillas') {
+      const q = this.obtener('cuadrillas', id);
+      this.recalcularProductos(`Cuadrilla: ${q?.nombre ?? ''}`);
+    } else if (tabla === 'productos') {
+      const p = this.obtener('productos', id);
+      if (!p?.apu) return;
+      const viejo = (antes?.desglose as Desglose | null) ?? null;
+      const d = calcular(p.apu as Apu, this.fuentesDeCostos().f);
+      let motivo: string | null = null;
+      if (!antes || !antes.apu) motivo = p.estado === 'aprobado' ? 'Alta en catálogo' : 'Alta (borrador)';
+      else if (p.estado === 'aprobado' && antes.estado !== 'aprobado') motivo = 'Aprobada';
+      else if (!viejo || viejo.pu !== d.pu) motivo = 'Edición de partida';
+      this.recalcularProductos(`Subpartida: ${p.nombre}`, { id, motivo });
+    }
+  }
+
+  importarCostos(args: ImportarCostos): ResultadoImportarCostos {
+    const nuevos = { costos: 0, cuadrillas: 0, productos: 0 };
+    const ya = { costos: 0, cuadrillas: 0, productos: 0 };
+    const ids = { costos: new Map<string, string>(), cuadrillas: new Map<string, string>(), productos: new Map<string, string>() };
+    const idPorClave = (tabla: string, columna: string, clave: string): string | null =>
+      clave ? ((this.sql.exec(`SELECT id FROM ${tabla} WHERE ${columna} = ?`, clave).toArray()[0] as Fila | undefined)?.id as string | undefined) ?? null : null;
+    let falla: { error: string; detalle?: unknown } | null = null;
+    try {
+      this.ctx.storage.transactionSync(() => {
+        const t = ahora();
+        for (const c of args.costos ?? []) {
+          const clave = String(c.clave ?? '').trim();
+          const hay = idPorClave('costos_base', 'clave', clave);
+          if (hay) { ids.costos.set(c.ref, hay); ya.costos++; continue; }
+          const tipo = ['material', 'mo', 'equipo'].includes(c.tipo) ? c.tipo : 'material';
+          const precio = Math.max(0, Math.trunc(Number(c.precio)) || 0);
+          const historial = Array.isArray(c.historial) && c.historial.length
+            ? c.historial.map((h) => ({ f: String(h.f).slice(0, 10), precio: Math.max(0, Math.trunc(Number(h.precio)) || 0) }))
+            : [{ f: hoyMx(), precio }];
+          const id = ulid();
+          this.sql.exec(
+            `INSERT INTO costos_base (id, clave, nombre, nombre_norm, tipo, unidad, precio, categoria, historial, creado_at, creado_por) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+            id, clave || this.siguienteClave('costos_base', 'clave', tipo === 'mo' ? 'MO-' : tipo === 'equipo' ? 'EQ-' : 'MAT-', 3),
+            String(c.nombre).trim(), normalizar(c.nombre), tipo, tipo === 'material' ? String(c.unidad ?? 'pza') : 'h', precio,
+            String(c.categoria ?? '').trim(), JSON.stringify(historial), t, args.usuario_id,
+          );
+          ids.costos.set(c.ref, id); nuevos.costos++;
+        }
+        for (const q of args.cuadrillas ?? []) {
+          const clave = String(q.clave ?? '').trim();
+          const hay = idPorClave('cuadrillas', 'clave', clave);
+          if (hay) { ids.cuadrillas.set(q.ref, hay); ya.cuadrillas++; continue; }
+          const miembros = (q.miembros ?? []).map((m) => {
+            const real = ids.costos.get(m.ref);
+            if (!real) throw Object.assign(new Error('ref'), { detalle: { que: 'cuadrilla', clave, miembro: m.ref, motivo: 'ese oficio no viene en el archivo' } });
+            return { ref: real, cant: Number(m.cant) || 0 };
+          });
+          const id = ulid();
+          this.sql.exec(
+            `INSERT INTO cuadrillas (id, clave, nombre, categoria, horas, miembros, creado_at, creado_por) VALUES (?,?,?,?,?,?,?,?)`,
+            id, clave || this.siguienteClave('cuadrillas', 'clave', 'CUA-', 2), String(q.nombre).trim(), String(q.categoria ?? '').trim(),
+            Number(q.horas) > 0 ? Number(q.horas) : 8, JSON.stringify(miembros), t, args.usuario_id,
+          );
+          ids.cuadrillas.set(q.ref, id); nuevos.cuadrillas++;
+        }
+        // Los ids de los productos se apartan todos antes: una receta puede
+        // apuntar a un producto que viene más abajo en el archivo.
+        const porHacer: Array<{ p: NonNullable<ImportarCostos['productos']>[number]; id: string; codigo: string }> = [];
+        for (const p of args.productos ?? []) {
+          const codigo = String(p.codigo ?? '').trim();
+          const hay = idPorClave('productos', 'codigo', codigo);
+          if (hay) { ids.productos.set(p.ref, hay); ya.productos++; continue; }
+          const id = ulid();
+          ids.productos.set(p.ref, id);
+          porHacer.push({ p, id, codigo });
+        }
+        for (const { p, id, codigo } of porHacer) {
+          const limpio = limpiarApu(p.apu);
+          if (!limpio.ok) throw Object.assign(new Error('apu'), { detalle: { que: 'producto', codigo, errores: limpio.errores } });
+          for (const c of limpio.apu.comps) {
+            const mapa = c.tipo === 'insumo' ? ids.costos : c.tipo === 'cuadrilla' ? ids.cuadrillas : ids.productos;
+            const real = mapa.get(c.ref);
+            if (!real) throw Object.assign(new Error('ref'), { detalle: { que: 'producto', codigo, componente: c.ref, motivo: 'no viene en el archivo' } });
+            c.ref = real;
+          }
+          this.sql.exec(
+            `INSERT INTO productos (id, codigo, nombre, descripcion, tipo, precio, moneda, creado_at, creado_por, unidad, categoria, estado, apu, historial)
+             VALUES (?,?,?,?,?,0,'MXN',?,?,?,?,?,?,'[]')`,
+            id, codigo || this.siguienteClave('productos', 'codigo', 'PAR-', 3), String(p.nombre).trim(), p.descripcion ?? null,
+            String(p.tipo ?? '').trim() || 'servicio', t, args.usuario_id, String(p.unidad ?? 'pza'), String(p.categoria ?? '').trim(),
+            p.estado === 'aprobado' ? 'aprobado' : 'borrador', JSON.stringify(limpio.apu),
+          );
+          nuevos.productos++;
+        }
+        // Una sola cuenta al final, ya con todo adentro; cada producto nuevo
+        // deja su renglón de alta.
+        const { f, productos } = this.fuentesDeCostos();
+        const recien = new Set(porHacer.map((x) => x.id));
+        const hoy = hoyMx();
+        for (const pr of productos) {
+          if (!recien.has(String(pr.id))) continue;
+          const d = calcular(pr.apu as Apu, f);
+          const m = pr.estado === 'aprobado' ? 'Alta en catálogo' : 'Alta (borrador)';
+          this.sql.exec(`UPDATE productos SET precio = ?, desglose = ?, historial = ? WHERE id = ?`, d.precio, JSON.stringify(d), JSON.stringify([{ f: hoy, pu: d.pu, m }]), String(pr.id));
+        }
+      });
+    } catch (e) {
+      const x = e as Error & { detalle?: unknown };
+      if (x.message === 'ref' || x.message === 'apu') falla = { error: 'datos_invalidos', detalle: x.detalle };
+      else throw e;
+    }
+    if (falla) return { ok: false, ...falla };
+    if (nuevos.costos || nuevos.cuadrillas) this.recalcularProductos('Carga de costos');
+    return { ok: true, nuevos, ya_estaban: ya };
   }
 
   /** Lo que hay que recalcular y avisar después de tocar una tabla. */
@@ -3161,6 +3492,21 @@ export class OrgDB extends DurableObject<Env> {
     this.sql.exec(SQL_EMPRESA);
     for (const col of COLUMNAS_0040) {
       if (!this.tieneColumna('empresa', col)) this.sql.exec(`ALTER TABLE empresa ADD COLUMN ${col} TEXT`);
+    }
+  }
+
+  /** 0041, en código: las tablas de cost101 y las columnas que gana
+   *  `productos`. El .sql ES la migración —de ahí se leen las sentencias, y de
+   *  ahí lee el esquema la prueba—; aquí sólo se corre de manera que repetirla
+   *  no truene: SQLite no tiene `ADD COLUMN IF NOT EXISTS`, y una base a la
+   *  que se le regresa la versión (las pruebas de la 0036, 0037 y 0039 lo
+   *  hacen) volvería a pasar por aquí con las columnas ya puestas. */
+  private costosDeObra(): void {
+    const sinAlter = costos.replace(/^ALTER TABLE .*$/gm, '');
+    this.sql.exec(sinAlter);
+    for (const m of costos.matchAll(/^ALTER TABLE (\w+) ADD COLUMN (\w+) (\w+);$/gm)) {
+      const [, tabla, columna, tipo] = m;
+      if (!this.tieneColumna(tabla, columna)) this.sql.exec(`ALTER TABLE ${tabla} ADD COLUMN ${columna} ${tipo}`);
     }
   }
 

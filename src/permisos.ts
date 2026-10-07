@@ -99,7 +99,17 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
    * está en la lista: cambiarle el precio a un producto es una decisión de
    * quien cotiza, no un caché. Lo que NO se escribe por aquí es a quién
    * pertenece cada pieza; eso es `items.producto_id`, abajo. */
-  productos: { dash101: ['codigo', 'nombre', 'descripcion', 'tipo', 'precio', 'moneda'] },
+  productos: {
+    dash101: ['codigo', 'nombre', 'descripcion', 'tipo', 'precio', 'moneda'],
+    /* 0.81.0 · cost101 arma el producto con su receta. NO manda `precio`:
+     * con `apu` lo calcula la API. `estado: 'aprobado'` sólo se lo deja la
+     * ruta a quien dirige. */
+    cost101: ['codigo', 'nombre', 'descripcion', 'tipo', 'moneda', 'unidad', 'categoria', 'estado', 'apu'],
+  },
+  /* 0.81.0 · Los costos base y las cuadrillas son de cost101. Las demás
+   * leen (cotizador101 las pone en una cotización), no escriben. */
+  costos_base: { cost101: ['clave', 'nombre', 'tipo', 'unidad', 'precio', 'categoria'] },
+  cuadrillas: { cost101: ['clave', 'nombre', 'categoria', 'horas', 'miembros'] },
   conciliacion_cuentas: { dash101: ['conciliacion_id', 'cuenta_id', 'saldo_registrado', 'saldo_real', 'diferencia', 'movimiento_id'] },
 };
 
@@ -108,6 +118,10 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
 export const CACHES: Partial<Record<Tabla, readonly string[]>> = {
   proyectos: ['precio_venta', 'cobrado', 'pagado_prov', 'compromiso', 'avance'],
   partidas: ['monto_pagado', 'estado', 'tarea_id', 'obra_id', 'fecha_esperada'],
+  /* 0.81.0 · lo que dio la cuenta y cuándo se movió: los escribe la API al
+   * recalcular, nunca una app. */
+  productos: ['desglose', 'historial'],
+  costos_base: ['historial'],
   /* `aprobado_at` y `cancelado_at` los pone la API al cambiar el estado, y
    * `cancelado_motivo` la ruta de cancelar. Ninguna app los manda: de
    * `aprobado_at` depende que un descartado no se lea como una venta

@@ -1,0 +1,2085 @@
+{
+ "costos": [
+  {
+   "ref": "m1",
+   "clave": "MAT-001",
+   "nombre": "Panel de yeso 1/2\" 1.22×2.44 m",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 24500,
+   "categoria": "Tableros",
+   "historial": [
+    {
+     "f": "2026-03-02",
+     "precio": 22800
+    },
+    {
+     "f": "2026-07-15",
+     "precio": 23900
+    },
+    {
+     "f": "2026-09-28",
+     "precio": 24500
+    }
+   ]
+  },
+  {
+   "ref": "m2",
+   "clave": "MAT-002",
+   "nombre": "Canal galvanizado 6.35 cm cal. 26",
+   "tipo": "material",
+   "unidad": "ml",
+   "precio": 2800,
+   "categoria": "Tableros",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 2800
+    }
+   ]
+  },
+  {
+   "ref": "m3",
+   "clave": "MAT-003",
+   "nombre": "Poste galvanizado 6.35 cm cal. 26",
+   "tipo": "material",
+   "unidad": "ml",
+   "precio": 3600,
+   "categoria": "Tableros",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 3300
+    },
+    {
+     "f": "2026-05-10",
+     "precio": 3600
+    }
+   ]
+  },
+  {
+   "ref": "m4",
+   "clave": "MAT-004",
+   "nombre": "Tornillo para tablaroca 1\"",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 35,
+   "categoria": "Tableros",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 35
+    }
+   ]
+  },
+  {
+   "ref": "m5",
+   "clave": "MAT-005",
+   "nombre": "Colchoneta fibra de vidrio 2.5\" acústica",
+   "tipo": "material",
+   "unidad": "m²",
+   "precio": 6800,
+   "categoria": "Aislantes",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 6100
+    },
+    {
+     "f": "2026-08-20",
+     "precio": 6800
+    }
+   ]
+  },
+  {
+   "ref": "m6",
+   "clave": "MAT-006",
+   "nombre": "Compuesto para juntas (redimix)",
+   "tipo": "material",
+   "unidad": "kg",
+   "precio": 1400,
+   "categoria": "Tableros",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 1400
+    }
+   ]
+  },
+  {
+   "ref": "m7",
+   "clave": "MAT-007",
+   "nombre": "Cinta de papel para juntas",
+   "tipo": "material",
+   "unidad": "ml",
+   "precio": 120,
+   "categoria": "Tableros",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 120
+    }
+   ]
+  },
+  {
+   "ref": "m8",
+   "clave": "MAT-008",
+   "nombre": "Sellador vinílico",
+   "tipo": "material",
+   "unidad": "l",
+   "precio": 7800,
+   "categoria": "Pintura",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 7800
+    }
+   ]
+  },
+  {
+   "ref": "m9",
+   "clave": "MAT-009",
+   "nombre": "Pintura vinílica lavable",
+   "tipo": "material",
+   "unidad": "l",
+   "precio": 11500,
+   "categoria": "Pintura",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 10800
+    },
+    {
+     "f": "2026-06-01",
+     "precio": 11500
+    }
+   ]
+  },
+  {
+   "ref": "m10",
+   "clave": "MAT-010",
+   "nombre": "Lija para pared #120",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 900,
+   "categoria": "Pintura",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 900
+    }
+   ]
+  },
+  {
+   "ref": "m11",
+   "clave": "MAT-011",
+   "nombre": "Block hueco 15×20×40 cm",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 1800,
+   "categoria": "Obra civil",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 1650
+    },
+    {
+     "f": "2026-04-01",
+     "precio": 1800
+    }
+   ]
+  },
+  {
+   "ref": "m12",
+   "clave": "MAT-012",
+   "nombre": "Cemento gris CPC 30R",
+   "tipo": "material",
+   "unidad": "kg",
+   "precio": 520,
+   "categoria": "Obra civil",
+   "historial": [
+    {
+     "f": "2026-02-01",
+     "precio": 490
+    },
+    {
+     "f": "2026-06-01",
+     "precio": 505
+    },
+    {
+     "f": "2026-09-01",
+     "precio": 520
+    }
+   ]
+  },
+  {
+   "ref": "m13",
+   "clave": "MAT-013",
+   "nombre": "Arena",
+   "tipo": "material",
+   "unidad": "m³",
+   "precio": 65000,
+   "categoria": "Obra civil",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 65000
+    }
+   ]
+  },
+  {
+   "ref": "m14",
+   "clave": "MAT-014",
+   "nombre": "Grava 3/4\"",
+   "tipo": "material",
+   "unidad": "m³",
+   "precio": 72000,
+   "categoria": "Obra civil",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 69000
+    },
+    {
+     "f": "2026-09-15",
+     "precio": 72000
+    }
+   ]
+  },
+  {
+   "ref": "m15",
+   "clave": "MAT-015",
+   "nombre": "Agua",
+   "tipo": "material",
+   "unidad": "m³",
+   "precio": 4500,
+   "categoria": "Obra civil",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 4500
+    }
+   ]
+  },
+  {
+   "ref": "m16",
+   "clave": "MAT-016",
+   "nombre": "Malla electrosoldada 6×6-10/10",
+   "tipo": "material",
+   "unidad": "m²",
+   "precio": 3800,
+   "categoria": "Acero",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 3800
+    }
+   ]
+  },
+  {
+   "ref": "m17",
+   "clave": "MAT-017",
+   "nombre": "Cable THW-LS cal. 12 AWG",
+   "tipo": "material",
+   "unidad": "ml",
+   "precio": 1450,
+   "categoria": "Eléctrico",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 1290
+    },
+    {
+     "f": "2026-08-05",
+     "precio": 1450
+    }
+   ]
+  },
+  {
+   "ref": "m18",
+   "clave": "MAT-018",
+   "nombre": "Cable THW-LS cal. 14 AWG",
+   "tipo": "material",
+   "unidad": "ml",
+   "precio": 1020,
+   "categoria": "Eléctrico",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 940
+    },
+    {
+     "f": "2026-08-05",
+     "precio": 1020
+    }
+   ]
+  },
+  {
+   "ref": "m19",
+   "clave": "MAT-019",
+   "nombre": "Poliducto naranja 1/2\"",
+   "tipo": "material",
+   "unidad": "ml",
+   "precio": 680,
+   "categoria": "Eléctrico",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 680
+    }
+   ]
+  },
+  {
+   "ref": "m20",
+   "clave": "MAT-020",
+   "nombre": "Caja chalupa galvanizada",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 1400,
+   "categoria": "Eléctrico",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 1400
+    }
+   ]
+  },
+  {
+   "ref": "m21",
+   "clave": "MAT-021",
+   "nombre": "Contacto dúplex polarizado con placa",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 8500,
+   "categoria": "Eléctrico",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 7900
+    },
+    {
+     "f": "2026-06-20",
+     "precio": 8500
+    }
+   ]
+  },
+  {
+   "ref": "m22",
+   "clave": "MAT-022",
+   "nombre": "Apagador sencillo con placa",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 7200,
+   "categoria": "Eléctrico",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 7200
+    }
+   ]
+  },
+  {
+   "ref": "m23",
+   "clave": "MAT-023",
+   "nombre": "Luminaria LED de empotrar 12 W",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 24500,
+   "categoria": "Eléctrico",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 26800
+    },
+    {
+     "f": "2026-09-22",
+     "precio": 24500
+    }
+   ]
+  },
+  {
+   "ref": "m24",
+   "clave": "MAT-024",
+   "nombre": "Cinta de aislar",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 1800,
+   "categoria": "Eléctrico",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 1800
+    }
+   ]
+  },
+  {
+   "ref": "m25",
+   "clave": "MAT-025",
+   "nombre": "Interruptor termomagnético 1P 20 A",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 16500,
+   "categoria": "Eléctrico",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 16500
+    }
+   ]
+  },
+  {
+   "ref": "m26",
+   "clave": "MAT-026",
+   "nombre": "Centro de carga 8 circuitos",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 89000,
+   "categoria": "Eléctrico",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 89000
+    }
+   ]
+  },
+  {
+   "ref": "m27",
+   "clave": "MAT-027",
+   "nombre": "Triplay de pino 16 mm 1.22×2.44 m",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 72000,
+   "categoria": "Maderas",
+   "historial": [
+    {
+     "f": "2026-02-10",
+     "precio": 66500
+    },
+    {
+     "f": "2026-09-10",
+     "precio": 72000
+    }
+   ]
+  },
+  {
+   "ref": "m28",
+   "clave": "MAT-028",
+   "nombre": "MDF 15 mm 1.22×2.44 m",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 61000,
+   "categoria": "Tableros",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 58500
+    },
+    {
+     "f": "2026-09-10",
+     "precio": 61000
+    }
+   ]
+  },
+  {
+   "ref": "m29",
+   "clave": "MAT-029",
+   "nombre": "Melamina blanca 16 mm 1.22×2.44 m",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 89000,
+   "categoria": "Tableros",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 84500
+    },
+    {
+     "f": "2026-10-02",
+     "precio": 89000
+    }
+   ]
+  },
+  {
+   "ref": "m30",
+   "clave": "MAT-030",
+   "nombre": "Madera de pino de 1ª (pie tabla)",
+   "tipo": "material",
+   "unidad": "pt",
+   "precio": 3200,
+   "categoria": "Maderas",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 3200
+    }
+   ]
+  },
+  {
+   "ref": "m31",
+   "clave": "MAT-031",
+   "nombre": "Cubrecanto PVC blanco 19 mm",
+   "tipo": "material",
+   "unidad": "ml",
+   "precio": 650,
+   "categoria": "Maderas",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 650
+    }
+   ]
+  },
+  {
+   "ref": "m32",
+   "clave": "MAT-032",
+   "nombre": "Bisagra bidimensional cierre suave",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 4800,
+   "categoria": "Herrajes",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 4800
+    }
+   ]
+  },
+  {
+   "ref": "m33",
+   "clave": "MAT-033",
+   "nombre": "Corredera telescópica 45 cm (par)",
+   "tipo": "material",
+   "unidad": "jgo",
+   "precio": 21000,
+   "categoria": "Herrajes",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 21000
+    }
+   ]
+  },
+  {
+   "ref": "m34",
+   "clave": "MAT-034",
+   "nombre": "Jaladera de aluminio 128 mm",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 6500,
+   "categoria": "Herrajes",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 6500
+    }
+   ]
+  },
+  {
+   "ref": "m35",
+   "clave": "MAT-035",
+   "nombre": "Pegamento blanco para madera",
+   "tipo": "material",
+   "unidad": "l",
+   "precio": 9500,
+   "categoria": "Maderas",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 9500
+    }
+   ]
+  },
+  {
+   "ref": "m36",
+   "clave": "MAT-036",
+   "nombre": "Barniz de poliuretano",
+   "tipo": "material",
+   "unidad": "l",
+   "precio": 26000,
+   "categoria": "Pintura",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 26000
+    }
+   ]
+  },
+  {
+   "ref": "m37",
+   "clave": "MAT-037",
+   "nombre": "Tornillo para madera 1 1/2\"",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 60,
+   "categoria": "Herrajes",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 60
+    }
+   ]
+  },
+  {
+   "ref": "m38",
+   "clave": "MAT-038",
+   "nombre": "Bisagra de libro 3.5\" latonada",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 3800,
+   "categoria": "Herrajes",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 3800
+    }
+   ]
+  },
+  {
+   "ref": "m39",
+   "clave": "MAT-039",
+   "nombre": "Chapa de perilla para interior",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 32000,
+   "categoria": "Herrajes",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 32000
+    }
+   ]
+  },
+  {
+   "ref": "m40",
+   "clave": "MAT-040",
+   "nombre": "Tubo PPR 1/2\"",
+   "tipo": "material",
+   "unidad": "ml",
+   "precio": 3200,
+   "categoria": "Hidráulico",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 3200
+    }
+   ]
+  },
+  {
+   "ref": "m41",
+   "clave": "MAT-041",
+   "nombre": "Codo PPR 1/2\" 90°",
+   "tipo": "material",
+   "unidad": "pza",
+   "precio": 900,
+   "categoria": "Hidráulico",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 900
+    }
+   ]
+  },
+  {
+   "ref": "m42",
+   "clave": "MAT-042",
+   "nombre": "Mármol travertino 40×40 cm",
+   "tipo": "material",
+   "unidad": "m²",
+   "precio": 68000,
+   "categoria": "Mármoles",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 64000
+    },
+    {
+     "f": "2026-05-18",
+     "precio": 68000
+    }
+   ]
+  },
+  {
+   "ref": "m43",
+   "clave": "MAT-043",
+   "nombre": "Adhesivo para piedra natural",
+   "tipo": "material",
+   "unidad": "kg",
+   "precio": 950,
+   "categoria": "Obra civil",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 950
+    }
+   ]
+  },
+  {
+   "ref": "o1",
+   "clave": "MO-001",
+   "nombre": "Oficial albañil",
+   "tipo": "mo",
+   "unidad": "h",
+   "precio": 9500,
+   "categoria": "Albañilería",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 9500
+    }
+   ]
+  },
+  {
+   "ref": "o2",
+   "clave": "MO-002",
+   "nombre": "Ayudante general",
+   "tipo": "mo",
+   "unidad": "h",
+   "precio": 6500,
+   "categoria": "General",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 6000
+    },
+    {
+     "f": "2026-07-01",
+     "precio": 6500
+    }
+   ]
+  },
+  {
+   "ref": "o3",
+   "clave": "MO-003",
+   "nombre": "Oficial tablaroquero",
+   "tipo": "mo",
+   "unidad": "h",
+   "precio": 10500,
+   "categoria": "Tablaroca",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 10500
+    }
+   ]
+  },
+  {
+   "ref": "o4",
+   "clave": "MO-004",
+   "nombre": "Oficial pintor",
+   "tipo": "mo",
+   "unidad": "h",
+   "precio": 8800,
+   "categoria": "Pintura",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 8800
+    }
+   ]
+  },
+  {
+   "ref": "o5",
+   "clave": "MO-005",
+   "nombre": "Oficial electricista",
+   "tipo": "mo",
+   "unidad": "h",
+   "precio": 11000,
+   "categoria": "Electricidad",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 11000
+    }
+   ]
+  },
+  {
+   "ref": "o6",
+   "clave": "MO-006",
+   "nombre": "Ayudante electricista",
+   "tipo": "mo",
+   "unidad": "h",
+   "precio": 7000,
+   "categoria": "Electricidad",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 7000
+    }
+   ]
+  },
+  {
+   "ref": "o7",
+   "clave": "MO-007",
+   "nombre": "Oficial carpintero",
+   "tipo": "mo",
+   "unidad": "h",
+   "precio": 11500,
+   "categoria": "Carpintería",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 10500
+    },
+    {
+     "f": "2026-07-01",
+     "precio": 11500
+    }
+   ]
+  },
+  {
+   "ref": "o8",
+   "clave": "MO-008",
+   "nombre": "Ayudante carpintero",
+   "tipo": "mo",
+   "unidad": "h",
+   "precio": 7000,
+   "categoria": "Carpintería",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 7000
+    }
+   ]
+  },
+  {
+   "ref": "o9",
+   "clave": "MO-009",
+   "nombre": "Oficial plomero",
+   "tipo": "mo",
+   "unidad": "h",
+   "precio": 10500,
+   "categoria": "Plomería",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 10500
+    }
+   ]
+  },
+  {
+   "ref": "o10",
+   "clave": "MO-010",
+   "nombre": "Instalador de mármol",
+   "tipo": "mo",
+   "unidad": "h",
+   "precio": 12000,
+   "categoria": "Albañilería",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 12000
+    }
+   ]
+  },
+  {
+   "ref": "e1",
+   "clave": "EQ-001",
+   "nombre": "Andamio tubular (cuerpo)",
+   "tipo": "equipo",
+   "unidad": "h",
+   "precio": 1800,
+   "categoria": "Andamios",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 1800
+    }
+   ]
+  },
+  {
+   "ref": "e2",
+   "clave": "EQ-002",
+   "nombre": "Revolvedora 1 saco",
+   "tipo": "equipo",
+   "unidad": "h",
+   "precio": 6500,
+   "categoria": "Maquinaria",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 6500
+    }
+   ]
+  },
+  {
+   "ref": "e3",
+   "clave": "EQ-003",
+   "nombre": "Atornillador eléctrico",
+   "tipo": "equipo",
+   "unidad": "h",
+   "precio": 1200,
+   "categoria": "Equipo menor",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 1200
+    }
+   ]
+  },
+  {
+   "ref": "e4",
+   "clave": "EQ-004",
+   "nombre": "Sierra circular de banco",
+   "tipo": "equipo",
+   "unidad": "h",
+   "precio": 3500,
+   "categoria": "Maquinaria",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 3500
+    }
+   ]
+  },
+  {
+   "ref": "e5",
+   "clave": "EQ-005",
+   "nombre": "Rotomartillo",
+   "tipo": "equipo",
+   "unidad": "h",
+   "precio": 2200,
+   "categoria": "Equipo menor",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 2200
+    }
+   ]
+  },
+  {
+   "ref": "e6",
+   "clave": "EQ-006",
+   "nombre": "Enchapadora de cantos portátil",
+   "tipo": "equipo",
+   "unidad": "h",
+   "precio": 4000,
+   "categoria": "Maquinaria",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 4000
+    }
+   ]
+  },
+  {
+   "ref": "e7",
+   "clave": "EQ-007",
+   "nombre": "Termofusor PPR",
+   "tipo": "equipo",
+   "unidad": "h",
+   "precio": 1500,
+   "categoria": "Equipo menor",
+   "historial": [
+    {
+     "f": "2026-01-12",
+     "precio": 1500
+    }
+   ]
+  }
+ ],
+ "cuadrillas": [
+  {
+   "ref": "c1",
+   "clave": "CUA-01",
+   "nombre": "Albañilería (1 of. + 1 ay.)",
+   "categoria": "Albañilería",
+   "horas": 8,
+   "miembros": [
+    {
+     "ref": "o1",
+     "cant": 1
+    },
+    {
+     "ref": "o2",
+     "cant": 1
+    }
+   ]
+  },
+  {
+   "ref": "c2",
+   "clave": "CUA-02",
+   "nombre": "Tablaroca (1 of. + 1 ay.)",
+   "categoria": "Tablaroca",
+   "horas": 8,
+   "miembros": [
+    {
+     "ref": "o3",
+     "cant": 1
+    },
+    {
+     "ref": "o2",
+     "cant": 1
+    }
+   ]
+  },
+  {
+   "ref": "c3",
+   "clave": "CUA-03",
+   "nombre": "Pintura (1 pintor + ½ ay.)",
+   "categoria": "Pintura",
+   "horas": 8,
+   "miembros": [
+    {
+     "ref": "o4",
+     "cant": 1
+    },
+    {
+     "ref": "o2",
+     "cant": 0.5
+    }
+   ]
+  },
+  {
+   "ref": "c4",
+   "clave": "CUA-04",
+   "nombre": "Electricidad (1 of. + 1 ay.)",
+   "categoria": "Electricidad",
+   "horas": 8,
+   "miembros": [
+    {
+     "ref": "o5",
+     "cant": 1
+    },
+    {
+     "ref": "o6",
+     "cant": 1
+    }
+   ]
+  },
+  {
+   "ref": "c5",
+   "clave": "CUA-05",
+   "nombre": "Carpintería (1 of. + 1 ay.)",
+   "categoria": "Carpintería",
+   "horas": 8,
+   "miembros": [
+    {
+     "ref": "o7",
+     "cant": 1
+    },
+    {
+     "ref": "o8",
+     "cant": 1
+    }
+   ]
+  },
+  {
+   "ref": "c6",
+   "clave": "CUA-06",
+   "nombre": "Plomería (1 of. + ½ ay.)",
+   "categoria": "Plomería",
+   "horas": 8,
+   "miembros": [
+    {
+     "ref": "o9",
+     "cant": 1
+    },
+    {
+     "ref": "o2",
+     "cant": 0.5
+    }
+   ]
+  }
+ ],
+ "productos": [
+  {
+   "ref": "p1",
+   "codigo": "PAR-101",
+   "nombre": "Concreto hecho en obra f'c=150 kg/cm²",
+   "unidad": "m³",
+   "categoria": "Concretos",
+   "estado": "aprobado",
+   "tipo": "servicio",
+   "apu": {
+    "herr": 3,
+    "ind": 12,
+    "util": 10,
+    "comps": [
+     {
+      "k": "c0",
+      "tipo": "insumo",
+      "ref": "m12",
+      "cant": 330,
+      "desp": 3
+     },
+     {
+      "k": "c1",
+      "tipo": "insumo",
+      "ref": "m13",
+      "cant": 0.55,
+      "desp": 5
+     },
+     {
+      "k": "c2",
+      "tipo": "insumo",
+      "ref": "m14",
+      "cant": 0.7,
+      "desp": 5
+     },
+     {
+      "k": "c3",
+      "tipo": "insumo",
+      "ref": "m15",
+      "cant": 0.22,
+      "desp": 0
+     },
+     {
+      "k": "c4",
+      "tipo": "insumo",
+      "ref": "e2",
+      "cant": 1.5,
+      "desp": 0
+     },
+     {
+      "k": "c5",
+      "tipo": "cuadrilla",
+      "ref": "c1",
+      "cant": 3,
+      "desp": 0
+     }
+    ]
+   }
+  },
+  {
+   "ref": "p2",
+   "codigo": "PAR-102",
+   "nombre": "Mortero cemento-arena 1:4",
+   "unidad": "m³",
+   "categoria": "Morteros",
+   "estado": "aprobado",
+   "tipo": "servicio",
+   "apu": {
+    "herr": 3,
+    "ind": 12,
+    "util": 10,
+    "comps": [
+     {
+      "k": "c0",
+      "tipo": "insumo",
+      "ref": "m12",
+      "cant": 350,
+      "desp": 3
+     },
+     {
+      "k": "c1",
+      "tipo": "insumo",
+      "ref": "m13",
+      "cant": 1.1,
+      "desp": 5
+     },
+     {
+      "k": "c2",
+      "tipo": "insumo",
+      "ref": "m15",
+      "cant": 0.25,
+      "desp": 0
+     },
+     {
+      "k": "c3",
+      "tipo": "cuadrilla",
+      "ref": "c1",
+      "cant": 4,
+      "desp": 0
+     }
+    ]
+   }
+  },
+  {
+   "ref": "p3",
+   "codigo": "PAR-201",
+   "nombre": "Pintura vinílica 2 manos sobre muro",
+   "unidad": "m²",
+   "categoria": "Acabados",
+   "estado": "aprobado",
+   "tipo": "servicio",
+   "apu": {
+    "herr": 3,
+    "ind": 12,
+    "util": 10,
+    "comps": [
+     {
+      "k": "c0",
+      "tipo": "insumo",
+      "ref": "m8",
+      "cant": 0.1,
+      "desp": 5
+     },
+     {
+      "k": "c1",
+      "tipo": "insumo",
+      "ref": "m9",
+      "cant": 0.22,
+      "desp": 5
+     },
+     {
+      "k": "c2",
+      "tipo": "insumo",
+      "ref": "m10",
+      "cant": 0.05,
+      "desp": 0
+     },
+     {
+      "k": "c3",
+      "tipo": "cuadrilla",
+      "ref": "c3",
+      "cant": 45,
+      "desp": 0
+     },
+     {
+      "k": "c4",
+      "tipo": "insumo",
+      "ref": "e1",
+      "cant": 0.05,
+      "desp": 0
+     }
+    ]
+   }
+  },
+  {
+   "ref": "p4",
+   "codigo": "PAR-301",
+   "nombre": "Muro de block 15 cm asentado con mortero",
+   "unidad": "m²",
+   "categoria": "Muros",
+   "estado": "aprobado",
+   "tipo": "servicio",
+   "apu": {
+    "herr": 3,
+    "ind": 12,
+    "util": 10,
+    "comps": [
+     {
+      "k": "c0",
+      "tipo": "insumo",
+      "ref": "m11",
+      "cant": 12.5,
+      "desp": 3
+     },
+     {
+      "k": "c1",
+      "tipo": "partida",
+      "ref": "p2",
+      "cant": 0.017,
+      "desp": 0
+     },
+     {
+      "k": "c2",
+      "tipo": "cuadrilla",
+      "ref": "c1",
+      "cant": 10,
+      "desp": 0
+     },
+     {
+      "k": "c3",
+      "tipo": "insumo",
+      "ref": "e1",
+      "cant": 0.1,
+      "desp": 0
+     }
+    ]
+   }
+  },
+  {
+   "ref": "p5",
+   "codigo": "PAR-302",
+   "nombre": "Muro de tablaroca 2 caras con aislante acústico y pintura",
+   "unidad": "m²",
+   "categoria": "Muros",
+   "estado": "borrador",
+   "tipo": "servicio",
+   "apu": {
+    "herr": 3,
+    "ind": 12,
+    "util": 10,
+    "comps": [
+     {
+      "k": "c0",
+      "tipo": "insumo",
+      "ref": "m1",
+      "cant": 0.672,
+      "desp": 8
+     },
+     {
+      "k": "c1",
+      "tipo": "insumo",
+      "ref": "m2",
+      "cant": 0.7,
+      "desp": 5
+     },
+     {
+      "k": "c2",
+      "tipo": "insumo",
+      "ref": "m3",
+      "cant": 2.2,
+      "desp": 5
+     },
+     {
+      "k": "c3",
+      "tipo": "insumo",
+      "ref": "m4",
+      "cant": 30,
+      "desp": 10
+     },
+     {
+      "k": "c4",
+      "tipo": "insumo",
+      "ref": "m5",
+      "cant": 1,
+      "desp": 5
+     },
+     {
+      "k": "c5",
+      "tipo": "insumo",
+      "ref": "m6",
+      "cant": 0.9,
+      "desp": 10
+     },
+     {
+      "k": "c6",
+      "tipo": "insumo",
+      "ref": "m7",
+      "cant": 2.4,
+      "desp": 10
+     },
+     {
+      "k": "c7",
+      "tipo": "cuadrilla",
+      "ref": "c2",
+      "cant": 12,
+      "desp": 0
+     },
+     {
+      "k": "c8",
+      "tipo": "insumo",
+      "ref": "e3",
+      "cant": 0.15,
+      "desp": 0
+     },
+     {
+      "k": "c9",
+      "tipo": "insumo",
+      "ref": "e1",
+      "cant": 0.1,
+      "desp": 0
+     },
+     {
+      "k": "c10",
+      "tipo": "partida",
+      "ref": "p3",
+      "cant": 2,
+      "desp": 0
+     }
+    ]
+   }
+  },
+  {
+   "ref": "p6",
+   "codigo": "PAR-401",
+   "nombre": "Firme de concreto 10 cm con malla",
+   "unidad": "m²",
+   "categoria": "Pisos",
+   "estado": "aprobado",
+   "tipo": "servicio",
+   "apu": {
+    "herr": 3,
+    "ind": 12,
+    "util": 10,
+    "comps": [
+     {
+      "k": "c0",
+      "tipo": "partida",
+      "ref": "p1",
+      "cant": 0.105,
+      "desp": 0
+     },
+     {
+      "k": "c1",
+      "tipo": "insumo",
+      "ref": "m16",
+      "cant": 1.05,
+      "desp": 5
+     },
+     {
+      "k": "c2",
+      "tipo": "cuadrilla",
+      "ref": "c1",
+      "cant": 25,
+      "desp": 0
+     }
+    ]
+   }
+  },
+  {
+   "ref": "p7",
+   "codigo": "PAR-402",
+   "nombre": "Plafón de tablaroca liso",
+   "unidad": "m²",
+   "categoria": "Plafones",
+   "estado": "borrador",
+   "tipo": "servicio",
+   "apu": {
+    "herr": 3,
+    "ind": 12,
+    "util": 10,
+    "comps": [
+     {
+      "k": "c0",
+      "tipo": "insumo",
+      "ref": "m1",
+      "cant": 0.36,
+      "desp": 8
+     },
+     {
+      "k": "c1",
+      "tipo": "insumo",
+      "ref": "m2",
+      "cant": 0.5,
+      "desp": 5
+     },
+     {
+      "k": "c2",
+      "tipo": "insumo",
+      "ref": "m3",
+      "cant": 2.5,
+      "desp": 5
+     },
+     {
+      "k": "c3",
+      "tipo": "insumo",
+      "ref": "m4",
+      "cant": 15,
+      "desp": 10
+     },
+     {
+      "k": "c4",
+      "tipo": "insumo",
+      "ref": "m6",
+      "cant": 0.6,
+      "desp": 10
+     },
+     {
+      "k": "c5",
+      "tipo": "insumo",
+      "ref": "m7",
+      "cant": 1.4,
+      "desp": 10
+     },
+     {
+      "k": "c6",
+      "tipo": "cuadrilla",
+      "ref": "c2",
+      "cant": 14,
+      "desp": 0
+     },
+     {
+      "k": "c7",
+      "tipo": "insumo",
+      "ref": "e1",
+      "cant": 0.2,
+      "desp": 0
+     }
+    ]
+   }
+  },
+  {
+   "ref": "p8",
+   "codigo": "PAR-501",
+   "nombre": "Salida de contacto dúplex (ranurado, poliducto y cableado)",
+   "unidad": "pza",
+   "categoria": "Eléctrico",
+   "estado": "aprobado",
+   "tipo": "servicio",
+   "apu": {
+    "herr": 3,
+    "ind": 12,
+    "util": 10,
+    "comps": [
+     {
+      "k": "c0",
+      "tipo": "insumo",
+      "ref": "m19",
+      "cant": 6,
+      "desp": 5
+     },
+     {
+      "k": "c1",
+      "tipo": "insumo",
+      "ref": "m17",
+      "cant": 18,
+      "desp": 8
+     },
+     {
+      "k": "c2",
+      "tipo": "insumo",
+      "ref": "m20",
+      "cant": 1,
+      "desp": 0
+     },
+     {
+      "k": "c3",
+      "tipo": "insumo",
+      "ref": "m21",
+      "cant": 1,
+      "desp": 0
+     },
+     {
+      "k": "c4",
+      "tipo": "insumo",
+      "ref": "m24",
+      "cant": 0.1,
+      "desp": 0
+     },
+     {
+      "k": "c5",
+      "tipo": "cuadrilla",
+      "ref": "c4",
+      "cant": 6,
+      "desp": 0
+     },
+     {
+      "k": "c6",
+      "tipo": "insumo",
+      "ref": "e5",
+      "cant": 0.3,
+      "desp": 0
+     }
+    ]
+   }
+  },
+  {
+   "ref": "p9",
+   "codigo": "PAR-502",
+   "nombre": "Salida de alumbrado con apagador y luminaria LED",
+   "unidad": "pza",
+   "categoria": "Eléctrico",
+   "estado": "aprobado",
+   "tipo": "servicio",
+   "apu": {
+    "herr": 3,
+    "ind": 12,
+    "util": 10,
+    "comps": [
+     {
+      "k": "c0",
+      "tipo": "insumo",
+      "ref": "m19",
+      "cant": 7,
+      "desp": 5
+     },
+     {
+      "k": "c1",
+      "tipo": "insumo",
+      "ref": "m18",
+      "cant": 21,
+      "desp": 8
+     },
+     {
+      "k": "c2",
+      "tipo": "insumo",
+      "ref": "m20",
+      "cant": 2,
+      "desp": 0
+     },
+     {
+      "k": "c3",
+      "tipo": "insumo",
+      "ref": "m22",
+      "cant": 1,
+      "desp": 0
+     },
+     {
+      "k": "c4",
+      "tipo": "insumo",
+      "ref": "m23",
+      "cant": 1,
+      "desp": 0
+     },
+     {
+      "k": "c5",
+      "tipo": "insumo",
+      "ref": "m24",
+      "cant": 0.1,
+      "desp": 0
+     },
+     {
+      "k": "c6",
+      "tipo": "cuadrilla",
+      "ref": "c4",
+      "cant": 5,
+      "desp": 0
+     },
+     {
+      "k": "c7",
+      "tipo": "insumo",
+      "ref": "e5",
+      "cant": 0.3,
+      "desp": 0
+     }
+    ]
+   }
+  },
+  {
+   "ref": "p10",
+   "codigo": "PAR-503",
+   "nombre": "Circuito derivado 20 A desde centro de carga",
+   "unidad": "pza",
+   "categoria": "Eléctrico",
+   "estado": "borrador",
+   "tipo": "servicio",
+   "apu": {
+    "herr": 3,
+    "ind": 12,
+    "util": 10,
+    "comps": [
+     {
+      "k": "c0",
+      "tipo": "insumo",
+      "ref": "m25",
+      "cant": 1,
+      "desp": 0
+     },
+     {
+      "k": "c1",
+      "tipo": "insumo",
+      "ref": "m17",
+      "cant": 30,
+      "desp": 8
+     },
+     {
+      "k": "c2",
+      "tipo": "insumo",
+      "ref": "m19",
+      "cant": 15,
+      "desp": 5
+     },
+     {
+      "k": "c3",
+      "tipo": "cuadrilla",
+      "ref": "c4",
+      "cant": 4,
+      "desp": 0
+     }
+    ]
+   }
+  },
+  {
+   "ref": "p11",
+   "codigo": "PAR-504",
+   "nombre": "Centro de carga 8 circuitos instalado",
+   "unidad": "pza",
+   "categoria": "Eléctrico",
+   "estado": "aprobado",
+   "tipo": "servicio",
+   "apu": {
+    "herr": 3,
+    "ind": 12,
+    "util": 10,
+    "comps": [
+     {
+      "k": "c0",
+      "tipo": "insumo",
+      "ref": "m26",
+      "cant": 1,
+      "desp": 0
+     },
+     {
+      "k": "c1",
+      "tipo": "insumo",
+      "ref": "m24",
+      "cant": 0.5,
+      "desp": 0
+     },
+     {
+      "k": "c2",
+      "tipo": "cuadrilla",
+      "ref": "c4",
+      "cant": 2,
+      "desp": 0
+     },
+     {
+      "k": "c3",
+      "tipo": "insumo",
+      "ref": "e5",
+      "cant": 0.5,
+      "desp": 0
+     }
+    ]
+   }
+  },
+  {
+   "ref": "p12",
+   "codigo": "PAR-601",
+   "nombre": "Puerta de tambor MDF 0.90×2.10 m con marco y chapa",
+   "unidad": "pza",
+   "categoria": "Carpintería",
+   "estado": "aprobado",
+   "tipo": "mueble",
+   "apu": {
+    "herr": 3,
+    "ind": 12,
+    "util": 10,
+    "comps": [
+     {
+      "k": "c0",
+      "tipo": "insumo",
+      "ref": "m28",
+      "cant": 1.3,
+      "desp": 10
+     },
+     {
+      "k": "c1",
+      "tipo": "insumo",
+      "ref": "m30",
+      "cant": 12,
+      "desp": 10
+     },
+     {
+      "k": "c2",
+      "tipo": "insumo",
+      "ref": "m35",
+      "cant": 0.25,
+      "desp": 0
+     },
+     {
+      "k": "c3",
+      "tipo": "insumo",
+      "ref": "m38",
+      "cant": 3,
+      "desp": 0
+     },
+     {
+      "k": "c4",
+      "tipo": "insumo",
+      "ref": "m39",
+      "cant": 1,
+      "desp": 0
+     },
+     {
+      "k": "c5",
+      "tipo": "insumo",
+      "ref": "m37",
+      "cant": 24,
+      "desp": 0
+     },
+     {
+      "k": "c6",
+      "tipo": "insumo",
+      "ref": "m36",
+      "cant": 0.6,
+      "desp": 10
+     },
+     {
+      "k": "c7",
+      "tipo": "cuadrilla",
+      "ref": "c5",
+      "cant": 1.5,
+      "desp": 0
+     },
+     {
+      "k": "c8",
+      "tipo": "insumo",
+      "ref": "e4",
+      "cant": 1.5,
+      "desp": 0
+     }
+    ]
+   }
+  },
+  {
+   "ref": "p13",
+   "codigo": "PAR-602",
+   "nombre": "Mueble bajo de cocina en melamina 16 mm",
+   "unidad": "ml",
+   "categoria": "Carpintería",
+   "estado": "aprobado",
+   "tipo": "mueble",
+   "apu": {
+    "herr": 3,
+    "ind": 12,
+    "util": 10,
+    "comps": [
+     {
+      "k": "c0",
+      "tipo": "insumo",
+      "ref": "m29",
+      "cant": 1.6,
+      "desp": 12
+     },
+     {
+      "k": "c1",
+      "tipo": "insumo",
+      "ref": "m31",
+      "cant": 6,
+      "desp": 10
+     },
+     {
+      "k": "c2",
+      "tipo": "insumo",
+      "ref": "m32",
+      "cant": 4,
+      "desp": 0
+     },
+     {
+      "k": "c3",
+      "tipo": "insumo",
+      "ref": "m33",
+      "cant": 1,
+      "desp": 0
+     },
+     {
+      "k": "c4",
+      "tipo": "insumo",
+      "ref": "m34",
+      "cant": 2,
+      "desp": 0
+     },
+     {
+      "k": "c5",
+      "tipo": "insumo",
+      "ref": "m37",
+      "cant": 40,
+      "desp": 0
+     },
+     {
+      "k": "c6",
+      "tipo": "cuadrilla",
+      "ref": "c5",
+      "cant": 1.2,
+      "desp": 0
+     },
+     {
+      "k": "c7",
+      "tipo": "insumo",
+      "ref": "e4",
+      "cant": 1.5,
+      "desp": 0
+     },
+     {
+      "k": "c8",
+      "tipo": "insumo",
+      "ref": "e6",
+      "cant": 0.8,
+      "desp": 0
+     }
+    ]
+   }
+  },
+  {
+   "ref": "p14",
+   "codigo": "PAR-603",
+   "nombre": "Closet de melamina con puertas abatibles",
+   "unidad": "m²",
+   "categoria": "Carpintería",
+   "estado": "borrador",
+   "tipo": "mueble",
+   "apu": {
+    "herr": 3,
+    "ind": 12,
+    "util": 10,
+    "comps": [
+     {
+      "k": "c0",
+      "tipo": "insumo",
+      "ref": "m29",
+      "cant": 2.1,
+      "desp": 12
+     },
+     {
+      "k": "c1",
+      "tipo": "insumo",
+      "ref": "m28",
+      "cant": 0.4,
+      "desp": 10
+     },
+     {
+      "k": "c2",
+      "tipo": "insumo",
+      "ref": "m31",
+      "cant": 8,
+      "desp": 10
+     },
+     {
+      "k": "c3",
+      "tipo": "insumo",
+      "ref": "m32",
+      "cant": 3,
+      "desp": 0
+     },
+     {
+      "k": "c4",
+      "tipo": "insumo",
+      "ref": "m34",
+      "cant": 1,
+      "desp": 0
+     },
+     {
+      "k": "c5",
+      "tipo": "insumo",
+      "ref": "m37",
+      "cant": 50,
+      "desp": 0
+     },
+     {
+      "k": "c6",
+      "tipo": "cuadrilla",
+      "ref": "c5",
+      "cant": 1.5,
+      "desp": 0
+     },
+     {
+      "k": "c7",
+      "tipo": "insumo",
+      "ref": "e4",
+      "cant": 1,
+      "desp": 0
+     },
+     {
+      "k": "c8",
+      "tipo": "insumo",
+      "ref": "e6",
+      "cant": 0.8,
+      "desp": 0
+     }
+    ]
+   }
+  },
+  {
+   "ref": "p15",
+   "codigo": "PAR-701",
+   "nombre": "Salida hidráulica de agua fría PPR 1/2\"",
+   "unidad": "pza",
+   "categoria": "Hidráulico",
+   "estado": "aprobado",
+   "tipo": "servicio",
+   "apu": {
+    "herr": 3,
+    "ind": 12,
+    "util": 10,
+    "comps": [
+     {
+      "k": "c0",
+      "tipo": "insumo",
+      "ref": "m40",
+      "cant": 6,
+      "desp": 5
+     },
+     {
+      "k": "c1",
+      "tipo": "insumo",
+      "ref": "m41",
+      "cant": 4,
+      "desp": 0
+     },
+     {
+      "k": "c2",
+      "tipo": "cuadrilla",
+      "ref": "c6",
+      "cant": 6,
+      "desp": 0
+     },
+     {
+      "k": "c3",
+      "tipo": "insumo",
+      "ref": "e7",
+      "cant": 0.4,
+      "desp": 0
+     }
+    ]
+   }
+  },
+  {
+   "ref": "p16",
+   "codigo": "PAR-404",
+   "nombre": "Piso de mármol travertino 40×40 asentado con adhesivo",
+   "unidad": "m²",
+   "categoria": "Pisos",
+   "estado": "aprobado",
+   "tipo": "servicio",
+   "apu": {
+    "herr": 3,
+    "ind": 12,
+    "util": 10,
+    "comps": [
+     {
+      "k": "c0",
+      "tipo": "insumo",
+      "ref": "m42",
+      "cant": 1,
+      "desp": 8
+     },
+     {
+      "k": "c1",
+      "tipo": "insumo",
+      "ref": "m43",
+      "cant": 6,
+      "desp": 5
+     },
+     {
+      "k": "c2",
+      "tipo": "insumo",
+      "ref": "o10",
+      "cant": 0.9,
+      "desp": 0
+     },
+     {
+      "k": "c3",
+      "tipo": "insumo",
+      "ref": "o2",
+      "cant": 0.6,
+      "desp": 0
+     }
+    ]
+   }
+  }
+ ],
+ "categorias": {
+  "material": [
+   "Tableros",
+   "Maderas",
+   "Cancelería",
+   "Eléctrico",
+   "Hidráulico",
+   "Obra civil",
+   "Mármoles",
+   "Pintura",
+   "Aislantes",
+   "Acero",
+   "Herrajes"
+  ],
+  "mo": [
+   "Albañilería",
+   "Electricidad",
+   "Carpintería",
+   "Cancelería",
+   "Tablaroca",
+   "Pintura",
+   "Plomería",
+   "General"
+  ],
+  "equipo": [
+   "Equipo menor",
+   "Andamios",
+   "Maquinaria"
+  ],
+  "cuadrilla": [
+   "Albañilería",
+   "Tablaroca",
+   "Pintura",
+   "Electricidad",
+   "Carpintería",
+   "Plomería"
+  ],
+  "partida": [
+   "Concretos",
+   "Morteros",
+   "Muros",
+   "Plafones",
+   "Pisos",
+   "Acabados",
+   "Eléctrico",
+   "Carpintería",
+   "Hidráulico",
+   "Instalaciones"
+  ]
+ }
+}

@@ -179,10 +179,39 @@ export const DEFS: Record<Tabla, Def> = {
     cols: {
       ...IDENT, codigo: 'texto', nombre: 'texto', descripcion: 'texto',
       tipo: 'texto', precio: 'dinero', moneda: 'texto', creado_por: 'texto', actualizado_at: 'texto',
+      /* 0041 · el producto que se arma en cost101. `apu` NULL = producto de
+       * siempre, con precio escrito a mano. Con `apu`, `precio` lo calcula la
+       * API (precio unitario SIN IVA) y `desglose` e `historial` son cachés
+       * suyos (CACHES en src/permisos.ts). */
+      unidad: 'texto', categoria: 'texto', estado: 'texto', apu: 'json', desglose: 'json', historial: 'json',
     },
     requeridos: ['nombre'],
-    filtros: ['codigo', 'tipo'],
+    filtros: ['codigo', 'tipo', 'estado', 'categoria'],
     orden: 'nombre',
+  },
+  /* 0041 · cost101. Lo que se compra o se paga por unidad: un material por
+   * pieza o metro, un oficio (`mo`) o un equipo por hora. `precio` en
+   * centavos y CON IVA, como se captura. `historial` lo lleva la API. */
+  costos_base: {
+    cols: {
+      ...IDENT, clave: 'texto', nombre: 'texto', nombre_norm: 'texto', tipo: 'texto', unidad: 'texto',
+      precio: 'dinero', categoria: 'texto', historial: 'json', creado_por: 'texto', actualizado_at: 'texto',
+    },
+    requeridos: ['nombre', 'tipo'],
+    filtros: ['tipo', 'categoria', 'clave'],
+    orden: 'clave',
+  },
+  /* 0041 · cost101. Un grupo de oficios con su jornada: `miembros` es
+   * [{ ref: costos_base.id (tipo mo), cant }]. No guarda costo: sale de sus
+   * miembros cada vez. */
+  cuadrillas: {
+    cols: {
+      ...IDENT, clave: 'texto', nombre: 'texto', categoria: 'texto', horas: 'real', miembros: 'json',
+      creado_por: 'texto', actualizado_at: 'texto',
+    },
+    requeridos: ['nombre'],
+    filtros: ['categoria', 'clave'],
+    orden: 'clave',
   },
   items: {
     cols: {
