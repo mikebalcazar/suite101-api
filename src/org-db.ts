@@ -52,6 +52,7 @@ import poblarCostos from '../migrations/org/0036_poblar_costos.sql';
 import tiemposDefault from '../migrations/org/0037_tiempos_default.sql';
 import descripcionDePieza from '../migrations/org/0038_descripcion_de_pieza.sql';
 import obrasALaSuite from '../migrations/org/0039_obras_a_la_suite.sql';
+import empresaLogoYDatos from '../migrations/org/0040_empresa_logo_y_datos.sql';
 import { atender as atenderQuell, poblarCostosDefault, ponerTiemposDefault, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { PREFIJOS, esRequerimiento, siguienteCodigo } from './quell/codigos.js';
 
@@ -78,15 +79,16 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos];
 
-/** La 0027, la 0030 y la 0039 no son SQL: corren en código, porque lo que hacen
+/** La 0027, la 0030, la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
  *  en la lista; el archivo .sql es sólo la nota que lo dice. */
-const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas'> = {
+const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos'> = {
   [MIGRACIONES.indexOf(sinNegocios)]: 'quitarNegocios',
   [MIGRACIONES.indexOf(requerimientosHuerfanos)]: 'migrarRequerimientosHuerfanos',
   [MIGRACIONES.indexOf(obrasALaSuite)]: 'migrarObrasSueltas',
+  [MIGRACIONES.indexOf(empresaLogoYDatos)]: 'empresaLogoYDatos',
 };
 
 /** La tabla `empresa` (0027): UN renglón, con id fijo, que es lo que antes
@@ -94,8 +96,12 @@ const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfano
  *  no de una copia a mano. */
 export const SQL_EMPRESA = `CREATE TABLE IF NOT EXISTS empresa (
   id TEXT PRIMARY KEY CHECK (id = 'empresa'), nombre TEXT NOT NULL, rfc TEXT,
-  moneda TEXT NOT NULL DEFAULT 'MXN', dia_conciliacion INTEGER NOT NULL DEFAULT 1, creado_at TEXT NOT NULL
+  moneda TEXT NOT NULL DEFAULT 'MXN', dia_conciliacion INTEGER NOT NULL DEFAULT 1, creado_at TEXT NOT NULL,
+  correo TEXT, telefono TEXT, sitio_web TEXT, direccion TEXT, logo_llave TEXT, logo_at TEXT
 )`;
+
+/** Lo que la 0040 le agrega a una `empresa` que nació antes que ella. */
+const COLUMNAS_0040 = ['correo', 'telefono', 'sitio_web', 'direccion', 'logo_llave', 'logo_at'];
 
 /** Los índices que llevaban `negocio_id`, vueltos a crear sin él (0027). */
 const INDICES_SIN_NEGOCIO = [
@@ -441,11 +447,12 @@ export interface ApiOrgDB {
    *  contesta el mismo censo para poder enseñarlo antes. */
   borrarCancelados(
     proyecto_id: string,
-    args: { modo: 'seco' | 'borrar' },
+    args: { modo: 'seco' | 'borrar'; ids?: string[]; soltar?: boolean },
     contexto: { usuario_id: string },
   ): Promise<{
     ok: true; modo: 'seco' | 'borrar'; total: number;
     borrados: number; cancelados: number; descartados: number;
+    se_sueltan: { movimientos: number; compromisos: number; archivos: number };
     se_van: Array<{ id: string; clave: string | null; nombre: string; monto: number; piezas: number }>;
     se_quedan: Array<{ id: string; clave: string | null; nombre: string; monto: number; porque: string[] }>;
     piezas_sin_item: number; venta_antes: number; venta_despues: number;
@@ -854,7 +861,8 @@ export class OrgDB extends DurableObject<Env> {
    *  demás se queda. Lo que es válido lo decide la ruta (PATCH /empresa). */
   actualizarEmpresa(datos: Fila): Fila {
     const antes = this.empresa(String(datos.nombre ?? ''));
-    const cols = ['nombre', 'rfc', 'moneda', 'dia_conciliacion'].filter((c) => datos[c] !== undefined);
+    // 0.80.0: también correo, teléfono, sitio web, dirección y el logotipo.
+    const cols = ['nombre', 'rfc', 'moneda', 'dia_conciliacion', 'correo', 'telefono', 'sitio_web', 'direccion', 'logo_llave', 'logo_at'].filter((c) => datos[c] !== undefined);
     if (cols.length) {
       this.sql.exec(
         `UPDATE empresa SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = 'empresa'`,
@@ -3148,6 +3156,14 @@ export class OrgDB extends DurableObject<Env> {
     return (this.sql.exec(`SELECT name FROM pragma_table_info(?)`, tabla).toArray() as Fila[]).some((c) => c.name === columna);
   }
 
+  /** 0040, en código: los datos de contacto y el logotipo de la empresa. */
+  private empresaLogoYDatos(): void {
+    this.sql.exec(SQL_EMPRESA);
+    for (const col of COLUMNAS_0040) {
+      if (!this.tieneColumna('empresa', col)) this.sql.exec(`ALTER TABLE empresa ADD COLUMN ${col} TEXT`);
+    }
+  }
+
   /** 0030, en código: repara las obras ya ligadas de la empresa. */
   private migrarRequerimientosHuerfanos(): void {
     this.levantarRequerimientosHuerfanos(null, 'migracion-0030');
@@ -4320,17 +4336,18 @@ export class OrgDB extends DurableObject<Env> {
   /** El censo, ítem por ítem. Una sola pasada por tabla y no cinco consultas
    *  por renglón: con 96 cancelados eso son 480 consultas dentro del Durable
    *  Object, y este censo lo pide una pantalla mientras alguien espera. */
-  private censarCancelados(proyecto_id: string): Array<{
+  private censarCancelados(proyecto_id: string, soloIds?: string[]): Array<{
     id: string; clave: string | null; nombre: string; monto: number;
     alcance: 'cancelado' | 'descartado';
     cobros: number; avances: number; compromisos: number; archivos: number; piezas: number;
   }> {
-    const items = this.sql
+    const items = (this.sql
       /* 0.64.0: ya no hay `estado = 'cancelado'`. Se censa lo que se SACÓ del
        * alcance —`cancelado_at` con fecha— y está fuera; un requerimiento que
        * nadie ha decidido no entra aquí: no es basura, es una pregunta. */
       .exec(`SELECT id, clave, nombre, monto, aprobado_at FROM items WHERE proyecto_id = ? AND estado <> 'vendido' AND cancelado_at IS NOT NULL ORDER BY creado_at`, proyecto_id)
-      .toArray() as Fila[];
+      .toArray() as Fila[])
+      .filter((i) => !soloIds || soloIds.includes(String(i.id)));
     if (!items.length) return [];
 
     const ids = new Set(items.map((i) => String(i.id)));
@@ -4379,11 +4396,12 @@ export class OrgDB extends DurableObject<Env> {
    *  ninguno. */
   borrarCancelados(
     proyecto_id: string,
-    args: { modo: 'seco' | 'borrar' },
+    args: { modo: 'seco' | 'borrar'; ids?: string[]; soltar?: boolean },
     contexto: { usuario_id: string },
   ): {
     ok: true; modo: 'seco' | 'borrar'; total: number;
     borrados: number; cancelados: number; descartados: number;
+    se_sueltan: { movimientos: number; compromisos: number; archivos: number };
     se_van: Array<{ id: string; clave: string | null; nombre: string; monto: number; piezas: number }>;
     se_quedan: Array<{ id: string; clave: string | null; nombre: string; monto: number; porque: string[] }>;
     piezas_sin_item: number; venta_antes: number; venta_despues: number;
@@ -4391,7 +4409,23 @@ export class OrgDB extends DurableObject<Env> {
     const proyecto = this.obtener('proyectos', proyecto_id);
     if (!proyecto) return { error: 'no_encontrado', detalle: { que: 'proyecto', id: proyecto_id } };
 
-    const censo = this.censarCancelados(proyecto_id);
+    const censoCompleto = this.censarCancelados(proyecto_id, args.ids);
+    /* SOLTAR (0.80.0, Mike 7-oct: «Elimínalo, yo no encuentro dónde»). Sólo
+     * con `ids`: es el «Borrar» de UN renglón, con su nombre enfrente, nunca
+     * el barrido de todo el proyecto. Lo que cuelga del ítem y vale por sí
+     * mismo no se pierde: el movimiento de dinero y el compromiso con el
+     * proveedor se quedan en el PROYECTO sin ítem, y el archivo pasa al
+     * proyecto. Lo único que sigue deteniendo es el avance de obra, que sin
+     * su ítem no quiere decir nada. */
+    const soltar = !!args.soltar && !!args.ids?.length;
+    const se_sueltan = { movimientos: 0, compromisos: 0, archivos: 0 };
+    const censo = soltar
+      ? censoCompleto.map((c) => {
+          if (c.avances) return c;
+          se_sueltan.movimientos += c.cobros; se_sueltan.compromisos += c.compromisos; se_sueltan.archivos += c.archivos;
+          return { ...c, cobros: 0, compromisos: 0, archivos: 0 };
+        })
+      : censoCompleto;
     const se_van = censo.filter((c) => this.loQueDetiene(c).length === 0);
     const se_quedan = censo
       .filter((c) => this.loQueDetiene(c).length > 0)
@@ -4406,6 +4440,11 @@ export class OrgDB extends DurableObject<Env> {
        * mismo tiempo—, y entonces no se borra ni uno. */
       this.ctx.storage.transactionSync(() => {
         for (const c of se_van) {
+          if (soltar) {
+            this.sql.exec(`UPDATE movimientos SET item_id = NULL, proyecto_id = COALESCE(proyecto_id, ?) WHERE item_id = ?`, proyecto_id, c.id);
+            this.sql.exec(`UPDATE partidas SET item_id = NULL, proyecto_id = COALESCE(proyecto_id, ?) WHERE item_id = ?`, proyecto_id, c.id);
+            this.sql.exec(`UPDATE archivos SET de_tabla = 'proyectos', de_id = ? WHERE de_tabla = 'items' AND de_id = ?`, proyecto_id, c.id);
+          }
           this.sql.exec(`DELETE FROM items WHERE id = ?`, c.id);
           borrados++;
         }
@@ -4418,6 +4457,7 @@ export class OrgDB extends DurableObject<Env> {
     return {
       ok: true, modo: args.modo, total: censo.length,
       borrados,
+      se_sueltan,
       cancelados: censo.filter((c) => c.alcance === 'cancelado').length,
       descartados: censo.filter((c) => c.alcance === 'descartado').length,
       se_van: se_van.map((c) => ({ id: c.id, clave: c.clave, nombre: c.nombre, monto: c.monto, piezas: c.piezas })),

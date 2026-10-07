@@ -263,3 +263,71 @@ describe('quién puede', () => {
     expect([401, 403]).toContain(r.estado);
   });
 });
+
+/* ─────────────── el «Borrar» de un renglón (0.80.0) ───────────────
+ *
+ * Mike, 7-oct, con «Sanje CC37» —un ítem de $1,440,000 sacado del alcance el
+ * 20-sep— en pantalla: «Elimínalo, yo no encuentro dónde». El botón de
+ * arriba barre el proyecto entero y vive hasta abajo de la lista; éste es por
+ * renglón. Y lo que cuelga del ítem y vale por sí mismo —el cobro, el
+ * compromiso, el papel— se queda en el PROYECTO en vez de detener el
+ * borrado: un ítem viejo de «toda la obra» casi siempre trae el anticipo. */
+describe('borrar un renglón, soltando lo que trae', () => {
+  let otro = '', viejo = '', vecino = '', cobro = '';
+  const uno = (ids: unknown, modo = 'seco', soltar = true) =>
+    o('mike', `/proyectos/${otro}/borrar-cancelados`, { method: 'POST', json: { modo, ids, soltar } });
+
+  beforeAll(async () => {
+    otro = (await o('mike', '/proyectos', { method: 'POST', json: { cliente_id: cliente, nombre: 'Sanje' } })).data.id;
+    const alta = async (nombre: string) => {
+      const r = await o('mike', '/items', { method: 'POST', json: { cliente_id: cliente, proyecto_id: otro, nombre, monto: 1_440_000_00, cantidad: 1, estado: 'vendido', tipo: 'mueble' } });
+      await o('mike', `/items/${r.data.id}/aprobar`, { method: 'POST', json: {} });
+      await o('mike', `/items/${r.data.id}/cancelar`, { method: 'POST', json: { motivo: 'se desglosó' } });
+      return r.data.id as string;
+    };
+    viejo = await alta('Sanje CC37');
+    vecino = await alta('Otro sacado');
+    cobro = (await o('mike', '/movimientos', { method: 'POST', json: {
+      tipo: 'ingreso', monto: 500_000_00, fecha: '2026-09-01', cuenta_id: cuenta, proyecto_id: otro, item_id: viejo,
+      contraparte_tipo: 'cliente', contraparte_id: cliente,
+    } })).data.id;
+  });
+
+  it('sin soltar, el cobro lo detiene, como siempre', async () => {
+    const r = await uno([viejo], 'seco', false);
+    expect(r.data.se_van).toEqual([]);
+    expect(r.data.se_quedan[0].porque).toEqual(['1 movimiento de dinero']);
+  });
+
+  it('el seco de un renglón sólo habla de ese renglón, y dice qué se suelta', async () => {
+    const r = await uno([viejo]);
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.total).toBe(1);
+    expect(r.data.se_van.map((x: { id: string }) => x.id)).toEqual([viejo]);
+    expect(r.data.se_sueltan).toEqual({ movimientos: 1, compromisos: 0, archivos: 0 });
+    expect((await o('mike', `/movimientos/${cobro}`)).data.item_id, 'el seco no escribe').toBe(viejo);
+  });
+
+  it('soltar sin ids no vale: el barrido nunca suelta dinero', async () => {
+    const r = await o('mike', `/proyectos/${otro}/borrar-cancelados`, { method: 'POST', json: { modo: 'seco', soltar: true } });
+    expect(r.data.se_sueltan).toEqual({ movimientos: 0, compromisos: 0, archivos: 0 });
+    expect(r.data.se_quedan.map((x: { id: string }) => x.id)).toEqual([viejo]);
+  });
+
+  it('ids que no son lista de textos es 400', async () => {
+    expect((await uno('x')).estado).toBe(400);
+    expect((await uno([])).estado).toBe(400);
+  });
+
+  it('borra ese renglón y nada más; el cobro se queda en el proyecto', async () => {
+    const r = await uno([viejo], 'borrar');
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.borrados).toBe(1);
+    expect(await vive(viejo)).toBe(false);
+    expect(await vive(vecino), 'el otro sacado no se toca').toBe(true);
+    const m = (await o('mike', `/movimientos/${cobro}`)).data;
+    expect(m.item_id).toBeNull();
+    expect(m.proyecto_id).toBe(otro);
+    expect(m.monto).toBe(500_000_00);
+  });
+});

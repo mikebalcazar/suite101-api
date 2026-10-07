@@ -1045,12 +1045,21 @@ rutas.get('/:o/proyectos/:id/estado.xlsx', async (c) => {
 rutas.post('/:o/proyectos/:id/borrar-cancelados', async (c) => {
   const quien = c.get('quien');
   if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'borrar ítems lo hace quien es de la empresa' });
-  const b = await c.req.json<{ modo?: string }>().catch(() => ({}) as { modo?: string });
+  const b = await c.req.json<{ modo?: string; ids?: unknown; soltar?: unknown }>().catch(() => ({}) as { modo?: string; ids?: unknown; soltar?: unknown });
   const modo = b.modo === 'borrar' ? 'borrar' : 'seco';
+  /* `ids` (0.80.0): el «Borrar» de un renglón. Sin `ids`, todo el proyecto,
+   * como siempre; `soltar` sólo vale con `ids`. */
+  let ids: string[] | undefined;
+  if (b.ids !== undefined) {
+    if (!Array.isArray(b.ids) || !b.ids.length || b.ids.length > 200 || b.ids.some((x) => typeof x !== 'string')) {
+      return err(c, 'datos_invalidos', 400, { campo: 'ids', motivo: 'una lista de ids de ítem' });
+    }
+    ids = b.ids as string[];
+  }
   if (modo === 'borrar' && quien.rol !== 'owner' && quien.rol !== 'admin') {
     return err(c, 'sin_permiso', 403, { motivo: 'borrar de verdad lo hacen el dueño o la administración' });
   }
-  const r = await stub(c).borrarCancelados(c.req.param('id'), { modo }, { usuario_id: quien.usuario_id });
+  const r = await stub(c).borrarCancelados(c.req.param('id'), { modo, ids, soltar: b.soltar === true }, { usuario_id: quien.usuario_id });
   if ('error' in r) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 409, r.detalle);
   return ok(c, r);
 });
@@ -1343,10 +1352,18 @@ rutas.get('/:o/conciliaciones/estadistica', async (c) => {
  *  0027), con id 'empresa'; si la org es nueva y todavía no lo tiene, se
  *  crea con su nombre del D1. GET lo abre quien es de la empresa o su
  *  personal; PATCH, quien la dirige. */
-function formaDeEmpresa(e: Record<string, unknown>): Record<string, unknown> {
+function formaDeEmpresa(e: Record<string, unknown>, org_id?: string): Record<string, unknown> {
+  const texto = (k: string) => ((e[k] as string | null | undefined) ?? null) || null;
   return {
     id: String(e.id ?? 'empresa'), nombre: String(e.nombre ?? ''), rfc: (e.rfc as string | null) ?? null,
     moneda: String(e.moneda ?? 'MXN'), dia_conciliacion: Number(e.dia_conciliacion ?? 1),
+    /* 0.80.0 · Lo que sale en los documentos (Mike, 7-oct: «info que se
+     * configura desde director101, no debería poder editarse aquí»). La ruta
+     * del logotipo es relativa a la API: cada app le pone su /s101. `?v=`
+     * cambia con cada logotipo nuevo, así que el navegador no se queda con el
+     * viejo. */
+    correo: texto('correo'), telefono: texto('telefono'), sitio_web: texto('sitio_web'), direccion: texto('direccion'),
+    logo_ruta: e.logo_llave && org_id ? `/orgs/${org_id}/empresa/logo?v=${encodeURIComponent(String(e.logo_at ?? ''))}` : null,
   };
 }
 
@@ -1361,6 +1378,13 @@ function datosDeEmpresa(b: Record<string, unknown>): { ok: true; datos: Record<s
     datos.nombre = nombre;
   }
   if (b.rfc !== undefined) datos.rfc = b.rfc === null || String(b.rfc).trim() === '' ? null : String(b.rfc).trim().toUpperCase();
+  // 0.80.0 · los datos de contacto que salen en los documentos. Vacío es null.
+  for (const [k, tope] of [['correo', 120], ['telefono', 60], ['sitio_web', 120], ['direccion', 300]] as const) {
+    if (b[k] === undefined) continue;
+    const v = b[k] === null ? '' : String(b[k]).trim();
+    if (v.length > tope) return { ok: false, error: 'datos_invalidos', detalle: { campo: k, maximo: tope } };
+    datos[k] = v || null;
+  }
   if (b.moneda !== undefined) {
     if (b.moneda !== 'MXN' && b.moneda !== 'USD') return { ok: false, error: 'datos_invalidos', detalle: { campo: 'moneda', permitidas: ['MXN', 'USD'] } };
     datos.moneda = b.moneda;
@@ -1380,7 +1404,7 @@ const dirige = (c: Ctx): boolean => {
 
 rutas.get('/:o/empresa', async (c) => {
   if (c.get('quien').clase === 'cliente') return err(c, 'sin_permiso', 403, { motivo: 'un cliente solo abre /peek' });
-  return ok(c, formaDeEmpresa(await empresaDe(c)));
+  return ok(c, formaDeEmpresa(await empresaDe(c), c.get('org_id')));
 });
 
 rutas.patch('/:o/empresa', async (c) => {
@@ -1390,7 +1414,65 @@ rutas.patch('/:o/empresa', async (c) => {
   if (!r.ok) return err(c, r.error, 400, r.detalle);
   await empresaDe(c); // que exista, con el nombre de la org, antes de tocarla
   if (Object.keys(r.datos).length) await stub(c).actualizarEmpresa(r.datos);
-  return ok(c, formaDeEmpresa(await empresaDe(c)));
+  return ok(c, formaDeEmpresa(await empresaDe(c), c.get('org_id')));
+});
+
+/* ─────────────── el logotipo de la empresa (0.80.0) ───────────────
+ *
+ * Mike, 7-oct: «yo debo subir en la configuración de la empresa (en
+ * director) el logotipo en PNG en una buena resolución y que ese sea el que
+ * se ocupe para todos los documentos que se generan en suite101».
+ *
+ * PUT con la imagen tal cual en el cuerpo (PNG o JPG, hasta 5 MB; se revisa
+ * la firma del archivo, no sólo lo que dice el encabezado). Cada logotipo
+ * nuevo es un archivo nuevo en R2 y el anterior se borra: la dirección
+ * cambia, y nadie se queda viendo el viejo de caché. GET lo sirve a
+ * cualquiera con sesión en la empresa, cliente incluido: un logotipo va en
+ * los documentos que el cliente recibe, no es un secreto. */
+const LOGO_MAX = 5 * 1024 * 1024;
+function tipoDeImagen(b: Uint8Array): 'image/png' | 'image/jpeg' | null {
+  if (b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
+  if (b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  return null;
+}
+
+rutas.put('/:o/empresa/logo', async (c) => {
+  if (!dirige(c)) return err(c, 'sin_permiso', 403, { motivo: 'el logotipo lo cambia quien dirige la empresa' });
+  const bytes = new Uint8Array(await c.req.arrayBuffer());
+  if (!bytes.length) return err(c, 'datos_invalidos', 400, { falta: 'imagen' });
+  if (bytes.length > LOGO_MAX) return err(c, 'datos_invalidos', 400, { campo: 'imagen', maximo_bytes: LOGO_MAX });
+  const tipo = tipoDeImagen(bytes);
+  if (!tipo) return err(c, 'datos_invalidos', 400, { campo: 'imagen', permitidos: ['image/png', 'image/jpeg'] });
+  const antes = await empresaDe(c);
+  const at = new Date().toISOString();
+  const llave = `orgs/${c.get('org_id')}/empresa/logo-${at.replace(/[^0-9]/g, '')}.${tipo === 'image/png' ? 'png' : 'jpg'}`;
+  await c.env.ARCHIVOS.put(llave, bytes, { httpMetadata: { contentType: tipo } });
+  await stub(c).actualizarEmpresa({ logo_llave: llave, logo_at: at });
+  if (antes.logo_llave && antes.logo_llave !== llave) await c.env.ARCHIVOS.delete(String(antes.logo_llave)).catch(() => {});
+  return ok(c, formaDeEmpresa(await empresaDe(c), c.get('org_id')));
+});
+
+rutas.delete('/:o/empresa/logo', async (c) => {
+  if (!dirige(c)) return err(c, 'sin_permiso', 403, { motivo: 'el logotipo lo cambia quien dirige la empresa' });
+  const antes = await empresaDe(c);
+  if (antes.logo_llave) {
+    await stub(c).actualizarEmpresa({ logo_llave: null, logo_at: null });
+    await c.env.ARCHIVOS.delete(String(antes.logo_llave)).catch(() => {});
+  }
+  return ok(c, formaDeEmpresa(await empresaDe(c), c.get('org_id')));
+});
+
+rutas.get('/:o/empresa/logo', async (c) => {
+  const e = await empresaDe(c);
+  if (!e.logo_llave) return err(c, 'no_encontrado', 404, { que: 'logotipo' });
+  const obj = await c.env.ARCHIVOS.get(String(e.logo_llave));
+  if (!obj) return err(c, 'no_encontrado', 404, { que: 'logotipo' });
+  return new Response(obj.body, { headers: {
+    'Content-Type': obj.httpMetadata?.contentType || 'image/png',
+    // La dirección cambia con cada logotipo (?v=), así que se puede guardar mucho.
+    'Cache-Control': 'private, max-age=86400',
+    'X-Content-Type-Options': 'nosniff',
+  } });
 });
 
 /* ─────────────── COMPATIBILIDAD: /negocios (0.63.0) ───────────────
@@ -1401,9 +1483,12 @@ rutas.patch('/:o/empresa', async (c) => {
  * `GET /negocios` y tome `filas[0]` siga encontrando el mismo registro que
  * antes. SE VAN CUANDO NINGUNA PRUEBA LO PIDA. Van antes del CRUD genérico,
  * que ya no conoce `negocios` y contestaría 404 tabla_desconocida. */
-const formaDeNegocio = (e: Record<string, unknown>): Record<string, unknown> => ({
-  ...formaDeEmpresa(e), creado_at: String(e.creado_at ?? ''),
-});
+/* La forma vieja de negocio, tal cual: lo que 0.80.0 le sumó a la empresa
+ * (contacto y logotipo) no viaja por una ruta que ya va de salida. */
+const formaDeNegocio = (e: Record<string, unknown>): Record<string, unknown> => {
+  const { id, nombre, rfc, moneda, dia_conciliacion } = formaDeEmpresa(e);
+  return { id, nombre, rfc, moneda, dia_conciliacion, creado_at: String(e.creado_at ?? '') };
+};
 
 rutas.get('/:o/negocios', async (c) => {
   if (c.get('quien').clase === 'cliente') return err(c, 'sin_permiso', 403, { motivo: 'un cliente solo abre /peek' });

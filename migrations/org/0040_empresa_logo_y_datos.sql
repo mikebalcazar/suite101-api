@@ -1,0 +1,18 @@
+-- OrgDB v40 — el logotipo y los datos de contacto de la empresa.
+--
+-- Mike, 7-oct-2026, con la hoja de quote101 enfrente: «El verde debería ser
+-- el logotipo del negocio que cotiza (…) yo debo subir en la configuración
+-- de la empresa (en director) el logotipo en PNG en una buena resolución y
+-- que ese sea el que se ocupe para todos los documentos que se generan en
+-- suite101. Lo rojo debería ser también info que se configura desde
+-- director101, no debería poder editarse aquí.»
+--
+-- `empresa` ya tenía nombre, RFC, moneda y día de conciliación (0027). Se
+-- agregan los datos que salen en los documentos y la llave del logotipo en
+-- R2 (el archivo vive en `orgs/<org>/empresa/`; aquí sólo su dirección).
+--
+-- CORRE EN CÓDIGO (`OrgDB.empresaLogoYDatos`), como la 0027: la tabla
+-- `empresa` nace en código con `SQL_EMPRESA`, que ya trae estas seis columnas
+-- (correo, telefono, sitio_web, direccion, logo_llave, logo_at). A una
+-- empresa que ya existía se le agregan las que le falten, una por una; un
+-- ALTER suelto aquí tronaría en la base que nació con ellas.
