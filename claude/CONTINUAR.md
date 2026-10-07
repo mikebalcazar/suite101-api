@@ -419,6 +419,11 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **Las ligas de las notas internas de quote101 dicen el título de la página (7-oct, API 0.79.0 #266, cotizador-t101 #82).**
+  `GET /orgs/:o/titulo-de-liga?url=` (miembros; nunca hosts internos: 400)
+  lee el <title>; quote lo guarda en el renglón (`ligas_titulos`) y enseña
+  el dominio si no hay título. Muro
+  `2026-10-07-0136-jr-titulo-de-las-ligas.md`.
 - **quote101: un recuadro para la imagen (arrastrar, pegar o desde carpeta) y las ligas de las notas internas se pican (7-oct, cotizador-t101 #80 y #81).**
   El recuadro `data-zona-imagen` carga a ESE renglón (pegar con el recuadro
   picado); en el armador el recuadro se ve siempre. Ligas: encima del campo
