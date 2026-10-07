@@ -419,6 +419,15 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **La empresa firma sus documentos; el responsable es quien cotiza; un renglón sacado se borra ahí mismo (7-oct, API 0.80.0 #268, workshop101 #14, cotizador-t101 #83, dash101 #145).**
+  `empresa` con contacto y logotipo (PUT/DELETE/GET `/orgs/:o/empresa/logo`,
+  PNG/JPG por firma, 5 MB; migración 0040 EN CÓDIGO). workshop101 › Empresa
+  los escribe («director101» = workshop101). quote101 los lee en la hoja y
+  en todos sus PDF/Excel (`EMPRESA_DOC`); responsable = quien la edita
+  primero. D1 0023: «Mike Balcázar». `borrar-cancelados` con `ids`+`soltar`
+  y «Borrar» por renglón en dash101 (para «Sanje CC37»). Falta: logotipo en
+  los documentos de dash/quell/roster/peek. Muro
+  `2026-10-07-0216-jr-empresa-logo-y-responsable.md`.
 - **Las ligas de las notas internas de quote101 dicen el título de la página (7-oct, API 0.79.0 #266, cotizador-t101 #82).**
   `GET /orgs/:o/titulo-de-liga?url=` (miembros; nunca hosts internos: 400)
   lee el <title>; quote lo guarda en el renglón (`ligas_titulos`) y enseña
