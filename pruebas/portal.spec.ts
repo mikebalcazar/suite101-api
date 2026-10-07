@@ -13,10 +13,10 @@ import { DOMINIO_SUITE } from '../src/portal';
 const SUITE = `https://${DOMINIO_SUITE}`;
 /* Siete programas de la empresa. master101 NO va: es el panel del dueño de la
  * suite y lo tiene sólo Mike (2-oct-2026). */
-const APPS = ['dash101', 'quell101', 'quote101', 'supply101', 'roster101', 'peek101', 'workshop101'];
+const APPS = ['dash101', 'quell101', 'quote101', 'cost101', 'supply101', 'roster101', 'peek101', 'workshop101'];
 
 describe('la puerta de la suite', () => {
-  it('la raíz es una página con una liga a cada uno de los ocho programas', async () => {
+  it('la raíz es una página con una liga a cada uno de los programas', async () => {
     const r = await SELF.fetch(`${SUITE}/`);
     expect(r.status).toBe(200);
     expect(r.headers.get('Content-Type')).toMatch(/text\/html/);

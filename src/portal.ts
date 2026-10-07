@@ -2,7 +2,8 @@
  * website base donde pueda dar click en cada aplicación para ir al portal de
  * cada aplicación»).
  *
- * Es una sola hoja con ocho ligas, y la sirve ESTE Worker en un segundo
+ * Es una sola hoja con una liga por programa (cost101 entró el 7-oct-2026),
+ * y la sirve ESTE Worker en un segundo
  * dominio propio en vez de un Worker aparte: un repositorio nuevo necesitaría
  * sus propios secretos de Cloudflare en GitHub, que sólo Mike puede poner, y
  * la API ya tiene el dominio, el certificado y el flujo de publicación. Lo que
