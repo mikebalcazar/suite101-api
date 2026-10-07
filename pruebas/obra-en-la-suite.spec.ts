@@ -167,6 +167,38 @@ describe('la descripción del requerimiento viaja a quote101 (0.77.0)', () => {
   });
 });
 
+describe('las notas internas del renglón llegan a la bitácora del ítem al autorizarse (0.78.0)', () => {
+  /* Mike, 7-oct: «un campo para agregar notas locales (no se presentan al
+   * cliente) (…) Esas mismas notas aparecen en quell cuando se autoriza el
+   * requerimiento. Se escriben en la bitácora del ahora ítem». */
+  it('al aprobar, la nota queda en la bitácora de la pieza; no en el ítem', async () => {
+    const r = await q('mike', '/projects', { method: 'POST', json: { name: 'Casa con notas', client: 'Familia Notas', suite: true } });
+    const fd = new FormData();
+    fd.append('name', 'Planta'); fd.append('file_name', 'p.pdf'); fd.append('width', '1000'); fd.append('height', '800');
+    fd.append('image', new File([PNG], 'plan.png', { type: 'image/png' }));
+    const pl = (await q('mike', `/projects/${r.id}/plans`, { method: 'POST', body: fd })).id;
+    const rq = await q('mike', `/plans/${pl}/elements`, { method: 'POST', json: { op_id: crypto.randomUUID(), name: 'Mesa', type: 'Requerimiento', x: 0.5, y: 0.5, descripcion: 'Mesa de nogal' } });
+    const otro = await q('mike', `/plans/${pl}/elements`, { method: 'POST', json: { op_id: crypto.randomUUID(), name: 'Banca', type: 'Requerimiento', x: 0.6, y: 0.6 } });
+    const ap = await o('mike', `/cotizaciones/${rq.cotizacion_id}/aprobar`, { method: 'POST', app: 'cotizador101', json: {
+      proyecto_id: r.proyecto_id,
+      lineas: [
+        { nombre: 'Mesa', descripcion: 'Mesa de nogal', tipo: 'mueble', cantidad: 1, precio: 1500000, item_id: rq.item_id, notas_internas: '  Usar la chapa que sobró de la cocina; el cliente no sabe.  ' },
+        { nombre: 'Banca', tipo: 'mueble', cantidad: 1, precio: 500000, item_id: otro.item_id, notas_internas: '   ' },
+      ],
+    } });
+    expect(ap.estado, JSON.stringify(ap)).toBe(201);
+    const log = (await q('mike', `/elements/${rq.id}`)).log as any[];
+    const nota = log.find((l) => /Usar la chapa que sobró/.test(l.text));
+    expect(nota, JSON.stringify(log)).toBeTruthy();
+    expect(nota.text).toBe('Nota interna de la cotización «Requerimientos» (quote101), al autorizarse: Usar la chapa que sobró de la cocina; el cliente no sabe.');
+    expect(nota.user_name, 'la escribe el sistema, no una persona de la obra').toBe('Suite 101');
+    expect(((await q('mike', `/elements/${otro.id}`)).log as any[]).some((l) => /Nota interna/.test(l.text)), 'vacía no escribe nada').toBe(false);
+    const item = (await o('mike', `/items/${rq.item_id}`)).data;
+    expect(item.descripcion, 'la nota no se mete en la descripción, que sí ve el cliente').toBe('Mesa de nogal');
+    expect(JSON.stringify(item)).not.toContain('Usar la chapa');
+  });
+});
+
 describe('la 0039 da de alta las obras sueltas que ya existían', () => {
   const dentro = runInDurableObject as unknown as <T>(s: unknown, f: (o: any) => T | Promise<T>) => Promise<T>;
   const entorno = env as unknown as { ORG: DurableObjectNamespace };

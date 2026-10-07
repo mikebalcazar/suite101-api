@@ -17,7 +17,14 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.77.0 (LA OBRA DE QUELL101 NACE CON CLIENTE Y
+ * Versión del contrato: 0.78.0 (LAS NOTAS INTERNAS DEL RENGLÓN, A LA
+ * BITÁCORA AL AUTORIZARSE. Mike, 7-oct: «notas locales (no se presentan al
+ * cliente) (…) aparecen en quell cuando se autoriza el requerimiento. Se
+ * escriben en la bitácora del ahora ítem». `LineaAprobada` acepta
+ * `notas_internas`; al aprobar una línea con `item_id`, cada pieza del plano
+ * de ese ítem recibe una entrada 'acuerdo' sin persona (sale como «Suite
+ * 101») con la nota. No va al ítem; el cliente no ve la bitácora). Antes:
+ * 0.77.0 (LA OBRA DE QUELL101 NACE CON CLIENTE Y
  * PROYECTO EN LA SUITE, Y EL REQUERIMIENTO LLEVA SU DESCRIPCIÓN. Mike, 6-oct:
  * «Cree un nuevo proyecto en Quell, con un cliente nuevo. Pero no me aparece
  * ni el cliente ni el proyecto ni en quote ni en dash.» `POST /orgs/:o/quell/
@@ -1200,7 +1207,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.77.0';
+export const VERSION_CONTRATO = '0.78.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

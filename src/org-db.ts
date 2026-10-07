@@ -169,6 +169,10 @@ export interface LineaAprobada {
    *  en la obra—. Al aprobar se aprueba ése, con su tipo y su precio nuevos,
    *  en vez de crear otro. */
   item_id?: string | null;
+  /** 0.78.0: las notas internas del renglón (Mike, 7-oct: «no se presentan
+   *  al cliente (…) aparecen en quell cuando se autoriza el requerimiento. Se
+   *  escriben en la bitácora del ahora ítem»). No van al ítem. */
+  notas_internas?: string | null;
 }
 /** Quién escribe, para la bitácora del alcance (0.64.0): la app y el
  *  usuario siempre; el correo cuando la ruta lo tiene a la mano. */
@@ -1573,6 +1577,7 @@ export class OrgDB extends DurableObject<Env> {
           );
           this.quitarDelBorrador(id);
           if (!estabaDentro) this.anotarAlcance(id, args.proyecto_id, 'entra', contexto, null);
+          this.notaInternaEnLaBitacora(id, l.notas_internas, String(datosCot.nombre || cot.folio || 'la cotización'));
           this.avisar({ t: 'item.cambio', id }, 'todos');
           creados++;
           return;
@@ -3576,6 +3581,24 @@ export class OrgDB extends DurableObject<Env> {
         crypto.randomUUID(),
         String(pz.id),
         texto,
+      );
+    }
+  }
+
+  /** 0.78.0 · La nota interna del renglón de quote101, en la bitácora de la
+   *  pieza (o piezas) del ítem que se acaba de aprobar. Sin persona
+   *  (`user_id` NULL, sale como «Suite 101», igual que la huella del precio)
+   *  y como 'acuerdo': lo que el taller dejó dicho al cotizarlo. El cliente
+   *  no ve la bitácora (motor: `log: []` para el cliente). Un ítem que no
+   *  está en ningún plano no tiene bitácora: no se escribe. */
+  private notaInternaEnLaBitacora(item_id: string, nota: unknown, cotizacion: string): void {
+    const texto = String(nota ?? '').trim().slice(0, 4000);
+    if (!texto) return;
+    const piezas = this.sql.exec(`SELECT id FROM quell_elements WHERE item_id = ?`, item_id).toArray() as Fila[];
+    for (const pz of piezas) {
+      this.sql.exec(
+        `INSERT INTO quell_log_entries (id, element_id, user_id, kind, text) VALUES (?,?,NULL,'acuerdo',?)`,
+        crypto.randomUUID(), String(pz.id), `Nota interna de la cotización «${cotizacion}» (quote101), al autorizarse: ${texto}`,
       );
     }
   }
