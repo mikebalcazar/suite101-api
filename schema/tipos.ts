@@ -17,7 +17,13 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.78.0 (LAS NOTAS INTERNAS DEL RENGLÓN, A LA
+ * Versión del contrato: 0.79.0 (EL TÍTULO DE UNA LIGA. Mike, 7-oct, sobre
+ * las notas internas de quote101: «sólo pon el título de la página a la que
+ * liga, no todo el link». `GET /orgs/:o/titulo-de-liga?url=` (sólo quien es
+ * de la empresa) contesta `{url, dominio, titulo}`; `titulo` es null si la
+ * página no es HTML, no contesta o no trae título. Nunca va a hosts
+ * internos: 400 `datos_invalidos`). Antes:
+ * 0.78.0 (LAS NOTAS INTERNAS DEL RENGLÓN, A LA
  * BITÁCORA AL AUTORIZARSE. Mike, 7-oct: «notas locales (no se presentan al
  * cliente) (…) aparecen en quell cuando se autoriza el requerimiento. Se
  * escriben en la bitácora del ahora ítem». `LineaAprobada` acepta
@@ -1207,7 +1213,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.78.0';
+export const VERSION_CONTRATO = '0.79.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

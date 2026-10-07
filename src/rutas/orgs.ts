@@ -19,6 +19,7 @@ import { crearUsuario } from '../maestro';
 import { guardarPin, normalizaCorreo, pinAceptable, ulid } from '../lib';
 import { TIPO_XLSX, xlsx, type Celda } from '../xlsx';
 import { empresaDe } from '../empresa';
+import { tituloDeLiga, urlPermitida } from '../titulo';
 import { montarOrdenes } from './ordenes';
 import { montarObras } from './obras';
 import { montarNomina } from './nomina';
@@ -380,6 +381,17 @@ rutas.post('/:o/clientes/invitar', async (c) => {
  * app. Lo que faltaba es avisar del parecido ANTES de crear y juntar los dos
  * que ya se crearon. Las dos rutas van antes del CRUD genérico o `/:o/:tabla`
  * se tragaría `clientes/parecidos` como si fuera una tabla llamada así. */
+
+/** GET /orgs/:o/titulo-de-liga?url= (0.79.0) — el título de la página a la
+ *  que apunta una liga, para las notas internas de quote101. Sólo quien es
+ *  de la empresa; `titulo: null` si no se pudo leer (la pantalla enseña el
+ *  dominio). Ver src/titulo.ts. */
+rutas.get('/:o/titulo-de-liga', async (c) => {
+  if (c.get('quien').clase !== 'miembro') return err(c, 'sin_permiso', 403);
+  const u = urlPermitida(c.req.query('url') || '');
+  if (!u) return err(c, 'datos_invalidos', 400, { url: c.req.query('url') ?? null, regla: 'http(s) a un sitio público' });
+  return ok(c, { url: u.toString(), dominio: u.hostname.replace(/^www\./, ''), titulo: await tituloDeLiga(u) });
+});
 
 /** GET /orgs/:o/clientes/parecidos?nombre= — «¿no te refieres a…?»
  *
