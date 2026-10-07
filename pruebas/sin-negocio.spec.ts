@@ -75,7 +75,8 @@ describe('la base ya no sabe de negocios', () => {
     expect(Object.keys(tablas).filter((t) => t.endsWith('__copia')), 'ninguna tabla de trabajo se quedó').toEqual([]);
     const conColumna = Object.entries(tablas).filter(([, cols]) => cols.includes('negocio_id')).map(([t]) => t);
     expect(conColumna, 'tablas que todavía traen negocio_id').toEqual([]);
-    expect(tablas.empresa).toEqual(['id', 'nombre', 'rfc', 'moneda', 'dia_conciliacion', 'creado_at']);
+    // 0.80.0 le suma el contacto y el logotipo, que salen en los documentos.
+    expect(tablas.empresa).toEqual(['id', 'nombre', 'rfc', 'moneda', 'dia_conciliacion', 'creado_at', 'correo', 'telefono', 'sitio_web', 'direccion', 'logo_llave', 'logo_at']);
     // Las que llevaban llave foránea a negocios siguen con sus demás columnas.
     expect(tablas.cuentas).toEqual(['id', 'nombre', 'tipo', 'banco', 'moneda', 'saldo_inicial', 'creado_at']);
     expect(tablas.accionistas).toContain('porcentaje');
@@ -100,7 +101,7 @@ describe('la empresa tiene su ruta, sobre la tabla empresa', () => {
     expect(r.data.nombre).toBe('Carpintería Sin Negocio');
     expect(r.data.moneda).toBe('MXN');
     expect(r.data.dia_conciliacion).toBe(1);
-    expect(Object.keys(r.data).sort()).toEqual(['dia_conciliacion', 'id', 'moneda', 'nombre', 'rfc']);
+    expect(Object.keys(r.data).sort()).toEqual(['correo', 'dia_conciliacion', 'direccion', 'id', 'logo_ruta', 'moneda', 'nombre', 'rfc', 'sitio_web', 'telefono']);
   });
 
   it('PATCH /empresa cambia rfc, moneda y día, y lo que no se manda se queda', async () => {
@@ -347,7 +348,8 @@ describe('la migración 0027 sobre una base con negocios', () => {
     expect(despues.tablas.filter((t) => t.endsWith('__copia'))).toEqual([]);
     expect(despues.conNegocioId, 'tablas que todavía traen negocio_id').toEqual([]);
     // La empresa es el PRIMERO POR NOMBRE: Alfa, aunque Beta se creó antes.
-    expect(despues.empresa).toEqual([{ id: 'empresa', nombre: 'Alfa', rfc: 'AAA010101AAA', moneda: 'MXN', dia_conciliacion: 2, creado_at: T }]);
+    expect(despues.empresa).toEqual([{ id: 'empresa', nombre: 'Alfa', rfc: 'AAA010101AAA', moneda: 'MXN', dia_conciliacion: 2, creado_at: T,
+      correo: null, telefono: null, sitio_web: null, direccion: null, logo_llave: null, logo_at: null }]);
     // Nada se pierde: lo de los dos negocios y lo huérfano, todo cuenta.
     expect(despues.conteos).toEqual({
       cuentas: 2, clientes: 3, proyectos: 1, productos: 2, items: 1, movimientos: 1, opex: 1,

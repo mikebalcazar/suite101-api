@@ -17,7 +17,23 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.79.0 (EL TÍTULO DE UNA LIGA. Mike, 7-oct, sobre
+ * Versión del contrato: 0.80.0 (LA EMPRESA FIRMA SUS DOCUMENTOS, Y UN
+ * RENGLÓN SACADO SE BORRA SOLO. Mike, 7-oct, con la hoja de quote101: «el
+ * logotipo del negocio que cotiza (…) que ese sea el que se ocupe para todos
+ * los documentos que se generan en suite101», y los datos de contacto «se
+ * configuran desde director101, no debería poder editarse aquí». `Empresa`
+ * suma `correo`, `telefono`, `sitio_web`, `direccion` (PATCH /empresa, quien
+ * dirige; vacío es null) y `logo_ruta` (relativa a la API, cambia con cada
+ * logotipo). `PUT /orgs/:o/empresa/logo` (quien dirige; el cuerpo crudo es
+ * un PNG o JPG de hasta 5 MB, se mira la firma) y `DELETE` lo quitan o
+ * ponen; `GET` lo sirve a cualquier sesión de la empresa, 404 si no hay. D1
+ * 0023: mike@forespot.com se llama «Mike Balcázar». Y, del mismo día, «En el
+ * proyecto Sanje CC 37 (…) Elimínalo, yo no encuentro dónde»:
+ * `POST /proyectos/:id/borrar-cancelados` acepta `ids` (sólo esos renglones)
+ * y `soltar: true` (sólo con `ids`): el movimiento y el compromiso se quedan
+ * en el proyecto sin ítem, el archivo pasa al proyecto, y contesta
+ * `se_sueltan`. El avance de obra sigue deteniendo). Antes:
+ * 0.79.0 (EL TÍTULO DE UNA LIGA. Mike, 7-oct, sobre
  * las notas internas de quote101: «sólo pon el título de la página a la que
  * liga, no todo el link». `GET /orgs/:o/titulo-de-liga?url=` (sólo quien es
  * de la empresa) contesta `{url, dominio, titulo}`; `titulo` es null si la
@@ -1213,7 +1229,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.79.0';
+export const VERSION_CONTRATO = '0.80.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1496,6 +1512,13 @@ export interface Empresa {
   moneda: Moneda;
   /** Día en que toca conciliar: 0 domingo … 6 sábado. Por omisión el lunes. */
   dia_conciliacion: number;
+  /** Lo que sale en los documentos (0.80.0); lo pone quien dirige. */
+  correo: string | null;
+  telefono: string | null;
+  sitio_web: string | null;
+  direccion: string | null;
+  /** Dónde se lee el logotipo, relativo a la API; null si no hay. */
+  logo_ruta: string | null;
 }
 
 /** Lo de quote101 de una empresa, en cuatro cifras (0.63.0). Lo lee
