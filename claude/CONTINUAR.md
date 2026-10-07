@@ -431,6 +431,11 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **El PDF del ítem en quell101 abre en Android con Chrome viejo, y si no puede, lo dice (7-oct, bitacora-obra #121).**
+  pdf.js moderno usa `Promise.withResolvers` (Chrome 119+); en un Android
+  anterior truena antes de pintar y quedaba un cuadro blanco de 300×150.
+  `web/src/pdf.js` carga la versión legacy; el visor dice el motivo y
+  ofrece abrirlo aparte. Muro `2026-10-07-2254-jr-pdf-en-android-viejo.md`.
 - **La empresa firma sus documentos; el responsable es quien cotiza; un renglón sacado se borra ahí mismo (7-oct, API 0.80.0 #268, workshop101 #14, cotizador-t101 #83, dash101 #145).**
   `empresa` con contacto y logotipo (PUT/DELETE/GET `/orgs/:o/empresa/logo`,
   PNG/JPG por firma, 5 MB; migración 0040 EN CÓDIGO). workshop101 › Empresa
