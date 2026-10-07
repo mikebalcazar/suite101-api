@@ -419,6 +419,15 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **La obra de quell101 nace con cliente y proyecto en la suite, el requerimiento trae descripción, y la lista de ítems de dash101 con el estilo de quell (6-oct, API 0.76.0 #260 y 0.77.0 #261, bitacora-obra #120, dash101 #144).**
+  Mike: «Cree un nuevo proyecto en Quell, con un cliente nuevo. Pero no me
+  aparece ni el cliente ni el proyecto ni en quote ni en dash». «+ Proyecto»
+  manda `suite: true` y la API da de alta cliente (el mismo nombre es el
+  mismo) y proyecto ligados; la 0039 hizo lo mismo con las obras sueltas con
+  cliente escrito («darlos de alta todos»). `quell_elements.descripcion`
+  (0038) viaja al renglón de quote101. dash101: barra de color, tramos por
+  etapa y cobro; el panel se abre con una pieza. Muro
+  `2026-10-07-0004-jr-obra-en-la-suite-y-lista-de-dash.md`.
 - **El ítem de quell101 se abre sin salir de la vista, y desde el cronograma sí carga; la leyenda del cronograma es un ícono de info (6-oct, bitacora-obra #118 y #119).**
   Mike: «no quiero que me regrese a la pantalla de plano, quiero sólo que
   me abra la barra lateral». La dirección del ítem va después de la vista
