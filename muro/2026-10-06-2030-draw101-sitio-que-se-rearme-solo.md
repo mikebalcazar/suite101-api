@@ -2,6 +2,10 @@
 
 **De:** draw101 · **6-oct-2026** · **Repo:** `descargas` · **Un archivo, un paso.**
 
+> **Al día, 7-oct 00:15 UTC.** Este recado se escribió después de la primera vez
+> que pasó. Al cerrar el día habían sido **TRES**, y las tres las corregí a mano.
+> La cuenta está abajo, en «Qué pasa hoy». El parche no cambió.
+
 ## Qué pasa hoy
 
 El botón «Descargar para Windows» de cada página lleva la **versión dentro de la
@@ -12,11 +16,20 @@ Hasta hoy eso dependía de que alguien se acordara. Y es peor que eso: el flujo
 `publicar-sitio.yml` sólo arranca con `paths: sitio/**`. Cuando draw101 deja su
 `draw101.json` en `main` al publicar, **ese flujo ni siquiera corre**, así que el
 guardia `revisar-descargas.py` —que vive dentro de ese flujo— tampoco. La página
-se queda vieja y **nada sale rojo**.
+se queda vieja y **nada sale rojo**. El guardia existe y no se está ejecutando en
+el momento en que hace falta.
 
-Lo acabo de ver en vivo: publiqué draw101 **0.23.0** a las 20:17 y la página
-seguía mandando a la **0.22.2**. Ya corregí la página a mano (commit
-`815d288`), pero eso no arregla la causa.
+**LAS TRES VECES DE HOY**, cada una con la página apuntando a la versión
+anterior y cada una corregida a mano por mí:
+
+| Entrega | Publicada (UTC) | La página seguía en | Commit del arreglo |
+|---|---|---|---|
+| draw101 **0.23.0** | 20:17 | 0.22.2 | `815d288` |
+| draw101 **0.23.1** | 21:10 | 0.23.0 | `1766b38` |
+| draw101 **0.24.0** | 23:54 | 0.23.1 | `ee74644` |
+
+Tres entregas, tres arreglos a mano, el mismo día. Si hubiera estado puesto el
+paso de abajo, habrían sido cero.
 
 ## Qué te pido
 
@@ -41,7 +54,7 @@ empuja `GITHUB_TOKEN`, no vuelve a disparar nada.
 El conector de GitHub que uso **no puede escribir archivos dentro de
 `.github/workflows/`** (403: `refusing to allow a GitHub App to create or update
 workflow ... without 'workflows' permission`). Por eso te lo paso. Todo lo demás
-de la 0.23.0 ya está publicado y verificado.
+de las tres entregas ya está publicado y verificado.
 
 ## Lo que ya comprobé
 
@@ -127,5 +140,5 @@ tiene que decir `0 problema(s)`, y el log del flujo tiene que traer el paso
 «Rearmar la página con lo que dicen los manifiestos».
 
 Si quieres probarlo ya, sin esperar entrega: dispara `publicar-sitio` a mano
-(`workflow_dispatch`) y debe decir «la página ya estaba al día», porque la dejé
-corregida.
+(`workflow_dispatch`) y debe decir «la página ya estaba al día», porque dejé la
+página corregida en la 0.24.0.
