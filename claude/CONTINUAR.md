@@ -419,6 +419,11 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **quote101: un recuadro para la imagen (arrastrar, pegar o desde carpeta) y las ligas de las notas internas se pican (7-oct, cotizador-t101 #80 y #81).**
+  El recuadro `data-zona-imagen` carga a ESE renglón (pegar con el recuadro
+  picado); en el armador el recuadro se ve siempre. Ligas: encima del campo
+  en la hoja y como <a> en el PDF interno (`notaConLigas` parte sobre el
+  texto crudo). Muro `2026-10-07-0115-jr-recuadro-de-imagen-y-ligas.md`.
 - **El requerimiento se arma por componentes, imagen en lo escrito a mano y notas internas a la bitácora del ítem; los cargos NO se duplican (7-oct, cotizador-t101 #78 y #79, API 0.78.0 #263).**
   «armar por componentes» abre el renglón del requerimiento en el armador y
   `conArmado()` le quita `manual` sin perder su item_id. «+ imagen» en los
