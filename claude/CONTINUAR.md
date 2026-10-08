@@ -431,6 +431,11 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **cost101 sólo trae el lienzo, y los costos base van en Excel a revisión (8-oct, cost101 #1, 0.2.2).**
+  Se fueron «Hoja APU» y «Por pasos». 193 costos base (carpintería,
+  tablaroca, cancelería) con precio de referencia CDMX sin validar, en
+  Excel para Mike; NO cargados. Al regresar: `POST /costos/importar` con lo
+  que quede en «Sí». Muro `2026-10-08-0101-jr-cost101-solo-lienzo-y-costos-base.md`.
 - **El PDF del ítem en quell101 abre en Android con Chrome viejo, y si no puede, lo dice (7-oct, bitacora-obra #121).**
   pdf.js moderno usa `Promise.withResolvers` (Chrome 119+); en un Android
   anterior truena antes de pintar y quedaba un cuadro blanco de 300×150.
