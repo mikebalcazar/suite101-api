@@ -56,11 +56,12 @@ type = "Text"
 globs = ["migrations/org/*.sql", "src/importar/*.html", "src/paginas/*.html"]
 fallthrough = true
 
-# 8-oct-2026 · las letras de la puerta de la suite viajan dentro del Worker:
+# 8-oct-2026 · las letras de la puerta de la suite viajan dentro del Worker
+# (el glob va con **/: con la ruta completa wrangler no lo aplicaba al publicar):
 # nada se le pide a Google (regla de la casa).
 [[rules]]
 type = "Data"
-globs = ["src/paginas/fuentes/*.woff2"]
+globs = ["**/*.woff2"]
 fallthrough = true
 
 [vars]
@@ -148,11 +149,12 @@ type = "Text"
 globs = ["migrations/org/*.sql", "src/importar/*.html", "src/paginas/*.html"]
 fallthrough = true
 
-# 8-oct-2026 · las letras de la puerta de la suite viajan dentro del Worker:
+# 8-oct-2026 · las letras de la puerta de la suite viajan dentro del Worker
+# (el glob va con **/: con la ruta completa wrangler no lo aplicaba al publicar):
 # nada se le pide a Google (regla de la casa).
 [[env.staging.rules]]
 type = "Data"
-globs = ["src/paginas/fuentes/*.woff2"]
+globs = ["**/*.woff2"]
 fallthrough = true
 
 [env.staging.vars]
