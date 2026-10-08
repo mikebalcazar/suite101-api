@@ -187,6 +187,13 @@ describe('la licencia y la puerta', () => {
     const r = await pedir('mike', '/orgs/sin-investor/inversion');
     expect(r.estado).toBe(403);
     expect(r.error).toBe('app_inactiva');
+    // Y TAMPOCO por dash101, que sí está prendida ahí: la licencia que cuenta
+    // es la de investor101, no la de la app por la que se llega.
+    for (const [metodo, ruta] of [['GET', ''], ['GET', '/flujo'], ['GET', '/pagos'], ['GET', '/rondas'], ['POST', '/rondas'], ['POST', '/inversionistas'], ['POST', '/simular']] as const) {
+      const d = await pedir('mike', `/orgs/sin-investor/inversion${ruta}`, { app: 'dash101', method: metodo, json: metodo === 'GET' ? undefined : { nombre: 'X', monto_meta: 100 } });
+      expect(d.estado, `dash101 ${metodo} ${ruta}`).toBe(403);
+      expect(d.error, `dash101 ${metodo} ${ruta}`).toBe('app_inactiva');
+    }
   });
 
   it('quien dirige entra como admin; el resumen arranca en ceros', async () => {
