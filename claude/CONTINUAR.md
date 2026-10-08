@@ -1,3 +1,17 @@
+# 8-oct-2026 · investor101 entra a la suite (API 0.82.0)
+
+Lo hizo el chat de investor101 (Cowork). El detalle está en
+`muro/2026-10-08-2040-investor101-entra-a-la-suite.md`. En corto: app
+`investor101` (llave `investor`, licencia por empresa), una clase nueva de
+quien entra —`inversionista`, que sólo abre `/orgs/:o/inversion/*`—, siete
+tablas (org/0042), la cuenta de un préstamo en `src/inversion.ts` y el motor
+en `src/inversion-db.ts`, por una sola entrada RPC del OrgDB. dash101 lee
+`/inversion/flujo` para su proyección y registra los pagos. Falta:
+`investor101` en APPS_DOMINIO y en la puerta de empresas; la lista de apps
+de master101 y workshop101.
+
+---
+
 # 7-oct-2026 · cost101 entra a la suite (API 0.81.0)
 
 Lo hizo el chat de cost101. El detalle está en
