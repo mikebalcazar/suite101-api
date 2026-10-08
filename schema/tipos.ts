@@ -17,7 +17,16 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.82.1 (COST101: LA MANO DE OBRA VA POR HORA O POR
+ * Versión del contrato: 0.83.0 (PATRON101 EN LOS REPORTES. Encargo del chat
+ * que construyó patron101, 8-oct. Lo que entra de un préstamo
+ * (`prestamo_recibido`) no es ingreso y lo que se le devuelve de capital
+ * (`prestamo_capital`) no es gasto: el cuadre fiscal (GET /fiscal/cuadre) ya
+ * no los cuenta; el interés (`prestamo_interes`) sí, como gasto. El saldo de
+ * las cuentas y el flujo los siguen contando, porque el dinero sí se movió.
+ * Y GET /inversion/pagos?estado=pagado da los pagos ya hechos, el más
+ * reciente arriba, para deshacer uno desde dash101.)
+ *
+ * 0.82.1 (COST101: LA MANO DE OBRA VA POR HORA O POR
  * UNIDAD. Mike, 8-oct: «en mano de obra también debe haber tipos de
  * unidades (…) solo hora o unidad». `costos_base` de tipo `mo` guarda la
  * unidad que trae (por omisión `h`), también en la carga en bloque; el equipo
@@ -1296,7 +1305,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.82.1';
+export const VERSION_CONTRATO = '0.83.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

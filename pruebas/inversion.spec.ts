@@ -632,6 +632,18 @@ describe('los pagos', () => {
 
   it('un pago capturado por error se deshace, con motivo: se van sus egresos y vuelve a pendiente', async () => {
     const [p1] = ids.pagosBeto.split(',');
+    // 0.83.0 · dash101 los saca de aquí para ofrecer «deshacer».
+    const hechos = await i('mike', '/pagos?estado=pagado', { app: 'dash101' });
+    expect(hechos.estado, JSON.stringify(hechos)).toBe(200);
+    expect(hechos.data.filas.map((g: any) => g.id)).toContain(p1);
+    expect(hechos.data.filas.find((g: any) => g.id === p1)).toMatchObject({ pagado_fecha: HOY, total: 5_200_00, inversionista_nombre: 'Beto Cruz' });
+    expect((await i('beto', '/pagos?estado=pagado')).estado, 'quien presta no ve la lista de la empresa').toBe(403);
+    // 0.83.0 · El cuadre fiscal no cuenta el préstamo como ingreso ni el
+    // capital como gasto; el interés sí es gasto.
+    const cuadre = await o('mike', `/fiscal/cuadre?desde=${HOY}&hasta=${HOY}`, { app: 'dash101' });
+    expect(cuadre.estado, JSON.stringify(cuadre)).toBe(200);
+    expect(cuadre.data.ingresos.total, 'lo que entró del préstamo no es ingreso').toBe(0);
+    expect(cuadre.data.egresos.total, 'del pago sólo cuenta el interés').toBe(200_00);
     expect((await i('mike', `/pagos/${p1}/deshacer`, { method: 'POST', json: {} })).estado).toBe(400);
     const r = await i('mike', `/pagos/${p1}/deshacer`, { method: 'POST', json: { motivo: 'Lo capturé en la cuenta equivocada' } });
     expect(r.estado, JSON.stringify(r)).toBe(200);
@@ -640,6 +652,7 @@ describe('los pagos', () => {
     expect(ctas.data.filas[0].saldo).toBe(10_000_00 + 70_000_00);
     const movs = await o('mike', '/movimientos?limite=100', { app: 'dash101' });
     expect(movs.data.filas.filter((m: any) => m.tipo === 'egreso')).toEqual([]);
+    expect((await i('mike', '/pagos?estado=pagado', { app: 'dash101' })).data.filas.map((g: any) => g.id), 'deshecho, ya no sale entre los hechos').not.toContain(p1);
     const otra = await i('mike', `/pagos/${p1}/pagar`, { method: 'POST', json: { cuenta_id: cuenta, fecha: HOY } });
     expect(otra.estado).toBe(200);
   });
