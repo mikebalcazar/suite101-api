@@ -54,6 +54,8 @@ import descripcionDePieza from '../migrations/org/0038_descripcion_de_pieza.sql'
 import obrasALaSuite from '../migrations/org/0039_obras_a_la_suite.sql';
 import empresaLogoYDatos from '../migrations/org/0040_empresa_logo_y_datos.sql';
 import costos from '../migrations/org/0041_costos.sql';
+import inversion from '../migrations/org/0042_inversion.sql';
+import { MotorInversion } from './inversion-db';
 import { atender as atenderQuell, poblarCostosDefault, ponerTiemposDefault, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { PREFIJOS, esRequerimiento, siguienteCodigo } from './quell/codigos.js';
 
@@ -81,7 +83,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion];
 
 /** La 0027, la 0030, la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
@@ -331,6 +333,8 @@ export interface ApiOrgDB {
   esDeNominas(usuario_id: string): Promise<boolean>;
   marcarNominas(args: { personal_id: string; valor: boolean; quien_usuario_id: string; quien_nombre?: string | null }): Promise<Fila | null>;
   marcarContador(args: { personal_id: string; valor: boolean; quien_usuario_id: string; quien_nombre?: string | null }): Promise<Fila | null>;
+  /** investor101 (0.82.0): una sola puerta al motor de src/inversion-db.ts. */
+  inversion(op: string, args?: unknown[]): Promise<any>;
   crearOrden(args: Record<string, unknown>): Promise<Fila | { error: string; detalle?: unknown }>;
   misOrdenes(usuario_id: string): Promise<Fila[]>;
   buzon(hoy?: string, tipo?: TipoOrden | null): Promise<{ filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number }>;
@@ -5562,6 +5566,32 @@ export class OrgDB extends DurableObject<Env> {
 
   webSocketClose(ws: WebSocket, code: number): void {
     try { ws.close(code === 1006 ? 1000 : code, 'adios'); } catch { /* ya estaba cerrada */ }
+  }
+
+  /* ─────────────── investor101 (0.82.0) ───────────────
+   * El motor vive en src/inversion-db.ts; aquí sólo se le presta la base, la
+   * transacción, el consecutivo y el aviso. Una sola entrada por RPC en vez
+   * de cuarenta métodos: la lista de lo que se puede llamar está abajo, y lo
+   * que no esté ahí no existe para nadie de afuera. */
+  private static readonly OPS_INVERSION: ReadonlySet<string> = new Set([
+    'inversionistas', 'inversionista', 'inversionistaPorUsuario', 'crearInversionista', 'actualizarInversionista', 'ligarUsuario', 'borrarInversionista',
+    'ajustes', 'guardarAjustes',
+    'rondas', 'verRonda', 'crearRonda', 'actualizarRonda', 'abrirRonda', 'terminarRonda', 'reabrirRonda', 'borrarRonda', 'rondaPara', 'rondasPara',
+    'ofrecer', 'oferta', 'retirarOferta', 'rechazarOferta', 'aprobarOferta',
+    'prestamos', 'prestamo', 'verPrestamo', 'crearPrestamo', 'actualizarPrestamo', 'marcarRecibido', 'cancelarPrestamo', 'editarTabla',
+    'pago', 'pagar', 'deshacerPago', 'pagosPendientes', 'flujo', 'resumenAdmin', 'estadoDeCuenta',
+    'registrarArchivo', 'archivo', 'borrarArchivo',
+  ]);
+
+  inversion(op: string, args: unknown[] = []): unknown {
+    if (!OrgDB.OPS_INVERSION.has(op)) return { error: 'operacion_desconocida', detalle: { op } };
+    const motor = new MotorInversion({
+      sql: this.sql,
+      tx: <T>(fn: () => T): T => this.ctx.storage.transactionSync(fn),
+      apartarNumero: (serie) => this.apartarNumero(serie),
+      alMover: (id) => this.avisar({ t: 'movimiento.nuevo', id, proyecto_id: null }, 'dinero'),
+    }) as unknown as Record<string, (...a: unknown[]) => unknown>;
+    return motor[op](...args);
   }
 
   private avisar(aviso: Aviso, alcance: 'todos' | 'dinero'): void {

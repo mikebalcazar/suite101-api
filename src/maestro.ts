@@ -312,7 +312,49 @@ export interface Acceso { usuario_id: string; org_id: string; tipo: TipoAcceso; 
  *  a personal, así que no debería pasar; y si pasa, equivocarse del lado de la
  *  sesión corta cuesta un login y no una cuenta. */
 export async function vidaDe(env: Env, usuario_id: string): Promise<number> {
-  return (await acceso(env, usuario_id)) ? VIDA_ACCESO : VIDA_MIEMBRO;
+  if (await acceso(env, usuario_id)) return VIDA_ACCESO;
+  /* 0.82.0 · Quien SÓLO es inversionista —no es miembro de ninguna empresa—
+   * trae la sesión corta, por lo mismo que un cliente: es alguien de afuera
+   * mirando dinero desde su teléfono. Un socio que además presta conserva sus
+   * 30 días: ya es de la casa. */
+  if ((await accesosInversionDe(env, usuario_id)).length) {
+    const m = await env.MASTER.prepare(`SELECT 1 AS x FROM miembros WHERE usuario_id = ? LIMIT 1`).bind(usuario_id).first();
+    if (!m && !(await esSuperadmin(env, usuario_id))) return VIDA_ACCESO;
+  }
+  return VIDA_MIEMBRO;
+}
+
+/* ─────────────── inversionistas (investor101, 0.82.0) ───────────────
+ * Su permiso no vive en `accesos` sino en `accesos_inversion`: la llave es la
+ * pareja persona-empresa (ver migrations/d1/0025_investor101.sql). */
+
+export interface AccesoInversion { usuario_id: string; org_id: string; ref_id: string }
+
+export async function accesoInversion(env: Env, org_id: string, usuario_id: string): Promise<AccesoInversion | null> {
+  return env.MASTER.prepare(`SELECT usuario_id, org_id, ref_id FROM accesos_inversion WHERE usuario_id = ? AND org_id = ? AND activo = 1`)
+    .bind(usuario_id, org_id).first<AccesoInversion>();
+}
+
+/** Las empresas a las que esta persona les presta, con su nombre. Sólo las
+ *  que siguen activas y con investor101 prendida. */
+export async function accesosInversionDe(env: Env, usuario_id: string): Promise<Array<{ org_id: string; nombre: string; ref_id: string }>> {
+  const r = await env.MASTER.prepare(
+    `SELECT a.org_id, a.ref_id, o.nombre FROM accesos_inversion a JOIN orgs o ON o.id = a.org_id
+      WHERE a.usuario_id = ? AND a.activo = 1 AND o.activa = 1 AND json_extract(o.apps, '$.investor') = 1 ORDER BY o.nombre`,
+  ).bind(usuario_id).all<{ org_id: string; nombre: string; ref_id: string }>();
+  return r.results ?? [];
+}
+
+export async function ponerAccesoInversion(env: Env, a: AccesoInversion): Promise<void> {
+  await env.MASTER.prepare(
+    `INSERT INTO accesos_inversion (usuario_id, org_id, ref_id, activo, creado_at) VALUES (?,?,?,1,?)
+     ON CONFLICT(usuario_id, org_id) DO UPDATE SET ref_id = excluded.ref_id, activo = 1`,
+  ).bind(a.usuario_id, a.org_id, a.ref_id, ahora()).run();
+}
+
+/** Quita el permiso de la fila `ref_id` de esa empresa (por si cambió de correo). */
+export async function quitarAccesoInversion(env: Env, org_id: string, ref_id: string): Promise<void> {
+  await env.MASTER.prepare(`DELETE FROM accesos_inversion WHERE org_id = ? AND ref_id = ?`).bind(org_id, ref_id).run();
 }
 
 export async function acceso(env: Env, usuario_id: string): Promise<Acceso | null> {
@@ -349,6 +391,7 @@ export async function accesoDe(env: Env, org_id: string, tipo: TipoAcceso, ref_i
 export async function borrarOrg(env: Env, org_id: string): Promise<void> {
   await env.MASTER.batch([
     env.MASTER.prepare(`DELETE FROM accesos WHERE org_id = ?`).bind(org_id),
+    env.MASTER.prepare(`DELETE FROM accesos_inversion WHERE org_id = ?`).bind(org_id),
     env.MASTER.prepare(`DELETE FROM miembros WHERE org_id = ?`).bind(org_id),
     env.MASTER.prepare(`DELETE FROM invitaciones WHERE org_id = ?`).bind(org_id),
     env.MASTER.prepare(`DELETE FROM orgs WHERE id = ?`).bind(org_id),

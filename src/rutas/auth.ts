@@ -34,7 +34,7 @@ import {
   normalizaCorreo, pinAceptable, pinCoincide, revisaClave, sha256, ulid, vencida,
 } from '../lib';
 import {
-  abrirSesion, acceso, cerrarSesion, crearUsuario, cuentaPorLicencia, esSuperadmin, vidaDe,
+  abrirSesion, acceso, accesosInversionDe, cerrarSesion, crearUsuario, cuentaPorLicencia, esSuperadmin, vidaDe,
   vidaQueQueda,
   miembro, org, orgs, secretoDe, sembrarSuperadmin, usuarioPorCorreo, usuarioPorId,
   secretosDe, type Como,
@@ -438,7 +438,11 @@ export async function yo(c: Ctx) {
   const dom = c.get('dominio');
   const visibles = dom ? mias.filter((o) => o.id === dom.org_id) : mias;
   const empresa = dom ? { id: dom.org_id, nombre: dom.nombre, dominio: dom.dominio, app: dom.app } : null;
-  return ok(c, { usuario, superadmin: soySuper, orgs: visibles, acceso: acc, entro_con: s.como, empresa, ...secretos });
+  /* 0.82.0 · a qué empresas les presta (investor101). Por el dominio de una
+   * empresa, sólo ésa. */
+  const presta = await accesosInversionDe(c.env, s.usuario_id);
+  const inversion = dom ? presta.filter((p) => p.org_id === dom.org_id) : presta;
+  return ok(c, { usuario, superadmin: soySuper, orgs: visibles, acceso: acc, inversion, entro_con: s.como, empresa, ...secretos });
 }
 
 /** Middleware: lee la sesión y la deja en el contexto. No exige nada: cada

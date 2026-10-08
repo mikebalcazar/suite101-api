@@ -19,7 +19,9 @@ export interface Sesion {
 }
 
 export interface Quien {
-  clase: 'miembro' | 'personal' | 'cliente';
+  /** `inversionista` (0.82.0): alguien de afuera que le presta a la empresa.
+   *  Sólo existe para investor101 y sólo abre /orgs/:o/inversion/*. */
+  clase: 'miembro' | 'personal' | 'cliente' | 'inversionista';
   usuario_id: string;
   rol?: Miembro['rol'];
   ref_id?: string;

@@ -13,7 +13,7 @@ import { Hono } from 'hono';
 import { DEFS, columnasDinero, esTabla } from '../tablas';
 import type { ApiOrgDB, LineaAprobada } from '../org-db';
 import { APPEND_ONLY, POR_SU_RUTA, revisarEscritura } from '../permisos';
-import { acceso, accesoDe, miembro, org, ponerAcceso, quitarAcceso, usuarioPorCorreo, usuarioPorId } from '../maestro';
+import { acceso, accesoDe, accesoInversion, miembro, org, ponerAcceso, quitarAcceso, usuarioPorCorreo, usuarioPorId } from '../maestro';
 import { invitarClienteEnSuite } from '../clientes';
 import { crearUsuario } from '../maestro';
 import { guardarPin, normalizaCorreo, pinAceptable, ulid } from '../lib';
@@ -24,6 +24,7 @@ import { ESTADOS_PRODUCTO, TIPOS_COSTO, limpiarMiembros } from '../costos';
 import { montarOrdenes } from './ordenes';
 import { montarObras } from './obras';
 import { montarNomina } from './nomina';
+import { montarInversion } from './inversion';
 import { err, ok, type Ctx, type Quien, type Vars } from '../http';
 import type { Env } from '../entorno';
 import { APPS, LLAVE_APP, type App, type Tabla, TIPOS_PROVEEDOR, type TipoProveedor } from '../../schema/tipos';
@@ -125,7 +126,21 @@ rutas.use('/:o/*', async (c, next) => {
       }
     }
   }
+  /* 0.82.0 · El inversionista. No es miembro, cliente ni personal: es alguien
+   * de afuera que le presta a la empresa, y sólo existe para investor101. Su
+   * clase es nueva y casi ninguna ruta de este archivo la conoce —muchas
+   * sólo dicen «un cliente no»—, así que NO se confía en que cada una lo
+   * rechace: se le cierra aquí todo lo que no sea /orgs/:o/inversion/*. Una
+   * ruta que mañana se olvide de él sigue cerrada. */
+  if (!quien && app === 'investor101') {
+    const inv = await accesoInversion(c.env, org_id, s.usuario_id);
+    if (inv) quien = { clase: 'inversionista', usuario_id: s.usuario_id, ref_id: inv.ref_id, ve_dinero: false, ve_costos: false };
+  }
   if (!quien) return err(c, 'sin_permiso', 403, { org: org_id });
+  if (quien.clase === 'inversionista') {
+    const partes = new URL(c.req.url).pathname.split('/').filter(Boolean); // ['orgs', ':o', 'inversion', …]
+    if (partes[partes.indexOf('orgs') + 2] !== 'inversion') return err(c, 'sin_permiso', 403, { motivo: 'un inversionista sólo abre /inversion' });
+  }
 
   // Contrato 0.6.0: la lista de apps por persona (`miembros.apps`, vacía =
   // todas las de la empresa) se aplica aquí. Antes se guardaba y no se leía.
@@ -1531,6 +1546,7 @@ rutas.patch('/:o/negocios/:id', async (c) => {
 montarOrdenes(rutas);
 montarObras(rutas);
 montarNomina(rutas);
+montarInversion(rutas);
 
 /* ─────────────── cost101: costos base, cuadrillas y productos (0.81.0) ───────────────
  *
@@ -1700,6 +1716,8 @@ rutas.get('/:o/:tabla', async (c) => {
    * que faltaban filas. */
   const limite = topeDe(filtros.limite);
   delete filtros.limite;
+  // La puerta ya no deja llegar aquí a un inversionista; esto es el cinturón.
+  if (quien.clase === 'inversionista') return err(c, 'sin_permiso', 403);
 
   const r = await stub(c).listar(tabla as Tabla, filtros, {
     usuario_id: quien.usuario_id,

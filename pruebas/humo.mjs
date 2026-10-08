@@ -124,6 +124,21 @@ async function costos() {
 
   const prodSin = await fetch(`${PROD}/orgs/forespot/costos`, { headers: { 'X-App': 'cost101' } });
   rev(prodSin.status === 401, 'producción: sin sesión, los costos no se abren', String(prodSin.status));
+
+  /* investor101 (0.82.0): la licencia quedó prendida en demo y la portada
+   * contesta. Sólo lectura: lo que mueve dinero se mide en inversion.spec. */
+  linea('');
+  linea('== investor101: la portada de la empresa demo ==');
+  const invSin = await fetch(`${STAGING}/orgs/demo/inversion`, { headers: { 'X-App': 'investor101' } });
+  rev(invSin.status === 401, 'sin sesión, investor101 no se abre', String(invSin.status));
+  const demoInv = await pedir(STAGING, '/orgs/demo', { app: 'investor101' });
+  rev(demoInv.estado === 200 && demoInv.data?.apps?.investor === true, 'la empresa demo trae investor101 prendida', `${demoInv.estado} ${JSON.stringify(demoInv.data?.apps || demoInv.error)}`);
+  const portada = await pedir(STAGING, '/orgs/demo/inversion', { app: 'investor101' });
+  rev(portada.estado === 200 && portada.data?.papel === 'admin', 'quien dirige abre la portada como admin', `${portada.estado} ${portada.data?.papel || portada.error}`);
+  const flujoInv = await pedir(STAGING, '/orgs/demo/inversion/flujo', { app: 'dash101' });
+  rev(flujoInv.estado === 200 && Array.isArray(flujoInv.data?.pagos) && Array.isArray(flujoInv.data?.depositos), 'dash101 lee lo que va a su flujo', String(flujoInv.estado));
+  const prodInv = await fetch(`${PROD}/orgs/forespot/inversion`, { headers: { 'X-App': 'investor101' } });
+  rev(prodInv.status === 401, 'producción: sin sesión, investor101 no se abre', String(prodInv.status));
 }
 
 /* ─────────────── producción: que responda y que se calle el código ─────────────── */
