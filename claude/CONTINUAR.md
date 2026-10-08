@@ -447,6 +447,11 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **Toda la suite con el look de cost101, la letra de dash y el logotipo oficial `-claro`; quell101 intacta (8-oct, dash101 #148/#149, suite101-api #282/#283, peek101 #26, master101 #36, workshop101 #16, t101-portal-trabajadores #36, cotizador-t101 #87 G111, cost101 #7 0.3.1).**
+  Fondo degradado azul, tarjetas de vidrio, botones redondos, Cifras +
+  Raleway locales, logotipo en trazos a 28/36 px. Lo que es papel se queda
+  claro, también al imprimir. La receta y lo de cada app en el muro
+  `2026-10-08-2253-jr-el-look-de-cost101-en-toda-la-suite.md`.
 - **cost101 con Configuración, título/descripción y mano de obra por hora o unidad; quote101 pone cargos y al día lo de cost101 (8-oct, API 0.82.1 #279/#280, cost101 #5/#6 0.3.0, cotizador-t101 #86 G110).**
   Cada empresa su base (probado). Partida con título y descripción.
   Mano de obra `h`|`unidad` (la API ya no fuerza `h`; cuadrillas sólo por
