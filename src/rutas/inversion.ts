@@ -140,9 +140,9 @@ export function montarInversion(rutas: App): void {
      * préstamos completos desde dash101. Lo encontró la prueba de dash101 el
      * 8-oct, el mismo día en que nació. */
     const empresa = await org(c.env, c.get('org_id'));
-    if (empresa?.apps?.investor !== true) return err(c, 'app_inactiva', 403, { app: 'investor101', motivo: 'la empresa no tiene investor101' });
+    if (empresa?.apps?.investor !== true) return err(c, 'app_inactiva', 403, { app: 'investor101', motivo: 'la empresa no tiene patron101' });
     const p = await papelDe(c);
-    if (!p) return err(c, 'sin_permiso', 403, { motivo: 'investor101 lo abre quien dirige la empresa o quien le presta' });
+    if (!p) return err(c, 'sin_permiso', 403, { motivo: 'patron101 lo abre quien dirige la empresa o quien le presta' });
     if (quienes === 'admin' && p.tipo !== 'admin') return err(c, 'sin_permiso', 403, { motivo: 'solo_quien_dirige' });
     return h(c, p);
   };

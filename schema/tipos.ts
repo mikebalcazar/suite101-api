@@ -1463,6 +1463,10 @@ export const APPS = [
    * reparte por persona, como las demás. */
   'cost101',
   /* investor101 (8-oct-2026): rondas de inversión y préstamos a la empresa.
+   * PARA LA GENTE SE LLAMA patron101: Mike le cambió el nombre el mismo día.
+   * Marca y dominio (patron101.taller101.com) dicen patron101; el nombre de
+   * app, la llave `investor`, el Worker y el repo conservan el de nacimiento,
+   * como quell101 en `bitacora-obra` (OPERAR.md §8).
    * Llave propia, `investor`. Es la única app a la que entra alguien que no
    * es de la empresa ni su cliente: el inversionista. */
   'investor101',
