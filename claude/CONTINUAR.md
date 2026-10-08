@@ -431,6 +431,12 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **Los 193 costos base con precio de tienda, y el botón para cargarlos (8-oct, cost101 #3, 0.2.3).**
+  Precio más alto de tienda en línea (127) o estimado más 15 % (66, con toda
+  la mano de obra y el equipo), por decisión de Mike. Tablaroca normal
+  (MAT-201) a $399. Van todos, sin las marcas. En el Resumen de cost101,
+  quien dirige ve «Cargar los N» (`/costos/importar`, no pisa); el clic en
+  forespot es de Mike. Muro `2026-10-08-2003-jr-costos-base-precio-de-tienda.md`.
 - **cost101 sólo trae el lienzo, y los costos base van en Excel a revisión (8-oct, cost101 #1, 0.2.2).**
   Se fueron «Hoja APU» y «Por pasos». 193 costos base (carpintería,
   tablaroca, cancelería) con precio de referencia CDMX sin validar, en
