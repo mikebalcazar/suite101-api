@@ -447,6 +447,13 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **cost101 con Configuración, título/descripción y mano de obra por hora o unidad; quote101 pone cargos y al día lo de cost101 (8-oct, API 0.82.1 #279/#280, cost101 #5/#6 0.3.0, cotizador-t101 #86 G110).**
+  Cada empresa su base (probado). Partida con título y descripción.
+  Mano de obra `h`|`unidad` (la API ya no fuerza `h`; cuadrillas sólo por
+  hora). Configuración en /ajustes `config`: indirectos con casilla, %
+  por omisión, unidades, categorías. En quote101 lo de cost101 entra como
+  base (lleva cargos) y toma el precio de hoy al editar una cotización no
+  aprobada; aprobada, congelada. Muro `2026-10-08-2130-jr-cost101-configuracion-y-quote-al-dia.md`.
 - **Los 193 costos base con precio de tienda, y el botón para cargarlos (8-oct, cost101 #3, 0.2.3).**
   Precio más alto de tienda en línea (127) o estimado más 15 % (66, con toda
   la mano de obra y el equipo), por decisión de Mike. Tablaroca normal
