@@ -1052,8 +1052,10 @@ export class OrgDB extends DurableObject<Env> {
     if (tabla === 'costos_base') {
       const tipo = String(fila.tipo ?? 'material');
       fila.clave = String(fila.clave ?? '').trim() || this.siguienteClave('costos_base', 'clave', tipo === 'mo' ? 'MO-' : tipo === 'equipo' ? 'EQ-' : 'MAT-', 3);
-      if (tipo !== 'material') fila.unidad = 'h';
-      fila.unidad = String(fila.unidad ?? '').trim() || 'pza';
+      /* 8-oct-2026 · la mano de obra va por hora o por unidad (destajo); el
+       * equipo, por hora siempre. */
+      if (tipo === 'equipo') fila.unidad = 'h';
+      fila.unidad = String(fila.unidad ?? '').trim() || (tipo === 'mo' ? 'h' : 'pza');
       fila.precio = Math.max(0, Math.trunc(Number(fila.precio ?? 0)) || 0);
       fila.categoria = String(fila.categoria ?? '').trim();
       if (!Array.isArray(fila.historial)) fila.historial = [{ f: hoyMx(), precio: fila.precio }];
@@ -1318,9 +1320,11 @@ export class OrgDB extends DurableObject<Env> {
   revisarMiembros(miembros: Array<{ ref: string; cant: number }>): Record<string, string> | null {
     const errores: Record<string, string> = {};
     miembros.forEach((m, i) => {
-      const o = this.sql.exec(`SELECT tipo FROM costos_base WHERE id = ?`, m.ref).toArray()[0] as Fila | undefined;
+      const o = this.sql.exec(`SELECT tipo, unidad FROM costos_base WHERE id = ?`, m.ref).toArray()[0] as Fila | undefined;
       if (!o) errores[`miembros.${i}.ref`] = 'Ese oficio ya no existe.';
       else if (o.tipo !== 'mo') errores[`miembros.${i}.ref`] = 'Una cuadrilla se arma con oficios (mano de obra).';
+      // La jornada es precio × horas: un destajo (por unidad) no cabe.
+      else if ((String(o.unidad ?? '') || 'h') !== 'h') errores[`miembros.${i}.ref`] = 'En una cuadrilla sólo entran oficios por hora.';
     });
     return Object.keys(errores).length ? errores : null;
   }
@@ -1403,7 +1407,7 @@ export class OrgDB extends DurableObject<Env> {
           this.sql.exec(
             `INSERT INTO costos_base (id, clave, nombre, nombre_norm, tipo, unidad, precio, categoria, historial, creado_at, creado_por) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
             id, clave || this.siguienteClave('costos_base', 'clave', tipo === 'mo' ? 'MO-' : tipo === 'equipo' ? 'EQ-' : 'MAT-', 3),
-            String(c.nombre).trim(), normalizar(c.nombre), tipo, tipo === 'material' ? String(c.unidad ?? 'pza') : 'h', precio,
+            String(c.nombre).trim(), normalizar(c.nombre), tipo, tipo === 'equipo' ? 'h' : (String(c.unidad ?? '').trim() || (tipo === 'mo' ? 'h' : 'pza')), precio,
             String(c.categoria ?? '').trim(), JSON.stringify(historial), t, args.usuario_id,
           );
           ids.costos.set(c.ref, id); nuevos.costos++;

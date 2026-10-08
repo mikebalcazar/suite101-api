@@ -17,7 +17,14 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.82.0 (INVESTOR101: RONDAS DE INVERSIÓN Y PRÉSTAMOS A
+ * Versión del contrato: 0.82.1 (COST101: LA MANO DE OBRA VA POR HORA O POR
+ * UNIDAD. Mike, 8-oct: «en mano de obra también debe haber tipos de
+ * unidades (…) solo hora o unidad». `costos_base` de tipo `mo` guarda la
+ * unidad que trae (por omisión `h`), también en la carga en bloque; el equipo
+ * sigue por hora. Una cuadrilla sólo acepta oficios por hora, y un oficio que
+ * está en una cuadrilla no deja de ser por hora.)
+ *
+ * 0.82.0 (INVESTOR101: RONDAS DE INVERSIÓN Y PRÉSTAMOS A
  * LA EMPRESA. Mike, 8-oct: «una plataforma para inversionistas o personas que
  * hacen préstamos/créditos a taller101 durante periodos de tiempo definidos
  * (…) abrirles una cuenta de inversionista y que puedan ver cuánto tienen
@@ -1289,7 +1296,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.82.0';
+export const VERSION_CONTRATO = '0.82.1';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

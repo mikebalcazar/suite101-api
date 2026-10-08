@@ -237,9 +237,10 @@ describe('agregar, quitar y actualizar costos base', () => {
     expect(m.estado, JSON.stringify(m)).toBe(201);
     expect(m.data.clave).toBe('MAT-044');
     expect(m.data.historial).toEqual([{ f: hoy, precio: 650 }]);
-    const mo = await o('mike', '/costos_base', { method: 'POST', json: { nombre: 'Oficial herrero', tipo: 'mo', unidad: 'pza', precio: 12000 } });
+    // 0.82.1: la mano de obra trae su unidad (hora o unidad); sin decirla, por hora.
+    const mo = await o('mike', '/costos_base', { method: 'POST', json: { nombre: 'Oficial herrero', tipo: 'mo', precio: 12000 } });
     expect(mo.data.clave).toBe('MO-011');
-    expect(mo.data.unidad, 'la mano de obra es por hora').toBe('h');
+    expect(mo.data.unidad, 'sin unidad, la mano de obra es por hora').toBe('h');
     const q = await o('mike', '/cuadrillas', { method: 'POST', json: { nombre: 'Herrería', miembros: [{ ref: mo.data.id, cant: 1 }] } });
     expect(q.estado, JSON.stringify(q)).toBe(201);
     expect(q.data.clave).toBe('CUA-07');
@@ -438,6 +439,54 @@ describe('cada empresa tiene su base de costos: una no ve la de otra', () => {
     expect(otra.data.costos_base.map((x: Fila) => x.clave)).toEqual(['MAT-900']);
     expect(otra.data.productos).toEqual([]);
     expect(otra.data.cuadrillas).toEqual([]);
+  });
+});
+
+/* Mike, 8-oct-2026: «en mano de obra también debe haber tipos de unidades.
+ * De hecho puede ser solo hora o unidad». Antes la API forzaba `h` a todo lo
+ * que no fuera material, también en la carga en bloque (los destajos por m²
+ * de forespot entraron como hora). */
+describe('la mano de obra va por hora o por unidad (0.82.1)', () => {
+  it('un oficio por unidad se guarda con su unidad; sin unidad, por hora', async () => {
+    const a = await o('mike', '/costos_base', { method: 'POST', json: { nombre: 'Colocación de chapa a destajo', tipo: 'mo', unidad: 'unidad', precio: 8500 } });
+    expect(a.estado, JSON.stringify(a)).toBe(201);
+    expect(a.data.unidad).toBe('unidad');
+    const b = await o('mike', '/costos_base', { method: 'POST', json: { nombre: 'Oficial sin unidad dicha', tipo: 'mo', precio: 9000 } });
+    expect(b.data.unidad).toBe('h');
+  });
+  it('el equipo sigue por hora, aunque se mande otra cosa', async () => {
+    const e = await o('mike', '/costos_base', { method: 'POST', json: { nombre: 'Andamio por día', tipo: 'equipo', unidad: 'día', precio: 30000 } });
+    expect(e.data.unidad).toBe('h');
+    const p = await o('mike', `/costos_base/${e.data.id}`, { method: 'PATCH', json: { unidad: 'día' } });
+    expect(p.estado).toBe(400);
+  });
+  it('la carga en bloque respeta la unidad de la mano de obra', async () => {
+    const r = await o('mike', '/costos/importar', { method: 'POST', json: { costos: [
+      { ref: 'd1', clave: 'MO-904', nombre: 'Tablaroca a destajo: muro 1 cara', tipo: 'mo', unidad: 'm²', precio: 10900 },
+      { ref: 'd2', clave: 'EQ-905', nombre: 'Escalera', tipo: 'equipo', unidad: 'pza', precio: 2500 },
+    ] } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    await releer();
+    expect(costo('MO-904').unidad).toBe('m²');
+    expect(costo('EQ-905').unidad).toBe('h');
+  });
+  it('en una cuadrilla sólo entran oficios por hora', async () => {
+    await releer();
+    const destajo = costos.find((x) => x.nombre === 'Colocación de chapa a destajo')!;
+    const r = await o('mike', '/cuadrillas', { method: 'POST', json: { nombre: 'Cuadrilla con destajo', horas: 8, miembros: [{ ref: destajo.id, cant: 1 }] } });
+    expect(r.estado).toBe(400);
+    expect(JSON.stringify(r)).toContain('sólo entran oficios por hora');
+  });
+  it('un oficio que está en una cuadrilla no deja de ser por hora', async () => {
+    await releer();
+    const enCuadrilla = cuadrillas[0].miembros[0].ref;
+    const r = await o('mike', `/costos_base/${enCuadrilla}`, { method: 'PATCH', json: { unidad: 'unidad' } });
+    expect(r.estado).toBe(400);
+    expect(JSON.stringify(r)).toContain('Está en una cuadrilla');
+    const libre = costos.find((x) => x.nombre === 'Oficial sin unidad dicha')!;
+    const ok = await o('mike', `/costos_base/${libre.id}`, { method: 'PATCH', json: { unidad: 'unidad' } });
+    expect(ok.estado, JSON.stringify(ok)).toBe(200);
+    expect(ok.data.unidad).toBe('unidad');
   });
 });
 

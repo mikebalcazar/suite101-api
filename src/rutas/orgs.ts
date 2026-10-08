@@ -1633,6 +1633,14 @@ async function revisarCostos(c: Ctx, tabla: Tabla, datos: Record<string, unknown
       const antes = await stub(c).obtener('costos_base', id);
       if (antes && antes.tipo !== datos.tipo && (await stub(c).usosEnCostos('costos_base', id)).length) errores.tipo = 'Ya se usa en cuadrillas o productos: no se le cambia el tipo.';
     }
+    /* 8-oct-2026 · el equipo va por hora; un oficio que está en una cuadrilla
+     * no deja de ser por hora (su jornada es precio × horas). */
+    if (id && datos.unidad !== undefined) {
+      const antes = await stub(c).obtener('costos_base', id);
+      const tipo = String(datos.tipo ?? antes?.tipo ?? '');
+      if (tipo === 'equipo' && datos.unidad !== 'h') errores.unidad = 'El equipo va por hora.';
+      else if (tipo === 'mo' && datos.unidad !== 'h' && (await stub(c).usosEnCostos('costos_base', id)).some((u) => u.que === 'cuadrilla')) errores.unidad = 'Está en una cuadrilla: sólo va por hora.';
+    }
   }
   if (tabla === 'cuadrillas') {
     for (const k of ['clave', 'nombre', 'categoria']) texto(k);
