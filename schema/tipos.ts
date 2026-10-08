@@ -17,7 +17,41 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.81.0 (COST101 ENTRA A LA SUITE. Mike, 7-oct: «una
+ * Versión del contrato: 0.82.0 (INVESTOR101: RONDAS DE INVERSIÓN Y PRÉSTAMOS A
+ * LA EMPRESA. Mike, 8-oct: «una plataforma para inversionistas o personas que
+ * hacen préstamos/créditos a taller101 durante periodos de tiempo definidos
+ * (…) abrirles una cuenta de inversionista y que puedan ver cuánto tienen
+ * invertido, durante cuánto tiempo y qué día se les paga de regreso con sus
+ * intereses (…) Esto se tiene que reflejar en la proyección de flujos de
+ * dash».
+ *   · App nueva `investor101`, llave `investor`: licencia por empresa.
+ *   · Una clase nueva de quien entra: `inversionista`. No es miembro, ni
+ *     cliente, ni personal: es alguien de afuera que le presta a la empresa.
+ *     Su permiso vive en el D1 (`accesos_inversion`, una fila por persona y
+ *     empresa) y SÓLO abre `/orgs/:o/inversion/*`; ninguna otra ruta.
+ *   · Todo va por `/orgs/:o/inversion/*` (src/rutas/inversion.ts), no por el
+ *     CRUD genérico: un inversionista ve SÓLO lo suyo y eso se decide renglón
+ *     por renglón. Administra quien dirige (owner o admin), desde investor101
+ *     o desde dash101.
+ *   · Tablas (org 0042): `inversionistas` (el directorio, con prospectos),
+ *     `rondas`, `ronda_ofertas`, `prestamos`, `prestamo_pagos` (la tabla de
+ *     pagos), `inversion_archivos` e `inversion_eventos` (la bitácora).
+ *   · La tasa va en PUNTOS BASE (250 = 2.50 %) y es de tres tipos, a escoger
+ *     en cada préstamo (decisión de Mike con botones): `mensual` (prorrateada
+ *     a 30 días), `anual` (días reales entre 365) o `fija` (por todo el
+ *     plazo). Dos esquemas: `unico` (capital e interés en una fecha) o
+ *     `parcialidades` (capital en partes iguales e interés sobre saldo). La
+ *     cuenta vive en src/inversion.ts y es la única.
+ *   · El préstamo ARRANCA cuando quien dirige marca el depósito recibido:
+ *     ahí nace el ingreso en `movimientos` (categoria `prestamo_recibido`) y
+ *     la tabla de pagos se rehace con la fecha de verdad. Cada pago se
+ *     registra con `POST /inversion/pagos/:id/pagar` y deja uno o dos egresos
+ *     (`prestamo_capital`, `prestamo_interes`), contraparte `inversionista`.
+ *   · `GET /orgs/:o/inversion/flujo` — lo que dash101 pone en su proyección:
+ *     los pagos pendientes (egresos) y los depósitos por recibir (ingresos).
+ *   · `/yo` suma `inversion`: las empresas a las que esta persona les presta.
+ * Antes:
+ * 0.81.0 (COST101 ENTRA A LA SUITE. Mike, 7-oct: «una
  * base de datos de los costos base, la cual puedo editar (…) de ahí se
  * generan los productos que son otra base de datos, los cuales van a
  * alimentar los precios de los productos para quote. Quote debe poder leer
@@ -1255,7 +1289,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.81.0';
+export const VERSION_CONTRATO = '0.82.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1428,6 +1462,10 @@ export const APPS = [
    * Llave propia, `cost`: es una app que se licencia por empresa y se
    * reparte por persona, como las demás. */
   'cost101',
+  /* investor101 (8-oct-2026): rondas de inversión y préstamos a la empresa.
+   * Llave propia, `investor`. Es la única app a la que entra alguien que no
+   * es de la empresa ni su cliente: el inversionista. */
+  'investor101',
 ] as const;
 export type App = (typeof APPS)[number];
 
@@ -1444,6 +1482,7 @@ export const LLAVE_APP: Record<App, string> = {
   workshop101: 'workshop',
   suite101: 'suite',
   cost101: 'cost',
+  investor101: 'investor',
 };
 
 /* ─────────────── D1 master: el directorio ─────────────── */
@@ -1499,6 +1538,10 @@ export interface Yo {
    *  en la forma por compatibilidad con quien lo lea. */
   orgs: Array<{ id: string; nombre: string; rol: Rol; apps: string[]; negocios: string[]; miembro: boolean }>;
   acceso: { org_id: string; tipo: TipoAcceso; ref_id: string } | null;
+  /** 0.82.0 · Las empresas a las que esta persona les presta dinero
+   *  (investor101). Vacía para casi todos. `ref_id` es su fila en
+   *  `inversionistas` dentro de esa empresa. */
+  inversion: Array<{ org_id: string; nombre: string; ref_id: string }>;
 }
 
 /* ─────────────── el panel de la suite (master101), contrato 0.5.0 ─────────────── */
@@ -1698,6 +1741,61 @@ export interface Accionista {
 
 /** La categoría del egreso que es un retiro de utilidades (0.57.0). */
 export const CATEGORIA_RETIRO_UTILIDADES = 'retiro_utilidades';
+
+/* ─────────────── investor101: préstamos a la empresa (0.82.0) ─────────────── */
+
+/** El ingreso que es dinero PRESTADO: entra a la cuenta, pero no es una venta. */
+export const CATEGORIA_PRESTAMO_RECIBIDO = 'prestamo_recibido';
+/** El egreso que devuelve capital: sale de la cuenta, pero no es un gasto. */
+export const CATEGORIA_PRESTAMO_CAPITAL = 'prestamo_capital';
+/** El egreso que paga intereses: éste sí es un gasto (financiero). */
+export const CATEGORIA_PRESTAMO_INTERES = 'prestamo_interes';
+/** `movimientos.contraparte_tipo` de lo que entra y sale por un préstamo. */
+export const CONTRAPARTE_INVERSIONISTA = 'inversionista';
+
+export const TIPOS_TASA = ['mensual', 'anual', 'fija'] as const;
+export type TipoTasa = (typeof TIPOS_TASA)[number];
+export const ESQUEMAS_PAGO = ['unico', 'parcialidades'] as const;
+export type EsquemaPago = (typeof ESQUEMAS_PAGO)[number];
+export const FRECUENCIAS_PAGO = ['semanal', 'quincenal', 'mensual'] as const;
+export type FrecuenciaPago = (typeof FRECUENCIAS_PAGO)[number];
+
+export const ESTADOS_RONDA = ['borrador', 'abierta', 'cerrada', 'cancelada'] as const;
+export type EstadoRonda = (typeof ESTADOS_RONDA)[number];
+export const ESTADOS_OFERTA = ['pendiente', 'aprobada', 'rechazada', 'retirada'] as const;
+export type EstadoOferta = (typeof ESTADOS_OFERTA)[number];
+export const ESTADOS_PRESTAMO = ['por_depositar', 'activo', 'liquidado', 'cancelado'] as const;
+export type EstadoPrestamo = (typeof ESTADOS_PRESTAMO)[number];
+
+/** Lo acordado de un préstamo, o lo que una ronda ofrece. Dinero en centavos;
+ *  la tasa en puntos base (250 = 2.50 %); fechas AAAA-MM-DD. */
+export interface CondicionesPrestamo {
+  monto: number;
+  tipo_tasa: TipoTasa;
+  tasa_pb: number;
+  esquema: EsquemaPago;
+  /** Sólo en `parcialidades`. */
+  frecuencia?: FrecuenciaPago | null;
+  /** Sólo en `parcialidades`: cuántos pagos. */
+  num_pagos?: number | null;
+  /** Desde cuándo corre el interés: el día que el dinero llegó. */
+  fecha_inicio: string;
+  /** Sólo en `parcialidades`, opcional: sin ella, un periodo después del inicio. */
+  fecha_primer_pago?: string | null;
+  /** Sólo en `unico`: el día que se paga todo. */
+  fecha_vencimiento?: string | null;
+}
+
+/** Un renglón de la tabla de pagos. */
+export interface RenglonDePago {
+  numero: number;
+  fecha: string;
+  capital: number;
+  interes: number;
+  total: number;
+  /** El capital que queda debiéndose después de este pago. */
+  saldo: number;
+}
 /** Un egreso que no es de ningún proyecto: renta, máquinas, herramienta,
  *  licencias de software (0.60.0). Mike, 1-oct: «debe haber un concepto de
  *  gastos generales en el tipo de egreso. No va a ningún proyecto el gasto,
@@ -2182,6 +2280,10 @@ export const TABLAS_INTERNAS = [
    * entera a quien pueda leer la empresa. */
   'rayas', 'raya_pagos',
   'quell_tareas',   // 0031 · el cronograma de la obra (0.68.0)
+  /* investor101 (0042). No salen por el CRUD genérico: un inversionista ve
+   * SÓLO sus préstamos y sus ofertas, y eso se decide renglón por renglón en
+   * /orgs/:o/inversion/*. */
+  'inversionistas', 'rondas', 'ronda_ofertas', 'prestamos', 'prestamo_pagos', 'inversion_archivos', 'inversion_eventos',
 ] as const;
 
 /* ─────────────── lo que devuelven las rutas con nombre ─────────────── */

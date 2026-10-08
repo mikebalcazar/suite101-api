@@ -40,6 +40,9 @@ export interface Env {
    *  vive en el dominio de la app, no en el de la API. Sin esta variable el
    *  correo sale sin liga: mejor ninguna que una rota. */
   URL_SUPPLY?: string;
+  /** investor101, a donde mandan los correos de una ronda, de una oferta y de
+   *  un pago. Sin ella los correos salen sin liga. */
+  URL_INVESTOR?: string;
   /** El remitente de los correos de quell101 (invitaciones y avisos de obra). */
   CORREO_QUELL?: string;
   /** El remitente de los correos de roster101 cuando el Worker de la empresa
