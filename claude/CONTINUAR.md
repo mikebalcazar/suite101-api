@@ -1,3 +1,5 @@
+> **8-oct-2026 · investor101 se llama patron101 para la gente** (Mike). Marca y dominio `patron101.taller101.com`; app `investor101`, llave `investor`, Worker, repo y `URL_INVESTOR` conservan el nombre. Ver `muro/2026-10-08-2110-…`.
+
 # 8-oct-2026 · investor101 entra a la suite (API 0.82.0)
 
 Lo hizo el chat de investor101 (Cowork). El detalle está en

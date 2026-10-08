@@ -1,4 +1,4 @@
-/* investor101 — los correos (contrato 0.82.0).
+/* patron101 (por dentro, investor101) — los correos (contrato 0.82.0).
  *
  * Tienen su propio sobre, y no el de `auth/correo.ts`, por una razón: quien
  * los recibe NO es de la empresa. El pie de los demás dice «escríbele a quien
@@ -55,7 +55,7 @@ const sobre = (empresa: string, titulo: string, cuerpo: string) =>
       ${cuerpo}
     </td></tr>
     <tr><td style="padding:16px 26px 24px;border-top:1px solid #e6ebef;font-size:12px;color:#6b7a85">
-      Mensaje automático de ${escapa(empresa)}, enviado por investor101. ${escapa(noSeContesta(empresa))}
+      Mensaje automático de ${escapa(empresa)}, enviado por patron101. ${escapa(noSeContesta(empresa))}
     </td></tr>
   </table>
 </td></tr></table></body></html>`;
