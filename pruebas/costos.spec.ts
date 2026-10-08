@@ -400,3 +400,44 @@ describe('lo que NO se abre', () => {
     expect(r.status).toBe(401);
   });
 });
+
+/* Mike, 8-oct-2026: «Cost101, sus bases de datos también se separan entre
+ * empresas. Forespot no puede ver las de BASE arquitectura ni al revés». Cada
+ * empresa tiene su propia base (un Durable Object por empresa) y la puerta
+ * pide ser miembro de ESA empresa. Aquí se prueba en los dos sentidos, con
+ * quien dirige cada una. */
+describe('cada empresa tiene su base de costos: una no ve la de otra', () => {
+  const OTRA = 'costos-otra';
+  const de = (quien: string, org: string, ruta: string, op: Parameters<typeof pedir>[2] = {}) => pedir(quien, `/orgs/${org}${ruta}`, op);
+  beforeAll(async () => {
+    const alta = await pedir('mike', '/admin/orgs', { method: 'POST', json: { id: OTRA, nombre: 'Otra constructora', apps: { cost: true } }, app: '' });
+    expect(alta.estado, JSON.stringify(alta)).toBe(201);
+    const m = await pedir('mike', `/admin/orgs/${OTRA}/miembros`, { method: 'POST', json: { correo: 'beto-otra@ejemplo.mx', rol: 'owner', nombre: 'Beto' }, app: '' });
+    expect(m.estado, JSON.stringify(m)).toBe(201);
+    await entrar('beto', 'beto-otra@ejemplo.mx');
+    const carga = await de('beto', OTRA, '/costos/importar', { method: 'POST', json: { costos: [{ ref: 'x', clave: 'MAT-900', nombre: 'Insumo sólo de la otra', tipo: 'material', unidad: 'pza', precio: 12300 }] } });
+    expect(carga.estado, JSON.stringify(carga)).toBe(201);
+  });
+  it('quien dirige una empresa no lee, ni escribe, ni carga en la otra', async () => {
+    for (const [quien, ajena] of [['ana', OTRA], ['beto', ORG]] as const) {
+      const leer = await de(quien, ajena, '/costos');
+      expect(leer.estado, `${quien} leyendo ${ajena}`).toBe(403);
+      expect(leer.error).toBe('sin_permiso');
+      expect((await de(quien, ajena, '/costos_base')).estado).toBe(403);
+      expect((await de(quien, ajena, '/costos_base', { method: 'POST', json: { nombre: 'Intruso', tipo: 'material', precio: 100 } })).estado).toBe(403);
+      expect((await de(quien, ajena, '/costos/importar', { method: 'POST', json: { costos: [{ ref: 'y', nombre: 'Intruso', tipo: 'material', precio: 100 }] } })).estado).toBe(403);
+      expect((await de(quien, ajena, '/costos', { app: 'cotizador101' })).estado).toBe(403);
+    }
+  });
+  it('lo de una no aparece en la otra, ni al revés', async () => {
+    const mia = await de('ana', ORG, '/costos');
+    expect(mia.estado).toBe(200);
+    expect(mia.data.costos_base.some((x: Fila) => x.clave === 'MAT-900')).toBe(false);
+    const otra = await de('beto', OTRA, '/costos');
+    expect(otra.estado).toBe(200);
+    expect(otra.data.costos_base.map((x: Fila) => x.clave)).toEqual(['MAT-900']);
+    expect(otra.data.productos).toEqual([]);
+    expect(otra.data.cuadrillas).toEqual([]);
+  });
+});
+
