@@ -26,7 +26,7 @@ import type { Hono } from 'hono';
 import { err, ok, type Ctx, type Vars } from '../http';
 import type { Env } from '../entorno';
 import type { ApiOrgDB } from '../org-db';
-import { accesoInversion, crearUsuario, miembrosDe, ponerAccesoInversion, quitarAccesoInversion } from '../maestro';
+import { accesoInversion, crearUsuario, miembrosDe, org, ponerAccesoInversion, quitarAccesoInversion } from '../maestro';
 import { empresaDe } from '../empresa';
 import { hoyMx } from '../costos';
 import { enviarCorreo } from '../auth/correo';
@@ -134,6 +134,13 @@ function ligaWhatsApp(telefono: unknown, mensaje: string): string | null {
 export function montarInversion(rutas: App): void {
   /** Envuelve un handler: resuelve el papel o contesta 403. */
   const con = (quienes: 'admin' | 'ambos', h: (c: Ctx, papel: Papel) => Promise<Response>) => async (c: Ctx) => {
+    /* LA LICENCIA ES DE investor101, venga de la app que venga. La puerta de
+     * /orgs revisa la app que dice `X-App`, y dash101 también entra aquí: sin
+     * esto, una empresa con dash101 y SIN investor101 contratada llevaría
+     * préstamos completos desde dash101. Lo encontró la prueba de dash101 el
+     * 8-oct, el mismo día en que nació. */
+    const empresa = await org(c.env, c.get('org_id'));
+    if (empresa?.apps?.investor !== true) return err(c, 'app_inactiva', 403, { app: 'investor101', motivo: 'la empresa no tiene investor101' });
     const p = await papelDe(c);
     if (!p) return err(c, 'sin_permiso', 403, { motivo: 'investor101 lo abre quien dirige la empresa o quien le presta' });
     if (quienes === 'admin' && p.tipo !== 'admin') return err(c, 'sin_permiso', 403, { motivo: 'solo_quien_dirige' });
