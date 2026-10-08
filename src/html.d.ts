@@ -6,3 +6,9 @@ declare module '*.html' {
   const contenido: string;
   export default contenido;
 }
+
+// Las letras de la puerta de la suite (regla [[rules]] type = "Data").
+declare module '*.woff2' {
+  const datos: ArrayBuffer;
+  export default datos;
+}
