@@ -70,7 +70,7 @@ import type { Quien } from './http';
 import { DEFS, type Def, type Tipo } from './tablas';
 import { calcular, hoyMx, limpiarApu, usaA, type Apu, type Desglose, type Fuentes } from './costos';
 import { ahora, normalizar, ulid } from './lib';
-import { alcanceDeItem, type MovimientoAlcance } from '../schema/tipos';
+import { alcanceDeItem, CATEGORIA_PRESTAMO_CAPITAL, CATEGORIA_PRESTAMO_RECIBIDO, type MovimientoAlcance } from '../schema/tipos';
 import { TABLAS, type Aviso, type ConteoQuote, type Etapa, type Peek, type Pool, type ProveedorDePago, type Tabla } from '../schema/tipos';
 import type { Env } from './entorno';
 
@@ -3048,11 +3048,16 @@ export class OrgDB extends DurableObject<Env> {
     egresos: { total: number; facturado: number; fuera: number };
   } {
     const d = String(desde).slice(0, 10), h = String(hasta).slice(0, 10);
+    /* 0.83.0 · Lo que entra de un préstamo no es ingreso, y lo que se le
+     * devuelve de capital no es gasto: no se cuentan aquí. El interés sí es
+     * gasto (financiero) y se queda. En el saldo de las cuentas y en el
+     * flujo los tres cuentan, porque el dinero sí se movió. */
     const lado = (tipo: string) => {
       const r = this.sql
         .exec(`SELECT COALESCE(SUM(monto),0) AS total,
                       COALESCE(SUM(CASE WHEN facturado = 1 THEN monto ELSE 0 END),0) AS fact
-               FROM movimientos WHERE tipo = ? AND fecha >= ? AND fecha <= ?`, tipo, d, h)
+               FROM movimientos WHERE tipo = ? AND fecha >= ? AND fecha <= ?
+                 AND COALESCE(categoria, '') NOT IN (?, ?)`, tipo, d, h, CATEGORIA_PRESTAMO_RECIBIDO, CATEGORIA_PRESTAMO_CAPITAL)
         .one() as { total: number; fact: number };
       return { total: r.total, facturado: r.fact, fuera: r.total - r.fact };
     };
@@ -5583,7 +5588,7 @@ export class OrgDB extends DurableObject<Env> {
     'rondas', 'verRonda', 'crearRonda', 'actualizarRonda', 'abrirRonda', 'terminarRonda', 'reabrirRonda', 'borrarRonda', 'rondaPara', 'rondasPara',
     'ofrecer', 'oferta', 'retirarOferta', 'rechazarOferta', 'aprobarOferta',
     'prestamos', 'prestamo', 'verPrestamo', 'crearPrestamo', 'actualizarPrestamo', 'marcarRecibido', 'cancelarPrestamo', 'editarTabla',
-    'pago', 'pagar', 'deshacerPago', 'pagosPendientes', 'flujo', 'resumenAdmin', 'estadoDeCuenta',
+    'pago', 'pagar', 'deshacerPago', 'pagosPendientes', 'pagosHechos', 'flujo', 'resumenAdmin', 'estadoDeCuenta',
     'registrarArchivo', 'archivo', 'borrarArchivo',
   ]);
 

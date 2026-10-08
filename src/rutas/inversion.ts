@@ -426,8 +426,12 @@ export function montarInversion(rutas: App): void {
 
   /* ─────────────── pagos ─────────────── */
 
-  /** Lo pendiente de pagar, por fecha: el buzón de dash101. */
-  rutas.get('/:o/inversion/pagos', con('admin', async (c) => ok(c, { filas: await motor(c, 'pagosPendientes', hoyMx()) })));
+  /** Lo pendiente de pagar, por fecha: el buzón de dash101. Con
+   *  `?estado=pagado` (0.83.0), los ya hechos, el más reciente arriba. */
+  rutas.get('/:o/inversion/pagos', con('admin', async (c) => {
+    if (c.req.query('estado') === 'pagado') return ok(c, { filas: await motor(c, 'pagosHechos', c.req.query('limite')) });
+    return ok(c, { filas: await motor(c, 'pagosPendientes', hoyMx()) });
+  }));
 
   /** Lo que dash101 pone en su flujo proyectado. */
   rutas.get('/:o/inversion/flujo', con('admin', async (c) => ok(c, await motor(c, 'flujo', hoyMx()))));

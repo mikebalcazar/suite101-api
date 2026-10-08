@@ -835,6 +835,19 @@ export class MotorInversion {
     return this.verPrestamo(String(p.id))!;
   }
 
+  /** 0.83.0 · Los pagos ya hechos, el más reciente arriba: de aquí se deshace
+   *  uno capturado por error desde dash101. */
+  pagosHechos(limite = 50): Fila[] {
+    const n = Math.min(Math.max(Math.trunc(Number(limite)) || 50, 1), 200);
+    return (this.sql.exec(
+      `SELECT g.id, g.prestamo_id, g.numero, g.fecha, g.capital, g.interes, g.pagado_fecha, g.cuenta_id,
+              p.folio, p.inversionista_id, i.nombre AS inversionista_nombre,
+              (SELECT COUNT(*) FROM prestamo_pagos x WHERE x.prestamo_id = p.id) AS de
+         FROM prestamo_pagos g JOIN prestamos p ON p.id = g.prestamo_id JOIN inversionistas i ON i.id = p.inversionista_id
+        WHERE g.estado = 'pagado' ORDER BY g.pagado_at DESC, g.pagado_fecha DESC LIMIT ?`, n).toArray() as Fila[])
+      .map((g) => ({ ...g, total: Number(g.capital) + Number(g.interes) }));
+  }
+
   /** Lo que falta por pagar, de todos los préstamos activos, por fecha. Es
    *  el buzón de pagos de dash101. */
   pagosPendientes(hoy: string): Fila[] {
