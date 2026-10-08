@@ -13,8 +13,28 @@
 import type { Next } from 'hono';
 import type { Ctx } from './http';
 import pagina from './paginas/suite.html';
+import cifras400 from './paginas/fuentes/fira-cifras-400.woff2';
+import cifras600 from './paginas/fuentes/fira-cifras-600.woff2';
+import raleway400 from './paginas/fuentes/raleway-400.woff2';
+import raleway600 from './paginas/fuentes/raleway-600.woff2';
+import raleway700 from './paginas/fuentes/raleway-700.woff2';
+import raleway800 from './paginas/fuentes/raleway-800.woff2';
 
 export const DOMINIO_SUITE = 'suite101.taller101.com';
+
+/* 8-oct-2026 · las letras de la puerta viajan con ella: nada se le pide a
+ * Google. Sólo estas seis, por nombre exacto. */
+const FUENTES: Record<string, ArrayBuffer> = {
+  '/fuentes/fira-cifras-400.woff2': cifras400,
+  '/fuentes/fira-cifras-600.woff2': cifras600,
+  '/fuentes/raleway-400.woff2': raleway400,
+  '/fuentes/raleway-600.woff2': raleway600,
+  '/fuentes/raleway-700.woff2': raleway700,
+  '/fuentes/raleway-800.woff2': raleway800,
+};
+const fuente = (ruta: string) => FUENTES[ruta]
+  ? new Response(FUENTES[ruta], { headers: { 'Content-Type': 'font/woff2', 'Cache-Control': 'public, max-age=31536000, immutable' } })
+  : null;
 
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="#0080C1"/><text x="32" y="41" text-anchor="middle" font-family="Raleway,system-ui,sans-serif" font-weight="800" font-size="26" fill="#fff">101</text></svg>`;
 
@@ -26,7 +46,7 @@ export function paginaDeEmpresa(nombre: string, dominio: string): string {
   const esc = (t: string) => t.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
   return pagina
     .replace(/https:\/\/(dash101|quell101|quote101|supply101|roster101|peek101|workshop101)\.taller101\.com/g, `https://$1.${dominio}`)
-    .replace('</style>', '.empresa{margin:4px 0 0;font-size:1.05rem;font-weight:700;color:#0080C1;letter-spacing:.01em}\n</style>')
+    .replace('</style>', '.empresa{margin:4px 0 0;font-size:1.05rem;font-weight:700;color:#86c9ec;letter-spacing:.01em}\n</style>')
     .replace('</header>', `  <p class="empresa">${esc(nombre)}</p>\n  </header>`);
 }
 
@@ -44,6 +64,8 @@ export async function puertaDeLaSuite(c: Ctx, next: Next): Promise<Response | vo
     if (u.pathname === '/favicon.svg') {
       return new Response(FAVICON, { headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' } });
     }
+    const letra = fuente(u.pathname);
+    if (letra) return letra;
     return c.json({ ok: false, error: 'no_encontrado', detalle: { aqui_solo: ['/'] } }, 404);
   }
   if (u.hostname !== DOMINIO_SUITE) return next();
@@ -59,5 +81,7 @@ export async function puertaDeLaSuite(c: Ctx, next: Next): Promise<Response | vo
   if (u.pathname === '/favicon.svg') {
     return new Response(FAVICON, { headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' } });
   }
+  const letra = fuente(u.pathname);
+  if (letra) return letra;
   return c.json({ ok: false, error: 'no_encontrado', detalle: { aqui_solo: ['/'] } }, 404);
 }

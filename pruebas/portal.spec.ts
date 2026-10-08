@@ -58,6 +58,32 @@ describe('la puerta de la suite', () => {
     expect(p.status).toBe(404);
   });
 
+  /* 8-oct-2026 · el look de cost101 con la tipografía y los logotipos de la
+   * suite: las letras viajan con la página, nada se le pide a Google, y cada
+   * programa trae su logotipo oficial en trazos (no su nombre en texto). */
+  it('las letras se sirven aquí mismo y la página no le pide nada a Google', async () => {
+    const html = await (await SELF.fetch(`${SUITE}/`)).text();
+    expect(html).not.toContain('googleapis');
+    expect(html).not.toContain('gstatic');
+    for (const f of ['fira-cifras-400', 'fira-cifras-600', 'raleway-400', 'raleway-600', 'raleway-700', 'raleway-800']) {
+      expect(html, f).toContain(`/fuentes/${f}.woff2`);
+      const r = await SELF.fetch(`${SUITE}/fuentes/${f}.woff2`);
+      expect(r.status, f).toBe(200);
+      expect(r.headers.get('Content-Type')).toBe('font/woff2');
+      expect((await r.arrayBuffer()).byteLength, f).toBeGreaterThan(5000);
+    }
+    expect((await SELF.fetch(`${SUITE}/fuentes/otra.woff2`)).status).toBe(404);
+  });
+
+  it('cada programa trae su logotipo oficial, y la suite el suyo', async () => {
+    const html = await (await SELF.fetch(`${SUITE}/`)).text();
+    for (const app of [...APPS, 'suite101']) {
+      expect(html, app).toContain(`<symbol id="logo-${app}"`);
+      expect(html, app).toContain(`href="#logo-${app}"`);
+    }
+    expect(html, 'el logotipo va en trazos, no en letras').not.toMatch(/<symbol[^>]*>[^]*?<text/);
+  });
+
   it('/salud contesta también en la puerta, para medirla', async () => {
     const r = await SELF.fetch(`${SUITE}/salud`);
     expect(r.status).toBe(200);

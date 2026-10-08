@@ -56,6 +56,13 @@ type = "Text"
 globs = ["migrations/org/*.sql", "src/importar/*.html", "src/paginas/*.html"]
 fallthrough = true
 
+# 8-oct-2026 · las letras de la puerta de la suite viajan dentro del Worker:
+# nada se le pide a Google (regla de la casa).
+[[rules]]
+type = "Data"
+globs = ["src/paginas/fuentes/*.woff2"]
+fallthrough = true
+
 [vars]
 ENTORNO = "produccion"
 API_VERSION = "0.21.0"
@@ -139,6 +146,13 @@ bucket_name = "suite101-staging"
 [[env.staging.rules]]
 type = "Text"
 globs = ["migrations/org/*.sql", "src/importar/*.html", "src/paginas/*.html"]
+fallthrough = true
+
+# 8-oct-2026 · las letras de la puerta de la suite viajan dentro del Worker:
+# nada se le pide a Google (regla de la casa).
+[[env.staging.rules]]
+type = "Data"
+globs = ["src/paginas/fuentes/*.woff2"]
 fallthrough = true
 
 [env.staging.vars]
