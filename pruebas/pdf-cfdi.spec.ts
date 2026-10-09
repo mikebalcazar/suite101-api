@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { armarPdf, cadenaOriginal, impresaDeBorrador, impresaDeXml, ligaSat, totalEnLetras } from '../src/pdf-cfdi';
 import { extrasImpresa, leerCfdi } from '../src/cfdi-xml';
 import { xmlCfdi, RFC_CLIENTE, RFC_EMPRESA } from './cfdi-de-prueba';
+import type { Borrador } from '../src/pac';
 
 const P = (pesos: number) => Math.round(pesos * 100);
 
@@ -54,7 +55,7 @@ describe('de un XML y de un borrador sale un PDF', () => {
   });
 
   it('del borrador: vista previa, sin timbre, con las mismas cuentas que van a Facturama', async () => {
-    const b = { receptor: { rfc: 'XAXX010101000', razon_social: '', regimen_fiscal: '', cp_fiscal: '', uso_cfdi: 'G03' }, forma_pago: '03', renglones: [
+    const b: Borrador = { receptor: { rfc: 'XAXX010101000', razon_social: '', regimen_fiscal: '', cp_fiscal: '', uso_cfdi: 'G03' }, forma_pago: '03', renglones: [
       { descripcion: 'Cocina', clave_prod_serv: '56101500', clave_unidad: 'E48', unidad: 'Unidad de servicio', cantidad: 1, precio_unitario: P(85_000), descuento: P(5_000), iva: 16 },
       { descripcion: 'Flete', clave_prod_serv: '78101800', clave_unidad: 'E48', unidad: null, cantidad: 1, precio_unitario: P(1_500), descuento: 0, iva: null },
     ] };
@@ -66,7 +67,7 @@ describe('de un XML y de un borrador sale un PDF', () => {
     const pdf = await armarPdf({ impresa: imp, empresa, config, vista_previa: true });
     expect(new TextDecoder().decode(pdf.slice(0, 5))).toBe('%PDF-');
     // Un renglón con cien renglones de descripción y un emoji no truena: se parte y se limpia.
-    const largo = { ...b, renglones: Array.from({ length: 60 }, (_, i) => ({ ...b.renglones[0], descripcion: `Renglón ${i} 🙂 ${'palabra '.repeat(40)}` })) };
+    const largo: Borrador = { ...b, renglones: Array.from({ length: 60 }, (_, i) => ({ ...b.renglones[0], descripcion: `Renglón ${i} 🙂 ${'palabra '.repeat(40)}` })) };
     const imp2 = impresaDeBorrador(largo, { serie: 'A', folio: null, fecha: '2026-10-09T11:02:00', lugar_expedicion: '10900', emisor: { rfc: RFC_EMPRESA, nombre: 'Taller', regimen: null } });
     const pdf2 = await armarPdf({ impresa: imp2, empresa: { ...empresa, logo: { bytes: new Uint8Array([1, 2, 3]), tipo: 'image/png' } }, config, vista_previa: true });
     expect(pdf2.length, 'varias páginas').toBeGreaterThan(pdf.length * 3);
