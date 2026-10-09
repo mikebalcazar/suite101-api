@@ -1,3 +1,5 @@
+> **9-oct-2026 · el reporte de quell se comparte como PDF directo a WhatsApp (quell #130, Android v21).** El PDF se arma en el teléfono al abrir el reporte (`reportePdf.js`); `entregar()` en `compartir.js` comparte con los plugins Filesystem + Share en la app de Android y con navigator.share en el navegador. Ver `muro/2026-10-09-2030-…`.
+
 > **9-oct-2026 · el pendiente de quell se reasigna (API 0.90.2, quell #129) y las fechas AAAA-MM-DD ya no salen un día antes.** «Editar» en cada pendiente; `assignee_id` vacío lo deja sin asignar. En quell `fmtD` lee la fecha sola a mediodía y `todayISO` es local; las demás apps pueden tener el mismo defecto. Ver `muro/2026-10-09-1910-…`.
 
 > **9-oct-2026 · un dibujo a mano junto a «Cámara» y «Fotos» (quell #128, Android v19).** Mike: «un dibujo bitmap … un cuadro de 1000x1000 pixeles y un par de pinceles y opción a colores». `web/src/Dibujo.jsx`, desde `PhotoInput`: sale en todo compositor con fotos. El dibujo entra a la fila de fotos por subir; la API no cambia. Ver `muro/2026-10-09-1853-…`.
