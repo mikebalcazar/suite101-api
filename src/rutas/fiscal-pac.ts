@@ -165,12 +165,13 @@ export function montarFiscalPac(rutas: App, p: PermisosFiscales): void {
     if (!k.sandbox && (!cfg.rfc_empresa || (pf?.rfc && pf.rfc !== cfg.rfc_empresa))) {
       return err(c, 'pac_de_otro_rfc', 409, { facturama: pf?.rfc ?? null, empresa: cfg.rfc_empresa ?? null, motivo: 'la cuenta de Facturama factura con otro RFC que el de la empresa (o la empresa no tiene RFC)' });
     }
-    const lugar = k.lugar_expedicion;
-    if (!lugar || !/^\d{5}$/.test(lugar)) return err(c, 'falta_cp_empresa', 409, { motivo: 'falta el código postal fiscal de la empresa (Ajustes), que es el lugar de expedición' });
 
     // Por si la serie se puso a mano en Facturama, o se borró allá: se asegura antes de apartar folio.
     const serie = await asegurarSerie(k, ventanilla(c), k.serie, Number(cfg.cuenta?.folio_siguiente ?? 1));
     if (esFallaPac(serie)) return err(c, serie.error, codigoDe(serie.error), serie.detalle);
+    // El lugar de expedición es el CP de la sucursal de Facturama; si no lo dice, el de la empresa.
+    const lugar = serie.cp && /^\d{5}$/.test(serie.cp) ? serie.cp : k.lugar_expedicion;
+    if (!lugar || !/^\d{5}$/.test(lugar)) return err(c, 'falta_cp_empresa', 409, { motivo: 'falta el código postal del lugar de expedición: el de la sucursal en Facturama, o el fiscal de la empresa (Ajustes)' });
     const em = await stub(c).pac('abrirEmision', [borrador, { proyecto_id: typeof b.proyecto_id === 'string' ? b.proyecto_id : null, cliente_id: typeof b.cliente_id === 'string' ? b.cliente_id : null }, p.actor(c)]);
     if (esFalla(em)) return err(c, em.error, em.error === 'emision_repetida' || em.error === 'emision_en_camino' ? 409 : codigoDe(em.error), em.detalle);
     const org = c.get('org_id');

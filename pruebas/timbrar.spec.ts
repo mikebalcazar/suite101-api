@@ -141,7 +141,7 @@ describe('la cuenta de Facturama', () => {
     expect(r.estado, JSON.stringify(r)).toBe(200);
     expect(r.data.cuenta).toMatchObject({ usuario: 'mike-sandbox', sandbox: true, serie: 'F', folio_siguiente: 1, perfil: { rfc: RFC_EMPRESA, csd: true, regimen: '601' } });
     // La serie se da de alta en la sucursal de Facturama al guardar la cuenta (lo que pidió el de verdad).
-    expect(r.data.serie_en_facturama).toEqual({ creada: true, sucursal: 'suc-1' });
+    expect(r.data.serie_en_facturama).toEqual({ creada: true, sucursal: 'suc-1', cp: '64000' });
     expect(fac.st.sucursales[0].series.map((x) => x.Name)).toEqual(['F']);
     expect(JSON.stringify(r)).not.toContain('clave-sandbox');
     for (const ruta of ['/pac_config', '/emisiones']) expect((await o('mike', ruta, { app: 'dash101' })).estado, ruta).not.toBe(200);
@@ -158,7 +158,7 @@ describe('la cuenta de Facturama', () => {
   it('la serie y el folio se ajustan', async () => {
     const aj = await o('mike', '/fiscal/pac', { method: 'PATCH', json: { serie: 'FAC', folio_siguiente: 100 } });
     expect(aj.data.cuenta).toMatchObject({ serie: 'FAC', folio_siguiente: 100 });
-    expect(aj.data.serie_en_facturama, 'la serie nueva también se da de alta en Facturama').toEqual({ creada: true, sucursal: 'suc-1' });
+    expect(aj.data.serie_en_facturama, 'la serie nueva también se da de alta en Facturama').toEqual({ creada: true, sucursal: 'suc-1', cp: '64000' });
     expect(fac.st.sucursales[0].series.find((x) => x.Name === 'FAC')?.Folio).toBe(100);
     expect((await o('mike', '/fiscal/pac', { method: 'PATCH', json: { folio_siguiente: 0 } })).estado).toBe(400);
   });
@@ -181,11 +181,14 @@ describe('emitir', () => {
     expect(await o('ana', '/fiscal/emitir/revisar', { method: 'POST', json: { borrador: { ...BORRADOR, forma_pago: '99' } } })).toMatchObject({ estado: 400, error: 'borrador_invalido', detalle: { campo: 'forma_pago' } });
   });
 
-  it('sin código postal (ni en Ajustes ni en Facturama) no se timbra', async () => {
+  it('el lugar de expedición es el CP de la sucursal de Facturama; sin ninguno, no se timbra', async () => {
     fac.st.perfil.TaxAddress.ZipCode = '';
+    fac.st.sucursales[0].Address.ZipCode = '';
     await o('mike', '/fiscal/pac/perfil', { method: 'POST' });
     expect(await o('mike', '/fiscal/emitir', { method: 'POST', json: { borrador: BORRADOR } })).toMatchObject({ estado: 409, error: 'falta_cp_empresa' });
     fac.st.perfil.TaxAddress.ZipCode = '64000';
+    fac.st.sucursales[0].Address.ZipCode = '10900';
+    // En Ajustes dice 64000, pero Facturama sólo acepta el CP de su sucursal: 10900.
     expect((await o('mike', '/fiscal/config', { method: 'PUT', json: { cp: '64000', regimen: '601', razon_social: 'ESCUELA KEMPER URGATE' } })).estado).toBe(200);
   });
 
@@ -200,7 +203,7 @@ describe('emitir', () => {
     expect(r.data.uuid).toMatch(/^F0000001-/);
     expect(r.data.cfdi).toMatchObject({ tipo: 'ingreso', lado: 'emitida', origen: 'timbrado', estado: 'vigente', total: P(101_732), subtotal: P(87_700), iva: P(14_032), serie: 'FAC', folio: '100', rfc: RFC_CLIENTE, proyecto_id: proyecto, tiene_xml: true, metodo_pago: 'PUE', forma_pago: '03' });
     const mandado = fac.st.llamadas.find((l) => l.paso === 'timbrar')!.cuerpo as any;
-    expect(mandado).toMatchObject({ Serie: 'FAC', Folio: '100', ExpeditionPlace: '64000', Receiver: { Rfc: RFC_CLIENTE, Name: 'UNIVERSIDAD ROBOTICA ESPAÑOLA', FiscalRegime: '603', TaxZipCode: '65000', CfdiUse: 'G03' } });
+    expect(mandado).toMatchObject({ Serie: 'FAC', Folio: '100', ExpeditionPlace: '10900', Receiver: { Rfc: RFC_CLIENTE, Name: 'UNIVERSIDAD ROBOTICA ESPAÑOLA', FiscalRegime: '603', TaxZipCode: '65000', CfdiUse: 'G03' } });
     expect(mandado.Date).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
     const xml = await SELF.fetch(`https://api.local/orgs/${ORG}/fiscal/cfdi/${r.data.cfdi_id}/xml`, { headers: { Cookie: galletas.mike, 'X-App': 'bill101' } });
     expect(xml.status).toBe(200);
