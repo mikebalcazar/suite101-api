@@ -708,6 +708,44 @@ describe('la documentación del ítem', () => {
     const r = await q('fuera', `/docs/${principal}/versiones`);
     expect([401, 403], JSON.stringify(r)).toContain(r.estado);
   });
+
+  /* 0.90.0 · Mike, 9-oct: «desde quell quiero poder marcar que el diseño ya
+   * está definido y poder adjuntar un plano (pdf) o imagen del diseño
+   * definido». Con botones: el archivo va APARTE, sin tocar el principal. */
+  let diseno1 = '';
+  it('el diseño definido se fecha y se adjunta en un paso, aparte del principal', async () => {
+    const antes = await q('mike', `/elements/${m1}/docs`);
+    const r = await subir('mike', m1, { archivo: pdf('diseno-gradas.pdf'), diseno: '1', diseno_definido: '2026-10-09', nombre: 'Diseño de las gradas', paginas: '2' });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    diseno1 = r.doc.id;
+    expect(r.doc.rol, 'es de soporte, no el principal').toBe('soporte');
+    expect(r.doc.diseno).toBe(1);
+    expect(r.diseno_definido).toBe('2026-10-09');
+    const d = await q('mike', `/elements/${m1}/docs`);
+    expect(d.principal.id, 'el principal no se toca').toBe(antes.principal.id);
+    expect(d.soporte.find((x: any) => x.id === diseno1)?.diseno).toBe(1);
+    const el = await q('mike', `/elements/${m1}`);
+    expect(el.element.diseno_definido, 'y la pieza queda fechada (candado del cronograma)').toBe('2026-10-09');
+    expect(el.element.diseno_doc?.id, 'el detalle trae el archivo del diseño').toBe(diseno1);
+  });
+
+  it('otro diseño es versión nueva del anterior: el viejo se archiva, no se borra', async () => {
+    const r = await subir('mike', m1, { archivo: pdf('diseno-gradas-b.pdf'), diseno: '1', diseno_definido: '2026-10-12' });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.archivada).toBe(diseno1);
+    expect(r.doc.version).toBe(2);
+    expect(r.doc.familia_id).toBe(diseno1);
+    const d = await q('mike', `/elements/${m1}/docs`);
+    expect(d.soporte.filter((x: any) => x.diseno === 1).map((x: any) => x.id), 'uno vivo').toEqual([r.doc.id]);
+    const vs = await q('mike', `/docs/${r.doc.id}/versiones`);
+    expect(vs.versiones.map((v: any) => v.id)).toEqual([r.doc.id, diseno1]);
+    expect((await q('mike', `/elements/${m1}`)).element.diseno_definido).toBe('2026-10-12');
+  });
+
+  it('una fecha mala no pasa, y el contratista no marca el diseño', async () => {
+    expect((await subir('mike', m1, { archivo: pdf('x.pdf'), diseno: '1', diseno_definido: '9/10/26' })).estado).toBe(400);
+    expect((await subir('goyo', m1, { archivo: pdf('x.pdf'), diseno: '1' })).estado).toBe(403);
+  });
 });
 
 /* EL REQUERIMIENTO: UN TIPO QUE TODAVÍA NO ENTRA EN PRODUCCIÓN
