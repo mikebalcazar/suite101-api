@@ -1,3 +1,5 @@
+> **8-oct-2026 · patron101: aviso de riesgos (API 0.84.0).** Aceptación obligatoria para ofrecer, texto editable en Ajustes, impreso en el pagaré; y arreglado que un cliente o personal dado de alta como inversionista no entraba. Ver `muro/2026-10-09-0045-…`.
+
 > **8-oct-2026 · investor101 se llama patron101 para la gente** (Mike). Marca y dominio `patron101.taller101.com`; app `investor101`, llave `investor`, Worker, repo y `URL_INVESTOR` conservan el nombre. Ver `muro/2026-10-08-2110-…`.
 
 # 8-oct-2026 · investor101 entra a la suite (API 0.82.0)

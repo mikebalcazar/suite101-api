@@ -74,6 +74,13 @@ export interface DatosRonda {
   url: string;
 }
 
+/** El riesgo, en una frase, en todo aviso de ronda (0.84.0; Mike, 8-oct:
+ *  «un disclaimer de los riesgos de la inversión, sobre todo riesgos de no pago
+ *  del cliente»). El aviso completo se lee y se acepta en la pantalla, antes
+ *  de ofrecer; aquí va lo esencial para que nadie llegue sin saberlo. */
+export const riesgoEnCorto = (empresa: string): string =>
+  `Prestar dinero tiene riesgo: el pago depende de que ${empresa} cobre a sus clientes, y puede atrasarse o no cubrirse completo. No es un depósito ni una inversión regulada. Antes de entrar se te pide leer y aceptar el aviso de riesgos.`;
+
 const CADA: Record<string, string> = { semanal: 'cada semana', quincenal: 'cada 15 días', mensual: 'cada mes' };
 
 /** Cómo se paga, en una frase. La usan el correo y el mensaje de WhatsApp. */
@@ -99,7 +106,7 @@ export function correoRondaAbierta(d: DatosRonda): Mensaje {
       + (d.descripcion ? `\n${d.descripcion}\n` : '')
       + `\n${lineas.join('\n')}\n`
       + (d.url ? `\nPara decir con cuánto entras, abre: ${d.url}\nEntras con este mismo correo. Si es tu primera vez, escoge «No tengo contraseña o la olvidé» y te llega un código para ponerla.\n` : '')
-      + `\nDecir que entras no te compromete todavía: ${d.empresa} revisa cada oferta y te confirma.\n\n${noSeContesta(d.empresa)}\n`,
+      + `\nDecir que entras no te compromete todavía: ${d.empresa} revisa cada oferta y te confirma.\n\n${riesgoEnCorto(d.empresa)}\n\n${noSeContesta(d.empresa)}\n`,
     html: sobre(d.empresa, `Ronda abierta: ${d.ronda}`,
       parrafo(`Hola, ${escapa(d.nombre_persona)}. ${escapa(d.empresa)} abrió una ronda de inversión.`)
       + (d.descripcion ? `<p style="margin:0 0 16px;font-size:15px;line-height:1.6;background:#f6f8fa;border-radius:10px;padding:12px 14px">${escapa(d.descripcion)}</p>` : '')
@@ -113,7 +120,8 @@ export function correoRondaAbierta(d: DatosRonda): Mensaje {
         + (d.ejemplo_total ? renglon('Por cada $10,000.00 regresan', pesos(d.ejemplo_total), true) : ''),
       )
       + boton(d.url, 'Ver la ronda y decir con cuánto entro')
-      + `<p style="margin:16px 0 0;font-size:13px;line-height:1.6;color:#6b7a85">Entras con este mismo correo. Si es tu primera vez, escoge «No tengo contraseña o la olvidé» y te llega un código para ponerla. Decir que entras no te compromete todavía: ${escapa(d.empresa)} revisa cada oferta y te confirma.</p>`),
+      + `<p style="margin:16px 0 0;font-size:13px;line-height:1.6;color:#6b7a85">Entras con este mismo correo. Si es tu primera vez, escoge «No tengo contraseña o la olvidé» y te llega un código para ponerla. Decir que entras no te compromete todavía: ${escapa(d.empresa)} revisa cada oferta y te confirma.</p>`
+      + `<p style="margin:14px 0 0;font-size:13px;line-height:1.6;color:#7a4a12;background:#fff7ec;border:1px solid #f3d9b1;border-radius:10px;padding:10px 12px">${escapa(riesgoEnCorto(d.empresa))}</p>`),
   };
 }
 
@@ -129,6 +137,7 @@ export function mensajeWhatsApp(d: DatosRonda): string {
     `• El dinero se necesita el ${diaEnPalabras(d.fecha_inicio)}`,
     ...(d.ejemplo_total ? [`• Por cada $10,000.00 regresan ${pesos(d.ejemplo_total)}`] : []),
     ...(d.url ? ['', `Para ver el detalle y decir con cuánto entras: ${d.url}`] : []),
+    '', `Ojo: ${riesgoEnCorto(d.empresa)}`,
   ].join('\n');
 }
 

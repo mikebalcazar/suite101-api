@@ -174,6 +174,33 @@ export function totalesDe(tabla: Array<{ fecha: string; capital: number; interes
   return { capital, interes, total: capital + interes, pagos: tabla.length, primera: fechas[0] ?? null, ultima: fechas[fechas.length - 1] ?? null };
 }
 
+/* ─────────────── el aviso de riesgos (0.84.0) ───────────────
+ *
+ * Mike, 8-oct-2026: «Necesito agregar un disclaimer de los riesgos de la
+ * inversión, sobre todo riesgos de no pago del cliente».
+ *
+ * Es el texto BASE: cada empresa lo puede cambiar en Ajustes (lo natural es
+ * que lo ajuste su abogado) y vaciarlo lo regresa a éste. No nombra a la
+ * empresa —dice «la empresa»— para que el mismo texto sirva guardado en una
+ * oferta, impreso en un pagaré y leído en la pantalla sin plantillas.
+ *
+ * El primer punto es el que Mike pidió: el dinero con el que se paga sale de
+ * lo que la empresa le cobra a SUS clientes. Los demás son lo que cualquiera
+ * que presta tiene derecho a leer antes de decir que sí. */
+export const RIESGOS_BASE = [
+  'Prestarle dinero a la empresa tiene riesgo. Antes de entrar, toma en cuenta:',
+  '1. Depende de que los clientes de la empresa le paguen. El dinero con el que se te paga sale de lo que la empresa cobra por sus proyectos. Si un cliente se atrasa o no paga, tu pago puede atrasarse, reprogramarse o no cubrirse completo.',
+  '2. Puedes perder dinero. El rendimiento es lo que se acordó, no una ganancia asegurada. En el peor caso puedes no recuperar una parte o todo lo que prestaste.',
+  '3. No es un depósito ni una inversión regulada. Es un préstamo entre particulares. No lo protege el IPAB ni lo supervisa ninguna autoridad financiera.',
+  '4. No hay más garantía que el pagaré. No hay aval, prenda ni hipoteca, salvo que se acuerde por escrito.',
+  '5. No se puede retirar antes. El dinero regresa en las fechas de la tabla de pagos, no cuando lo necesites.',
+  '6. Presta sólo lo que no vayas a necesitar durante el plazo.',
+  '7. Los intereses que recibas pueden causar impuestos. Consúltalo con tu contador.',
+].join('\n');
+
+/** Lo más largo que puede ser el aviso de una empresa. */
+export const RIESGOS_MAX = 6000;
+
 /** «2.5 % mensual», «24 % anual», «5 % por el plazo». Para correos y avisos. */
 export function tasaEnPalabras(tipo: TipoTasa, tasa_pb: number): string {
   const n = (tasa_pb / 100).toFixed(2).replace(/\.?0+$/, '');

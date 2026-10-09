@@ -10,7 +10,8 @@
  *      punta a punta —abrir, ofrecer, aprobar, depósito, pagar— y, sobre
  *      todo, lo que cada quien NO puede ver ni hacer.
  */
-import { SELF } from 'cloudflare:test';
+import { SELF, env } from 'cloudflare:test';
+import { ponerAcceso, usuarioPorCorreo } from '../src/maestro';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { interesDelPeriodo, mesesYDias, revisarCondiciones, sumarDias, sumarMeses, tablaDePagos, totalesDe, tasaEnPalabras } from '../src/inversion';
 import { hoyMx } from '../src/costos';
@@ -321,7 +322,7 @@ describe('una ronda, de punta a punta', () => {
   it('un borrador no lo ve nadie de afuera, ni se le puede ofrecer ni avisar', async () => {
     expect((await i('ana', '/rondas')).data.filas).toEqual([]);
     expect((await i('ana', `/rondas/${ids.ronda}`)).estado).toBe(404);
-    const of = await i('ana', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { monto: 10_000_00 } });
+    const of = await i('ana', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { acepta_riesgos: true, monto: 10_000_00 } });
     expect(of.estado).toBe(409);
     expect(of.error).toBe('ronda_no_esta_abierta');
     expect((await i('mike', `/rondas/${ids.ronda}/avisar`, { method: 'POST', json: {} })).estado).toBe(409);
@@ -375,29 +376,40 @@ describe('una ronda, de punta a punta', () => {
     expect(r.data.instrucciones, 'a dónde depositar se dice hasta que se le acepta').toBeNull();
     expect(r.data.mis_ofertas).toEqual([]);
     for (const k of ['ofertas', 'prestamos', 'origen', 'creado_por']) expect(r.data, k).not.toHaveProperty(k);
+    // 0.84.0 · El aviso de riesgos viene con la ronda, y dice lo del no pago del cliente.
+    expect(r.data.riesgos).toContain('Si un cliente se atrasa o no paga');
+  });
+
+  it('0.84.0 · sin aceptar los riesgos, quien presta no ofrece; aceptarlos deja la hora y el texto', async () => {
+    for (const cuerpo of [{ monto: 40_000_00 }, { monto: 40_000_00, acepta_riesgos: false }, { monto: 40_000_00, acepta_riesgos: 'true' }, { monto: 40_000_00, acepta_riesgos: 1 }]) {
+      const sin = await i('ana', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: cuerpo });
+      expect(sin.estado, JSON.stringify(cuerpo)).toBe(400);
+      expect(sin.error).toBe('riesgos_sin_aceptar');
+    }
+    expect((await i('ana', `/rondas/${ids.ronda}`)).data.mis_ofertas, 'un rechazo no deja oferta').toEqual([]);
   });
 
   it('«le entro con tanto»: queda pendiente; volver a ofrecer la cambia, no la duplica', async () => {
-    const poco = await i('ana', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { monto: 1_000_00 } });
+    const poco = await i('ana', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { acepta_riesgos: true, monto: 1_000_00 } });
     expect(poco.estado).toBe(400);
     expect(poco.detalle.errores.monto).toContain('mínimo');
-    const flot = await i('ana', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { monto: 50000.5 } });
+    const flot = await i('ana', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { acepta_riesgos: true, monto: 50000.5 } });
     expect(flot.estado).toBe(400);
 
-    const a = await i('ana', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { monto: 40_000_00, nota: 'El lunes deposito' } });
+    const a = await i('ana', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { acepta_riesgos: true, monto: 40_000_00, nota: 'El lunes deposito' } });
     expect(a.estado, JSON.stringify(a)).toBe(201);
     ids.ofertaAna = a.data.id;
     expect(a.data).toMatchObject({ estado: 'pendiente', monto: 40_000_00, inversionista_id: ids.ana });
-    const a2 = await i('ana', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { monto: 50_000_00 } });
+    const a2 = await i('ana', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { acepta_riesgos: true, monto: 50_000_00 } });
     expect(a2.data.id).toBe(ids.ofertaAna);
     expect(a2.data.monto).toBe(50_000_00);
     // Un inversionista no ofrece a nombre de otro, aunque mande su id.
-    const trampa = await i('ana', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { monto: 6_000_00, inversionista_id: ids.beto } });
+    const trampa = await i('ana', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { acepta_riesgos: true, monto: 6_000_00, inversionista_id: ids.beto } });
     expect(trampa.data.inversionista_id).toBe(ids.ana);
-    await i('ana', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { monto: 50_000_00 } });
+    await i('ana', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { acepta_riesgos: true, monto: 50_000_00 } });
 
     await entrar('beto', 'beto@ejemplo.mx');
-    const b = await i('beto', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { monto: 30_000_00 } });
+    const b = await i('beto', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { acepta_riesgos: true, monto: 30_000_00 } });
     ids.ofertaBeto = b.data.id;
     // Quien dirige captura la de alguien que se lo dijo por teléfono.
     const c = await i('mike', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { inversionista_id: ids.caro, monto: 20_000_00 } });
@@ -412,6 +424,14 @@ describe('una ronda, de punta a punta', () => {
     expect(vistaBeto.data.avance.juntado).toBe(0);
     expect(vistaBeto.data.mis_ofertas).toHaveLength(1);
     expect(vistaBeto.data.mis_ofertas[0].monto).toBe(30_000_00);
+    // 0.84.0 · Quien ofreció por sí mismo aceptó los riesgos; la que capturó
+    // quien dirige (Caro, por teléfono) no trae aceptación, y no se finge.
+    expect(vistaBeto.data.mis_ofertas[0].riesgos_aceptados_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    const porQuien = Object.fromEntries(ronda.data.ofertas.map((x: any) => [x.inversionista_nombre, x.riesgos_aceptados_at]));
+    expect(porQuien['Ana Robles']).toMatch(/^\d{4}-/);
+    expect(porQuien['Beto Cruz']).toMatch(/^\d{4}-/);
+    expect(porQuien['Caro Díaz']).toBeNull();
+    for (const o of ronda.data.ofertas) expect(o, 'el texto no viaja en la lista').not.toHaveProperty('riesgos_texto');
   });
 
   it('nadie retira ni resuelve la oferta de otro', async () => {
@@ -429,6 +449,9 @@ describe('una ronda, de punta a punta', () => {
     expect(a.data.prestamo.pagos).toHaveLength(1);
     expect(a.data.prestamo.pagos[0]).toMatchObject({ numero: 1, fecha: en(24), capital: 50_000_00, interes: 1_050_00, total: 51_050_00, estado: 'pendiente' });
     expect(a.data.correo).toMatchObject({ enviado: false, para: 'ana@ejemplo.mx' });
+    // 0.84.0 · El préstamo carga el aviso que Ana aceptó, con su hora: es lo que imprime el pagaré.
+    expect(a.data.prestamo.riesgos.aceptados_at).toMatch(/^\d{4}-/);
+    expect(a.data.prestamo.riesgos.texto).toContain('Si un cliente se atrasa o no paga');
 
     // A Beto se le acepta menos de lo que ofreció, y en parcialidades: «libre por préstamo».
     const b = await i('mike', `/ofertas/${ids.ofertaBeto}/aprobar`, { method: 'POST', json: { monto_aprobado: 20_000_00, condiciones: { esquema: 'parcialidades', frecuencia: 'semanal', num_pagos: 4, tipo_tasa: 'fija', tasa_pb: 400 } } });
@@ -744,7 +767,7 @@ describe('préstamos directos, cancelar y cerrar', () => {
     const c = await i('mike', `/rondas/${ids.ronda}/cerrar`, { method: 'POST' });
     expect(c.data.estado).toBe('cerrada');
     await entrar('caro', 'caro@ejemplo.mx');
-    const of = await i('ana', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { monto: 10_000_00 } });
+    const of = await i('ana', `/rondas/${ids.ronda}/ofertas`, { method: 'POST', json: { acepta_riesgos: true, monto: 10_000_00 } });
     expect(of.estado).toBe(409);
     expect((await i('ana', `/rondas/${ids.ronda}`)).estado).toBe(200);
     expect((await i('caro', `/rondas/${ids.ronda}`)).estado, 'Caro ofreció: la ve con su oferta rechazada').toBe(200);
@@ -754,7 +777,7 @@ describe('préstamos directos, cancelar y cerrar', () => {
   it('cancelar una ronda rechaza lo pendiente; un borrador se borra', async () => {
     const r = await i('mike', '/rondas', { method: 'POST', json: { nombre: 'Otra', monto_meta: 10_000_00, tasa_pb: 200, fecha_inicio: en(2), fecha_vencimiento: en(30) } });
     await i('mike', `/rondas/${r.data.id}/abrir`, { method: 'POST' });
-    const of = await i('ana', `/rondas/${r.data.id}/ofertas`, { method: 'POST', json: { monto: 4_000_00 } });
+    const of = await i('ana', `/rondas/${r.data.id}/ofertas`, { method: 'POST', json: { acepta_riesgos: true, monto: 4_000_00 } });
     expect(of.estado).toBe(201);
     const c = await i('mike', `/rondas/${r.data.id}/cancelar`, { method: 'POST' });
     expect(c.data.estado).toBe('cancelada');
@@ -767,9 +790,27 @@ describe('préstamos directos, cancelar y cerrar', () => {
   it('una ronda con fecha límite ya no recibe ofertas pasado el día', async () => {
     const r = await i('mike', '/rondas', { method: 'POST', json: { nombre: 'Vencida', monto_meta: 10_000_00, fecha_inicio: en(2), fecha_vencimiento: en(30), fecha_limite: en(-1) } });
     await i('mike', `/rondas/${r.data.id}/abrir`, { method: 'POST' });
-    const of = await i('ana', `/rondas/${r.data.id}/ofertas`, { method: 'POST', json: { monto: 4_000_00 } });
+    const of = await i('ana', `/rondas/${r.data.id}/ofertas`, { method: 'POST', json: { acepta_riesgos: true, monto: 4_000_00 } });
     expect(of.estado).toBe(409);
     expect(of.error).toBe('ronda_vencida');
+  });
+
+  it('0.84.0 · el aviso de riesgos se edita en Ajustes; lo ya aceptado no cambia; vacío regresa al base', async () => {
+    const antes = await i('mike', '/ajustes');
+    expect(antes.data.riesgos_propio).toBe(false);
+    expect(antes.data.riesgos).toContain('No lo protege el IPAB');
+    const g = await i('mike', '/ajustes', { method: 'PUT', json: { riesgos: '  Texto del abogado: puedes perder tu dinero.  ' } });
+    expect(g.data).toMatchObject({ riesgos: 'Texto del abogado: puedes perder tu dinero.', riesgos_propio: true });
+    // Lo que Ana aceptó aquel día sigue siendo lo que aceptó.
+    const pAna = await i('mike', `/prestamos/${ids.pAna}`);
+    expect(pAna.data.riesgos.texto).toContain('Si un cliente se atrasa o no paga');
+    expect(pAna.data.riesgos.aceptados_at).toMatch(/^\d{4}-/);
+    // Guardar otra cosa no borra el aviso propio…
+    expect((await i('mike', '/ajustes', { method: 'PUT', json: { lugar: 'Monterrey' } })).data.riesgos_propio).toBe(true);
+    // …y vaciarlo regresa al base.
+    const v = await i('mike', '/ajustes', { method: 'PUT', json: { riesgos: '' } });
+    expect(v.data.riesgos_propio).toBe(false);
+    expect(v.data.riesgos).toBe(antes.data.riesgos);
   });
 
   it('los ajustes: a dónde se deposita, para la siguiente ronda', async () => {
@@ -793,5 +834,27 @@ describe('préstamos directos, cancelar y cerrar', () => {
     await i('mike', '/inversionistas', { method: 'POST', json: { nombre: 'Admin que presta', correo: 'admin@ejemplo.mx' } });
     await entrar('admin', 'admin@ejemplo.mx');
     expect((await i('admin', '')).data.papel).toBe('admin');
+  });
+
+  it('0.84.0 · quien ya era cliente o personal de la empresa, y se da de alta como inversionista, entra sin nada más', async () => {
+    // Mike, 8-oct: «deberían estar autorizados y dados de alta en automático
+    // cuando yo los registro como inversionistas». A quien ya tenía otra
+    // puerta en la empresa (peek101, roster101) esa otra clase le ganaba.
+    for (const [quien, tipo] of [['cliente', 'cliente'], ['obrero', 'personal']] as const) {
+      const correo = `${quien}@ejemplo.mx`;
+      const alta = await i('mike', '/inversionistas', { method: 'POST', json: { nombre: `El ${quien} que presta`, correo } });
+      expect(alta.estado, JSON.stringify(alta)).toBe(201);
+      const u = await usuarioPorCorreo(env as any, correo);
+      await ponerAcceso(env as any, { usuario_id: u!.id, org_id: ORG, tipo, ref_id: `ref-${quien}` });
+      await entrar(quien, correo);
+      const yo = await pedir(quien, '/yo', { app: '' });
+      expect(yo.data.inversion.map((x: any) => x.org_id), quien).toContain(ORG);
+      const r = await i(quien, '');
+      expect(r.estado, `${quien}: ${JSON.stringify(r)}`).toBe(200);
+      expect(r.data.papel).toBe('inversionista');
+      // Y sigue sin alcanzar lo de quien dirige ni lo demás de la empresa.
+      expect((await i(quien, '/inversionistas')).estado).toBe(403);
+      expect((await pedir(quien, `/orgs/${ORG}/movimientos`, { app: 'investor101' })).estado).toBe(403);
+    }
   });
 });

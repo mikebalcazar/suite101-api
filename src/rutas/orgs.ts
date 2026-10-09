@@ -132,7 +132,17 @@ rutas.use('/:o/*', async (c, next) => {
    * sólo dicen «un cliente no»—, así que NO se confía en que cada una lo
    * rechace: se le cierra aquí todo lo que no sea /orgs/:o/inversion/*. Una
    * ruta que mañana se olvide de él sigue cerrada. */
-  if (!quien && app === 'investor101') {
+  /* 0.84.0 · DEFECTO. Mike, 8-oct: «si el usuario entra con su correo dice que
+   * no está dado de alta (…) deberían estar autorizados y dados de alta en
+   * automático cuando yo los registro como inversionistas». El alta sí daba
+   * el permiso, pero esto sólo lo miraba cuando la persona no era NADA más en
+   * la empresa: a quien ya era su cliente (peek101) o su personal
+   * (roster101) le ganaba esa otra clase, y la portada de inversión le
+   * contestaba 403. En investor101 quien presta es inversionista, sea además
+   * cliente o trabajador. Al miembro no se le cambia la clase: quien dirige
+   * sigue dirigiendo, y al socio o al de oficina que presta lo resuelve
+   * `papelDe` en rutas/inversion.ts. */
+  if (app === 'investor101' && (!quien || quien.clase === 'cliente' || quien.clase === 'personal')) {
     const inv = await accesoInversion(c.env, org_id, s.usuario_id);
     if (inv) quien = { clase: 'inversionista', usuario_id: s.usuario_id, ref_id: inv.ref_id, ve_dinero: false, ve_costos: false };
   }
