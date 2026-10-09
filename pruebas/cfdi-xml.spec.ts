@@ -243,6 +243,15 @@ describe('lo que no es una factura no entra', () => {
     expect(falla(`<!--${'x'.repeat(2_000_001)}-->`)).toBe('xml_muy_grande');
   });
 
+  it('un comentario o un DOCTYPE que abre y nunca cierra se rechaza, y rápido', () => {
+    // Con una expresión regular esto era cuadrático: minutos con dos megas.
+    const t0 = Date.now();
+    expect(falla('<!--'.repeat(400_000))).toBe('xml_ilegible');
+    expect(falla('<!DOCTYPE'.repeat(200_000))).toBe('xml_ilegible');
+    expect(falla('<?'.repeat(900_000))).toBe('xml_ilegible');
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
   it('sin total, o con un total que no es número', () => {
     expect(falla(xmlCfdi(buena).replace(/ Total="[^"]*"/, ' Total="mucho"'))).toBe('total_invalido');
   });

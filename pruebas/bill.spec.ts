@@ -150,6 +150,11 @@ describe('subir facturas', () => {
     expect((await o('mike', '/fiscal/config')).data.rfc).toBe(RFC_EMPRESA);
   });
 
+  it('el RFC escrito con guiones o espacios es el mismo RFC', async () => {
+    await o('mike', '/empresa', { method: 'PATCH', app: 'dash101', json: { rfc: 'eku-900317 3c9' } });
+    expect((await o('mike', '/fiscal/config')).data.rfc).toBe(RFC_EMPRESA);
+  });
+
   it('entra la emitida, entra la recibida, y la que no es de la empresa NO entra', async () => {
     const ajena = xmlCfdi({ uuid: U.AJENA, emisor: FLE, receptor: CLI, fecha: '2026-01-05', subtotal: '999.00' });
     const r = await subir('mike', [xml('A'), xml('C'), ajena, '<html>no soy una factura</html>']);
@@ -570,6 +575,17 @@ describe('preguntarle al SAT', () => {
     const e = (await o('mike', '/fiscal/estado-de-cuenta?mes=2026-01')).data;
     expect(e.renglones.some((x: any) => x.uuid === U.C)).toBe(false);
     expect(e.canceladas).toBe(1);
+  });
+
+  it('y ese pago queda libre para la factura que la sustituye', async () => {
+    // El proveedor canceló C y la volvió a emitir: mismo monto, otro folio.
+    const r = await subir('mike', [xmlCfdi({ uuid: uuidDe(130), emisor: PRO, receptor: EMP, fecha: '2026-01-11', subtotal: '50000.00' })]);
+    const nueva = r.data.resultados[0].id;
+    const s = (await o('mike', `/fiscal/sugerencias?cfdi_id=${nueva}`)).data.filas[0];
+    const m1 = (await o('mike', `/fiscal/cfdi/${await idDe(U.C)}`)).data.movimientos[0].movimiento_id;
+    expect(s.candidatos.map((k: any) => k.movimiento.id)).toContain(m1);
+    // Se cancela para no mover los números de las pruebas que siguen.
+    expect((await o('mike', `/fiscal/cfdi/${nueva}/cancelar`, { method: 'POST' })).estado).toBe(200);
   });
 
   it('sin decir cuáles, revisa primero las que nunca se han revisado', async () => {

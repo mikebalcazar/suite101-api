@@ -85,9 +85,14 @@ export function montarFiscal(rutas: App): void {
 
     const docs: { nombre: string; xml: string }[] = [];
     const tipo = (c.req.header('Content-Type') || '').toLowerCase();
+    // Se mide lo que de verdad llegó: una petición sin Content-Length (por
+    // trozos) se saltaría el tope de arriba.
+    const cuerpo = await c.req.arrayBuffer().catch(() => null);
+    if (!cuerpo) return err(c, 'datos_invalidos', 400, { motivo: 'no se pudo leer lo que se subió' });
+    if (cuerpo.byteLength > TOPE_SUBIDA) return err(c, 'subida_muy_grande', 413, { tope_bytes: TOPE_SUBIDA });
     try {
       if (tipo.includes('multipart/form-data')) {
-        const forma = await c.req.formData();
+        const forma = await new Response(cuerpo, { headers: { 'Content-Type': c.req.header('Content-Type')! } }).formData();
         for (const v of forma.getAll('archivo')) {
           if (typeof v === 'string') { docs.push({ nombre: 'archivo', xml: v }); continue; }
           const f = v as File;
@@ -104,11 +109,11 @@ export function montarFiscal(rutas: App): void {
           }
         }
       } else if (tipo.includes('json')) {
-        const b = await c.req.json<{ xmls?: unknown; xml?: unknown }>();
+        const b = JSON.parse(new TextDecoder().decode(cuerpo)) as { xmls?: unknown; xml?: unknown };
         const lista = Array.isArray(b.xmls) ? b.xmls : b.xml !== undefined ? [b.xml] : [];
         lista.forEach((x, i) => docs.push({ nombre: `xml ${i + 1}`, xml: typeof x === 'string' ? x : '' }));
       } else {
-        docs.push({ nombre: 'cuerpo', xml: await c.req.text() });
+        docs.push({ nombre: 'cuerpo', xml: new TextDecoder().decode(cuerpo) });
       }
     } catch {
       return err(c, 'datos_invalidos', 400, { motivo: 'no se pudo leer lo que se subió' });

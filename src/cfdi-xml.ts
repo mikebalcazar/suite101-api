@@ -108,14 +108,33 @@ function sinEntidades(s: string): string {
 /** El tope de un XML. Una factura de verdad pesa unos cuantos KB; una con
  *  cientos de conceptos, decenas. Dos megas es no leer basura. */
 export const TOPE_XML = 2_000_000;
+export const TOPE_CONCEPTOS = 500;
+
+/** Quita de un texto todo lo que va de `abre` a `cierra`. Con `indexOf` y de
+ *  una pasada: la expresión regular equivalente se vuelve cuadrática cuando
+ *  el que abre se repite y nunca cierra, y con dos megas de «<!--» eso son
+ *  minutos de procesador. Si uno abre y no cierra, el XML está roto: `null`. */
+function sinBloques(s: string, abre: string, cierra: string): string | null {
+  let desde = s.indexOf(abre);
+  if (desde < 0) return s;
+  let salida = '', cursor = 0;
+  while (desde >= 0) {
+    const fin = s.indexOf(cierra, desde + abre.length);
+    if (fin < 0) return null;
+    salida += s.slice(cursor, desde);
+    cursor = fin + cierra.length;
+    desde = s.indexOf(abre, cursor);
+  }
+  return salida + s.slice(cursor);
+}
 
 function leerXml(xml: string): Nodo | null {
-  const limpio = xml
-    .replace(/^﻿/, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, '')
-    .replace(/<\?[\s\S]*?\?>/g, '')
-    .replace(/<!DOCTYPE[\s\S]*?>/gi, '');
+  // La marca de orden de bytes con que algunos PAC empiezan el archivo.
+  let limpio: string | null = xml.charCodeAt(0) === 0xfeff ? xml.slice(1) : xml;
+  for (const [abre, cierra] of [['<!--', '-->'], ['<![CDATA[', ']]>'], ['<?', '?>'], ['<!DOCTYPE', '>'], ['<!doctype', '>']] as const) {
+    limpio = sinBloques(limpio, abre, cierra);
+    if (limpio === null) return null;
+  }
   // Con `u`: una adenda puede traer etiquetas con acentos o eñes.
   const etiqueta = /<(\/?)([\p{L}_][\p{L}\p{N}_:.-]*)((?:\s+[\p{L}\p{N}_:.-]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/gu;
   const atributo = /([\p{L}\p{N}_:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/gu;
@@ -238,7 +257,10 @@ export function leerCfdi(xml: string): CfdiLeido | FallaXml {
   // Un comprobante que sólo trae el total de trasladados, sin el desglose.
   if (!traslados.length && imp?.attrs.TotalImpuestosTrasladados) iva = aCentavos(imp.attrs.TotalImpuestosTrasladados, tc);
 
-  const conceptos: ConceptoLeido[] = hijos(hijo(raiz, 'Conceptos'), 'Concepto').map((k) => {
+  // Se guardan hasta TOPE_CONCEPTOS renglones: son para leer la factura, no
+  // para sumarla (los importes salen del comprobante), y un XML de dos megas
+  // puede traer veinte mil.
+  const conceptos: ConceptoLeido[] = hijos(hijo(raiz, 'Conceptos'), 'Concepto').slice(0, TOPE_CONCEPTOS).map((k) => {
     const tk = hijos(hijo(hijo(k, 'Impuestos'), 'Traslados'), 'Traslado');
     return {
       clave_prod_serv: texto(k.attrs.ClaveProdServ, 20),

@@ -112,7 +112,8 @@ export class MotorFiscal {
    *  entra. Sin RFC en la empresa no se puede saber, así que no entra
    *  ninguna y se dice qué falta. */
   importar(lista: CfdiLeido[], actor: Actor, origen: Origen = 'xml'): { rfc_empresa: string; resultados: ResultadoImportar[] } | Falla {
-    const rfc = this.e.rfcEmpresa().trim().toUpperCase();
+    // Como lo escribe la gente: «EKU-900317-3C9», con espacios. En el XML va corrido.
+    const rfc = this.e.rfcEmpresa().toUpperCase().replace(/[\s.-]/g, '');
     if (!rfc) return { error: 'falta_rfc_empresa', detalle: { motivo: 'sin el RFC de la empresa no se sabe si una factura es emitida o recibida', donde: 'PATCH /orgs/:o/empresa { rfc }' } };
     if (!ORIGENES.includes(origen)) return { error: 'origen_invalido', detalle: { origen, acepta: ORIGENES } };
     const resultados: ResultadoImportar[] = [];
@@ -266,7 +267,8 @@ export class MotorFiscal {
    *
    *  Un movimiento es candidato si es del mismo lado (cobro contra emitida,
    *  pago contra recibida), no es un traspaso ni un préstamo, no está ligado
-   *  ya a otra factura, y su monto es el que le falta a la factura con un
+   *  ya a otra factura VIGENTE (el pago de una que se canceló vuelve a estar
+   *  libre: es justo el que hay que proponerle a la que la sustituye), y su monto es el que le falta a la factura con un
    *  peso de tolerancia. De ésos:
    *    · a cinco días o menos: se propone (`alta`);
    *    · hasta cuarenta y cinco: sólo si además coincide el nombre o el RFC
@@ -310,7 +312,8 @@ export class MotorFiscal {
             AND COALESCE(m.categoria, '') NOT IN (?, ?)
             AND ABS(m.monto - ?) <= ?
             AND m.fecha >= date(?, ?) AND m.fecha <= date(?, ?)
-            AND NOT EXISTS (SELECT 1 FROM cfdi_movimientos lm WHERE lm.movimiento_id = m.id)`,
+            AND NOT EXISTS (SELECT 1 FROM cfdi_movimientos lm JOIN cfdi k ON k.id = lm.cfdi_id
+                             WHERE lm.movimiento_id = m.id AND k.estado = 'vigente')`,
         String(f.tipo), CATEGORIA_PRESTAMO_RECIBIDO, CATEGORIA_PRESTAMO_CAPITAL,
         restante, TOLERANCIA_MONTO,
         String(f.fecha), `-${DIAS_LEJOS} days`, String(f.fecha), `+${DIAS_LEJOS} days`,
@@ -398,7 +401,7 @@ export class MotorFiscal {
     let cambio = false;
     this.e.tx(() => {
       this.sql.exec(`UPDATE cfdi SET estado_sat = ?, sat_revisado_at = ? WHERE id = ?`, r.estado, ahora(), id);
-      if (r.estado === 'cancelado' && f.estado === 'vigente') { this.e.cancelar(id); cambio = true; }
+      if (r.estado === 'cancelado' && f.estado === 'vigente') cambio = !esFalla(this.e.cancelar(id));
     });
     return { cfdi: this.forma(this.cfdi(id)!), cambio };
   }
@@ -456,7 +459,13 @@ export class MotorFiscal {
       neto: { subtotal: ingresos.subtotal - egresos.subtotal, iva: ingresos.iva - egresos.iva, total: ingresos.total - egresos.total },
       complementos_de_pago: cuenta(`SELECT COUNT(*) AS n FROM cfdi WHERE estado = 'vigente' AND tipo_comprobante = 'P' AND fecha >= ? AND fecha <= ?`, d, h),
       canceladas: cuenta(`SELECT COUNT(*) AS n FROM cfdi WHERE estado = 'cancelada' AND fecha >= ? AND fecha <= ?`, d, h),
-      marcados_sin_factura: { movimientos: sueltos.length, total: sueltos.reduce((s, m) => s + Number(m.monto), 0), filas: sueltos },
+      marcados_sin_factura: {
+        movimientos: sueltos.length,
+        total: sueltos.reduce((s, m) => s + Number(m.monto), 0),
+        ingresos: sueltos.filter((m) => m.tipo === 'ingreso').reduce((s, m) => s + Number(m.monto), 0),
+        egresos: sueltos.filter((m) => m.tipo === 'egreso').reduce((s, m) => s + Number(m.monto), 0),
+        filas: sueltos,
+      },
     };
   }
 
@@ -630,7 +639,7 @@ export class MotorFiscal {
   config(): Fila {
     const f = this.una(`SELECT * FROM fiscal_config WHERE id = 'fiscal'`);
     return {
-      rfc: this.e.rfcEmpresa().trim().toUpperCase() || null,
+      rfc: this.e.rfcEmpresa().toUpperCase().replace(/[\s.-]/g, '') || null,
       regimen: f?.regimen ?? null, razon_social: f?.razon_social ?? null, cp: f?.cp ?? null,
       actualizado_at: f?.actualizado_at ?? null,
     };

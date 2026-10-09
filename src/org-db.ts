@@ -3035,10 +3035,15 @@ export class OrgDB extends DurableObject<Env> {
      * tabla también trae notas de crédito, que RESTAN, y complementos de
      * pago y recibos de nómina, que no llevan IVA ni son «una factura» para
      * este conteo. Lo capturado antes trae `tipo_comprobante` nulo y se
-     * suma como siempre: para esos datos la respuesta es la misma. */
+     * suma como siempre: para esos datos la respuesta es la misma.
+     * Y la retención que le baja al acreditable es la de IVA cuando la
+     * factura la trae desglosada (`iva_retenido`); lo tecleado sólo trae
+     * `retenciones`, y se sigue tomando entera, como antes. OJO: esta ruta
+     * suma por FECHA DE FACTURA; la que va por flujo —la buena para saber
+     * qué se paga— es GET /fiscal/impuestos. */
     const suma = (tipo: string) => this.sql
       .exec(`SELECT COALESCE(SUM(CASE WHEN tipo_comprobante = 'E' THEN -iva ELSE iva END),0) AS iva,
-                    COALESCE(SUM(CASE WHEN tipo_comprobante = 'E' THEN -retenciones ELSE retenciones END),0) AS ret, COUNT(*) AS n
+                    COALESCE(SUM(CASE WHEN tipo_comprobante = 'E' THEN -COALESCE(iva_retenido, retenciones) ELSE COALESCE(iva_retenido, retenciones) END),0) AS ret, COUNT(*) AS n
              FROM cfdi WHERE estado = 'vigente' AND tipo = ? AND fecha >= ? AND fecha <= ?
                AND COALESCE(tipo_comprobante, 'I') IN ('I', 'E')`, tipo, d, h)
       .one() as { iva: number; ret: number; n: number };
