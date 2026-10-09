@@ -257,6 +257,28 @@ describe('D · contratistas por ítem', () => {
     const m1Mike = await q('mike', `/elements/${m1}`);
     expect(m1Mike.contratistas.map((c: any) => c.name).sort()).toEqual(['Berna', 'Goyo']);
   });
+  it('0.90.2 · el pendiente se reasigna o se deja sin asignar después de creado', async () => {
+    // Mike, 9-oct: «una vez creado el ítem de punchlist no puedo editar a quien se le asigna».
+    const k = (await q('mike', `/elements/${m2}`)).punch.find((x: any) => x.title === 'Herraje flojo');
+    expect(k?.assignee_id).toBe(ids.tema);
+    const patch = (quien: string, cuerpo: any) => q(quien, `/punch/${k.id}`, { method: 'PATCH', json: { ...cuerpo, op_id: crypto.randomUUID() } });
+    expect((await patch('mike', { assignee_id: ids.berna })).estado).toBe(200);
+    const aBerna = (await q('mike', `/elements/${m2}`)).punch.find((x: any) => x.id === k.id);
+    expect(aBerna.assignee_id, 'pasó a Berna').toBe(ids.berna);
+    expect((await q('tema', `/elements/${m2}`)).recorte, 'Tema ya no lo ve completo').toBe(true);
+    expect((await q('berna', `/elements/${m2}`)).punch.some((x: any) => x.id === k.id), 'Berna sí').toBe(true);
+    // Otro campo sin assignee_id no lo toca.
+    expect((await patch('mike', { title: 'Herraje flojo (puerta 2)' })).estado).toBe(200);
+    expect((await q('mike', `/elements/${m2}`)).punch.find((x: any) => x.id === k.id).assignee_id).toBe(ids.berna);
+    // Vacío, a propósito: sin asignar.
+    expect((await patch('mike', { assignee_id: '' })).estado).toBe(200);
+    expect((await q('mike', `/elements/${m2}`)).punch.find((x: any) => x.id === k.id).assignee_id ?? null).toBe(null);
+    // Alguien que no está en la obra, no; el contratista no reasigna.
+    expect((await patch('mike', { assignee_id: ids.fuera })).estado).toBe(400);
+    expect((await patch('goyo', { assignee_id: ids.goyo })).estado).toBe(403);
+    // Como estaba, para lo que sigue.
+    expect((await patch('mike', { assignee_id: ids.tema, title: 'Herraje flojo' })).estado).toBe(200);
+  });
   it('desactivar a alguien no se lleva el ítem; borrar un ítem se lleva sus asignaciones', async () => {
     expect((await q('mike', `/users/${ids.fuera}`, { method: 'PATCH', json: { active: false } })).estado).toBe(200);
     expect((await q('fuera', '/me')).estado).toBe(401);

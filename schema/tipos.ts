@@ -17,7 +17,12 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.90.1 (`diseno_doc` TRAE SU `r2_key`, para que la
+ * Versión del contrato: 0.90.2 (EL PENDIENTE SE REASIGNA. Mike, 9-oct: «una vez
+ * creado el ítem de punchlist no puedo editar a quien se le asigna». PATCH
+ * /quell/punch/:id con `assignee_id` vacío o null lo deja SIN asignar; sin
+ * el campo, no lo toca. Cambiarlo a otro ya se podía.)
+ * Antes:
+ * 0.90.1 (`diseno_doc` TRAE SU `r2_key`, para que la
  * pantalla de quell abra el archivo del diseño con /files/<r2_key>.)
  * Antes:
  * 0.90.0 (EL DISEÑO DEFINIDO DE LA PIEZA, CON SU
@@ -1496,7 +1501,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.90.1';
+export const VERSION_CONTRATO = '0.90.2';
 
 /* ─────────────── órdenes de compra (0.21.0; cancelada desde 0.86.0) ─────────────── */
 
