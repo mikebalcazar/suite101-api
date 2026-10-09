@@ -2,9 +2,10 @@ de:     sitio (el escaparate)
 para:   quien siga con el dominio propio de las empresas (API: src/dominios.ts,
         `nombresDe`) y quien toque las rutas de taller101.com
 fecha:  9-oct-2026, 07:15 UTC
-asunto: Mike cambió la regla de nombres: los DOMINIOS van sin «101». Hay que
-        cambiar `nombresDe` ANTES de que la primera empresa tenga dominio.
-        Y suite101.app ya está en vivo.
+asunto: Mike cambió la regla de nombres: los DOMINIOS de las apps van sin
+        «101», la plataforma sí lo conserva. Hay que cambiar `nombresDe`
+        ANTES de que la primera empresa tenga dominio. Y suite101.app ya
+        está en vivo.
 
 MIKE, 9-oct, textual: «Son sin el "101" para los dominios. Para los logos y
 nombres sí van con "101". Solo en los dominios no, para simplificar el
@@ -12,18 +13,30 @@ typing».
 
 Es decir: la marca sigue siendo quell101, quote101, dash101 —el logotipo, el
 nombre del programa, el manual de imagen, todo eso NO cambia—. Lo único que
-pierde el «101» es el hostname.
+pierde el «101» es el hostname de las apps.
 
   quell101.acme.com   ->  quell.acme.com
   quote101.acme.com   ->  quote.acme.com
   roster101.acme.com  ->  roster.acme.com
 
+EL OCTAVO NOMBRE: YA ESTÁ CONTESTADO, NO SE TOCA
+
+El de la plataforma (`paginaDeEmpresa`) hoy es `suite101.acme.com`. Como la
+regla de arriba lo dejaba en duda, se lo pregunté a Mike con botones esa
+misma noche y contestó: se queda **suite101.acme.com, CON el 101**. Ahí el
+«101» es la marca de la plataforma, no el estorbo que se quiere quitar.
+
+Entonces la regla completa, sin ambigüedad:
+
+  las APPS pierden el 101    ->  quell.acme.com, quote.acme.com, roster.acme.com
+  la PLATAFORMA lo conserva  ->  suite101.acme.com
+
 LO QUE ESTO ROMPE, Y POR QUÉ CORRE PRISA
 
 `nombresDe` en src/dominios.ts arma los ocho hostnames de cada empresa, uno
-por app, y hoy los arma CON el 101 (así están los ejemplos de la fase A:
-roster101.dominioempresa.com, quote101.dominioempresa.com). Esa función es el
-único lugar donde se decide cómo se va a llamar el portal de TODAS las
+por app, y hoy los arma todos CON el 101 (así están los ejemplos de la fase
+A: roster101.dominioempresa.com, quote101.dominioempresa.com). Esa función es
+el único lugar donde se decide cómo se va a llamar el portal de TODAS las
 empresas que entren de aquí en adelante.
 
 Hoy cambiarlo es gratis: la puerta (`suite101-puerta`) todavía no se
@@ -33,20 +46,12 @@ con certificado emitido, el mismo cambio es una migración por cliente, con
 correos que ya traen la liga vieja. Por eso lo mando ahora y no después.
 
 Lo que hay que tocar, hasta donde alcanzo a ver desde fuera:
-- `nombresDe`: quitar el «101» del prefijo de cada app.
+- `nombresDe`: quitar el «101» del prefijo de las siete apps. El de la
+  plataforma se queda igual.
 - Las pruebas que fijan esos nombres (dominios.spec.ts, 21).
 - Lo que master101 enseña en «Dominio propio»: la tabla de los ocho nombres
   y el texto de «Copiar las instrucciones» que la empresa le pasa a su DNS.
 - DOMINIOS.md, si trae ejemplos.
-
-UN PUNTO QUE NO ME TOCA DECIDIR, Y QUE HAY QUE PREGUNTARLE A MIKE
-
-El octavo nombre, el de la plataforma, hoy es `suite101.acme.com`
-(paginaDeEmpresa). Por la regla tal cual debería quedar `suite.acme.com`,
-pero Mike lo escribió DOS VECES con el 101 cuando describió la arquitectura,
-y ahí el «101» podría ser la marca y no el estorbo. No lo cambien por su
-cuenta: pregúntenle con botones, es una línea de diferencia y se contesta en
-diez segundos.
 
 LO QUE ESTÁ EN TALLER101.COM Y TAMBIÉN HAY QUE RENOMBRAR
 
@@ -97,6 +102,11 @@ Y el plano que dictó Mike para suite101.app, para que no se pierda:
 - quell.suite101.app y demás  -> DEMOS ESTÁTICOS, no la app de verdad
 - quell.acme.com y demás      -> la app de producción de cada empresa
 
+SIGUE PENDIENTE DE MIKE, Y TAPA TODO LO MULTIEMPRESA: sus pasos de
+DOMINIOS.md (SaaS prendido en la zona, el AAAA 100:: de
+empresas.taller101.com, el secreto CLOUDFLARE_SAAS_TOKEN). Llevan esperando
+desde el 2-oct. Se lo recordé esta noche.
+
 VERIFICADO: suite101.app responde 200 con HTTPS y enseña el escaparate
 (revisado en el navegador, 9-oct 07:00 UTC). Lo de `nombresDe` NO lo toqué:
-no es mi repo y la decisión del octavo nombre es de Mike.
+no es mi repo.
