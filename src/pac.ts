@@ -168,6 +168,12 @@ export function receptorPublico(b: Borrador, lugar_expedicion: string): Borrador
   return { ...b, receptor: { rfc: RFC_PUBLICO, razon_social: 'PUBLICO EN GENERAL', regimen_fiscal: '616', uso_cfdi: 'S01', cp_fiscal: lugar_expedicion } };
 }
 
+/** Periodicidad 01 = diaria; Months «01»–«12»; Year con cuatro cifras.
+ *  `fecha` viene como «AAAA-MM-DDTHH:mm:ss» en hora del centro. */
+export function informacionGlobal(fecha: string): { Periodicity: string; Months: string; Year: number } {
+  return { Periodicity: '01', Months: fecha.slice(5, 7), Year: Number(fecha.slice(0, 4)) };
+}
+
 export function cuerpoFacturama(b: Borrador, a: { serie: string; folio: number; fecha: string; lugar_expedicion: string }): Record<string, unknown> {
   b = receptorPublico(b, a.lugar_expedicion);
   const c = cuentas(b.renglones);
@@ -185,6 +191,9 @@ export function cuerpoFacturama(b: Borrador, a: { serie: string; folio: number; 
     ...(b.observaciones ? { Observations: b.observaciones } : {}),
     ...(b.orden ? { OrderNumber: b.orden } : {}),
     Receiver: { Rfc: b.receptor.rfc, Name: b.receptor.razon_social, CfdiUse: b.receptor.uso_cfdi, FiscalRegime: b.receptor.regimen_fiscal, TaxZipCode: b.receptor.cp_fiscal },
+    // Público en general: el SAT exige el nodo InformacionGlobal (de qué
+    // periodo es la factura global). v1 la trata como diaria del día de hoy.
+    ...(b.receptor.rfc === RFC_PUBLICO ? { GlobalInformation: informacionGlobal(a.fecha) } : {}),
     Items: b.renglones.map((r, i) => {
       const k = c.renglones[i];
       const item: Record<string, unknown> = {

@@ -93,6 +93,7 @@ export function crearFacturama(usuario: string, clave: string): { responder(url:
       if (b.Serie && !st.sucursales.some((s) => s.series.some((x) => x.Name === b.Serie))) return malo("El atributo 'Serie' debe existir en la sucursal");
       if (!st.sucursales.some((s) => s.Address.ZipCode === String(b.ExpeditionPlace))) return malo("El atributo 'ExpeditionPlace' debe existir como código postal en alguno de los Lugares de expedición en tu Perfil Fiscal");
       if (b.Receiver?.Rfc === 'XAXX010101000' && b.Receiver?.CfdiUse !== 'S01') ms['cfdiToCreate.Receiver.CfdiUse'] = ['Para el RFC genérico el uso debe ser S01.'];
+      if (b.Receiver?.Rfc === 'XAXX010101000' && !(b.GlobalInformation && /^0[1-5]$/.test(String(b.GlobalInformation.Periodicity)) && /^(0[1-9]|1[0-8])$/.test(String(b.GlobalInformation.Months)) && /^\d{4}$/.test(String(b.GlobalInformation.Year)))) return malo("El Nodo (GlobalInformation) debe existir cuando el atributo Rfc del nodo receptor contiene el valor 'XAXX010101000' y el valor del atributo Nombre del nodo Receptor contiene el valor 'PUBLICO EN GENERAL'");
       let subtotal = 0, descuento = 0, impuestos = 0;
       (b.Items || []).forEach((it: any, i: number) => {
         const k = `cfdiToCreate.Items[${i}]`;
