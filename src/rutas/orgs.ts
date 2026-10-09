@@ -25,6 +25,7 @@ import { montarOrdenes } from './ordenes';
 import { montarObras } from './obras';
 import { montarNomina } from './nomina';
 import { montarInversion } from './inversion';
+import { montarFiscal } from './fiscal';
 import { err, ok, type Ctx, type Quien, type Vars } from '../http';
 import type { Env } from '../entorno';
 import { APPS, LLAVE_APP, type App, type Tabla, TIPOS_PROVEEDOR, type TipoProveedor } from '../../schema/tipos';
@@ -1557,6 +1558,7 @@ montarOrdenes(rutas);
 montarObras(rutas);
 montarNomina(rutas);
 montarInversion(rutas);
+montarFiscal(rutas);
 
 /* ─────────────── cost101: costos base, cuadrillas y productos (0.81.0) ───────────────
  *

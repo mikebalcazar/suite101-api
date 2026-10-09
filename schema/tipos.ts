@@ -17,7 +17,57 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.84.0 (PATRON101: EL AVISO DE RIESGOS. Mike, 8-oct:
+ * Versión del contrato: 0.85.0 (BILL101 ENTRA A LA SUITE, FASE A: LA FACTURA
+ * SE LEE SOLA Y LOS IMPUESTOS SE CALCULAN. Mike, 8-oct: «Quiero hacer un
+ * módulo para generar y timbrar facturas y también importar y actualizar las
+ * facturas recibidas (…) un estado de cuenta de movimientos exclusivamente
+ * fiscales (solo facturados, ingresos y egresos) para llevar un control
+ * fiscal de los impuestos y estimaciones. Esta ventana debe calcular los
+ * pagos de impuestos que deben hacerse mensuales y anuales».
+ *   · App nueva `bill101`, llave `bill`: licencia por empresa. Una empresa
+ *     nueva NO nace con ella. Por decisión de Mike (con botones) bill101 se
+ *     queda lo fiscal; dash101 sigue entrando a las rutas que ya usa.
+ *   · NADA DE LO QUE YA EXISTÍA CAMBIA DE RESPUESTA: /fiscal/iva, /cuadre,
+ *     /pendientes, /cfdi, ligar, cancelar y marcar facturado son los mismos.
+ *     Sigue la regla de la 0009: una sola lista de movimientos, y lo fiscal
+ *     es esa lista filtrada.
+ *   · `cfdi` gana columnas (org 0044), todas opcionales: `origen`
+ *     ('manual'|'xml'|'sat'|'timbrado'), `tipo_comprobante` (I factura, E
+ *     nota de crédito, P complemento de pago, N nómina), `serie`, `folio`,
+ *     `metodo_pago` (PUE|PPD), `uso`, `moneda`, `tipo_cambio`,
+ *     `total_original`, `iva_retenido`, `isr_retenido`, `ieps`, `rfc_emisor`,
+ *     `rfc_receptor`, `trato` ('normal'|'inversion'|'no_deducible'),
+ *     `estado_sat`, `sat_revisado_at`, `proyecto_id`, `xml_llave`. Lo
+ *     capturado antes las trae nulas: nulo se lee 'manual', 'I' y 'normal'.
+ *   · Tablas nuevas, internas: `cfdi_conceptos`, `cfdi_pagos` (lo que dice
+ *     un complemento de pago), `fiscal_config`, `fiscal_ejercicios`,
+ *     `fiscal_pagos`.
+ *   · POST /fiscal/xml — sube facturas: JSON `{xmls:[…]}`, multipart
+ *     `archivo` (.xml o .zip) o el XML en el cuerpo; hasta 20 por petición.
+ *     Se leen solas (CFDI 3.3 y 4.0). Emitida o recibida lo decide el RFC de
+ *     la empresa (`empresa.rfc`; sin él, 409 `falta_rfc_empresa`). Contesta
+ *     qué pasó con cada una: `nueva`, `actualizada` (estaba tecleada),
+ *     `repetida` o `rechazada` con su motivo. El XML queda en R2.
+ *   · GET /fiscal/sugerencias — para cada factura sin cubrir, los
+ *     movimientos que se le parecen (mismo monto ±$1; a 5 días, o hasta 45
+ *     si coincide nombre o RFC). PROPONE, no liga: se confirma con el
+ *     `POST /fiscal/cfdi/:id/ligar` de siempre. Lo único que se liga solo es
+ *     el movimiento que ya traía escrito el UUID de la factura.
+ *     POST /fiscal/cfdi/:id/desligar deshace una liga.
+ *   · POST /fiscal/verificar — le pregunta al SAT (servicio público, sin
+ *     firma) si las facturas siguen vigentes; una cancelada allá se cancela
+ *     aquí. Hasta 10 por petición.
+ *   · GET /fiscal/estado-de-cuenta?mes=|desde=&hasta=|anio= — un renglón por
+ *     factura vigente, con saldo corrido y totales por lado.
+ *   · GET /fiscal/impuestos?anio= — doce meses de IVA (por flujo: PUE el día
+ *     de la factura, PPD cuando se paga) y de ISR provisional (ingresos
+ *     acumulados × coeficiente × tasa), y la anual estimada. La cuenta vive
+ *     en src/fiscal.ts y es la única. ES UNA ESTIMACIÓN: no es la
+ *     declaración ni sustituye al contador.
+ *   · GET|PUT /fiscal/config, GET|PUT /fiscal/ejercicios/:anio (coeficiente
+ *     en diezmilésimas, tasa en puntos base, pérdidas, ajustes del
+ *     contador), GET|POST /fiscal/pagos y DELETE /fiscal/pagos/:id.) Antes:
+ * 0.84.0 (PATRON101: EL AVISO DE RIESGOS. Mike, 8-oct:
  * «Necesito agregar un disclaimer de los riesgos de la inversión, sobre todo
  * riesgos de no pago del cliente»; y con botones: «Aceptación obligatoria».
  *   · `ajustes` de inversión trae `riesgos` (el aviso vigente: el de la
@@ -1324,7 +1374,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.84.0';
+export const VERSION_CONTRATO = '0.85.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
@@ -1505,6 +1555,11 @@ export const APPS = [
    * Llave propia, `investor`. Es la única app a la que entra alguien que no
    * es de la empresa ni su cliente: el inversionista. */
   'investor101',
+  /* bill101 (9-oct-2026): facturas emitidas y recibidas, y los impuestos.
+   * Llave propia, `bill`, con licencia por empresa. Por decisión de Mike se
+   * queda con lo fiscal que nació en dash101; las rutas /fiscal son las
+   * mismas para las dos. */
+  'bill101',
 ] as const;
 export type App = (typeof APPS)[number];
 
@@ -1522,6 +1577,7 @@ export const LLAVE_APP: Record<App, string> = {
   suite101: 'suite',
   cost101: 'cost',
   investor101: 'investor',
+  bill101: 'bill',
 };
 
 /* ─────────────── D1 master: el directorio ─────────────── */
@@ -2323,6 +2379,10 @@ export const TABLAS_INTERNAS = [
    * SÓLO sus préstamos y sus ofertas, y eso se decide renglón por renglón en
    * /orgs/:o/inversion/*. */
   'inversionistas', 'rondas', 'ronda_ofertas', 'prestamos', 'prestamo_pagos', 'inversion_archivos', 'inversion_eventos',
+  /* bill101 (0044). Por /orgs/:o/fiscal/*, como `cfdi` desde la 0009: quién
+   * puede cambiar lo que mueve la cuenta de los impuestos se decide en cada
+   * ruta. */
+  'cfdi_conceptos', 'cfdi_pagos', 'fiscal_config', 'fiscal_ejercicios', 'fiscal_pagos',
 ] as const;
 
 /* ─────────────── lo que devuelven las rutas con nombre ─────────────── */

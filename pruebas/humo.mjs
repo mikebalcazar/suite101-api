@@ -660,6 +660,84 @@ async function recorrido() {
  *
  * Devuelve si se logró entrar, para que el primer `rev` que falle lo diga en
  * vez de dejar veinte fallas sin explicación. */
+/* ─────────────── bill101, fase A (0.85.0) ───────────────
+ *
+ * Contra el Worker de verdad, en la empresa de humo (por dash101, que entra
+ * a las mismas rutas /fiscal): que un XML suba, se lea y quede guardado; que
+ * los impuestos contesten; y LO QUE NINGUNA PRUEBA DE AQUÍ ADENTRO PUEDE
+ * MEDIR: que el servicio del SAT conteste desde donde corre el Worker. Se le
+ * pregunta por un folio fiscal que no existe; la respuesta buena es «no
+ * encontrado». Si el SAT no contesta, se dice y NO se cuenta como falla del
+ * despliegue: su servicio se cae solo de vez en cuando, y un humo en rojo
+ * por eso no dice nada del código. */
+
+async function bill() {
+  linea('');
+  linea('== bill101: subir una factura, los impuestos y el SAT ==');
+  if (!galleta && !(await entrarComoMike())) { rev(false, 'entrar para medir bill101'); return; }
+  const app = 'dash101';
+  const RFC = 'EKU9003173C9'; // RFC de pruebas del SAT; no es de nadie
+  const UUID = `0B111A00-${String(Date.now()).slice(-4)}-4000-8000-${String(Date.now()).padStart(12, '0').slice(-12)}`;
+  const anio = new Date().getFullYear();
+  const fecha = `${anio}-01-10`;
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" Version="4.0" Serie="H" Folio="1" Fecha="${fecha}T10:00:00" Sello="RELLENOrellenoRELLENO12345678==" FormaPago="03" SubTotal="1000.00" Moneda="MXN" Total="1160.00" TipoDeComprobante="I" Exportacion="01" MetodoPago="PUE" LugarExpedicion="64000">
+<cfdi:Emisor Rfc="JES900109Q90" Nombre="PROVEEDOR DE HUMO" RegimenFiscal="601"/>
+<cfdi:Receptor Rfc="${RFC}" Nombre="EMPRESA DE HUMO" DomicilioFiscalReceptor="64000" RegimenFiscalReceptor="601" UsoCFDI="G03"/>
+<cfdi:Conceptos><cfdi:Concepto ClaveProdServ="56101700" Cantidad="1" ClaveUnidad="H87" Descripcion="Triplay de humo" ValorUnitario="1000.00" Importe="1000.00" ObjetoImp="02"/></cfdi:Conceptos>
+<cfdi:Impuestos TotalImpuestosTrasladados="160.00"><cfdi:Traslados><cfdi:Traslado Base="1000.00" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="160.00"/></cfdi:Traslados></cfdi:Impuestos>
+<cfdi:Complemento><tfd:TimbreFiscalDigital xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital" Version="1.1" UUID="${UUID}" FechaTimbrado="${fecha}T10:00:30"/></cfdi:Complemento>
+</cfdi:Comprobante>`;
+
+  const sinRfc = await pedir(STAGING, `/orgs/${ORG}/fiscal/xml`, { app, method: 'POST', body: { xmls: [xml] } });
+  rev(sinRfc.estado === 409 && sinRfc.error === 'falta_rfc_empresa', 'sin el RFC de la empresa no entra ninguna factura', `${sinRfc.estado} ${sinRfc.error ?? ''}`);
+  const emp = await pedir(STAGING, `/orgs/${ORG}/empresa`, { app, method: 'PATCH', body: { rfc: RFC } });
+  rev(emp.estado === 200, 'se le pone el RFC a la empresa', String(emp.estado));
+
+  const sube = await pedir(STAGING, `/orgs/${ORG}/fiscal/xml`, { app, method: 'POST', body: { xmls: [xml, '<html>no</html>'] } });
+  const r0 = sube.data?.resultados?.[0];
+  rev(sube.estado === 200 && r0?.resultado === 'nueva' && r0?.lado === 'recibida' && r0?.total === 116000,
+    'el XML sube, se lee solo y queda como recibida', `${sube.estado} ${JSON.stringify(sube.data?.resumen ?? sube.error)} · ${sube.ms} ms`);
+  rev(sube.data?.resultados?.[1]?.resultado === 'rechazada', 'lo que no es una factura se rechaza sin detener a la otra', sube.data?.resultados?.[1]?.motivo);
+  const otra = await pedir(STAGING, `/orgs/${ORG}/fiscal/xml`, { app, method: 'POST', body: { xmls: [xml] } });
+  rev(otra.data?.resumen?.repetidas === 1 && otra.data?.resumen?.nuevas === 0, 'subirla otra vez no la duplica', JSON.stringify(otra.data?.resumen));
+
+  const guardado = await fetch(`${STAGING}/orgs/${ORG}/fiscal/cfdi/${r0?.id}/xml`, { headers: { 'X-App': app, Cookie: galleta } });
+  const texto = await guardado.text();
+  rev(guardado.status === 200 && texto === xml, 'el archivo quedó en R2 y baja idéntico', `${guardado.status} · ${texto.length} de ${xml.length} caracteres`);
+
+  const imp = await pedir(STAGING, `/orgs/${ORG}/fiscal/impuestos?anio=${anio}`, { app });
+  const ene = imp.data?.meses?.[0]?.iva;
+  rev(imp.estado === 200 && imp.data?.meses?.length === 12 && ene?.acreditable >= 16000,
+    'los impuestos del año contestan, y enero trae el IVA de esa factura', `${imp.estado} · acreditable ${ene?.acreditable} · ${imp.ms} ms`);
+  rev(imp.data?.avisos?.falta_coeficiente === true, 'sin coeficiente el ISR no se inventa: lo avisa');
+  const edo = await pedir(STAGING, `/orgs/${ORG}/fiscal/estado-de-cuenta?anio=${anio}`, { app });
+  rev(edo.estado === 200 && (edo.data?.renglones || []).some((x) => x.uuid === UUID), 'el estado de cuenta fiscal la trae', `${edo.estado} · ${edo.data?.renglones?.length} renglones`);
+
+  const sat = await pedir(STAGING, `/orgs/${ORG}/fiscal/verificar`, { app, method: 'POST', body: { ids: [r0?.id] } });
+  const s0 = sat.data?.resultados?.[0];
+  if (sat.estado === 200 && sat.data?.sin_respuesta === 0 && s0?.sat) {
+    rev(s0.sat.estado === 'no_encontrado', 'EL SAT CONTESTA desde el Worker: un folio inventado sale «no encontrado»', `${s0.sat.estado} · «${s0.sat.codigo}» · ${sat.ms} ms`);
+    const f = await pedir(STAGING, `/orgs/${ORG}/fiscal/cfdi/${r0?.id}`, { app });
+    rev(f.data?.estado === 'vigente' && f.data?.estado_sat === 'no_encontrado', '«no encontrada» se anota y NO cancela la factura', `${f.data?.estado} / ${f.data?.estado_sat}`);
+  } else {
+    linea(`  AVISO el SAT NO contestó desde el Worker (no cuenta como falla): ${sat.estado} ${JSON.stringify(s0?.motivo ?? sat.error ?? sat.no_json ?? '')} · ${sat.ms} ms`);
+  }
+
+  linea('');
+  linea('== bill101: la licencia en la empresa demo ==');
+  const sin = await fetch(`${STAGING}/orgs/demo/fiscal/impuestos`, { headers: { 'X-App': 'bill101' } });
+  rev(sin.status === 401, 'sin sesión, bill101 no se abre', String(sin.status));
+  const demo = await pedir(STAGING, '/orgs/demo', { app: 'bill101' });
+  rev(demo.estado === 200 && demo.data?.apps?.bill === true, 'la empresa demo trae bill101 prendida', `${demo.estado} ${JSON.stringify(demo.data?.apps || demo.error)}`);
+  const cfg = await pedir(STAGING, '/orgs/demo/fiscal/config', { app: 'bill101' });
+  rev(cfg.estado === 200, 'y abre sus datos fiscales', String(cfg.estado));
+  const humoSin = await pedir(STAGING, `/orgs/${ORG}/fiscal/config`, { app: 'bill101' });
+  rev(humoSin.estado === 403 && humoSin.error === 'app_inactiva', 'una empresa sin la licencia no la abre', `${humoSin.estado} ${humoSin.error ?? ''}`);
+  const prodSin = await fetch(`${PROD}/orgs/forespot/fiscal/impuestos`, { headers: { 'X-App': 'dash101' } });
+  rev(prodSin.status === 401, 'producción: sin sesión, lo fiscal no se abre', String(prodSin.status));
+}
+
 async function entrarComoMike() {
   galleta = '';
   for (let i = 0; i < 4; i++) {
@@ -1018,6 +1096,7 @@ try {
   await recorrido();
   await licencias();
   await ordenesYFiscal();
+  await bill();
   await importacion();
   await costos();
 } catch (e) {
