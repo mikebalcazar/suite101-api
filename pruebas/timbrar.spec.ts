@@ -319,6 +319,95 @@ describe('emitir', () => {
   });
 });
 
+describe('la factura nueva, segunda vuelta (0.89.0)', () => {
+  const NUEVO = { rfc: 'MAR990101AB1', razon_social: 'Maderas del Sur', regimen_fiscal: '601', cp_fiscal: '64000', uso_cfdi: 'G01' };
+
+  it('un RFC nuevo se guarda como cliente, con sus correos; los conceptos van al catálogo', async () => {
+    const b = { ...BORRADOR, receptor: NUEVO, renglones: [{ ...RENGLON, descripcion: 'Librero de encino' }, { ...RENGLON, descripcion: 'Flete', clave_prod_serv: '78101800', precio_unitario: P(1_500), iva: null }] };
+    const r = await o('mike', '/fiscal/emitir', { method: 'POST', json: { borrador: b, correos: ['conta@maderas.mx', 'CONTA@maderas.mx', 'dueño@maderas.mx', 'no-es-correo'], enviar: true } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    expect(r.data.cliente_id).toBeTruthy();
+    expect(r.data.correo, 'en pruebas el correo no está configurado: se dice, no se traga').toMatchObject({ enviado: false, motivo: 'correo_no_configurado' });
+    const cli = (await o('mike', `/clientes/${r.data.cliente_id}`, { app: 'dash101' })).data;
+    expect(cli).toMatchObject({ nombre: 'MADERAS DEL SUR', rfc: 'MAR990101AB1', razon_social: 'MADERAS DEL SUR', regimen_fiscal: '601', cp_fiscal: '64000', uso_cfdi: 'G01', creado_en_app: 'bill101' });
+    expect(JSON.parse(cli.correos_factura), 'limpios: sin repetir, sin los que no son correo').toEqual(['conta@maderas.mx', 'dueño@maderas.mx']);
+    const pre = (await o('mike', `/fiscal/emitir/prellenar?cliente_id=${r.data.cliente_id}`)).data;
+    expect(pre.cliente.correos).toEqual(['conta@maderas.mx', 'dueño@maderas.mx']);
+    expect(pre.receptor).toMatchObject({ rfc: 'MAR990101AB1', razon_social: 'MADERAS DEL SUR', regimen_fiscal: '601' });
+    // La segunda vez con ese RFC no abre otro cliente.
+    const r2 = await o('mike', '/fiscal/emitir', { method: 'POST', json: { borrador: { ...b, renglones: [{ ...RENGLON, descripcion: 'Librero de encino' }] } } });
+    expect(r2.estado, JSON.stringify(r2)).toBe(201);
+    expect(r2.data.cliente_id).toBe(r.data.cliente_id);
+    const lista = (await o('mike', '/fiscal/clientes?q=maderas')).data.filas as any[];
+    expect(lista).toHaveLength(1);
+    expect(lista[0]).toMatchObject({ id: r.data.cliente_id, rfc: 'MAR990101AB1', correos: ['conta@maderas.mx', 'dueño@maderas.mx'] });
+    expect(((await o('mike', '/fiscal/clientes?q=MAR990')).data.filas as any[])[0].id, 'también por RFC').toBe(r.data.cliente_id);
+    // El catálogo de facturación: el librero se facturó dos veces.
+    const cat = (await o('ana', '/fiscal/conceptos')).data.filas as any[];
+    const librero = cat.find((x) => x.descripcion === 'Librero de encino');
+    expect(librero).toMatchObject({ clave_prod_serv: '56101700', clave_unidad: 'H87', unidad: 'Pieza', precio_unitario: P(85_000), iva: 16, veces: 2 });
+    expect(cat.find((x) => x.descripcion === 'Flete')).toMatchObject({ clave_prod_serv: '78101800', iva: null, veces: 1 });
+    expect(cat[0].descripcion, 'lo más usado primero').toBe('Librero de encino');
+    expect(((await o('ana', '/fiscal/conceptos?q=flete')).data.filas as any[]).map((x) => x.descripcion)).toEqual(['Flete']);
+    expect(((await o('ana', '/fiscal/conceptos?q=encino 5610')).data.filas as any[]).map((x) => x.descripcion)).toEqual(['Librero de encino']);
+  });
+
+  it('al público en general no se le abre cliente; y los correos se exigen bien', async () => {
+    const antes = ((await o('mike', '/fiscal/clientes')).data.filas as any[]).length;
+    const r = await o('mike', '/fiscal/emitir', { method: 'POST', json: { borrador: { ...BORRADOR, receptor: { rfc: 'XAXX010101000', razon_social: 'PUBLICO EN GENERAL', regimen_fiscal: '616', cp_fiscal: '10900', uso_cfdi: 'S01' }, renglones: [{ ...RENGLON, descripcion: 'Venta de mostrador' }] } } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    expect(r.data.cliente_id).toBeNull();
+    expect(((await o('mike', '/fiscal/clientes')).data.filas as any[]).length).toBe(antes);
+    expect(await o('mike', '/fiscal/emitir', { method: 'POST', json: { borrador: BORRADOR, enviar: true } })).toMatchObject({ estado: 400, error: 'borrador_invalido', detalle: { campo: 'correos' } });
+    expect(await o('mike', '/fiscal/emitir', { method: 'POST', json: { borrador: BORRADOR, correos: ['nada'] } })).toMatchObject({ estado: 400, error: 'borrador_invalido', detalle: { campo: 'correos' } });
+    expect(fac.st.llamadas.filter((l) => l.paso === 'timbrar' && (l.cuerpo as any).Items[0].Description === 'Venta de mostrador')).toHaveLength(1);
+  });
+
+  it('los correos de un cliente se cambian aparte', async () => {
+    const r = await o('mike', `/fiscal/clientes/${cliente}/correos`, { method: 'PUT', json: { correos: 'pagos@robotica.mx; Direccion@robotica.mx' } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.correos).toEqual(['pagos@robotica.mx', 'direccion@robotica.mx']);
+    expect((await o('ana', `/fiscal/clientes/${cliente}/correos`, { method: 'PUT', json: { correos: [] } })).estado, 'sólo quien administra').toBe(403);
+    expect((await o('mike', `/fiscal/clientes/no-existe/correos`, { method: 'PUT', json: { correos: [] } })).estado).toBe(404);
+  });
+
+  it('los datos del PDF (banco, leyenda) los pone quien dirige, y se leen', async () => {
+    expect((await o('beto', '/fiscal/pdf-config', { method: 'PUT', json: { banco: 'BBVA' } })).estado).toBe(403);
+    expect(await o('mike', '/fiscal/pdf-config', { method: 'PUT', json: { clabe: '123' } })).toMatchObject({ estado: 400, error: 'datos_invalidos', detalle: { campo: 'clabe' } });
+    const r = await o('mike', '/fiscal/pdf-config', { method: 'PUT', json: { banco: 'BBVA', clabe: '012180001234567890', cuenta: '0123456789', beneficiario: 'Taller 101 S.A. de C.V.', leyenda: 'Gracias por su preferencia.' } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data).toMatchObject({ banco: 'BBVA', clabe: '012180001234567890', cuenta: '0123456789', beneficiario: 'Taller 101 S.A. de C.V.', leyenda: 'Gracias por su preferencia.' });
+    expect((await o('ana', '/fiscal/pdf-config')).data).toMatchObject({ banco: 'BBVA', clabe: '012180001234567890' });
+  });
+
+  it('la vista previa es un PDF del borrador, sin timbrar nada', async () => {
+    const antes = fac.st.llamadas.filter((l) => l.paso === 'timbrar').length;
+    const r = await SELF.fetch(`https://api.local/orgs/${ORG}/fiscal/emitir/vista-previa`, { method: 'POST', headers: { Cookie: galletas.ana, 'X-App': 'bill101', 'Content-Type': 'application/json' }, body: JSON.stringify({ borrador: BORRADOR }) });
+    expect(r.status).toBe(200);
+    expect(r.headers.get('Content-Type')).toBe('application/pdf');
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    expect(new TextDecoder().decode(bytes.slice(0, 5))).toBe('%PDF-');
+    expect(bytes.length).toBeGreaterThan(2000);
+    expect(fac.st.llamadas.filter((l) => l.paso === 'timbrar').length).toBe(antes);
+    const malo = await SELF.fetch(`https://api.local/orgs/${ORG}/fiscal/emitir/vista-previa`, { method: 'POST', headers: { Cookie: galletas.ana, 'X-App': 'bill101', 'Content-Type': 'application/json' }, body: JSON.stringify({ borrador: { ...BORRADOR, renglones: [] } }) });
+    expect(malo.status).toBe(400);
+  });
+
+  it('mandar una timbrada: a los correos del cliente si no se dicen; sin correos, se dice', async () => {
+    const filas = (await o('mike', '/fiscal/cfdi')).data.filas as any[];
+    const venta = filas.find((f) => f.origen === 'timbrado' && f.rfc === 'XAXX010101000');
+    expect(await o('mike', `/fiscal/cfdi/${venta.id}/enviar`, { method: 'POST', json: {} })).toMatchObject({ estado: 400, error: 'sin_correos' });
+    const r = await o('mike', `/fiscal/cfdi/${venta.id}/enviar`, { method: 'POST', json: { correos: ['alguien@ejemplo.mx'] } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data).toMatchObject({ enviado: false, motivo: 'correo_no_configurado', a: ['alguien@ejemplo.mx'] });
+    const librero = filas.find((f) => f.origen === 'timbrado' && f.rfc === 'MAR990101AB1');
+    const r2 = await o('mike', `/fiscal/cfdi/${librero.id}/enviar`, { method: 'POST', json: {} });
+    expect(r2.estado, JSON.stringify(r2)).toBe(200);
+    expect(r2.data.a, 'los del cliente').toEqual(['conta@maderas.mx', 'dueño@maderas.mx']);
+    expect((await o('ana', `/fiscal/cfdi/${librero.id}/enviar`, { method: 'POST', json: {} })).estado).toBe(403);
+  });
+});
+
 describe('el PDF y la cancelación', () => {
   let id = '';
   beforeAll(async () => {
@@ -326,16 +415,23 @@ describe('el PDF y la cancelación', () => {
     id = filas.find((f) => f.folio === '100').id;
   });
 
-  it('el PDF lo arma Facturama la primera vez y luego se sirve de aquí', async () => {
+  it('el PDF lo arma la API desde el XML (0.89.0); el de Facturama sólo si se pide', async () => {
+    const antes = fac.st.llamadas.filter((l) => l.paso === 'bajar_pdf').length;
     const r1 = await SELF.fetch(`https://api.local/orgs/${ORG}/fiscal/cfdi/${id}/pdf`, { headers: { Cookie: galletas.ana, 'X-App': 'bill101' } });
     expect(r1.status).toBe(200);
     expect(r1.headers.get('Content-Type')).toBe('application/pdf');
     expect(r1.headers.get('Content-Disposition')).toContain('FAC-100.pdf');
-    expect(await r1.text()).toContain('%PDF');
-    const antes = fac.st.llamadas.filter((l) => l.paso === 'bajar_pdf').length;
-    const r2 = await SELF.fetch(`https://api.local/orgs/${ORG}/fiscal/cfdi/${id}/pdf`, { headers: { Cookie: galletas.ana, 'X-App': 'bill101' } });
+    const bytes = new Uint8Array(await r1.arrayBuffer());
+    expect(new TextDecoder().decode(bytes.slice(0, 5))).toBe('%PDF-');
+    expect(bytes.length, 'con QR, sellos y cadena original pesa más que una hoja vacía').toBeGreaterThan(6000);
+    expect(fac.st.llamadas.filter((l) => l.paso === 'bajar_pdf').length, 'sin pedírselo a Facturama').toBe(antes);
+    const r2 = await SELF.fetch(`https://api.local/orgs/${ORG}/fiscal/cfdi/${id}/pdf?de=facturama`, { headers: { Cookie: galletas.ana, 'X-App': 'bill101' } });
     expect(r2.status).toBe(200);
-    expect(fac.st.llamadas.filter((l) => l.paso === 'bajar_pdf').length, 'la segunda vez no se le pide a Facturama').toBe(antes);
+    expect(await r2.text()).toContain('%PDF');
+    expect(fac.st.llamadas.filter((l) => l.paso === 'bajar_pdf').length, 'el de Facturama se baja una vez y se guarda').toBe(antes + 1);
+    const r3 = await SELF.fetch(`https://api.local/orgs/${ORG}/fiscal/cfdi/${id}/pdf?de=facturama`, { headers: { Cookie: galletas.ana, 'X-App': 'bill101' } });
+    expect(r3.status).toBe(200);
+    expect(fac.st.llamadas.filter((l) => l.paso === 'bajar_pdf').length).toBe(antes + 1);
     expect((await entorno.ARCHIVOS.list({ prefix: `orgs/${ORG}/cfdi/` })).objects.some((x) => x.key.endsWith('.pdf'))).toBe(true);
   });
 
@@ -358,6 +454,7 @@ describe('el PDF y la cancelación', () => {
   });
 
   it('se cancela: Facturama lo recibe, aquí queda cancelada con su motivo y el acuse guardado', async () => {
+    const ivaAntes = ((await o('mike', '/fiscal/impuestos?anio=2026')).data.meses as any[]).reduce((s: number, m: any) => s + m.iva.trasladado, 0);
     const r = await o('beto', `/fiscal/cfdi/${id}/cancelar`, { method: 'POST', json: { motivo: '02' } });
     expect(r.estado, JSON.stringify(r)).toBe(200);
     expect(r.data).toMatchObject({ estado: 'cancelada', cambio: true, cfdi: { estado: 'cancelada', motivo_cancelacion: '02', cancelacion: 'cancelada', estado_sat: 'cancelado' } });
@@ -366,7 +463,7 @@ describe('el PDF y la cancelación', () => {
     expect(fac.st.llamadas.find((l) => l.paso === 'cancelar')).toMatchObject({ motive: '02', type: 'issued', uuidReplacement: null });
     expect((await o('mike', `/fiscal/cfdi/${id}/cancelar`, { method: 'POST', json: { motivo: '02' } })).estado).toBe(409);
     const imp = (await o('mike', '/fiscal/impuestos?anio=2026')).data;
-    expect(imp.meses.reduce((s: number, m: any) => s + m.iva.trasladado, 0), 'ya no cuenta en el IVA: quedan Closet, Librero y Mesa').toBe(P(40_800));
+    expect(imp.meses.reduce((s: number, m: any) => s + m.iva.trasladado, 0), 'ya no cuenta en el IVA').toBe(ivaAntes - P(14_032));
   });
 
   it('cuando el receptor tiene que aceptar, queda pendiente y sigue vigente', async () => {

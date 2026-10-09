@@ -17,7 +17,30 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.88.0 (BILL101 FASE C: EMITIR Y TIMBRAR CON
+ * Versión del contrato: 0.89.0 (BILL101: LA FACTURA NUEVA, SEGUNDA VUELTA.
+ * Mike, 9-oct: un RFC nuevo se guarda como cliente; cada concepto facturado
+ * queda en un catálogo; correos del cliente a donde se manda la factura
+ * timbrada; vista previa; y el PDF lo arma bill101 con logo y datos
+ * bancarios de la empresa.
+ *   · Tablas internas (org 0048): `conceptos_fact` (catálogo de
+ *     facturación: se arma solo al timbrar) y `pdf_config` (banco, CLABE,
+ *     cuenta, beneficiario, leyenda). `clientes` gana `correos_factura`
+ *     (lista JSON; sale por /clientes).
+ *   · GET /fiscal/conceptos?q= → {filas}; GET /fiscal/clientes?q= → {filas}
+ *     (id, nombre, rfc, razon_social, regimen_fiscal, cp_fiscal, uso_cfdi,
+ *     correos). GET|PUT /fiscal/pdf-config (PUT sólo owner/admin).
+ *   · POST /fiscal/emitir acepta además `correos?: string[]` (se guardan en
+ *     el cliente) y `enviar?: boolean`: timbrada, se manda por correo con
+ *     PDF y XML; la respuesta trae `correo: {enviado, motivo?}`. Un receptor
+ *     con RFC (no XAXX) sin `cliente_id` se busca por RFC o se da de alta
+ *     como cliente; la respuesta trae `cliente_id`.
+ *   · POST /fiscal/cfdi/:id/enviar {correos?} → {enviado, motivo?, a[]}.
+ *   · GET /fiscal/cfdi/:id/pdf: si la factura tiene XML, el PDF lo arma la
+ *     API (src/pdf-cfdi.ts: logo y datos de la empresa, datos bancarios,
+ *     QR del SAT, cadena original); si no, el de Facturama. POST
+ *     /fiscal/emitir/vista-previa {borrador} → PDF con marca «VISTA PREVIA».)
+ * Antes:
+ * 0.88.0 (BILL101 FASE C: EMITIR Y TIMBRAR CON
  * FACTURAMA. Mike, 8-oct: «un módulo para generar y timbrar facturas»; con
  * botones: PAC Facturama por API, v1 Ingreso y Cancelación, todo PUE, la
  * factura nace de un proyecto o libre.
@@ -1457,7 +1480,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.88.0';
+export const VERSION_CONTRATO = '0.89.0';
 
 /* ─────────────── órdenes de compra (0.21.0; cancelada desde 0.86.0) ─────────────── */
 
@@ -2488,6 +2511,8 @@ export const TABLAS_INTERNAS = [
   /* bill101 fase C (0047). Sólo por /orgs/:o/fiscal/pac y /fiscal/emitir.
    * `pac_config` guarda la contraseña de Facturama cifrada: no sale. */
   'pac_config', 'emisiones',
+  /* bill101, factura v2 (0048). Sólo por /orgs/:o/fiscal/*. */
+  'conceptos_fact', 'pdf_config',
 ] as const;
 
 /* ─────────────── lo que devuelven las rutas con nombre ─────────────── */

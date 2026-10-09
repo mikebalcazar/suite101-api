@@ -352,3 +352,50 @@ export function leerCfdi(xml: string): CfdiLeido | FallaXml {
 }
 
 export const esFallaXml = (r: CfdiLeido | FallaXml): r is FallaXml => 'error' in r;
+
+/* ─────────────── lo que la representación impresa necesita además ─────────────── */
+
+/** 0.89.0 · Lo que `leerCfdi` no guarda porque no sirve para contar
+ *  impuestos pero sí para imprimir la factura: sellos, certificados, lugar
+ *  de expedición, condiciones, exportación, y por renglón la tasa y el
+ *  objeto de impuesto. Con el timbre se arma la cadena original del
+ *  complemento y el QR del SAT. */
+export interface ExtrasImpresa {
+  fecha_hora: string;
+  lugar_expedicion: string | null;
+  condiciones: string | null;
+  exportacion: string | null;
+  sello: string | null;
+  no_certificado: string | null;
+  no_certificado_sat: string | null;
+  sello_sat: string | null;
+  rfc_prov_certif: string | null;
+  fecha_timbrado: string | null;
+  /** Por renglón, en el mismo orden que `conceptos` de leerCfdi. */
+  renglones: { objeto_imp: string | null; tasa_iva: string | null }[];
+}
+
+export function extrasImpresa(xml: string): ExtrasImpresa | null {
+  const raiz = typeof xml === 'string' && xml.length <= TOPE_XML ? leerXml(xml) : null;
+  if (!raiz || raiz.local !== 'Comprobante') return null;
+  const c = raiz.attrs;
+  const t = (v: string | undefined, tope = 4000): string | null => (v === undefined ? null : v.trim().slice(0, tope) || null);
+  const timbre = hijos(raiz, 'Complemento').flatMap((x) => x.hijos).find((x) => x.local === 'TimbreFiscalDigital');
+  const renglones = hijos(hijo(raiz, 'Conceptos'), 'Concepto').slice(0, TOPE_CONCEPTOS).map((k) => {
+    const iva = hijos(hijo(hijo(k, 'Impuestos'), 'Traslados'), 'Traslado').find((x) => x.attrs.Impuesto === '002');
+    return { objeto_imp: t(k.attrs.ObjetoImp, 2), tasa_iva: t(iva?.attrs.TasaOCuota, 10) };
+  });
+  return {
+    fecha_hora: (c.Fecha ?? '').trim(),
+    lugar_expedicion: t(c.LugarExpedicion, 10),
+    condiciones: t(c.CondicionesDePago, 1000),
+    exportacion: t(c.Exportacion, 2),
+    sello: t(c.Sello),
+    no_certificado: t(c.NoCertificado, 20),
+    no_certificado_sat: t(timbre?.attrs.NoCertificadoSAT, 20),
+    sello_sat: t(timbre?.attrs.SelloSAT),
+    rfc_prov_certif: t(timbre?.attrs.RfcProvCertif, 13),
+    fecha_timbrado: t(timbre?.attrs.FechaTimbrado, 25),
+    renglones,
+  };
+}

@@ -7,6 +7,7 @@
  * se acepta que un cliente de correo caiga en la de al lado; lo que no se hace
  * es pedirle una fuente que contradiga la identidad. */
 
+import { Buffer } from 'node:buffer';
 import type { Env } from '../entorno';
 
 const AZUL = '#0080C1';
@@ -66,9 +67,13 @@ export const NO_SE_CONTESTA = 'Este buzón no recibe respuestas. Si necesitas al
  *  uno puede querer que deje de llegarle. */
 const bajaDe = (env: Env): string | null => (env.CORREO_BAJA ? `<mailto:${env.CORREO_BAJA}?subject=Baja>` : null);
 
+/** Un archivo que va con el correo (0.89.0: la factura timbrada lleva su
+ *  PDF y su XML). Resend lo quiere en base64. */
+export interface Adjunto { nombre: string; contenido: Uint8Array; tipo: string }
+
 export async function enviarCorreo(
   env: Env,
-  msg: { para: string; asunto: string; html: string; texto: string; conBaja?: boolean },
+  msg: { para: string | string[]; asunto: string; html: string; texto: string; conBaja?: boolean; adjuntos?: Adjunto[] },
 ): Promise<{ enviado: boolean; motivo?: string }> {
   if (!env.RESEND_API_KEY) return { enviado: false, motivo: 'correo_no_configurado' };
   if (!sale(env)) return { enviado: false, motivo: 'correo_apagado_fuera_de_produccion' };
@@ -78,10 +83,11 @@ export async function enviarCorreo(
     headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       from: env.CORREO_REMITENTE || 'Suite 101 <onboarding@resend.dev>',
-      to: [msg.para],
+      to: Array.isArray(msg.para) ? msg.para : [msg.para],
       subject: msg.asunto,
       html: msg.html,
       text: msg.texto,
+      ...(msg.adjuntos?.length ? { attachments: msg.adjuntos.map((a) => ({ filename: a.nombre, content: Buffer.from(a.contenido).toString('base64'), content_type: a.tipo })) } : {}),
       headers: {
         /* Sin esto, Gmail agrupa los mensajes de asunto parecido —«Tu código
          * de acceso: 481920»— en una sola conversación y colapsa los de
@@ -253,5 +259,25 @@ export function correoOrdenResuelta(que: 'devuelta' | 'rechazada', d: DatosOrden
        <p style="margin:0 0 18px;font-size:15px;line-height:1.6;background:#f6f8fa;border-radius:10px;padding:12px 14px">${d.nota}</p>
        <p style="margin:0 0 18px;font-size:15px;line-height:1.6">${que_sigue}</p>
        ${d.url ? `<p style="margin:0"><a href="${d.url}" style="display:inline-block;background:${AZUL};color:#fff;text-decoration:none;padding:11px 18px;border-radius:9px;font-weight:600;font-size:15px">Ver la orden</a></p>` : ''}`),
+  };
+}
+
+/** 0.89.0 · La factura timbrada, al cliente (bill101). Va con su PDF y su
+ *  XML adjuntos; el cuerpo dice lo justo para saber qué es y cuánto. Sin
+ *  liga: el cliente no es de la suite. Sin `List-Unsubscribe`: la pidió él. */
+export function correoFactura(d: { empresa: string; folio: string; uuid: string; total: number; fecha: string; receptor: string }): { asunto: string; html: string; texto: string } {
+  const monto = pesos(d.total);
+  return {
+    asunto: `Factura ${d.folio} de ${d.empresa} · ${monto}`,
+    texto: `${d.empresa} te manda la factura ${d.folio}.\n\nA nombre de: ${d.receptor}\nFecha: ${d.fecha}\nTotal: ${monto}\nFolio fiscal: ${d.uuid}\n\nVan adjuntos el PDF y el XML.\n\n${NO_SE_CONTESTA}\n`,
+    html: sobre(`Factura ${d.folio}`, AZUL,
+      `<p style="margin:0 0 18px;font-size:15px;line-height:1.6"><b>${d.empresa}</b> te manda esta factura. Van adjuntos el PDF y el XML.</p>
+       <table role="presentation" width="100%" style="border-collapse:collapse;margin:0 0 18px">
+         ${renglon('Folio', d.folio, true)}
+         ${renglon('A nombre de', d.receptor)}
+         ${renglon('Fecha', d.fecha, true)}
+         ${renglon('Total', monto, true)}
+         ${renglon('Folio fiscal', d.uuid, true)}
+       </table>`),
   };
 }
