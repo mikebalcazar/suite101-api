@@ -158,7 +158,18 @@ const pesos = (centavos: number): number => Math.round(centavos) / 100;
 
 /** Lo que se le manda a Facturama (POST /3/cfdis). `fecha` es la hora del
  *  centro de México sin zona, como la pide el SAT. */
+export const RFC_PUBLICO = 'XAXX010101000';
+
+/** «Público en general» (RFC genérico): el SAT exige nombre PUBLICO EN
+ *  GENERAL, régimen 616, uso S01 y el código postal del lugar de expedición.
+ *  Se ponen aquí para que nadie tenga que saberlo. */
+export function receptorPublico(b: Borrador, lugar_expedicion: string): Borrador {
+  if (b.receptor.rfc !== RFC_PUBLICO) return b;
+  return { ...b, receptor: { rfc: RFC_PUBLICO, razon_social: 'PUBLICO EN GENERAL', regimen_fiscal: '616', uso_cfdi: 'S01', cp_fiscal: lugar_expedicion } };
+}
+
 export function cuerpoFacturama(b: Borrador, a: { serie: string; folio: number; fecha: string; lugar_expedicion: string }): Record<string, unknown> {
+  b = receptorPublico(b, a.lugar_expedicion);
   const c = cuentas(b.renglones);
   return {
     Serie: a.serie,
