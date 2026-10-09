@@ -5769,7 +5769,7 @@ export class OrgDB extends DurableObject<Env> {
   /* ─────────────── bill101 fase C: timbrar (0.88.0) ─────────────── */
   private static readonly OPS_PAC: ReadonlySet<string> = new Set([
     'config', 'cuenta', 'guardarCuenta', 'quitarCuenta', 'ajustar', 'anotarPerfil', 'prellenar',
-    'abrirEmision', 'timbrada', 'fallida', 'emision', 'emisiones', 'paraCancelar', 'cancelacion',
+    'abrirEmision', 'timbrada', 'fallida', 'darPorFallida', 'emision', 'emisiones', 'paraCancelar', 'cancelacion',
   ]);
 
   pac(op: string, args: unknown[] = []): unknown {
@@ -5779,7 +5779,7 @@ export class OrgDB extends DurableObject<Env> {
       sql: this.sql,
       tx: <T>(fn: () => T): T => this.ctx.storage.transactionSync(fn),
       rfcEmpresa: () => String((this.sql.exec(`SELECT rfc FROM empresa WHERE id = 'empresa'`).toArray()[0] as Fila | undefined)?.rfc ?? ''),
-      importar: (lista, actor) => fiscal('importar', [lista, actor, 'timbrado']),
+      importar: (lista, actor, rfcComo) => fiscal('importar', [lista, actor, 'timbrado', rfcComo]),
       ponerArchivo: (id, a) => fiscal('ponerArchivo', [id, a]),
       cancelar: (id) => this.cancelarCfdi(id),
     }) as unknown as Record<string, (...a: unknown[]) => unknown>;

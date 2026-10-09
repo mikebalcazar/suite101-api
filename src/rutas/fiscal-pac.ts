@@ -9,6 +9,8 @@
  *   POST   /fiscal/emitir/revisar      el borrador → sus cuentas, o la primera falla (sin timbrar)
  *   POST   /fiscal/emitir              el borrador → timbrada (201) o por qué no
  *   GET    /fiscal/emisiones           los intentos, con su folio y en qué quedaron
+ *   POST   /fiscal/emisiones/:id/resolver   una que se quedó «timbrando»: se busca en Facturama por su folio;
+ *                                       si existe se recupera (XML, PDF, entra a cfdi); si no, queda fallida
  *   POST   /fiscal/cfdi/:id/cancelar   { motivo: '01'..'04', uuid_sustituto? }
  *   GET    /fiscal/cfdi/:id/pdf        el PDF de una emitida (Facturama lo arma; se guarda la primera vez)
  *
@@ -29,7 +31,7 @@ import { cifrarLlave, descifrarLlave, llaveMaestraFiel } from '../fiel';
 import { esFallaXml, leerCfdi } from '../cfdi-xml';
 import { horaMx } from '../sat-db';
 import {
-  bajar, cancelar, cuentas, cuerpoFacturama, esFallaPac, MOTIVOS_CANCELACION, perfil, revisarBorrador, timbrar,
+  bajar, buscarPorFolio, cancelar, cuentas, cuerpoFacturama, esFallaPac, MOTIVOS_CANCELACION, perfil, revisarBorrador, timbrar,
   type Cuenta_, type Ventanilla,
 } from '../pac';
 import type { PermisosFiscales } from './fiscal-sat';
@@ -150,11 +152,15 @@ export function montarFiscalPac(rutas: App, p: PermisosFiscales): void {
     const cfg = await stub(c).pac('config');
     const pf = cfg.cuenta?.perfil;
     if (pf && pf.csd === false) return err(c, 'pac_sin_sello', 409, { motivo: 'la cuenta de Facturama no tiene cargado el sello (CSD): sin él no timbra. Se carga en el portal de Facturama.' });
+    // En producción la factura sale con el RFC de la cuenta de Facturama: tiene que ser el de la empresa.
+    if (!k.sandbox && (!cfg.rfc_empresa || (pf?.rfc && pf.rfc !== cfg.rfc_empresa))) {
+      return err(c, 'pac_de_otro_rfc', 409, { facturama: pf?.rfc ?? null, empresa: cfg.rfc_empresa ?? null, motivo: 'la cuenta de Facturama factura con otro RFC que el de la empresa (o la empresa no tiene RFC)' });
+    }
     const lugar = k.lugar_expedicion;
     if (!lugar || !/^\d{5}$/.test(lugar)) return err(c, 'falta_cp_empresa', 409, { motivo: 'falta el código postal fiscal de la empresa (Ajustes), que es el lugar de expedición' });
 
     const em = await stub(c).pac('abrirEmision', [borrador, { proyecto_id: typeof b.proyecto_id === 'string' ? b.proyecto_id : null, cliente_id: typeof b.cliente_id === 'string' ? b.cliente_id : null }, p.actor(c)]);
-    if (esFalla(em)) return err(c, em.error, em.error === 'emision_repetida' ? 409 : codigoDe(em.error), em.detalle);
+    if (esFalla(em)) return err(c, em.error, em.error === 'emision_repetida' || em.error === 'emision_en_camino' ? 409 : codigoDe(em.error), em.detalle);
     const org = c.get('org_id');
     const cuerpo = cuerpoFacturama(borrador, { serie: em.serie, folio: em.folio, fecha: horaMx(Date.now() - 60_000), lugar_expedicion: lugar });
     const t = await timbrar(k, ventanilla(c), cuerpo);
@@ -165,27 +171,66 @@ export function montarFiscalPac(rutas: App, p: PermisosFiscales): void {
       return err(c, t.error, codigoDe(t.error), { ...t.detalle, emision_id: em.id, folio: `${em.serie}-${em.folio}`, ...(sinRespuesta ? { que_hacer: 'no se sabe si se timbró. Antes de volver a intentar, revisar en Facturama si existe el folio.' } : {}) });
     }
     // Timbrada. Su XML es la verdad: se baja, se lee y entra como cualquier otra.
-    const x = await bajar(k, ventanilla(c), t.pac_id, 'xml');
+    const fin = await recuperar(c, k, { id: em.id, serie: em.serie, folio: em.folio }, t.pac_id, t.uuid);
+    if ('error' in fin) return err(c, fin.error, fin.estado, fin.detalle);
+    return ok(c, fin.data, 201);
+  });
+
+  /** Lo que sigue a un timbre: bajar el XML, comprobar que es ÉSTE, meterlo.
+   *  Si algo falla a medias, la emisión guarda lo que se sabe (id y folio
+   *  fiscal) y se queda «timbrando» para resolverla después, nunca para
+   *  timbrarla otra vez. */
+  async function recuperar(c: Ctx, k: Cuenta_, em: { id: string; serie: string; folio: number }, pac_id: string, uuid: string | null): Promise<{ data: Record<string, unknown> } | { error: string; estado: number; detalle?: unknown }> {
+    const sabido = { pac_id, uuid };
+    const x = await bajar(k, ventanilla(c), pac_id, 'xml');
     if (esFallaPac(x)) {
-      await stub(c).pac('fallida', [em.id, `timbrada en Facturama (${t.uuid}) pero no se pudo bajar su XML: ${JSON.stringify(x.detalle ?? {})}`, true]);
-      return err(c, 'timbrada_sin_xml', 502, { uuid: t.uuid, pac_id: t.pac_id, emision_id: em.id, motivo: 'Facturama la timbró pero no entregó el XML; vuelve a intentar bajarlo desde «Emisiones»' });
+      await stub(c).pac('fallida', [em.id, `timbrada en Facturama (${uuid ?? pac_id}) pero no se pudo bajar su XML: ${JSON.stringify(x.detalle ?? {})}`, true, sabido]);
+      return { error: 'timbrada_sin_xml', estado: 502, detalle: { uuid, pac_id, emision_id: em.id, motivo: 'Facturama la timbró pero no entregó el XML; se resuelve desde «Lo intentado»' } };
     }
-    const xml = new TextDecoder().decode(x.bytes);
-    const leida = leerCfdi(xml);
+    const leida = leerCfdi(new TextDecoder().decode(x.bytes));
     if (esFallaXml(leida)) {
-      await stub(c).pac('fallida', [em.id, `timbrada (${t.uuid}) pero su XML no se pudo leer: ${leida.error}`, true]);
-      return err(c, 'timbrada_xml_ilegible', 502, { uuid: t.uuid, emision_id: em.id, motivo: leida.error });
+      await stub(c).pac('fallida', [em.id, `timbrada (${uuid ?? pac_id}) pero su XML no se pudo leer: ${leida.error}`, true, sabido]);
+      return { error: 'timbrada_xml_ilegible', estado: 502, detalle: { uuid, emision_id: em.id, motivo: leida.error } };
     }
-    const r = await stub(c).pac('timbrada', [em.id, leida, t.pac_id, p.actor(c)]);
+    if (uuid && leida.uuid !== uuid) {
+      await stub(c).pac('fallida', [em.id, `Facturama contestó el folio fiscal ${uuid} pero el XML trae ${leida.uuid}`, true, sabido]);
+      return { error: 'xml_de_otra_factura', estado: 502, detalle: { esperado: uuid, vino: leida.uuid, emision_id: em.id } };
+    }
+    const r = await stub(c).pac('timbrada', [em.id, leida, pac_id, p.actor(c)]);
     if (esFalla(r)) {
-      await stub(c).pac('fallida', [em.id, `timbrada (${t.uuid}) pero no entró a la base: ${r.error}`, true]);
-      return err(c, r.error, 500, { ...(r.detalle as object), uuid: t.uuid, emision_id: em.id });
+      await stub(c).pac('fallida', [em.id, `timbrada (${leida.uuid}) pero no entró a la base: ${r.error} ${JSON.stringify(r.detalle ?? {})}`, true, sabido]);
+      return { error: r.error, estado: r.error === 'xml_de_otra_factura' ? 502 : 500, detalle: { ...((r.detalle as object) ?? {}), uuid: leida.uuid, emision_id: em.id } };
     }
+    const org = c.get('org_id');
     const llave = llaveXml(org, String(r.cfdi_id));
     await c.env.ARCHIVOS.put(llave, x.bytes, { httpMetadata: { contentType: 'application/xml' } });
     await stub(c).fiscal('ponerArchivo', [String(r.cfdi_id), { xml_llave: llave }]);
     const detalle = await stub(c).fiscal('detalle', [String(r.cfdi_id)]);
-    return ok(c, { ...r, folio: `${em.serie}-${em.folio}`, cfdi: detalle }, 201);
+    return { data: { ...(r as Record<string, unknown>), folio: `${em.serie}-${em.folio}`, cfdi: detalle } };
+  }
+
+  rutas.post('/:o/fiscal/emisiones/:id/resolver', async (c) => {
+    if (!(await p.administra(c))) return err(c, 'sin_permiso', 403);
+    const em = await stub(c).pac('emision', [c.req.param('id')!]);
+    if (!em) return err(c, 'emision_desconocida', 404);
+    if (em.estado !== 'timbrando') return err(c, 'emision_cerrada', 409, { estado: em.estado, cfdi_id: em.cfdi_id });
+    const k = await abrirCuenta(c);
+    if ('error' in k) return err(c, k.error, codigoDe(k.error), k.detalle);
+    let pac_id: string | null = em.pac_id ? String(em.pac_id) : null;
+    let uuid: string | null = em.uuid ? String(em.uuid) : null;
+    if (!pac_id) {
+      // No se sabe si Facturama la timbró: se le pregunta por el folio.
+      const b = await buscarPorFolio(k, ventanilla(c), String(em.serie), Number(em.folio));
+      if (esFallaPac(b)) return err(c, b.error, codigoDe(b.error), b.detalle);
+      if (!b) {
+        const f = await stub(c).pac('darPorFallida', [em.id, 'Facturama no tiene este folio: no se timbró']);
+        return ok(c, { resultado: 'fallida', emision: f });
+      }
+      pac_id = b.pac_id; uuid = b.uuid;
+    }
+    const fin = await recuperar(c, k, { id: String(em.id), serie: String(em.serie), folio: Number(em.folio) }, pac_id, uuid);
+    if ('error' in fin) return err(c, fin.error, fin.estado, fin.detalle);
+    return ok(c, { ...fin.data, resultado: 'timbrada' });
   });
 
   rutas.get('/:o/fiscal/emisiones', async (c) => {
@@ -235,13 +280,18 @@ export function montarFiscalPac(rutas: App, p: PermisosFiscales): void {
     if ('error' in k) return err(c, k.error, codigoDe(k.error), k.detalle);
     const r = await cancelar(k, ventanilla(c), q.pac_id, motivo, motivo === '01' ? sustituto : null);
     if (esFallaPac(r)) return err(c, r.error, codigoDe(r.error), r.detalle);
+    // Lo que el SAT ya hizo se anota PRIMERO; el acuse, después y aparte:
+    // si guardarlo truena, la factura no se queda vigente aquí y cancelada allá.
+    const a = await stub(c).pac('cancelacion', [id, { estado: r.estado, motivo }]);
+    if (esFalla(a)) return err(c, a.error, 404, a.detalle);
     let acuse_llave: string | null = null;
     if (r.acuse_b64) {
-      acuse_llave = llaveAcuse(c.get('org_id'), id);
-      await c.env.ARCHIVOS.put(acuse_llave, Uint8Array.from(atob(r.acuse_b64), (ch) => ch.charCodeAt(0)), { httpMetadata: { contentType: 'application/xml' } });
+      try {
+        acuse_llave = llaveAcuse(c.get('org_id'), id);
+        await c.env.ARCHIVOS.put(acuse_llave, Uint8Array.from(atob(r.acuse_b64), (ch) => ch.charCodeAt(0)), { httpMetadata: { contentType: 'application/xml' } });
+        await stub(c).pac('cancelacion', [id, { estado: r.estado, motivo, acuse_llave }]);
+      } catch { acuse_llave = null; }
     }
-    const a = await stub(c).pac('cancelacion', [id, { estado: r.estado, motivo, acuse_llave }]);
-    if (esFalla(a)) return err(c, a.error, 404, a.detalle);
-    return ok(c, { ...a, mensaje: r.mensaje, cfdi: await stub(c).fiscal('detalle', [id]) });
+    return ok(c, { ...a, acuse_llave, mensaje: r.mensaje, cfdi: await stub(c).fiscal('detalle', [id]) });
   });
 }

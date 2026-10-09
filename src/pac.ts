@@ -131,12 +131,14 @@ export function revisarBorrador(b: unknown): Borrador | FallaPac {
     if (!/^[A-Z0-9]{2,3}$/.test(unidad)) return mal(`${donde}.clave_unidad`, 'la clave de unidad del SAT son dos o tres letras (H87 pieza, E48 servicio, MTK metro cuadrado)');
     const descripcion = String(x.descripcion ?? '').trim().replace(/\s+/g, ' ');
     if (descripcion.length < 1 || descripcion.length > 1000) return mal(`${donde}.descripcion`, 'falta la descripción (hasta 1,000 letras)');
-    const cantidad = Number(x.cantidad);
-    if (!(cantidad > 0) || cantidad > 1_000_000) return mal(`${donde}.cantidad`, 'la cantidad es un número mayor que cero');
+    // Hasta seis decimales, que es lo que el SAT admite; más se redondea aquí y no allá.
+    const cantidad = Math.round(Number(x.cantidad) * 1e6) / 1e6;
+    if (!(cantidad > 0) || cantidad > 1_000_000) return mal(`${donde}.cantidad`, 'la cantidad es un número mayor que cero (hasta seis decimales)');
     const precio = Number(x.precio_unitario);
     if (!Number.isInteger(precio) || precio < 0 || precio > 1_000_000_000_00) return mal(`${donde}.precio_unitario`, 'el precio va en centavos enteros');
     const descuento = x.descuento === undefined || x.descuento === null ? 0 : Number(x.descuento);
     if (!Number.isInteger(descuento) || descuento < 0) return mal(`${donde}.descuento`, 'el descuento va en centavos enteros, sin signo');
+    if (redondea(cantidad * precio) > 1e15) return mal(`${donde}.precio_unitario`, 'ese importe no cabe en una factura');
     if (descuento > redondea(cantidad * precio)) return mal(`${donde}.descuento`, 'el descuento no puede ser mayor que el importe del renglón');
     const iva = x.iva === null || x.iva === 'no_objeto' ? null : Number(x.iva);
     if (iva !== null && iva !== 16 && iva !== 0) return mal(`${donde}.iva`, 'el IVA es 16, 0 (tasa cero) o nulo (no objeto)');
@@ -316,8 +318,23 @@ export async function cancelar(c: Cuenta_, v: Ventanilla, pac_id: string, motivo
   if (esFallaPac(r)) return r;
   const o = (r.json ?? {}) as Record<string, unknown>;
   const s = String(o.Status ?? '').toLowerCase();
+  if (!['canceled', 'cancelled', 'pending', 'active'].includes(s)) return { error: 'pac_respuesta_rara', detalle: { paso: 'cancelar', motivo: 'Facturama contestó un estado que no se conoce', estado: s.slice(0, 40) } };
   const estado: Cancelada['estado'] = s === 'canceled' || s === 'cancelled' ? 'cancelada' : s === 'pending' ? 'pendiente' : 'vigente';
   return { estado, mensaje: texto(o, 'AcuseStatusDetails') ?? texto(o, 'Message'), acuse_b64: texto(o, 'AcuseXmlBase64') };
+}
+
+/** Buscar en Facturama una factura emitida por su serie y folio: para saber
+ *  si una emisión que se quedó sin respuesta de verdad se timbró. */
+export async function buscarPorFolio(c: Cuenta_, v: Ventanilla, serie: string, folio: number): Promise<{ pac_id: string; uuid: string | null } | null | FallaPac> {
+  const q = new URLSearchParams({ type: 'issued', keyword: String(folio), status: 'all', page: '0' });
+  const r = await llamar(c, v, 'buscar', 'GET', `/cfdi?${q}`);
+  if (esFallaPac(r)) return r;
+  const lista = Array.isArray(r.json) ? (r.json as Record<string, unknown>[]) : [];
+  const f = lista.find((x) => String(x.Folio ?? '') === String(folio) && String(x.Serie ?? '') === serie && String(x.Status ?? 'active').toLowerCase() !== 'deleted');
+  if (!f) return null;
+  const pac_id = texto(f, 'Id');
+  if (!pac_id) return null;
+  return { pac_id, uuid: texto(f, 'Uuid')?.toUpperCase() ?? null };
 }
 
 /** El perfil fiscal de la cuenta en Facturama: de quién es y si ya tiene el

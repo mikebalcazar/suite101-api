@@ -230,7 +230,7 @@ describe('emitir', () => {
     expect((await o('mike', '/fiscal/pac')).data.cuenta.folio_siguiente).toBe(102);
   });
 
-  it('Facturama no contesta: la emisión se queda «timbrando» y se dice que no se reintente a ciegas', async () => {
+  it('Facturama no contesta: la emisión se queda «timbrando», se dice que no se reintente a ciegas, y nada más se timbra hasta resolverla', async () => {
     fac.st.modo = 'caido';
     const r = await o('mike', '/fiscal/emitir', { method: 'POST', json: { borrador: { ...BORRADOR, renglones: [{ ...RENGLON, cantidad: 3 }] } } });
     expect(r.estado).toBe(502);
@@ -240,6 +240,49 @@ describe('emitir', () => {
     const e = (await o('mike', '/fiscal/emisiones')).data.filas as any[];
     expect(e[0]).toMatchObject({ folio: 102, estado: 'timbrando' });
     expect((await o('mike', '/fiscal/pac')).data.en_camino).toBe(1);
+    // La puerta queda cerrada: otra factura, aunque sea distinta, no se timbra.
+    const otra = await o('mike', '/fiscal/emitir', { method: 'POST', json: { borrador: { ...BORRADOR, renglones: [{ ...RENGLON, descripcion: 'Otra' }] } } });
+    expect(otra).toMatchObject({ estado: 409, error: 'emision_en_camino' });
+    expect(otra.detalle.emision_id).toBe(e[0].id);
+    expect(fac.st.llamadas.filter((l) => l.paso === 'timbrar' && (l.cuerpo as any).Items[0].Description === 'Otra')).toHaveLength(0);
+  });
+
+  it('resolver: Facturama no tiene ese folio → queda fallida, y se vuelve a poder timbrar', async () => {
+    const e = (await o('mike', '/fiscal/emisiones')).data.filas as any[];
+    expect((await o('ana', `/fiscal/emisiones/${e[0].id}/resolver`, { method: 'POST' })).estado).toBe(403);
+    const r = await o('mike', `/fiscal/emisiones/${e[0].id}/resolver`, { method: 'POST' });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.resultado).toBe('fallida');
+    expect(fac.st.llamadas.find((l) => l.paso === 'buscar')).toMatchObject({ keyword: '102' });
+    expect((await o('mike', '/fiscal/emisiones')).data.filas[0]).toMatchObject({ folio: 102, estado: 'fallida' });
+    expect((await o('mike', '/fiscal/pac')).data.en_camino).toBe(0);
+    expect((await o('mike', `/fiscal/emisiones/${e[0].id}/resolver`, { method: 'POST' })).estado, 'una cerrada no se resuelve dos veces').toBe(409);
+  });
+
+  it('resolver: Facturama SÍ la timbró aunque no contestó → se recupera con su XML, sin timbrar otra', async () => {
+    fac.st.modo = 'timbra_y_calla';
+    const r = await o('mike', '/fiscal/emitir', { method: 'POST', json: { borrador: { ...BORRADOR, renglones: [{ ...RENGLON, descripcion: 'Librero' }] } } });
+    expect(r.estado).toBe(502);
+    fac.st.modo = 'bien';
+    const em = (await o('mike', '/fiscal/emisiones')).data.filas[0];
+    expect(em).toMatchObject({ estado: 'timbrando', folio: 103 });
+    const timbres = fac.st.llamadas.filter((l) => l.paso === 'timbrar').length;
+    const res = await o('mike', `/fiscal/emisiones/${em.id}/resolver`, { method: 'POST' });
+    expect(res.estado, JSON.stringify(res)).toBe(200);
+    expect(res.data.resultado).toBe('timbrada');
+    expect(res.data.cfdi).toMatchObject({ folio: '103', origen: 'timbrado', estado: 'vigente' });
+    expect(fac.st.llamadas.filter((l) => l.paso === 'timbrar').length, 'no se volvió a timbrar').toBe(timbres);
+    expect((await o('mike', '/fiscal/emisiones')).data.filas[0]).toMatchObject({ estado: 'timbrada', folio: 103 });
+    const cf = (await o('mike', '/fiscal/cfdi')).data.filas as any[];
+    expect(cf.filter((x) => x.pac_id).map((x) => x.folio).sort(), JSON.stringify(cf.map((x) => [x.folio, x.pac_id, x.origen]))).toEqual(['100', '103', 'x']);
+  });
+
+  it('en una cuenta de pruebas el emisor es el RFC del sandbox, y aun así entra como emitida de la empresa', async () => {
+    expect((await o('mike', '/empresa', { method: 'PATCH', app: 'dash101', json: { rfc: 'AAA010101AAA' } })).estado).toBe(200);
+    const r = await o('mike', '/fiscal/emitir', { method: 'POST', json: { borrador: { ...BORRADOR, renglones: [{ ...RENGLON, descripcion: 'Mesa' }] } } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    expect(r.data.cfdi).toMatchObject({ lado: 'emitida', tipo: 'ingreso', rfc_emisor: RFC_EMPRESA });
+    expect((await o('mike', '/empresa', { method: 'PATCH', app: 'dash101', json: { rfc: RFC_EMPRESA } })).estado).toBe(200);
   });
 
   it('el mismo clic dos veces no timbra dos veces', async () => {
@@ -251,6 +294,7 @@ describe('emitir', () => {
     const estados = [a.estado, c.estado].sort();
     expect(estados, JSON.stringify([a, c])).toEqual([201, 409]);
     expect(fac.st.llamadas.filter((l) => l.paso === 'timbrar' && (l.cuerpo as any).Items[0].Description === 'Closet')).toHaveLength(1);
+    expect([a, c].find((x) => x.estado === 409)!.error).toBe('emision_repetida');
   });
 
   it('sin el sello en Facturama no se intenta', async () => {
@@ -305,10 +349,11 @@ describe('el PDF y la cancelación', () => {
     expect(r.estado, JSON.stringify(r)).toBe(200);
     expect(r.data).toMatchObject({ estado: 'cancelada', cambio: true, cfdi: { estado: 'cancelada', motivo_cancelacion: '02', cancelacion: 'cancelada', estado_sat: 'cancelado' } });
     expect(r.data.cfdi.acuse_llave).toBeTruthy();
+    expect(r.data.acuse_llave).toBe(r.data.cfdi.acuse_llave);
     expect(fac.st.llamadas.find((l) => l.paso === 'cancelar')).toMatchObject({ motive: '02', type: 'issued', uuidReplacement: null });
     expect((await o('mike', `/fiscal/cfdi/${id}/cancelar`, { method: 'POST', json: { motivo: '02' } })).estado).toBe(409);
     const imp = (await o('mike', '/fiscal/impuestos?anio=2026')).data;
-    expect(imp.meses.reduce((s: number, m: any) => s + m.iva.trasladado, 0), 'ya no cuenta en el IVA').toBe(P(13_600));
+    expect(imp.meses.reduce((s: number, m: any) => s + m.iva.trasladado, 0), 'ya no cuenta en el IVA: quedan Closet, Librero y Mesa').toBe(P(40_800));
   });
 
   it('cuando el receptor tiene que aceptar, queda pendiente y sigue vigente', async () => {
@@ -319,5 +364,12 @@ describe('el PDF y la cancelación', () => {
     fac.st.modo = 'bien';
     expect(r.estado).toBe(200);
     expect(r.data).toMatchObject({ estado: 'pendiente', cambio: false, cfdi: { estado: 'vigente', cancelacion: 'pendiente', motivo_cancelacion: '03' } });
+    // La lista del SAT (fase D) la resuelve: el SAT dice cancelada → aquí también.
+    const dentro = (await import('cloudflare:test')).runInDurableObject as unknown as <T>(s: unknown, f: (o: any) => T) => Promise<T>;
+    const entorno2 = env as unknown as { ORG: DurableObjectNamespace };
+    const a = await dentro(entorno2.ORG.get(entorno2.ORG.idFromName(ORG)), (db: any) => db.fiscal('anotarSat', [closet.id, { estado: 'cancelado' }]));
+    expect(a.cambio).toBe(true);
+    const f2 = (await o('mike', `/fiscal/cfdi/${closet.id}`)).data;
+    expect(f2).toMatchObject({ estado: 'cancelada', cancelacion: 'cancelada', estado_sat: 'cancelado' });
   });
 });

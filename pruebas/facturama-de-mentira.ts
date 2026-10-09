@@ -26,8 +26,10 @@ export interface EstadoFacturama {
   llamadas: Record<string, unknown>[];
   /** Lo timbrado, por id de Facturama. */
   cfdis: Map<string, { uuid: string; xml: string; cuerpo: Record<string, any>; estado: 'active' | 'canceled' | 'pending' }>;
-  /** Para simular: 'caido' (503), 'mudo' (lanza), 'cancelacion_pendiente'. */
-  modo: 'bien' | 'caido' | 'mudo' | 'cancelacion_pendiente';
+  /** Para simular: 'caido' (503), 'mudo' (lanza), 'cancelacion_pendiente',
+   *  'timbra_y_calla' (timbra de verdad y luego contesta 503: el caso que
+   *  deja una emisión sin saber). */
+  modo: 'bien' | 'caido' | 'mudo' | 'cancelacion_pendiente' | 'timbra_y_calla';
   n: number;
 }
 
@@ -98,6 +100,7 @@ export function crearFacturama(usuario: string, clave: string): { responder(url:
         conceptos: (b.Items as any[]).map((it) => ({ descripcion: String(it.Description), cantidad: String(it.Quantity), valor: Number(it.UnitPrice).toFixed(2), iva: (it.Taxes || []).reduce((s: number, t: any) => s + Number(t.Total), 0).toFixed(2) })),
       });
       st.cfdis.set(id, { uuid, xml, cuerpo: b, estado: 'active' });
+      if (st.modo === 'timbra_y_calla') return { status: 503, body: '<html>Gateway Time-out</html>' };
       return json(201, {
         Id: id, CfdiType: 'ingreso', Type: 'I - ingreso', Serie: b.Serie ?? null, Folio: b.Folio, Date: `${fecha}T10:00:00`,
         PaymentTerms: `${b.PaymentForm} - …`, PaymentMethod: 'PUE - Pago en una sola exhibición', ExpeditionPlace: b.ExpeditionPlace, Currency: 'MXN - Peso Mexicano',
@@ -107,6 +110,14 @@ export function crearFacturama(usuario: string, clave: string): { responder(url:
         Complement: { TaxStamp: { Uuid: uuid.toLowerCase(), Date: `${fecha}T10:00:01`, SatCertNumber: '30001000000500003456', RfcProvCertif: 'SPR190613I52' } },
         Status: 'active',
       });
+    }
+
+    if (u.pathname === '/cfdi' && u.searchParams.get('type') === 'issued') {
+      const k = u.searchParams.get('keyword') || '';
+      st.llamadas.push({ paso: 'buscar', keyword: k });
+      const lista = [...st.cfdis.entries()].filter(([, c]) => String(c.cuerpo.Folio).includes(k) || String(c.cuerpo.Serie ?? '').includes(k))
+        .map(([id, c]) => ({ Id: id, Serie: c.cuerpo.Serie ?? null, Folio: String(c.cuerpo.Folio), Uuid: c.uuid.toLowerCase(), Status: c.estado, Total: 0 }));
+      return json(200, lista);
     }
 
     let m = /^\/cfdi\/(xml|pdf|html)\/issued\/([^/]+)$/.exec(u.pathname);

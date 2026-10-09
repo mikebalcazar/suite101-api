@@ -29,7 +29,9 @@ export interface EntornoPac {
   sql: SqlStorage;
   tx<T>(fn: () => T): T;
   rfcEmpresa(): string;
-  importar(lista: CfdiLeido[], actor: Actor): { resultados: ResultadoImportar[] } | Falla;
+  /** `rfcComo`: en una cuenta de pruebas el emisor del XML es el RFC del
+   *  sandbox, no el de la empresa; con esto la factura entra como emitida. */
+  importar(lista: CfdiLeido[], actor: Actor, rfcComo?: string): { resultados: ResultadoImportar[] } | Falla;
   ponerArchivo(id: string, a: { xml_llave?: string | null; pdf_llave?: string | null }): unknown;
   cancelar(id: string): Fila | Falla;
 }
@@ -54,7 +56,7 @@ export class MotorPac {
   /** Lo que ve la pantalla: nunca la contraseña. */
   config(): Fila {
     const f = this.fila();
-    const emitidas = Number(this.una(`SELECT COUNT(*) AS n FROM cfdi WHERE origen = 'timbrado'`)?.n ?? 0);
+    const emitidas = Number(this.una(`SELECT COUNT(*) AS n FROM cfdi WHERE pac_id IS NOT NULL`)?.n ?? 0);
     return {
       rfc_empresa: this.e.rfcEmpresa().toUpperCase().replace(/[\s.-]/g, '') || null,
       cuenta: f ? {
@@ -185,13 +187,18 @@ export class MotorPac {
     if (!f) return { error: 'sin_pac', detalle: { motivo: 'primero hay que poner la cuenta de Facturama' } };
     if (a.proyecto_id && !this.una(`SELECT 1 AS x FROM proyectos WHERE id = ?`, a.proyecto_id)) return { error: 'proyecto_desconocido' };
     if (a.cliente_id && !this.una(`SELECT 1 AS x FROM clientes WHERE id = ?`, a.cliente_id)) return { error: 'cliente_desconocido' };
-    // Una ya en camino con el mismo receptor y total, hace menos de un minuto: es el mismo clic dos veces.
-    const total = JSON.stringify(b.renglones);
-    const gemela = this.una(
-      `SELECT id FROM emisiones WHERE estado = 'timbrando' AND creada_at > ? AND json_extract(borrador, '$.receptor.rfc') = ? AND json_extract(borrador, '$.renglones') = json(?)`,
-      new Date(Date.now() - 60_000).toISOString(), b.receptor.rfc, total,
-    );
-    if (gemela) return { error: 'emision_repetida', detalle: { emision_id: gemela.id, motivo: 'esa misma factura se está timbrando ahora mismo' } };
+    /* Una que sigue «timbrando» —el mismo clic dos veces, o una a la que
+     * Facturama no contestó— cierra la puerta: no se timbra nada más hasta
+     * saber en qué quedó (POST /fiscal/emisiones/:id/resolver). Es la única
+     * manera de no timbrar dos veces la misma factura sin que nadie se entere. */
+    const abierta = this.una(`SELECT id, serie, folio, creada_at, error FROM emisiones WHERE estado = 'timbrando' ORDER BY creada_at LIMIT 1`);
+    if (abierta) {
+      const reciente = Date.parse(String(abierta.creada_at)) > Date.now() - 60_000 && !abierta.error;
+      return {
+        error: reciente ? 'emision_repetida' : 'emision_en_camino',
+        detalle: { emision_id: abierta.id, folio: `${abierta.serie}-${abierta.folio}`, motivo: reciente ? 'hay una factura timbrándose ahora mismo' : 'hay una emisión sin resolver: no se sabe si se timbró. Hay que resolverla antes de timbrar otra' },
+      };
+    }
     const id = ulid();
     const folio = Number(f.folio_siguiente);
     this.e.tx(() => {
@@ -210,7 +217,14 @@ export class MotorPac {
   timbrada(emision_id: string, leida: CfdiLeido, pac_id: string, actor: Actor): Fila | Falla {
     const em = this.una(`SELECT * FROM emisiones WHERE id = ?`, emision_id);
     if (!em) return { error: 'emision_desconocida' };
-    const r = this.e.importar([leida], actor);
+    if (em.estado === 'timbrada') return { error: 'emision_cerrada', detalle: { estado: em.estado, cfdi_id: em.cfdi_id } };
+    // El XML tiene que ser EL de esta emisión: misma serie y folio. Otro
+    // archivo (otro id de Facturama) no entra como si fuera ésta.
+    if ((leida.serie ?? '') !== String(em.serie) || String(leida.folio ?? '') !== String(em.folio)) {
+      return { error: 'xml_de_otra_factura', detalle: { esperado: `${em.serie}-${em.folio}`, vino: `${leida.serie ?? ''}-${leida.folio ?? ''}` } };
+    }
+    const sandbox = !!this.fila()?.sandbox;
+    const r = this.e.importar([leida], actor, sandbox ? leida.emisor.rfc : undefined);
     if (esFalla(r)) return r;
     const x = r.resultados[0];
     if (!x?.id || x.resultado === 'rechazada') return { error: 'cfdi_no_entro', detalle: { motivo: x?.motivo, detalle: x?.detalle } };
@@ -231,13 +245,21 @@ export class MotorPac {
   /** Facturama dijo que no (o no se sabe). `sin_respuesta`: se mandó y no
    *  contestó; la emisión se queda `timbrando` para poder preguntar después
    *  si de verdad se timbró, en vez de timbrarla dos veces. */
-  fallida(emision_id: string, error: string, sin_respuesta = false): Fila | Falla {
+  fallida(emision_id: string, error: string, sin_respuesta = false, sabido: { pac_id?: string | null; uuid?: string | null } = {}): Fila | Falla {
     const em = this.una(`SELECT id, estado FROM emisiones WHERE id = ?`, emision_id);
     if (!em) return { error: 'emision_desconocida' };
     if (em.estado !== 'timbrando') return { error: 'emision_cerrada', detalle: { estado: em.estado } };
-    if (sin_respuesta) this.sql.exec(`UPDATE emisiones SET error = ? WHERE id = ?`, error.slice(0, 2000), emision_id);
+    // Si Facturama sí la timbró y lo que falló fue después, su id y su folio
+    // fiscal se guardan: con ellos se recupera (resolver).
+    if (sin_respuesta) this.sql.exec(`UPDATE emisiones SET error = ?, pac_id = COALESCE(?, pac_id), uuid = COALESCE(?, uuid) WHERE id = ?`, error.slice(0, 2000), sabido.pac_id ?? null, sabido.uuid ?? null, emision_id);
     else this.sql.exec(`UPDATE emisiones SET estado = 'fallida', error = ?, terminada_at = ? WHERE id = ?`, error.slice(0, 2000), ahora(), emision_id);
-    return this.una(`SELECT id, serie, folio, estado, error, creada_at, terminada_at FROM emisiones WHERE id = ?`, emision_id)!;
+    return this.una(`SELECT id, serie, folio, estado, error, pac_id, uuid, creada_at, terminada_at FROM emisiones WHERE id = ?`, emision_id)!;
+  }
+
+  /** Cerrar a mano una emisión que se quedó «timbrando» y que Facturama
+   *  dice que NO existe (o que alguien decide dar por perdida). */
+  darPorFallida(emision_id: string, motivo: string): Fila | Falla {
+    return this.fallida(emision_id, motivo, false);
   }
 
   emision(id: string): Fila | null {
@@ -262,7 +284,8 @@ export class MotorPac {
   paraCancelar(cfdi_id: string): { pac_id: string; uuid: string; estado: string; cancelacion: string | null } | Falla {
     const f = this.una(`SELECT id, pac_id, uuid, estado, cancelacion, origen, tipo FROM cfdi WHERE id = ?`, cfdi_id);
     if (!f) return { error: 'cfdi_desconocido' };
-    if (f.tipo !== 'ingreso' || f.origen !== 'timbrado' || !f.pac_id) return { error: 'no_se_emitio_aqui', detalle: { motivo: 'sólo se puede cancelar desde aquí una factura que se timbró desde aquí' } };
+    // Con `pac_id` basta: si primero la bajó el SAT (fase D) y luego se ligó a su emisión, su origen dice `sat` y sigue siendo nuestra.
+    if (f.tipo !== 'ingreso' || !f.pac_id) return { error: 'no_se_emitio_aqui', detalle: { motivo: 'sólo se puede cancelar desde aquí una factura que se timbró desde aquí' } };
     if (f.estado !== 'vigente') return { error: 'ya_cancelada' };
     return { pac_id: String(f.pac_id), uuid: String(f.uuid), estado: String(f.estado), cancelacion: (f.cancelacion as string | null) ?? null };
   }

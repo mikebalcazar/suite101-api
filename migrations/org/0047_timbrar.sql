@@ -49,9 +49,11 @@ CREATE TABLE IF NOT EXISTS pac_config (
 );
 
 -- `emisiones` — cada intento de timbrar, con su folio apartado y lo que se
--- mandó. Si Facturama contesta mal, queda `fallida` con el motivo y el folio
--- se vuelve a usar en el siguiente intento (Facturama pide no regenerar el
--- folio en un reintento). Si contesta bien, apunta a la factura en `cfdi`.
+-- mandó. Si Facturama contesta mal, queda `fallida` con el motivo y ese
+-- folio NO se vuelve a usar: un hueco en los folios se explica, un folio
+-- repetido no. Si no contesta, se queda `timbrando` con lo que se sepa
+-- (pac_id, uuid) hasta que alguien la resuelva. Si contesta bien, apunta a
+-- la factura en `cfdi`.
 CREATE TABLE IF NOT EXISTS emisiones (
   id           TEXT PRIMARY KEY,
   serie        TEXT NOT NULL,

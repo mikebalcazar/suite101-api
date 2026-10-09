@@ -111,9 +111,11 @@ export class MotorFiscal {
    *  receptor, la recibió; si no es ninguno de los dos, NO ES SUYA y no
    *  entra. Sin RFC en la empresa no se puede saber, así que no entra
    *  ninguna y se dice qué falta. */
-  importar(lista: CfdiLeido[], actor: Actor, origen: Origen = 'xml'): { rfc_empresa: string; resultados: ResultadoImportar[] } | Falla {
+  importar(lista: CfdiLeido[], actor: Actor, origen: Origen = 'xml', rfcComo?: string): { rfc_empresa: string; resultados: ResultadoImportar[] } | Falla {
     // Como lo escribe la gente: «EKU-900317-3C9», con espacios. En el XML va corrido.
-    const rfc = this.e.rfcEmpresa().toUpperCase().replace(/[\s.-]/g, '');
+    // `rfcComo` (0.88.0): una cuenta de PRUEBAS de Facturama timbra con el RFC
+    // del sandbox, no con el de la empresa; lo timbrado entra como si fuera suyo.
+    const rfc = (rfcComo || this.e.rfcEmpresa()).toUpperCase().replace(/[\s.-]/g, '');
     if (!rfc) return { error: 'falta_rfc_empresa', detalle: { motivo: 'sin el RFC de la empresa no se sabe si una factura es emitida o recibida', donde: 'PATCH /orgs/:o/empresa { rfc }' } };
     if (!ORIGENES.includes(origen)) return { error: 'origen_invalido', detalle: { origen, acepta: ORIGENES } };
     const resultados: ResultadoImportar[] = [];
@@ -402,6 +404,13 @@ export class MotorFiscal {
     this.e.tx(() => {
       this.sql.exec(`UPDATE cfdi SET estado_sat = ?, sat_revisado_at = ? WHERE id = ?`, r.estado, ahora(), id);
       if (r.estado === 'cancelado' && f.estado === 'vigente') cambio = !esFalla(this.e.cancelar(id));
+      /* Una cancelación que se pidió por Facturama y esperaba al receptor
+       * (0.88.0): lo que diga el SAT la resuelve. Cancelada: quedó. Sigue
+       * vigente: el receptor no la aceptó, o aún no. */
+      if (f.cancelacion === 'pendiente') {
+        if (r.estado === 'cancelado') this.sql.exec(`UPDATE cfdi SET cancelacion = 'cancelada' WHERE id = ?`, id);
+        else if (r.estado === 'vigente' && f.actualizado_at && Date.now() - Date.parse(String(f.actualizado_at)) > 4 * 86_400_000) this.sql.exec(`UPDATE cfdi SET cancelacion = 'rechazada' WHERE id = ?`, id);
+      }
     });
     return { cfdi: this.forma(this.cfdi(id)!), cambio };
   }
