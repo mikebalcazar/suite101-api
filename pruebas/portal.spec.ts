@@ -128,7 +128,7 @@ describe('la puerta de la suite', () => {
    * emite, no las timbra ni las baja del SAT. La tarjeta no lo promete. */
   it('la tarjeta de bill101 sólo dice lo que hace hoy', async () => {
     const html = await (await SELF.fetch(`${SUITE}/`)).text();
-    const tarjeta = html.match(/<a class="app" href="https:\/\/bill101\.taller101\.com"[^]*?<\/a>/)?.[0] ?? '';
+    const tarjeta = html.match(/<a class="app"[^>]*href="https:\/\/bill101\.taller101\.com"[^]*?<\/a>/)?.[0] ?? '';
     expect(tarjeta).toContain('estimados');
     expect(tarjeta).not.toMatch(/timbr|descarga|declaraci/i);
   });
