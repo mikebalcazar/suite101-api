@@ -515,18 +515,18 @@ async function marcasDe(env, docId) {
  *  (2).pdf» con acentos y paréntesis en una llave de R2 es un problema el
  *  día que haya que buscarlo a mano. La llave lleva el id, que es único, y
  *  el nombre bonito se guarda en la columna, que es donde sirve. */
-async function guardaDoc(env, { element_id, rol, archivo, nombre, paginas, familia_id, version, user }) {
+async function guardaDoc(env, { element_id, rol, archivo, nombre, paginas, familia_id, version, user, diseno = 0 }) {
   const id = uid();
   const ext = (String(archivo.name || '').split('.').pop() || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5);
   const llave = `${env.PREFIJO_R2}docs/${element_id}/${id}${ext ? '.' + ext : ''}`;
   await env.FILES.put(llave, archivo.stream(), { httpMetadata: { contentType: archivo.type || 'application/octet-stream' } });
   await env.DB.prepare(
-    `INSERT INTO quell_element_docs (id, element_id, familia_id, rol, nombre, r2_key, mime, bytes, paginas, version, subido_por)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    `INSERT INTO quell_element_docs (id, element_id, familia_id, rol, nombre, r2_key, mime, bytes, paginas, version, subido_por, diseno)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
     .bind(id, element_id, familia_id || id, rol,
           String(nombre || archivo.name || 'Documento').slice(0, 200),
           llave, archivo.type || null, archivo.size || 0,
-          Math.max(1, Math.trunc(Number(paginas) || 1)), Number(version) || 1, user.id).run();
+          Math.max(1, Math.trunc(Number(paginas) || 1)), Number(version) || 1, user.id, diseno ? 1 : 0).run();
   return await env.DB.prepare(`SELECT * FROM quell_element_docs WHERE id = ?`).bind(id).first();
 }
 
@@ -1526,7 +1526,7 @@ export async function atender(req, env, url, path) {
       const nueva = await guardaDoc(env, {
         element_id: doc.element_id, rol: doc.rol, archivo,
         nombre: fd.get('nombre') || doc.nombre, paginas: fd.get('paginas'),
-        familia_id: doc.familia_id, version: Number(doc.version) + 1, user,
+        familia_id: doc.familia_id, version: Number(doc.version) + 1, user, diseno: doc.diseno,
       });
 
       /* Copiar las marcas de la anterior es una DECISIÓN de quien sube, no
@@ -1694,6 +1694,11 @@ export async function atender(req, env, url, path) {
        * hay fecha: ahí la pantalla decide qué poner, y lo que pone es un
        * botón para fijarla. */
       element.item_entrega_falta = faltaParaEntrega(element.item_fecha_entrega);
+      /* 0.90.0 · El archivo del diseño definido, si hay: para enseñarlo junto
+       * a la fecha sin abrir la barra de archivos. */
+      element.diseno_doc = await env.DB.prepare(
+        `SELECT id, nombre, mime, paginas, version, created_at FROM quell_element_docs
+          WHERE element_id = ? AND diseno = 1 AND archivado_at IS NULL`).bind(eid).first() || null;
       /* La bitácora del alcance del ítem (0.64.0): cuándo entró, cuándo
        * salió, quién y por qué. Es del ítem, no de la pieza, y por eso viene
        * de `alcance_movimientos` y no de la bitácora de la obra. Sólo para la
@@ -1909,6 +1914,26 @@ export async function atender(req, env, url, path) {
       if (await yaHecha(env, op)) return json({ ok: true, repetida: true });
       const archivo = fd.get('archivo');
       if (!(archivo instanceof File) || !archivo.size) return err('falta el archivo');
+      /* 0.90.0 · El archivo del DISEÑO DEFINIDO (Mike, 9-oct: «marcar que el
+       * diseño ya está definido y poder adjuntar un plano (pdf) o imagen»).
+       * Va aparte del principal —lo escogió con botones—: es de soporte con
+       * la marca `diseno`. Uno vivo por pieza: si ya hay, éste es su versión
+       * nueva y el anterior se archiva (se consulta en versiones). Con
+       * `diseno_definido` (AAAA-MM-DD) se fecha la pieza en el mismo paso. */
+      if (fd.get('diseno') === '1') {
+        const fecha = String(fd.get('diseno_definido') || '');
+        if (fecha && !fechaValida(fecha)) return err('La fecha del diseño no es válida (AAAA-MM-DD).', 400);
+        const previo = await env.DB.prepare(
+          `SELECT * FROM quell_element_docs WHERE element_id = ? AND diseno = 1 AND archivado_at IS NULL`).bind(eid).first();
+        if (previo) await env.DB.prepare(`UPDATE quell_element_docs SET archivado_at = ? WHERE id = ?`).bind(new Date().toISOString(), previo.id).run();
+        const doc = await guardaDoc(env, {
+          element_id: eid, rol: 'soporte', archivo, nombre: fd.get('nombre'), paginas: fd.get('paginas'), user, diseno: 1,
+          ...(previo ? { familia_id: previo.familia_id, version: Number(previo.version) + 1 } : {}),
+        });
+        if (fecha) await env.DB.prepare(`UPDATE quell_elements SET diseno_definido = ? WHERE id = ?`).bind(fecha, eid).run();
+        await apunta(env, op);
+        return json({ ok: true, doc, archivada: previo?.id || null, diseno_definido: fecha || null });
+      }
       const rol = fd.get('rol') === 'principal' ? 'principal' : 'soporte';
       /* Un principal nuevo cuando ya hay uno vivo NO se cuela por el índice
        * único: se dice que use «versión nueva», que es lo que de verdad

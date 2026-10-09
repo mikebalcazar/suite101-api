@@ -61,6 +61,7 @@ import ordenesCanceladas from '../migrations/org/0045_ordenes_canceladas.sql';
 import sat from '../migrations/org/0046_sat.sql';
 import timbrar from '../migrations/org/0047_timbrar.sql';
 import facturaV2 from '../migrations/org/0048_factura_v2.sql';
+import disenoDelItem from '../migrations/org/0049_diseno_del_item.sql';
 import { MotorInversion } from './inversion-db';
 import { MotorFiscal } from './fiscal-db';
 import { MotorSat, type MemoriaSat } from './sat-db';
@@ -92,12 +93,12 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem];
 
 /** La 0027, la 0030, la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
  *  en la lista; el archivo .sql es sólo la nota que lo dice. */
-const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar' | 'facturaV2'> = {
+const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar' | 'facturaV2' | 'disenoDelItem'> = {
   [MIGRACIONES.indexOf(sinNegocios)]: 'quitarNegocios',
   [MIGRACIONES.indexOf(requerimientosHuerfanos)]: 'migrarRequerimientosHuerfanos',
   [MIGRACIONES.indexOf(obrasALaSuite)]: 'migrarObrasSueltas',
@@ -107,6 +108,7 @@ const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfano
   [MIGRACIONES.indexOf(bill)]: 'bill101',
   [MIGRACIONES.indexOf(timbrar)]: 'timbrar',
   [MIGRACIONES.indexOf(facturaV2)]: 'facturaV2',
+  [MIGRACIONES.indexOf(disenoDelItem)]: 'disenoDelItem',
 };
 
 /** La tabla `empresa` (0027): UN renglón, con id fijo, que es lo que antes
@@ -3600,6 +3602,17 @@ export class OrgDB extends DurableObject<Env> {
       const [, tabla, columna, tipo] = m;
       if (!this.tieneColumna(tabla, columna)) this.sql.exec(`ALTER TABLE ${tabla} ADD COLUMN ${columna} ${tipo}`);
     }
+  }
+
+  /** 0049, en código: la marca del archivo del diseño definido (quell101,
+   *  0.90.0). Misma razón que la 0041: SQLite no tiene `ADD COLUMN IF NOT
+   *  EXISTS` y hay pruebas que regresan la versión. El índice sí es
+   *  idempotente por sí solo. */
+  private disenoDelItem(): void {
+    if (!this.tieneColumna('quell_element_docs', 'diseno')) {
+      this.sql.exec(`ALTER TABLE quell_element_docs ADD COLUMN diseno INTEGER NOT NULL DEFAULT 0`);
+    }
+    this.sql.exec(disenoDelItem.replace(/^ALTER TABLE .*$/gm, ''));
   }
 
   /** 0048, en código: la factura nueva, segunda vuelta. Misma forma que la 0047. */

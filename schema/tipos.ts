@@ -17,7 +17,20 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.89.0 (BILL101: LA FACTURA NUEVA, SEGUNDA VUELTA.
+ * Versión del contrato: 0.90.0 (EL DISEÑO DEFINIDO DE LA PIEZA, CON SU
+ * ARCHIVO. Mike, 9-oct: «desde quell quiero poder marcar que el diseño ya está
+ * definido y poder adjuntar un plano (pdf) o imagen del diseño definido».
+ * Con botones: el archivo va APARTE, sin tocar el plano principal.
+ *   · org 0049: `quell_element_docs.diseno` (0/1). Uno vivo por pieza.
+ *   · POST /quell/elements/:id/docs con `diseno=1` (y `diseno_definido`
+ *     AAAA-MM-DD opcional): se guarda como soporte con la marca; si ya había
+ *     uno vivo, éste es su versión nueva (misma familia, el anterior se
+ *     archiva). Con fecha, fecha la pieza en el mismo paso. Respuesta:
+ *     {doc, archivada, diseno_definido}. Sólo personal (como los demás docs).
+ *   · GET /quell/elements/:id trae `diseno_doc` ({id, nombre, mime, paginas,
+ *     version, created_at} o null). Los docs listan `diseno`.)
+ * Antes:
+ * 0.89.0 (BILL101: LA FACTURA NUEVA, SEGUNDA VUELTA.
  * Mike, 9-oct: un RFC nuevo se guarda como cliente; cada concepto facturado
  * queda en un catálogo; correos del cliente a donde se manda la factura
  * timbrada; vista previa; y el PDF lo arma bill101 con logo y datos
@@ -1480,7 +1493,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.89.0';
+export const VERSION_CONTRATO = '0.90.0';
 
 /* ─────────────── órdenes de compra (0.21.0; cancelada desde 0.86.0) ─────────────── */
 
