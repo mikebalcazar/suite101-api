@@ -1697,7 +1697,7 @@ export async function atender(req, env, url, path) {
       /* 0.90.0 · El archivo del diseño definido, si hay: para enseñarlo junto
        * a la fecha sin abrir la barra de archivos. */
       element.diseno_doc = await env.DB.prepare(
-        `SELECT id, nombre, mime, paginas, version, created_at FROM quell_element_docs
+        `SELECT id, nombre, mime, paginas, version, r2_key, created_at FROM quell_element_docs
           WHERE element_id = ? AND diseno = 1 AND archivado_at IS NULL`).bind(eid).first() || null;
       /* La bitácora del alcance del ítem (0.64.0): cuándo entró, cuándo
        * salió, quién y por qué. Es del ítem, no de la pieza, y por eso viene
