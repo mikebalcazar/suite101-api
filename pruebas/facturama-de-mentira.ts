@@ -25,7 +25,7 @@ export interface EstadoFacturama {
   /** Lo que llegó, en orden. */
   llamadas: Record<string, unknown>[];
   /** Las sucursales y sus series, como las tiene Facturama. */
-  sucursales: { Id: string; Name: string; IsDefault: boolean; series: { Name: string; Folio: number }[] }[];
+  sucursales: { Id: string; Name: string; IsDefault: boolean; Address: { ZipCode: string }; series: { Name: string; Folio: number }[] }[];
   /** Lo timbrado, por id de Facturama. */
   cfdis: Map<string, { uuid: string; xml: string; cuerpo: Record<string, any>; estado: 'active' | 'canceled' | 'pending' }>;
   /** Para simular: 'caido' (503), 'mudo' (lanza), 'cancelacion_pendiente',
@@ -42,7 +42,7 @@ export function crearFacturama(usuario: string, clave: string): { responder(url:
   const st: EstadoFacturama = {
     usuario, clave,
     perfil: { Rfc: RFC_EMPRESA, TaxName: 'ESCUELA KEMPER URGATE', FiscalRegime: '601', TaxAddress: { ZipCode: '64000' }, Csd: { Certificate: 'MIIF…' } },
-    sucursales: [{ Id: 'suc-1', Name: 'Matriz', IsDefault: true, series: [] }],
+    sucursales: [{ Id: 'suc-1', Name: 'Matriz', IsDefault: true, Address: { ZipCode: '64000' }, series: [] }],
     llamadas: [], cfdis: new Map(), modo: 'bien', n: 0,
   };
   const json = (status: number, o: unknown) => ({ status, body: JSON.stringify(o) });
@@ -91,6 +91,7 @@ export function crearFacturama(usuario: string, clave: string): { responder(url:
       if (!st.perfil.Csd.Certificate) return malo('No se ha cargado el certificado de sello digital (CSD).');
       // Lo que dijo el de verdad el 9-oct: la serie tiene que existir en la sucursal.
       if (b.Serie && !st.sucursales.some((s) => s.series.some((x) => x.Name === b.Serie))) return malo("El atributo 'Serie' debe existir en la sucursal");
+      if (!st.sucursales.some((s) => s.Address.ZipCode === String(b.ExpeditionPlace))) return malo("El atributo 'ExpeditionPlace' debe existir como código postal en alguno de los Lugares de expedición en tu Perfil Fiscal");
       if (b.Receiver?.Rfc === 'XAXX010101000' && b.Receiver?.CfdiUse !== 'S01') ms['cfdiToCreate.Receiver.CfdiUse'] = ['Para el RFC genérico el uso debe ser S01.'];
       let subtotal = 0, descuento = 0, impuestos = 0;
       (b.Items || []).forEach((it: any, i: number) => {
