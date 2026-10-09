@@ -12,3 +12,18 @@ declare module '*.woff2' {
   const datos: ArrayBuffer;
   export default datos;
 }
+
+// El ícono de la puerta de la suite (9-oct-2026): el SVG como texto, el .ico
+// y el PNG del celular como bytes (reglas en wrangler.toml).
+declare module '*.svg' {
+  const contenido: string;
+  export default contenido;
+}
+declare module '*.png' {
+  const datos: ArrayBuffer;
+  export default datos;
+}
+declare module '*.ico' {
+  const datos: ArrayBuffer;
+  export default datos;
+}

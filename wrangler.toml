@@ -53,7 +53,7 @@ bucket_name = "suite101"
 # aplica al despertar y a runtime no hay disco del que leerlas.
 [[rules]]
 type = "Text"
-globs = ["migrations/org/*.sql", "src/importar/*.html", "src/paginas/*.html"]
+globs = ["migrations/org/*.sql", "src/importar/*.html", "src/paginas/*.html", "**/paginas/icono/*.svg"]
 fallthrough = true
 
 # 8-oct-2026 · las letras de la puerta de la suite viajan dentro del Worker
@@ -61,7 +61,7 @@ fallthrough = true
 # nada se le pide a Google (regla de la casa).
 [[rules]]
 type = "Data"
-globs = ["**/*.woff2"]
+globs = ["**/*.woff2", "**/paginas/icono/*.png", "**/paginas/icono/*.ico"]
 fallthrough = true
 
 [vars]
@@ -146,7 +146,7 @@ bucket_name = "suite101-staging"
 
 [[env.staging.rules]]
 type = "Text"
-globs = ["migrations/org/*.sql", "src/importar/*.html", "src/paginas/*.html"]
+globs = ["migrations/org/*.sql", "src/importar/*.html", "src/paginas/*.html", "**/paginas/icono/*.svg"]
 fallthrough = true
 
 # 8-oct-2026 · las letras de la puerta de la suite viajan dentro del Worker
@@ -154,7 +154,7 @@ fallthrough = true
 # nada se le pide a Google (regla de la casa).
 [[env.staging.rules]]
 type = "Data"
-globs = ["**/*.woff2"]
+globs = ["**/*.woff2", "**/paginas/icono/*.png", "**/paginas/icono/*.ico"]
 fallthrough = true
 
 [env.staging.vars]
