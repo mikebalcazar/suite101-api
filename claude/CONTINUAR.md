@@ -447,6 +447,13 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
   panel. OJO: la prueba de navegador de dash101 filtraba `estado !==
   'cancelado'` y se cayó en staging (#129 la arregló). Muro
   `2026-10-02-0237-jr-alcance-en-dos-estados.md`.
+- **patron101 integrada en la suite (9-oct, master101 #38, workshop101 #17/#18, suite101-api #285 contrato 0.83.0, dash101 #150).**
+  Encargo del chat de patron101 (Drive suite101/patron101), trabajos 1–4; el
+  5 (sitio público) espera a Mike. Llave `investor` en master101 (por
+  empresa) y en workshop101 (sólo dueño y administración, decisión de Mike).
+  El cuadre fiscal y el resumen del mes ya no cuentan el préstamo como
+  ingreso ni el capital como gasto. «Deshacer» un pago en dash101 /inversion
+  (`?estado=pagado`). Muro `2026-10-09-0006-jr-patron101-integrada.md`.
 - **Toda la suite con el look de cost101, la letra de dash y el logotipo oficial `-claro`; quell101 intacta (8-oct, dash101 #148/#149, suite101-api #282/#283, peek101 #26, master101 #36, workshop101 #16, t101-portal-trabajadores #36, cotizador-t101 #87 G111, cost101 #7 0.3.1).**
   Fondo degradado azul, tarjetas de vidrio, botones redondos, Cifras +
   Raleway locales, logotipo en trazos a 28/36 px. Lo que es papel se queda
