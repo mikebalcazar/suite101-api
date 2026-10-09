@@ -233,6 +233,10 @@ jobs:
         env:
           PROD: ${{ needs.publicar.outputs.prod }}
           STAGING: ${{ needs.publicar.outputs.staging }}
+          # bill101 fase C: la cuenta de PRUEBAS de Facturama de Mike (sandbox,
+          # timbres sin valor). Sin ellos la sección sólo avisa.
+          FACTURAMA_SANDBOX_USUARIO: ${{ secrets.FACTURAMA_SANDBOX_USUARIO }}
+          FACTURAMA_SANDBOX_CLAVE: ${{ secrets.FACTURAMA_SANDBOX_CLAVE }}
         run: |
           set -u
           exec > >(tee /tmp/salida.txt) 2>&1

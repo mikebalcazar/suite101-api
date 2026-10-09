@@ -65,6 +65,8 @@ export interface Env {
   /** Sólo para probar: la dirección de un SAT de mentira. En producción se
    *  IGNORA aunque esté puesta (src/sat-db.ts). */
   SAT_BASE?: string;
+  /** Lo mismo para Facturama: un PAC de mentira para probar. En producción se ignora. */
+  FACTURAMA_BASE?: string;
   ORIGENES: string; // CSV de orígenes con permiso de CORS
   CORREO_REMITENTE: string;
   CORREO_SUPERADMIN: string;

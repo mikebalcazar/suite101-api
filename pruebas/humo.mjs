@@ -19,7 +19,7 @@
  */
 
 import WebSocket from 'ws';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 
 /** Cuántas migraciones tiene hoy el OrgDB, contadas del repositorio. Así el
  *  humo no se queda atrás cada vez que se agrega una. */
@@ -738,6 +738,75 @@ async function bill() {
   rev(prodSin.status === 401, 'producción: sin sesión, lo fiscal no se abre', String(prodSin.status));
 }
 
+/* ─────────────── bill101 fase C: timbrar contra el SANDBOX de Facturama (0.88.0) ───────────────
+ *
+ * Lo único que no se puede medir sin Facturama es Facturama. Con la cuenta de
+ * pruebas de Mike (secretos FACTURAMA_SANDBOX_USUARIO y _CLAVE del repo; el
+ * humo no los imprime) se timbra UNA factura de verdad en su sandbox —sin
+ * valor fiscal— desde staging, se baja su PDF y se cancela. Si el sandbox no
+ * tiene perfil fiscal o sello, se le ponen los de prueba que publica el SAT
+ * (RFC EKU9003173C9), que es lo que Facturama pide para su sandbox. Sin los
+ * secretos, sólo se avisa: no es falla. */
+async function timbrar() {
+  linea('');
+  linea('== bill101: timbrar en el sandbox de Facturama ==');
+  const usuario = process.env.FACTURAMA_SANDBOX_USUARIO, clave = process.env.FACTURAMA_SANDBOX_CLAVE;
+  if (!usuario || !clave) { linea('  AVISO sin FACTURAMA_SANDBOX_USUARIO / _CLAVE: no se timbra contra el sandbox (no cuenta como falla)'); return; }
+  if (!galleta && !(await entrarComoMike())) { rev(false, 'entrar para medir el timbrado'); return; }
+  const app = 'bill101';
+  const SANDBOX = 'https://apisandbox.facturama.mx';
+  const auth = { Authorization: `Basic ${Buffer.from(`${usuario}:${clave}`).toString('base64')}`, 'Content-Type': 'application/json' };
+  const fac = async (metodo, ruta, cuerpo) => {
+    const r = await fetch(`${SANDBOX}${ruta}`, { method: metodo, headers: auth, body: cuerpo ? JSON.stringify(cuerpo) : undefined });
+    const t = await r.text(); let j = {}; try { j = JSON.parse(t); } catch { j = { no_json: t.slice(0, 200) }; }
+    return { estado: r.status, ...j };
+  };
+
+  // El sandbox tiene que estar listo para timbrar: perfil fiscal de pruebas y sello de pruebas.
+  const perfil = await fac('GET', '/TaxEntity');
+  if (perfil.estado !== 200) { rev(false, 'el sandbox de Facturama contesta el perfil con la cuenta de pruebas', `${perfil.estado} ${perfil.Message ?? perfil.no_json ?? ''}`); return; }
+  if (String(perfil.Rfc || '').toUpperCase() !== 'EKU9003173C9') {
+    const puesto = await fac('PUT', '/TaxEntity', {
+      Rfc: 'EKU9003173C9', TaxName: 'ESCUELA KEMPER URGATE', FiscalRegime: '601', Email: 'pruebas@taller101.com', Phone: '8100000000',
+      TaxAddress: { Street: 'Calle de prueba', ExteriorNumber: '1', Neighborhood: 'Centro', ZipCode: '64000', Municipality: 'Monterrey', State: 'Nuevo León', Country: 'México' },
+    });
+    linea(`  nota  el perfil del sandbox se pone con el RFC de pruebas del SAT: ${puesto.estado} ${puesto.Message ?? ''}`);
+  }
+  const conSello = !!(perfil.Csd && (perfil.Csd.Certificate || perfil.Csd.CertificateNumber));
+  if (!conSello) {
+    const leer = (n) => readFileSync(new URL(`./datos/sat/${n}`, import.meta.url)).toString('base64');
+    const csd = await fac('PUT', '/TaxEntity/UploadCsd', { Certificate: leer('sello-de-prueba.cer'), PrivateKey: leer('sello-de-prueba.key'), PrivateKeyPassword: '12345678a' });
+    linea(`  nota  el sello de pruebas del SAT se carga en el sandbox: ${csd.estado} ${csd.Message ?? ''}`);
+  }
+
+  const cuenta = await pedir(STAGING, `/orgs/${ORG}/fiscal/pac`, { app, method: 'PUT', body: { usuario, clave, sandbox: true, serie: 'HUMO' } });
+  rev(cuenta.estado === 200 && cuenta.data?.cuenta?.sandbox === true, 'la cuenta de Facturama se prueba y se guarda (sandbox)', `${cuenta.estado} ${cuenta.error ?? ''} · perfil ${JSON.stringify(cuenta.data?.cuenta?.perfil ?? {}).slice(0, 120)} · ${cuenta.ms} ms`);
+  if (cuenta.estado !== 200) return;
+  rev(!JSON.stringify(cuenta).includes(clave), 'la contraseña no vuelve en la respuesta');
+  await pedir(STAGING, `/orgs/${ORG}/fiscal/config`, { app, method: 'PUT', body: { cp: '64000', regimen: '601', razon_social: 'ESCUELA KEMPER URGATE' } });
+
+  const borrador = {
+    receptor: { rfc: 'URE180429TM6', razon_social: 'UNIVERSIDAD ROBOTICA ESPAÑOLA', regimen_fiscal: '603', cp_fiscal: '65000', uso_cfdi: 'G03' },
+    forma_pago: '03',
+    renglones: [{ clave_prod_serv: '56101500', clave_unidad: 'H87', unidad: 'Pieza', descripcion: 'Mueble de humo (prueba de bill101, sin valor fiscal)', cantidad: 1, precio_unitario: 100000, iva: 16 }],
+  };
+  const t = await pedir(STAGING, `/orgs/${ORG}/fiscal/emitir`, { app, method: 'POST', body: { borrador } });
+  rev(t.estado === 201 && /^[0-9A-F-]{36}$/.test(t.data?.uuid || '') && t.data?.cfdi?.total === 116000,
+    'FACTURAMA TIMBRA desde staging: una factura de $1,160 con folio fiscal de verdad (sandbox)', `${t.estado} ${t.error ?? ''} ${JSON.stringify(t.detalle?.motivos ?? '')} · ${t.data?.folio ?? ''} · ${t.data?.uuid ?? ''} · ${t.ms} ms`);
+  if (t.estado !== 201) return;
+  const id = t.data.cfdi_id;
+  const xml = await fetch(`${STAGING}/orgs/${ORG}/fiscal/cfdi/${id}/xml`, { headers: { 'X-App': app, Cookie: galleta } });
+  const texto = await xml.text();
+  rev(xml.status === 200 && texto.includes('TimbreFiscalDigital') && texto.includes(t.data.uuid), 'su XML timbrado quedó guardado, con el timbre de Facturama', `${xml.status} · ${texto.length} caracteres`);
+  const pdf = await fetch(`${STAGING}/orgs/${ORG}/fiscal/cfdi/${id}/pdf`, { headers: { 'X-App': app, Cookie: galleta } });
+  const bytes = new Uint8Array(await pdf.arrayBuffer());
+  rev(pdf.status === 200 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46, 'el PDF lo arma Facturama y aquí se sirve', `${pdf.status} · ${bytes.length} bytes`);
+  const can = await pedir(STAGING, `/orgs/${ORG}/fiscal/cfdi/${id}/cancelar`, { app, method: 'POST', body: { motivo: '02' } });
+  rev(can.estado === 200 && ['cancelada', 'pendiente'].includes(can.data?.estado), 'y se cancela ante el SAT (sandbox) con motivo 02', `${can.estado} ${can.error ?? ''} · ${can.data?.estado ?? ''} · ${can.data?.mensaje ?? ''} · ${can.ms} ms`);
+  const em = await pedir(STAGING, `/orgs/${ORG}/fiscal/emisiones`, { app });
+  rev(em.estado === 200 && em.data?.filas?.[0]?.estado === 'timbrada' && em.data.filas[0].serie === 'HUMO', 'la emisión quedó registrada con su folio', JSON.stringify(em.data?.filas?.[0] ?? {}).slice(0, 120));
+}
+
 async function entrarComoMike() {
   galleta = '';
   for (let i = 0; i < 4; i++) {
@@ -1106,6 +1175,7 @@ try {
   await licencias();
   await ordenesYFiscal();
   await bill();
+  await timbrar();
   await importacion();
   await costos();
 } catch (e) {

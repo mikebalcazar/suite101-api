@@ -17,7 +17,39 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.87.0 (BILL101 FASE D: LAS FACTURAS SE BAJAN DEL SAT
+ * Versión del contrato: 0.88.0 (BILL101 FASE C: EMITIR Y TIMBRAR CON
+ * FACTURAMA. Mike, 8-oct: «un módulo para generar y timbrar facturas»; con
+ * botones: PAC Facturama por API, v1 Ingreso y Cancelación, todo PUE, la
+ * factura nace de un proyecto o libre.
+ *   · Tablas internas (org 0047): `pac_config` (cuenta de Facturama; la
+ *     contraseña cifrada como la FIEL; serie y folio que sigue; perfil
+ *     fiscal según Facturama) y `emisiones` (cada intento de timbrar con su
+ *     folio apartado y en qué quedó). `cfdi` gana `pac_id`,
+ *     `motivo_cancelacion`, `cancelacion` y `acuse_llave`; `clientes` gana
+ *     `razon_social`, `regimen_fiscal`, `cp_fiscal` y `uso_cfdi` (lo que la
+ *     4.0 exige del receptor; se llenan al facturarle y salen por /clientes).
+ *   · /fiscal/pac (src/rutas/fiscal-pac.ts): GET; PUT {usuario, clave,
+ *     sandbox, serie?} (sólo owner/admin; se prueba contra Facturama y se
+ *     guarda su perfil: 422 `pac_credenciales` —no 401, que las pantallas
+ *     leen como sesión vencida—, 409 `pac_de_otro_rfc`);
+ *     DELETE; PATCH {serie?, folio_siguiente?}; POST /perfil.
+ *   · GET /fiscal/emitir/prellenar?proyecto_id|cliente_id; POST
+ *     /fiscal/emitir/revisar {borrador} → {borrador limpio, cuentas} o 400
+ *     `borrador_invalido` {campo, motivo}; POST /fiscal/emitir {borrador,
+ *     proyecto_id?, cliente_id?} → 201 {cfdi_id, uuid, folio, cfdi} (la
+ *     factura entra a `cfdi` con origen `timbrado`, su XML en R2) o 422
+ *     `pac_rechaza` {motivos[]}, 502 `pac_no_responde` (la emisión queda
+ *     `timbrando`: no se reintenta a ciegas), 409 `sin_pac` /
+ *     `pac_sin_sello` / `falta_cp_empresa` / `emision_repetida`.
+ *   · GET /fiscal/emisiones; GET /fiscal/cfdi/:id/pdf (lo arma Facturama,
+ *     se guarda la primera vez); POST /fiscal/cfdi/:id/cancelar {motivo
+ *     01–04, uuid_sustituto?} → {estado: cancelada|pendiente|vigente}; una
+ *     cancelada se cancela aquí con la regla de la 0009.
+ *   · El borrador va en CENTAVOS; a Facturama se le manda en pesos. El IVA
+ *     se calcula por renglón sobre su base. Variable opcional
+ *     `FACTURAMA_BASE` (sólo fuera de producción).)
+ * Antes:
+ * 0.87.0 (BILL101 FASE D: LAS FACTURAS SE BAJAN DEL SAT
  * CON LA FIEL. Mike, 8-oct: «primero desarrollemos la fase para revisar
  * facturas ya recibidas y emitidas en el SAT»; y con botones: la FIEL vive
  * guardada cifrada, se sube una vez y bill101 baja solo cada noche.
@@ -1421,7 +1453,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.87.0';
+export const VERSION_CONTRATO = '0.88.0';
 
 /* ─────────────── órdenes de compra (0.21.0; cancelada desde 0.86.0) ─────────────── */
 
@@ -2449,6 +2481,9 @@ export const TABLAS_INTERNAS = [
    * lista blanca de src/tablas.ts; esta lista es para que las pruebas del
    * esquema sepan que existe a propósito.) */
   'sat_fiel', 'sat_config', 'sat_solicitudes', 'sat_eventos',
+  /* bill101 fase C (0047). Sólo por /orgs/:o/fiscal/pac y /fiscal/emitir.
+   * `pac_config` guarda la contraseña de Facturama cifrada: no sale. */
+  'pac_config', 'emisiones',
 ] as const;
 
 /* ─────────────── lo que devuelven las rutas con nombre ─────────────── */

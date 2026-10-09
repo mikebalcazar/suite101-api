@@ -403,8 +403,14 @@ export function montarOrdenes(rutas: App): void {
     return ok(c, r);
   });
 
-  rutas.post('/:o/fiscal/cfdi/:id/cancelar', async (c) => {
+  rutas.post('/:o/fiscal/cfdi/:id/cancelar', async (c, next) => {
     if (!puedeFiscal(c)) return err(c, 'sin_permiso', 403);
+    /* Una factura timbrada desde bill101 (0.88.0) se cancela ante el SAT, por
+     * Facturama: eso lo hace la ruta de rutas/fiscal-pac.ts, que va después
+     * con este mismo camino. Ésta sólo cancela aquí lo capturado a mano o
+     * subido, como desde la 0009. */
+    const f = (await stub(c).fiscal('detalle', [c.req.param('id')!])) as Record<string, unknown> | null;
+    if (f?.pac_id) return next();
     const r = await stub(c).cancelarCfdi(c.req.param('id')!);
     if (esFalla(r)) return err(c, r.error, 404);
     return ok(c, r);
