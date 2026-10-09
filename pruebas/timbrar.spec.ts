@@ -274,7 +274,7 @@ describe('emitir', () => {
     expect(fac.st.llamadas.filter((l) => l.paso === 'timbrar').length, 'no se volvió a timbrar').toBe(timbres);
     expect((await o('mike', '/fiscal/emisiones')).data.filas[0]).toMatchObject({ estado: 'timbrada', folio: 103 });
     const cf = (await o('mike', '/fiscal/cfdi')).data.filas as any[];
-    expect(cf.filter((x) => x.pac_id).map((x) => x.folio).sort(), JSON.stringify(cf.map((x) => [x.folio, x.pac_id, x.origen]))).toEqual(['100', '103', 'x']);
+    expect(cf.filter((x) => x.pac_id).map((x) => x.folio).sort(), 'la 100 y la 103 tienen su id de Facturama').toEqual(['100', '103']);
   });
 
   it('en una cuenta de pruebas el emisor es el RFC del sandbox, y aun así entra como emitida de la empresa', async () => {

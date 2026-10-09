@@ -41,6 +41,10 @@
  *     `pac_rechaza` {motivos[]}, 502 `pac_no_responde` (la emisión queda
  *     `timbrando`: no se reintenta a ciegas), 409 `sin_pac` /
  *     `pac_sin_sello` / `falta_cp_empresa` / `emision_repetida`.
+ *   · Una emisión `timbrando` (Facturama no contestó) cierra la puerta: 409
+ *     `emision_en_camino` hasta POST /fiscal/emisiones/:id/resolver, que
+ *     busca el folio en Facturama y recupera (XML → cfdi) o la da por
+ *     fallida. El mismo clic dos veces: 409 `emision_repetida`.
  *   · GET /fiscal/emisiones; GET /fiscal/cfdi/:id/pdf (lo arma Facturama,
  *     se guarda la primera vez); POST /fiscal/cfdi/:id/cancelar {motivo
  *     01–04, uuid_sustituto?} → {estado: cancelada|pendiente|vigente}; una

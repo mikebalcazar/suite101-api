@@ -42,7 +42,7 @@ asunto: bill101 fase C — emitir y timbrar facturas con Facturama (API 0.88.0, 
    son lo que la factura 4.0 exige del receptor. `cfdi` gana `pac_id`,
    `motivo_cancelacion`, `cancelacion`, `acuse_llave`.
 
-6. PROBADO. API: 1,096 de 1,096 (timbrar.spec 24, de punta a punta contra
+6. PROBADO. API: 1,099 de 1,099 (timbrar.spec 27, de punta a punta contra
    un Facturama de mentira que pide la cuenta, revisa el cuerpo como
    Facturama y timbra). bill101: 109 de 109 en pantalla. Y el humo de este
    despliegue timbra UNA factura de verdad en el sandbox de Facturama desde
@@ -50,5 +50,18 @@ asunto: bill101 fase C — emitir y timbrar facturas con Facturama (API 0.88.0, 
    del commit. NO probado: Facturama de producción (falta contratar el
    módulo API y cargar el sello de forespot; lo hace Mike en el portal).
 
-7. VARIABLES. `FACTURAMA_BASE` (sólo fuera de producción). Secretos del
+7. REVISADO por una sesión aparte: 2 altas, 4 medias, 3 bajas; las 9
+   arregladas. Las altas: (a) una emisión sin respuesta de Facturama dejaba
+   timbrar otra igual al minuto → ahora una «timbrando» cierra la puerta y
+   POST /fiscal/emisiones/:id/resolver le pregunta a Facturama por el folio
+   (recupera o da por fallida); el mismo clic dos veces, con la primera ya
+   terminada, también se detiene; (b) con cuenta sandbox el emisor es el
+   RFC del sandbox y la factura no entraba → entra como emitida de la
+   empresa (`importar` con `rfcComo`); en producción el RFC de la cuenta
+   tiene que ser el de la empresa (409 `pac_de_otro_rfc`). Y: se comprueba
+   que el XML sea el de la emisión (UUID, serie, folio); cancelar anota
+   antes de guardar el acuse; `anotarSat` resuelve una cancelación
+   pendiente; cantidad a seis decimales.
+
+8. VARIABLES. `FACTURAMA_BASE` (sólo fuera de producción). Secretos del
    repo: FACTURAMA_SANDBOX_USUARIO/_CLAVE, sólo los usa el humo.

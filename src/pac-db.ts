@@ -191,6 +191,14 @@ export class MotorPac {
      * Facturama no contestó— cierra la puerta: no se timbra nada más hasta
      * saber en qué quedó (POST /fiscal/emisiones/:id/resolver). Es la única
      * manera de no timbrar dos veces la misma factura sin que nadie se entere. */
+    // El mismo clic dos veces, y la primera ya terminó: la misma factura
+    // (mismo receptor, mismos renglones) timbrada hace menos de un minuto.
+    const igual = this.una(
+      `SELECT id, serie, folio, cfdi_id FROM emisiones WHERE estado = 'timbrada' AND terminada_at > ?
+         AND json_extract(borrador, '$.receptor.rfc') = ? AND json_extract(borrador, '$.renglones') = json(?) ORDER BY terminada_at DESC LIMIT 1`,
+      new Date(Date.now() - 60_000).toISOString(), b.receptor.rfc, JSON.stringify(b.renglones),
+    );
+    if (igual) return { error: 'emision_repetida', detalle: { emision_id: igual.id, cfdi_id: igual.cfdi_id, folio: `${igual.serie}-${igual.folio}`, motivo: 'esa misma factura se acaba de timbrar' } };
     const abierta = this.una(`SELECT id, serie, folio, creada_at, error FROM emisiones WHERE estado = 'timbrando' ORDER BY creada_at LIMIT 1`);
     if (abierta) {
       const reciente = Date.parse(String(abierta.creada_at)) > Date.now() - 60_000 && !abierta.error;
