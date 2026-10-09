@@ -753,7 +753,8 @@ async function timbrar() {
   const usuario = process.env.FACTURAMA_SANDBOX_USUARIO, clave = process.env.FACTURAMA_SANDBOX_CLAVE;
   if (!usuario || !clave) { linea('  AVISO sin FACTURAMA_SANDBOX_USUARIO / _CLAVE: no se timbra contra el sandbox (no cuenta como falla)'); return; }
   if (!galleta && !(await entrarComoMike())) { rev(false, 'entrar para medir el timbrado'); return; }
-  const app = 'bill101';
+  // La empresa del humo no trae la licencia de bill101; dash101 entra a las mismas rutas.
+  const app = 'dash101';
   const SANDBOX = 'https://apisandbox.facturama.mx';
   const auth = { Authorization: `Basic ${Buffer.from(`${usuario}:${clave}`).toString('base64')}`, 'Content-Type': 'application/json' };
   const fac = async (metodo, ruta, cuerpo) => {
@@ -768,15 +769,16 @@ async function timbrar() {
   if (String(perfil.Rfc || '').toUpperCase() !== 'EKU9003173C9') {
     const puesto = await fac('PUT', '/TaxEntity', {
       Rfc: 'EKU9003173C9', TaxName: 'ESCUELA KEMPER URGATE', FiscalRegime: '601', Email: 'pruebas@taller101.com', Phone: '8100000000',
-      TaxAddress: { Street: 'Calle de prueba', ExteriorNumber: '1', Neighborhood: 'Centro', ZipCode: '64000', Municipality: 'Monterrey', State: 'Nuevo León', Country: 'México' },
+      TaxAddress: { Street: 'Calle de prueba', ExteriorNumber: '1', Neighborhood: 'Centro', ZipCode: '42501', Municipality: 'Pachuca', State: 'Hidalgo', Country: 'México' },
     });
-    linea(`  nota  el perfil del sandbox se pone con el RFC de pruebas del SAT: ${puesto.estado} ${puesto.Message ?? ''}`);
+    linea(`  nota  el perfil del sandbox se pone con el RFC de pruebas del SAT: ${puesto.estado} ${puesto.Message ?? ''} ${JSON.stringify(puesto.ModelState ?? '')}`);
   }
   const conSello = !!(perfil.Csd && (perfil.Csd.Certificate || perfil.Csd.CertificateNumber));
   if (!conSello) {
     const leer = (n) => readFileSync(new URL(`./datos/sat/${n}`, import.meta.url)).toString('base64');
-    const csd = await fac('PUT', '/TaxEntity/UploadCsd', { Certificate: leer('sello-de-prueba.cer'), PrivateKey: leer('sello-de-prueba.key'), PrivateKeyPassword: '12345678a' });
-    linea(`  nota  el sello de pruebas del SAT se carga en el sandbox: ${csd.estado} ${csd.Message ?? ''}`);
+    const csd = await fac('PUT', '/TaxEntity/UploadCsd', { Rfc: 'EKU9003173C9', Certificate: leer('sello-de-prueba.cer'), PrivateKey: leer('sello-de-prueba.key'), PrivateKeyPassword: '12345678a' });
+    linea(`  nota  el sello de pruebas del SAT se carga en el sandbox: ${csd.estado} ${csd.Message ?? ''} ${JSON.stringify(csd.ModelState ?? '')}`);
+    if (csd.estado >= 400) linea('  nota  si sigue sin sello, se carga una vez en el portal del sandbox (dev.facturama.mx → Perfil fiscal → Certificados) con el zip de csd-pruebas de Facturama');
   }
 
   const cuenta = await pedir(STAGING, `/orgs/${ORG}/fiscal/pac`, { app, method: 'PUT', body: { usuario, clave, sandbox: true, serie: 'HUMO' } });
