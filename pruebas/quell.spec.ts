@@ -727,6 +727,7 @@ describe('la documentación del ítem', () => {
     const el = await q('mike', `/elements/${m1}`);
     expect(el.element.diseno_definido, 'y la pieza queda fechada (candado del cronograma)').toBe('2026-10-09');
     expect(el.element.diseno_doc?.id, 'el detalle trae el archivo del diseño').toBe(diseno1);
+    expect(el.element.diseno_doc?.r2_key, 'con su llave, para abrirlo').toBeTruthy();
   });
 
   it('otro diseño es versión nueva del anterior: el viejo se archiva, no se borra', async () => {

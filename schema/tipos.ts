@@ -17,7 +17,10 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.90.0 (EL DISEÑO DEFINIDO DE LA PIEZA, CON SU
+ * Versión del contrato: 0.90.1 (`diseno_doc` TRAE SU `r2_key`, para que la
+ * pantalla de quell abra el archivo del diseño con /files/<r2_key>.)
+ * Antes:
+ * 0.90.0 (EL DISEÑO DEFINIDO DE LA PIEZA, CON SU
  * ARCHIVO. Mike, 9-oct: «desde quell quiero poder marcar que el diseño ya está
  * definido y poder adjuntar un plano (pdf) o imagen del diseño definido».
  * Con botones: el archivo va APARTE, sin tocar el plano principal.
@@ -28,7 +31,7 @@
  *     archiva). Con fecha, fecha la pieza en el mismo paso. Respuesta:
  *     {doc, archivada, diseno_definido}. Sólo personal (como los demás docs).
  *   · GET /quell/elements/:id trae `diseno_doc` ({id, nombre, mime, paginas,
- *     version, created_at} o null). Los docs listan `diseno`.)
+ *     version, created_at} o null; desde 0.90.1 también r2_key). Los docs listan `diseno`.)
  * Antes:
  * 0.89.0 (BILL101: LA FACTURA NUEVA, SEGUNDA VUELTA.
  * Mike, 9-oct: un RFC nuevo se guarda como cliente; cada concepto facturado
@@ -1493,7 +1496,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.90.0';
+export const VERSION_CONTRATO = '0.90.1';
 
 /* ─────────────── órdenes de compra (0.21.0; cancelada desde 0.86.0) ─────────────── */
 
