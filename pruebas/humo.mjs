@@ -763,22 +763,25 @@ async function timbrar() {
     return { estado: r.status, ...j };
   };
 
-  // El sandbox tiene que estar listo para timbrar: perfil fiscal de pruebas y sello de pruebas.
+  /* El sandbox tiene que estar listo para timbrar: perfil fiscal con sello.
+   * El perfil NO se toca desde aquí (es la cuenta de Mike; el 9-oct un PUT
+   * le cambió el nombre y la dirección, y eso no es del humo). Si el RFC del
+   * sandbox es el de pruebas del SAT (EKU9003173C9) y falta el sello, se le
+   * carga el sello de pruebas; con otro RFC el sello lo carga Mike en el
+   * portal, y hasta entonces aquí sólo se avisa. */
   const perfil = await fac('GET', '/TaxEntity');
   if (perfil.estado !== 200) { rev(false, 'el sandbox de Facturama contesta el perfil con la cuenta de pruebas', `${perfil.estado} ${perfil.Message ?? perfil.no_json ?? ''}`); return; }
-  if (String(perfil.Rfc || '').toUpperCase() !== 'EKU9003173C9') {
-    const puesto = await fac('PUT', '/TaxEntity', {
-      Rfc: 'EKU9003173C9', TaxName: 'ESCUELA KEMPER URGATE', FiscalRegime: '601', Email: 'pruebas@taller101.com', Phone: '8100000000',
-      TaxAddress: { Street: 'Calle de prueba', ExteriorNumber: '1', Neighborhood: 'Centro', ZipCode: '42501', Municipality: 'Pachuca', State: 'Hidalgo', Country: 'México' },
-    });
-    linea(`  nota  el perfil del sandbox se pone con el RFC de pruebas del SAT: ${puesto.estado} ${puesto.Message ?? ''} ${JSON.stringify(puesto.ModelState ?? '')}`);
-  }
-  const conSello = !!(perfil.Csd && (perfil.Csd.Certificate || perfil.Csd.CertificateNumber));
-  if (!conSello) {
+  const rfcSandbox = String(perfil.Rfc || '').toUpperCase();
+  let conSello = !!(perfil.Csd && (perfil.Csd.Certificate || perfil.Csd.CertificateNumber));
+  if (!conSello && rfcSandbox === 'EKU9003173C9') {
     const leer = (n) => readFileSync(new URL(`./datos/sat/${n}`, import.meta.url)).toString('base64');
     const csd = await fac('PUT', '/TaxEntity/UploadCsd', { Rfc: 'EKU9003173C9', Certificate: leer('sello-de-prueba.cer'), PrivateKey: leer('sello-de-prueba.key'), PrivateKeyPassword: '12345678a' });
     linea(`  nota  el sello de pruebas del SAT se carga en el sandbox: ${csd.estado} ${csd.Message ?? ''} ${JSON.stringify(csd.ModelState ?? '')}`);
-    if (csd.estado >= 400) linea('  nota  si sigue sin sello, se carga una vez en el portal del sandbox (dev.facturama.mx → Perfil fiscal → Certificados) con el zip de csd-pruebas de Facturama');
+    conSello = csd.estado < 300;
+  }
+  if (!conSello) {
+    linea(`  AVISO el sandbox (RFC ${rfcSandbox || '?'}) no tiene sello (CSD) cargado: sin él Facturama no timbra. Se carga una vez en dev.facturama.mx → Perfil fiscal → Certificados (no cuenta como falla)`);
+    return;
   }
 
   const cuenta = await pedir(STAGING, `/orgs/${ORG}/fiscal/pac`, { app, method: 'PUT', body: { usuario, clave, sandbox: true, serie: 'HUMO' } });
