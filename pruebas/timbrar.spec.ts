@@ -140,6 +140,9 @@ describe('la cuenta de Facturama', () => {
     const r = await o('mike', '/fiscal/pac', { method: 'PUT', json: { usuario: 'mike-sandbox', clave: 'clave-sandbox', sandbox: true, serie: 'f' } });
     expect(r.estado, JSON.stringify(r)).toBe(200);
     expect(r.data.cuenta).toMatchObject({ usuario: 'mike-sandbox', sandbox: true, serie: 'F', folio_siguiente: 1, perfil: { rfc: RFC_EMPRESA, csd: true, regimen: '601' } });
+    // La serie se da de alta en la sucursal de Facturama al guardar la cuenta (lo que pidió el de verdad).
+    expect(r.data.serie_en_facturama).toEqual({ creada: true, sucursal: 'suc-1' });
+    expect(fac.st.sucursales[0].series.map((x) => x.Name)).toEqual(['F']);
     expect(JSON.stringify(r)).not.toContain('clave-sandbox');
     for (const ruta of ['/pac_config', '/emisiones']) expect((await o('mike', ruta, { app: 'dash101' })).estado, ruta).not.toBe(200);
   });
@@ -153,7 +156,10 @@ describe('la cuenta de Facturama', () => {
   });
 
   it('la serie y el folio se ajustan', async () => {
-    expect((await o('mike', '/fiscal/pac', { method: 'PATCH', json: { serie: 'FAC', folio_siguiente: 100 } })).data.cuenta).toMatchObject({ serie: 'FAC', folio_siguiente: 100 });
+    const aj = await o('mike', '/fiscal/pac', { method: 'PATCH', json: { serie: 'FAC', folio_siguiente: 100 } });
+    expect(aj.data.cuenta).toMatchObject({ serie: 'FAC', folio_siguiente: 100 });
+    expect(aj.data.serie_en_facturama, 'la serie nueva también se da de alta en Facturama').toEqual({ creada: true, sucursal: 'suc-1' });
+    expect(fac.st.sucursales[0].series.find((x) => x.Name === 'FAC')?.Folio).toBe(100);
     expect((await o('mike', '/fiscal/pac', { method: 'PATCH', json: { folio_siguiente: 0 } })).estado).toBe(400);
   });
 });
@@ -230,8 +236,8 @@ describe('emitir', () => {
     expect((await o('mike', '/fiscal/pac')).data.cuenta.folio_siguiente).toBe(102);
   });
 
-  it('Facturama no contesta: la emisión se queda «timbrando», se dice que no se reintente a ciegas, y nada más se timbra hasta resolverla', async () => {
-    fac.st.modo = 'caido';
+  it('Facturama no contesta al timbrar: la emisión se queda «timbrando», se dice que no se reintente a ciegas, y nada más se timbra hasta resolverla', async () => {
+    fac.st.modo = 'calla_al_timbrar';
     const r = await o('mike', '/fiscal/emitir', { method: 'POST', json: { borrador: { ...BORRADOR, renglones: [{ ...RENGLON, cantidad: 3 }] } } });
     expect(r.estado).toBe(502);
     expect(r.error).toBe('pac_no_responde');

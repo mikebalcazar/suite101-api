@@ -24,12 +24,14 @@ export interface EstadoFacturama {
   perfil: { Rfc: string; TaxName: string; FiscalRegime: string; TaxAddress: { ZipCode: string }; Csd: { Certificate: string | null } };
   /** Lo que llegó, en orden. */
   llamadas: Record<string, unknown>[];
+  /** Las sucursales y sus series, como las tiene Facturama. */
+  sucursales: { Id: string; Name: string; IsDefault: boolean; series: { Name: string; Folio: number }[] }[];
   /** Lo timbrado, por id de Facturama. */
   cfdis: Map<string, { uuid: string; xml: string; cuerpo: Record<string, any>; estado: 'active' | 'canceled' | 'pending' }>;
   /** Para simular: 'caido' (503), 'mudo' (lanza), 'cancelacion_pendiente',
    *  'timbra_y_calla' (timbra de verdad y luego contesta 503: el caso que
    *  deja una emisión sin saber). */
-  modo: 'bien' | 'caido' | 'mudo' | 'cancelacion_pendiente' | 'timbra_y_calla';
+  modo: 'bien' | 'caido' | 'mudo' | 'cancelacion_pendiente' | 'timbra_y_calla' | 'calla_al_timbrar';
   n: number;
 }
 
@@ -40,6 +42,7 @@ export function crearFacturama(usuario: string, clave: string): { responder(url:
   const st: EstadoFacturama = {
     usuario, clave,
     perfil: { Rfc: RFC_EMPRESA, TaxName: 'ESCUELA KEMPER URGATE', FiscalRegime: '601', TaxAddress: { ZipCode: '64000' }, Csd: { Certificate: 'MIIF…' } },
+    sucursales: [{ Id: 'suc-1', Name: 'Matriz', IsDefault: true, series: [] }],
     llamadas: [], cfdis: new Map(), modo: 'bien', n: 0,
   };
   const json = (status: number, o: unknown) => ({ status, body: JSON.stringify(o) });
@@ -56,11 +59,29 @@ export function crearFacturama(usuario: string, clave: string): { responder(url:
     const metodo = (h['x-metodo'] || '').toUpperCase();
 
     if (u.pathname === '/TaxEntity') { st.llamadas.push({ paso: 'perfil' }); return json(200, st.perfil); }
+    if (u.pathname === '/BranchOffice') { st.llamadas.push({ paso: 'sucursales' }); return json(200, st.sucursales.map(({ series: _s, ...x }) => x)); }
+    const ms = /^\/serie\/([^/]+)$/.exec(u.pathname);
+    if (ms) {
+      const suc = st.sucursales.find((x) => x.Id === decodeURIComponent(ms[1]));
+      if (!suc) return json(404, { Message: 'Sucursal no encontrada.' });
+      if (metodo === 'POST') {
+        let b: Record<string, any>; try { b = JSON.parse(cuerpo || ''); } catch { return malo('The request is invalid.'); }
+        st.llamadas.push({ paso: 'crear_serie', serie: b.Name, folio: b.Folio });
+        if (!/^[a-zA-Z0-9]{1,10}$/.test(String(b.Name ?? ''))) return malo('The request is invalid.', { 'serie.Name': ['La serie debe cumplir [a-zA-Z0-9]+'] });
+        if (suc.series.some((x) => x.Name === b.Name)) return malo('La serie ya existe.');
+        suc.series.push({ Name: String(b.Name), Folio: Number(b.Folio ?? 1) });
+        return json(201, { Name: b.Name, Folio: b.Folio ?? 1, Description: b.Description ?? '' });
+      }
+      st.llamadas.push({ paso: 'series' });
+      return json(200, suc.series.map((x) => ({ Name: x.Name, Folio: x.Folio, Description: '' })));
+    }
 
     if (u.pathname === '/3/cfdis') {
       let b: Record<string, any>;
       try { b = JSON.parse(cuerpo || ''); } catch { return malo('The request is invalid.'); }
       st.llamadas.push({ paso: 'timbrar', cuerpo: b });
+      // Se cae justo al timbrar (lo demás contesta): no se sabe si timbró, y no timbró.
+      if (st.modo === 'calla_al_timbrar') return { status: 503, body: '<html>Gateway Time-out</html>' };
       const ms: Record<string, string[]> = {};
       const falta = (k: string, v: unknown, que = 'El campo es requerido.') => { if (v === undefined || v === null || v === '') ms[`cfdiToCreate.${k}`] = [que]; };
       falta('Receiver.Rfc', b.Receiver?.Rfc); falta('Receiver.Name', b.Receiver?.Name); falta('Receiver.CfdiUse', b.Receiver?.CfdiUse);
@@ -68,6 +89,8 @@ export function crearFacturama(usuario: string, clave: string): { responder(url:
       falta('ExpeditionPlace', b.ExpeditionPlace); falta('PaymentForm', b.PaymentForm); falta('PaymentMethod', b.PaymentMethod); falta('CfdiType', b.CfdiType);
       if (!Array.isArray(b.Items) || !b.Items.length) ms['cfdiToCreate.Items'] = ['Debe incluir al menos un concepto.'];
       if (!st.perfil.Csd.Certificate) return malo('No se ha cargado el certificado de sello digital (CSD).');
+      // Lo que dijo el de verdad el 9-oct: la serie tiene que existir en la sucursal.
+      if (b.Serie && !st.sucursales.some((s) => s.series.some((x) => x.Name === b.Serie))) return malo("El atributo 'Serie' debe existir en la sucursal");
       if (b.Receiver?.Rfc === 'XAXX010101000' && b.Receiver?.CfdiUse !== 'S01') ms['cfdiToCreate.Receiver.CfdiUse'] = ['Para el RFC genérico el uso debe ser S01.'];
       let subtotal = 0, descuento = 0, impuestos = 0;
       (b.Items || []).forEach((it: any, i: number) => {
