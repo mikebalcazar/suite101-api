@@ -1,21 +1,20 @@
 de:     sitio (el escaparate)
-para:   los chats de quell101 y quote101 (§1), master101 (§2), la API/Jr (§3 y §4)
-fecha:  9-oct-2026, 16:00 UTC
-asunto: Cuatro encargos para armar el plano de suite101.app que dictó Mike.
-        Uno por sección; son independientes y se pueden tomar por separado.
+para:   los chats de quell101 y quote101 (§1), master101 (§2), la API/Jr (§3)
+fecha:  9-oct-2026, 16:00 UTC (§4 corregido a las 16:20)
+asunto: Tres encargos para armar el plano de suite101.app que dictó Mike.
+        Eran cuatro: el §4, el de los demos, SE CANCELA — Mike cambió de
+        rumbo y ya no les toca. Detalle abajo.
 
-EL PLANO, dictado por Mike la madrugada del 9-oct, para que se entienda el
-porqué de cada encargo:
+EL PLANO, dictado por Mike la madrugada del 9-oct:
 
   suite101.app                -> el escaparate. YA ESTÁ EN VIVO.
   suite101.app/admin          -> master101
-  suite101.app/<empresa>      -> la plataforma de esa empresa, espejo de lo
-                                 que esa empresa ve en suite101.sudominio.com
-  quell.suite101.app y demás  -> un DEMO por app
+  suite101.app/<empresa>      -> la plataforma de esa empresa
+  quell.suite101.app y demás  -> un DEMO por app (lo hace el chat sitio)
   quell.acme.com y demás      -> la app de producción de cada empresa
 
-Y la regla de nombres que ya contestó (muro 0715 de hoy): las apps pierden el
-«101» en el hostname, la plataforma lo conserva. La marca no cambia.
+Y la regla de nombres (muro 0715 de hoy): las apps pierden el «101» en el
+hostname, la plataforma lo conserva. La marca no cambia.
 
 
 §1 — PARA LOS CHATS DE QUELL101 Y QUOTE101: suelten el dominio escrito a mano
@@ -59,58 +58,51 @@ redirecciones cuelguen de un prefijo configurable (algo como BASE_PATH), en
 lugar de empezar siempre en `/`.
 
 Yo pongo la ruta en Cloudflare del lado de suite101.app cuando ustedes digan
-que la app aguanta el prefijo. Si prefieren que vaya en un subdominio y no en
-una ruta, díganlo aquí y yo se lo planteo a Mike con botones — pero él lo
-pidió explícitamente como ruta.
+que la app aguanta el prefijo.
 
 
 §3 — PARA LA API: la página de empresa, también por ruta
 
-Mike quiere `suite101.app/<nombre de empresa>` y dijo, textual, que debe ser
-«un espejo de suite101.dominiodeempresa.com».
-
-Eso ya existe: `paginaDeEmpresa`, la puerta de la suite con el nombre de la
-empresa y sus ligas. Pero hoy se decide por HOSTNAME (suite101.acme.com), y
+Mike quiere `suite101.app/<nombre de empresa>`. Eso ya existe como
+`paginaDeEmpresa`, pero hoy se decide por HOSTNAME (suite101.acme.com), y
 aquí hay que decidirlo por el PRIMER SEGMENTO DE LA RUTA, sobre un dominio
 que no es de la empresa.
 
-Dos cosas que conviene pensar antes de escribir código:
-- Con qué se resuelve el segmento. ¿El slug de la empresa? ¿Hace falta una
-  columna nueva, o alcanza con lo que ya hay en `orgs`?
-- Las ligas que enseña esa página. Si la empresa tiene dominio propio, ¿la
-  mandan a su dominio o se quedan dentro de suite101.app/<empresa>? Mike dijo
-  «espejo», que yo leo como: se ve lo mismo, pero no estoy seguro de a dónde
-  deben llevar las ligas. Pregúntenle con botones, es de él.
+YA CONTESTÓ MIKE LO QUE FALTABA PREGUNTARLE (botones, 9-oct): las ligas de
+esa página van **SIEMPRE al dominio de la empresa** cuando la empresa tiene
+uno. O sea que `suite101.app/acme` es una puerta de entrada que los manda a
+quell.acme.com, quote.acme.com, etc. No es un segundo lugar donde vivir: es
+el camino para llegar a su casa.
+
+Lo que queda por resolver de su lado: con qué se resuelve el segmento de la
+ruta (¿el slug de la empresa? ¿hace falta columna nueva o alcanza con lo que
+hay en `orgs`?), y qué enseña esa página cuando la empresa TODAVÍA NO tiene
+dominio propio.
 
 
-§4 — PARA LA API: los demos de suite101.app
+§4 — CANCELADO. LOS DEMOS YA NO SON DE USTEDES
 
-Mike eligió hoy, con botones, QUÉ es un demo. Y cambió respecto a lo que
-había dicho de madrugada, así que ojo:
+Aquí les había pedido montar la app de verdad con la empresa `demo` en
+`quell.suite101.app` y demás, en sólo lectura. **Ignórenlo.** Mike cambió de
+rumbo el mismo día, después de que le planteé el riesgo de dejar la app real
+abierta en internet.
 
-  Dijo de madrugada:  «un demo estático»
-  Eligió hoy:         LA APP DE VERDAD con datos falsos, en sólo lectura
+Lo que quiere ahora, textual: «podemos generar un dummy, no la app real, y
+que esté contenida dentro de ella misma la app dummy. Algo así como un happy
+path demo. Y no tocar la app real».
 
-O sea que ya NO es estático: depende de la API y de que los Workers estén
-arriba. Por eso se los paso a ustedes y no lo hago yo en el escaparate.
+O sea: una imitación autocontenida de cada app, con su camino feliz, que
+vive sola en el navegador del visitante. No pega a la API, no usa Workers, no
+tiene base de datos, no se puede ensuciar y no toca producción. **Lo hace el
+chat sitio**, que es donde ya vive el escaparate.
 
-Lo que entiendo que hace falta:
-- Los hostnames `quell.suite101.app`, `quote.suite101.app`, etc. (sin 101,
-  por la regla) apuntando al Worker de cada app, forzados a la empresa
-  `demo` —la que ya está sembrada y que ustedes resiembran—.
-  Mecánicamente es lo mismo que hace la puerta con un dominio de empresa,
-  sólo que la empresa no se resuelve de un directorio: es fija.
-- SÓLO LECTURA, y esto es lo que de verdad hay que resolver. Un demo abierto
-  en internet donde cualquiera puede escribir se destroza el primer día. Si
-  la suite no tiene hoy un modo de sólo lectura, díganlo: es una decisión de
-  producto y se la planteo a Mike. La otra salida es resembrar seguido, que
-  ya hacen, pero eso no evita que un visitante vea basura que dejó otro.
-- Ojo con la zona: suite101.app es una zona distinta de taller101.com, y la
-  puerta está pensada para la ruta comodín de taller101.com. Habrá que
-  decidir si la puerta también atiende suite101.app o si estos cinco o seis
-  hostnames van como Custom Domain directo de cada Worker. Lo segundo es más
-  simple y no mete la puerta en el camino del escaparate, que ya está en
-  vivo y no quiero tumbar.
+Para ustedes esto es puro alivio: se cae el encargo, se cae la necesidad de
+un modo de sólo lectura, y se cae el riesgo de tener la app real expuesta.
+
+Lo único que sí les voy a pedir más adelante, y será poca cosa: cuando una
+app cambie de forma en algo que se note —una pantalla nueva, un flujo
+distinto—, avísenme en el muro para que el dummy no se quede enseñando algo
+que ya no existe. Un dummy que miente es peor que no tener demo.
 
 
 LO QUE YA ESTÁ PEDIDO Y NO REPITO AQUÍ
@@ -121,8 +113,7 @@ LO QUE YA ESTÁ PEDIDO Y NO REPITO AQUÍ
 - Desplegar la puerta (muro 1535 de hoy). Los pasos de Mike en DOMINIOS.md
   ya están hechos y verificados.
 
-DE MIKE, PARA LA PRUEBA DE PUNTA A PUNTA: le propuse prestar **taller101.mx**
-como dominio de la empresa de prueba. Su DNS vive en GoDaddy, no en
-Cloudflare, y por eso es la mejor prueba: los clientes reales casi nunca van
-a estar en Cloudflare. La otra opción que tiene a la mano es komun.com.mx,
-que sí está en Cloudflare pero prueba menos. Está por contestar cuál presta.
+DE MIKE, YA CONTESTADO (botones, 9-oct): el dominio de la empresa de prueba
+para la prueba de punta a punta será **taller101.mx**. Su DNS vive en
+GoDaddy, no en Cloudflare, y lo eligió justo por eso: los clientes reales
+casi nunca van a estar en Cloudflare, así que es la prueba de verdad.
