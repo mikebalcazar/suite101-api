@@ -110,6 +110,8 @@ describe('el borrador, sin red', () => {
     expect(c.Items[0].Taxes[0]).toMatchObject({ Name: 'IVA', Rate: 0.16, Base: 85000, Total: 13600, IsRetention: false });
     expect(c.Items[1]).toMatchObject({ Quantity: 2, UnitPrice: 1500, Subtotal: 3000, Discount: 300, Total: 3132 });
     expect(c.Items[1].Taxes[0]).toMatchObject({ Base: 2700, Total: 432 });
+    const publico = cuerpoFacturama({ ...b, receptor: { ...b.receptor, rfc: 'XAXX010101000', uso_cfdi: 'G03', regimen_fiscal: '601', cp_fiscal: '65000' } }, { serie: 'A', folio: 9, fecha: '2026-10-09T10:00:00', lugar_expedicion: '64000' }) as any;
+    expect(publico.Receiver, 'público en general: lo que el SAT exige, aunque la pantalla diga otra cosa').toEqual({ Rfc: 'XAXX010101000', Name: 'PUBLICO EN GENERAL', CfdiUse: 'S01', FiscalRegime: '616', TaxZipCode: '64000' });
     const sin = cuerpoFacturama({ ...b, renglones: [{ ...b.renglones[0], iva: null }] }, { serie: 'A', folio: 8, fecha: '2026-10-09T10:00:00', lugar_expedicion: '64000' }) as any;
     expect(sin.Items[0].TaxObject).toBe('01');
     expect(sin.Items[0].Taxes).toBeUndefined();

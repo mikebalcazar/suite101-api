@@ -790,8 +790,10 @@ async function timbrar() {
   rev(!JSON.stringify(cuenta).includes(clave), 'la contraseña no vuelve en la respuesta');
   await pedir(STAGING, `/orgs/${ORG}/fiscal/config`, { app, method: 'PUT', body: { cp: '64000', regimen: '601', razon_social: 'ESCUELA KEMPER URGATE' } });
 
+  // A «público en general»: el sandbox de Facturama revisa que el RFC del
+  // receptor esté inscrito en el SAT, y el de pruebas (URE180429TM6) no lo está.
   const borrador = {
-    receptor: { rfc: 'URE180429TM6', razon_social: 'UNIVERSIDAD ROBOTICA ESPAÑOLA', regimen_fiscal: '603', cp_fiscal: '65000', uso_cfdi: 'G03' },
+    receptor: { rfc: 'XAXX010101000', razon_social: 'PUBLICO EN GENERAL', regimen_fiscal: '616', cp_fiscal: cuenta.data?.cuenta?.perfil?.cp || '10900', uso_cfdi: 'S01' },
     forma_pago: '03',
     renglones: [{ clave_prod_serv: '56101500', clave_unidad: 'H87', unidad: 'Pieza', descripcion: 'Mueble de humo (prueba de bill101, sin valor fiscal)', cantidad: 1, precio_unitario: 100000, iva: 16 }],
   };
