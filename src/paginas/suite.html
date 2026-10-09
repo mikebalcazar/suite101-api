@@ -38,26 +38,57 @@
   .vidrio { background:linear-gradient(180deg,rgba(255,255,255,.085),rgba(255,255,255,.035)); border:1px solid var(--linea);
             border-radius:20px; box-shadow:inset 0 1px 0 rgba(255,255,255,.08); -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px); }
   /* Mike, 9-oct-2026: «agrega los íconos en grande en cada app; menos texto y
-     más gráfico». Cada programa es su ícono grande, su logotipo y una línea. */
-  .apps { display:grid; grid-template-columns:repeat(auto-fill, minmax(176px, 1fr)); gap:14px; }
-  .app { display:flex; flex-direction:column; align-items:center; text-align:center; gap:12px; padding:26px 14px 22px;
-         color:inherit; text-decoration:none; border-radius:24px; border:1px solid transparent;
-         transition:background .2s, border-color .2s, transform .2s; animation:sube .5s ease-out both; }
-  .app:nth-child(2){animation-delay:.03s} .app:nth-child(3){animation-delay:.06s} .app:nth-child(4){animation-delay:.09s}
-  .app:nth-child(5){animation-delay:.12s} .app:nth-child(6){animation-delay:.15s} .app:nth-child(7){animation-delay:.18s}
-  .app:nth-child(8){animation-delay:.21s} .app:nth-child(9){animation-delay:.24s} .app:nth-child(10){animation-delay:.27s}
-  .app .icono { width:112px; height:112px; border-radius:26px; display:block;
-                box-shadow:0 14px 34px rgba(0,0,0,.38), 0 0 0 1px rgba(255,255,255,.10); transition:transform .2s, box-shadow .2s; }
-  .app:hover, .app:focus-visible { background:rgba(255,255,255,.06); border-color:var(--linea); outline:none; }
-  .app:hover .icono, .app:focus-visible .icono { transform:translateY(-4px) scale(1.04);
-                box-shadow:0 20px 40px rgba(0,0,0,.45), 0 0 0 2px rgba(61,255,138,.55); }
-  .app:focus-visible { box-shadow:0 0 0 3px rgba(58,163,220,.35); }
-  .logo { height:26px; display:block; }
-  .lema { font-size:14px; line-height:1.35; color:var(--suave); }
-  @keyframes sube { from { opacity:.0; transform:translateY(10px); } to { opacity:1; transform:none; } }
-  @media (prefers-reduced-motion: reduce) { .app, .app .icono { animation:none; transition:none; } }
-  @media (max-width:420px) { .apps { grid-template-columns:1fr 1fr; gap:8px; } .app .icono { width:92px; height:92px; border-radius:22px; } }
+     más gráfico» y, encima, «que cuando hagas mouse over se haga grande y
+     aparezca el nombre y la descripción de la app, y le salga un halo, un
+     glow limegreen como los de los proyectos de quote». Los íconos van en
+     fila, redondos, como un menú de juego; el que tiene el mouse crece,
+     se prende con el neón de quote101 (#C6FF3D: destello y luego pulso) y
+     abajo, en el escenario, sale su logotipo, su línea y su descripción. */
+  main { max-width:1180px; }
+  .apps { display:flex; flex-wrap:wrap; justify-content:center; align-items:flex-start; gap:30px 16px; padding:26px 0 8px; }
+  .app { position:relative; display:flex; flex-direction:column; align-items:center; gap:10px; width:96px;
+         color:inherit; text-decoration:none; outline:none; animation:sube .5s ease-out both; }
+  .app:nth-child(2){animation-delay:.04s} .app:nth-child(3){animation-delay:.08s} .app:nth-child(4){animation-delay:.12s}
+  .app:nth-child(5){animation-delay:.16s} .app:nth-child(6){animation-delay:.20s} .app:nth-child(7){animation-delay:.24s}
+  .app:nth-child(8){animation-delay:.28s} .app:nth-child(9){animation-delay:.32s} .app:nth-child(10){animation-delay:.36s}
+  .boton { display:block; width:88px; height:88px; padding:5px; border-radius:50%; border:2px solid #3AA3DC;
+           background:radial-gradient(circle at 50% 35%,rgba(58,163,220,.25),rgba(5,20,32,.6));
+           box-shadow:0 0 14px rgba(58,163,220,.35); transition:transform .28s cubic-bezier(.2,.8,.2,1.2), border-color .3s; }
+  .boton .icono { width:100%; height:100%; display:block; clip-path:circle(50%); }
+  .app .logo { height:20px; display:block; opacity:.85; transition:opacity .2s, transform .28s; }
+  .app .lema { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+  .app:hover .boton, .app:focus-visible .boton { transform:scale(1.32); border-color:#C6FF3D;
+           animation:neonStrobe .55s linear, neonPulse 1.8s ease-in-out infinite .55s; }
+  .app:hover .logo, .app:focus-visible .logo { opacity:1; transform:translateY(14px); }
+  .app:hover, .app:focus-visible { z-index:2; }
+  .escenario { min-height:132px; margin:34px auto 0; max-width:620px; display:flex; flex-direction:column; align-items:center;
+               text-align:center; gap:8px; transition:opacity .2s; }
+  .esc-logo { height:46px; width:auto; display:block; }
+  .esc-lema { font-size:13px; font-weight:700; letter-spacing:.16em; text-transform:uppercase; color:#C6FF3D;
+              text-shadow:0 0 12px rgba(198,255,61,.55); }
+  .esc-desc { font-size:17px; line-height:1.45; color:var(--tinta); }
+  .escenario.cambia { opacity:.25; }
+  @keyframes neonStrobe {
+    0%   { box-shadow:0 0 0 rgba(198,255,61,0); border-color:#C6FF3D; }
+    15%  { box-shadow:0 0 22px 6px rgba(255,255,255,1), 0 0 50px 16px rgba(198,255,61,1), inset 0 0 16px rgba(255,255,255,.95); border-color:#fff; }
+    100% { box-shadow:0 0 4px rgba(198,255,61,.9), 0 0 10px rgba(198,255,61,.7), 0 0 18px rgba(198,255,61,.5), 0 0 28px rgba(198,255,61,.3), inset 0 0 6px rgba(198,255,61,.5); border-color:#C6FF3D; }
+  }
+  @keyframes neonPulse {
+    0%, 100% { box-shadow:0 0 3px rgba(198,255,61,.7), 0 0 8px rgba(198,255,61,.5), 0 0 14px rgba(198,255,61,.35), 0 0 22px rgba(198,255,61,.2), inset 0 0 4px rgba(198,255,61,.4); }
+    50%      { box-shadow:0 0 8px rgba(198,255,61,1), 0 0 18px rgba(198,255,61,.95), 0 0 32px rgba(198,255,61,.75), 0 0 48px rgba(198,255,61,.5), inset 0 0 10px rgba(198,255,61,.75); }
+  }
   footer { padding:16px; text-align:center; font-size:13px; color:var(--suave); }
+  @keyframes sube { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
+  @media (prefers-reduced-motion: reduce) { .app, .boton { animation:none !important; transition:none; } }
+  /* En el teléfono no hay mouse: tres por renglón, el nombre debajo y la
+     línea corta a la vista; el escenario se esconde. */
+  @media (hover:none), (max-width:600px) {
+    .apps { display:grid; grid-template-columns:repeat(3,1fr); gap:22px 10px; }
+    .app { width:auto; }
+    .boton { width:78px; height:78px; }
+    .app .lema { position:static; width:auto; height:auto; clip:auto; white-space:normal; font-size:12px; line-height:1.3; color:var(--suave); text-align:center; }
+    .escenario { display:none; }
+  }
   .portal .icono { width:64px; height:64px; flex:none; border-radius:16px; box-shadow:0 10px 24px rgba(0,0,0,.35); }
   .portal { margin-top:28px; padding:18px 20px; display:flex; flex-wrap:wrap; align-items:center; gap:14px 20px; }
   .portal .texto { flex:1 1 280px; display:flex; flex-direction:column; gap:6px; }
@@ -79,57 +110,58 @@
   </header>
   <p class="intro">Una cuenta, todos los programas.</p>
   <nav class="apps" aria-label="Programas de la suite">
-    <a class="app" href="https://dash101.taller101.com" data-app="dash101">
-      <svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-dash101"/></svg>
-      <svg class="logo" viewBox="0 0 408.15 194.51" style="width:54.6px" role="img" aria-label="dash101"><use href="#logo-dash101"/></svg>
+    <a class="app" data-desc="Cuentas, proyectos, cobros y pagos del taller en una sola pantalla." href="https://dash101.taller101.com" data-app="dash101">
+      <span class="boton"><svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-dash101"/></svg></span>
+      <svg class="logo" viewBox="0 0 408.15 194.51" style="width:42.0px" role="img" aria-label="dash101"><use href="#logo-dash101"/></svg>
       <span class="lema">El dinero del taller</span>
     </a>
-    <a class="app" href="https://quell101.taller101.com" data-app="quell101">
-      <svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-quell101"/></svg>
-      <svg class="logo" viewBox="0 0 402.64 194.51" style="width:53.8px" role="img" aria-label="quell101"><use href="#logo-quell101"/></svg>
+    <a class="app" data-desc="La obra mueble por mueble sobre el plano: etapas, pendientes y dudas." href="https://quell101.taller101.com" data-app="quell101">
+      <span class="boton"><svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-quell101"/></svg></span>
+      <svg class="logo" viewBox="0 0 402.64 194.51" style="width:41.4px" role="img" aria-label="quell101"><use href="#logo-quell101"/></svg>
       <span class="lema">La obra sobre el plano</span>
     </a>
-    <a class="app" href="https://quote101.taller101.com" data-app="quote101">
-      <svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-quote101"/></svg>
-      <svg class="logo" viewBox="0 0 442.06 194.51" style="width:59.1px" role="img" aria-label="quote101"><use href="#logo-quote101"/></svg>
+    <a class="app" data-desc="Del levantamiento de medidas a la propuesta firmada, por componente." href="https://quote101.taller101.com" data-app="quote101">
+      <span class="boton"><svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-quote101"/></svg></span>
+      <svg class="logo" viewBox="0 0 442.06 194.51" style="width:45.5px" role="img" aria-label="quote101"><use href="#logo-quote101"/></svg>
       <span class="lema">Cotizaciones</span>
     </a>
-    <a class="app" href="https://cost101.taller101.com" data-app="cost101">
-      <svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-cost101"/></svg>
-      <svg class="logo" viewBox="0 0 374.23 194.51" style="width:50.0px" role="img" aria-label="cost101"><use href="#logo-cost101"/></svg>
+    <a class="app" data-desc="Precios base, cuadrillas y el catálogo que alimenta las cotizaciones." href="https://cost101.taller101.com" data-app="cost101">
+      <span class="boton"><svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-cost101"/></svg></span>
+      <svg class="logo" viewBox="0 0 374.23 194.51" style="width:38.5px" role="img" aria-label="cost101"><use href="#logo-cost101"/></svg>
       <span class="lema">Costos por partida</span>
     </a>
-    <a class="app" href="https://patron101.taller101.com" data-app="patron101">
-      <svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-patron101"/></svg>
-      <svg class="logo" viewBox="0 0 467.98 194.51" style="width:62.6px" role="img" aria-label="patron101"><use href="#logo-patron101"/></svg>
+    <a class="app" data-desc="Rondas de inversión: quién prestó, cuánto se le debe y cuándo se le paga." href="https://patron101.taller101.com" data-app="patron101">
+      <span class="boton"><svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-patron101"/></svg></span>
+      <svg class="logo" viewBox="0 0 467.98 194.51" style="width:48.1px" role="img" aria-label="patron101"><use href="#logo-patron101"/></svg>
       <span class="lema">Inversionistas</span>
     </a>
-    <a class="app" href="https://bill101.taller101.com" data-app="bill101">
-      <svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-bill101"/></svg>
-      <svg class="logo" viewBox="0 0 318.70 194.51" style="width:42.6px" role="img" aria-label="bill101"><use href="#logo-bill101"/></svg>
+    <a class="app" data-desc="Facturas emitidas y recibidas, leídas de su XML, y el IVA e ISR del mes, estimados." href="https://bill101.taller101.com" data-app="bill101">
+      <span class="boton"><svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-bill101"/></svg></span>
+      <svg class="logo" viewBox="0 0 318.70 194.51" style="width:32.8px" role="img" aria-label="bill101"><use href="#logo-bill101"/></svg>
       <span class="lema">Facturas e impuestos estimados</span>
     </a>
-    <a class="app" href="https://supply101.taller101.com" data-app="supply101">
-      <svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-supply101"/></svg>
-      <svg class="logo" viewBox="0 0 476.01 194.51" style="width:63.6px" role="img" aria-label="supply101"><use href="#logo-supply101"/></svg>
+    <a class="app" data-desc="Pedir una compra o un reembolso desde el teléfono, con su foto." href="https://supply101.taller101.com" data-app="supply101">
+      <span class="boton"><svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-supply101"/></svg></span>
+      <svg class="logo" viewBox="0 0 476.01 194.51" style="width:48.9px" role="img" aria-label="supply101"><use href="#logo-supply101"/></svg>
       <span class="lema">Compras y reembolsos</span>
     </a>
-    <a class="app" href="https://roster101.taller101.com/admin" data-app="roster101">
-      <svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-roster101"/></svg>
-      <svg class="logo" viewBox="0 0 434.92 194.51" style="width:58.1px" role="img" aria-label="roster101"><use href="#logo-roster101"/></svg>
+    <a class="app" data-desc="Expedientes del personal: quién está completo y a quién le falta qué." href="https://roster101.taller101.com/admin" data-app="roster101">
+      <span class="boton"><svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-roster101"/></svg></span>
+      <svg class="logo" viewBox="0 0 434.92 194.51" style="width:44.7px" role="img" aria-label="roster101"><use href="#logo-roster101"/></svg>
       <span class="lema">Expedientes del personal</span>
     </a>
-    <a class="app" href="https://peek101.taller101.com" data-app="peek101">
-      <svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-peek101"/></svg>
-      <svg class="logo" viewBox="0 0 409.49 194.51" style="width:54.7px" role="img" aria-label="peek101"><use href="#logo-peek101"/></svg>
+    <a class="app" data-desc="Lo que el cliente quiere saber, sin llamar: su proyecto y su estado de cuenta." href="https://peek101.taller101.com" data-app="peek101">
+      <span class="boton"><svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-peek101"/></svg></span>
+      <svg class="logo" viewBox="0 0 409.49 194.51" style="width:42.1px" role="img" aria-label="peek101"><use href="#logo-peek101"/></svg>
       <span class="lema">Lo que ve tu cliente</span>
     </a>
-    <a class="app" href="https://workshop101.taller101.com" data-app="workshop101">
-      <svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-workshop101"/></svg>
-      <svg class="logo" viewBox="0 0 616.36 194.51" style="width:82.4px" role="img" aria-label="workshop101"><use href="#logo-workshop101"/></svg>
+    <a class="app" data-desc="Quién trabaja en la empresa, con qué rol y a qué programas entra." href="https://workshop101.taller101.com" data-app="workshop101">
+      <span class="boton"><svg class="icono" viewBox="0 0 512 512" aria-hidden="true"><use href="#icono-workshop101"/></svg></span>
+      <svg class="logo" viewBox="0 0 616.36 194.51" style="width:63.4px" role="img" aria-label="workshop101"><use href="#logo-workshop101"/></svg>
       <span class="lema">Tu equipo y sus accesos</span>
     </a>
   </nav>
+  <div class="escenario" aria-hidden="true"><svg class="esc-logo" viewBox="0 0 402.06 194.51"><use href="#logo-suite101"/></svg><span class="esc-lema">Pasa el mouse por un programa</span><span class="esc-desc">Una cuenta abre todos.</span></div>
 
   <!-- El portal del trabajador NO es de la oficina: es la liga que se le
        manda a cada trabajador para que arme su expediente desde su celular.
@@ -146,6 +178,31 @@
 </main>
 <footer>FORESPOT · Suite 101</footer>
 <script>
+  /* El escenario: al pasar el mouse (o el tabulador) por un programa, abajo
+     sale su logotipo, su línea y su descripción. */
+  (function () {
+    var esc = document.querySelector('.escenario');
+    if (!esc) return;
+    var uso = esc.querySelector('.esc-logo use'), logo = esc.querySelector('.esc-logo');
+    var lema = esc.querySelector('.esc-lema'), desc = esc.querySelector('.esc-desc');
+    var inicial = [logo.getAttribute('viewBox'), uso.getAttribute('href'), lema.textContent, desc.textContent];
+    var poner = function (vb, href, l, d) {
+      esc.classList.add('cambia');
+      setTimeout(function () {
+        logo.setAttribute('viewBox', vb); uso.setAttribute('href', href);
+        lema.textContent = l; desc.textContent = d; esc.classList.remove('cambia');
+      }, 90);
+    };
+    document.querySelectorAll('.app').forEach(function (a) {
+      var mostrar = function () {
+        var l = a.querySelector('.logo');
+        poner(l.getAttribute('viewBox'), l.querySelector('use').getAttribute('href'), a.querySelector('.lema').textContent, a.getAttribute('data-desc'));
+      };
+      a.addEventListener('mouseenter', mostrar);
+      a.addEventListener('focus', mostrar);
+    });
+    document.querySelector('.apps').addEventListener('mouseleave', function () { poner.apply(null, inicial); });
+  })();
   /* «Compartir portal»: en el celular abre la hoja de compartir del sistema
      (WhatsApp y las demás apps); donde no existe —la mayoría de los
      navegadores de escritorio— copia la liga al portapapeles y lo dice. Si
