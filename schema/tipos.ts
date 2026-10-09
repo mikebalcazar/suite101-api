@@ -17,7 +17,12 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.85.0 (BILL101 ENTRA A LA SUITE, FASE A: LA FACTURA
+ * Versión del contrato: 0.85.1 (GET /fiscal/cfdi trae `aplicado` en cada
+ * factura: cuánto de ella ya está ligado a dinero. Cada mes de
+ * GET /fiscal/impuestos trae `a_pagar_estimado` (IVA a pagar + ISR del mes),
+ * para que ninguna pantalla lo sume. Y los orígenes de bill101 en ORIGENES.)
+ * Antes:
+ * 0.85.0 (BILL101 ENTRA A LA SUITE, FASE A: LA FACTURA
  * SE LEE SOLA Y LOS IMPUESTOS SE CALCULAN. Mike, 8-oct: «Quiero hacer un
  * módulo para generar y timbrar facturas y también importar y actualizar las
  * facturas recibidas (…) un estado de cuenta de movimientos exclusivamente
@@ -1374,7 +1379,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.85.0';
+export const VERSION_CONTRATO = '0.85.1';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

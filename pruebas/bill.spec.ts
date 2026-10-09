@@ -378,6 +378,7 @@ describe('los impuestos, con las facturas entrando por XML', () => {
     expect(mar).toMatchObject({ trasladado: P(30_400), acreditable: P(15_200), retenido_a_terceros: P(800), favor_anterior: P(16_000), a_pagar: 0, a_favor: P(800) });
     expect(abr).toMatchObject({ resultado: 0, a_favor: P(800) });
     expect(r.data.iva_pendiente).toEqual({ por_cobrar: 0, por_pagar: 0 });
+    expect(r.data.meses[0].a_pagar_estimado, 'IVA 8,000 + ISR 9,600').toBe(P(17_600));
   });
 
   it('el ISR provisional también', async () => {
@@ -457,6 +458,10 @@ describe('el estado de cuenta fiscal', () => {
     expect(e.renglones).toHaveLength(5); // C, A, B, H, N
     expect(e.renglones.find((r: any) => r.uuid === U.C).aplicado).toBe(P(58_000));
     expect(e.renglones.find((r: any) => r.uuid === U.A).aplicado).toBe(0);
+    // Y la lista de siempre lo dice igual (0.85.1).
+    const lista = (await o('mike', '/fiscal/cfdi?mes=2026-01')).data.filas as any[];
+    expect(lista.find((r) => r.uuid === U.C).aplicado).toBe(P(58_000));
+    expect(lista.find((r) => r.uuid === U.A).aplicado).toBe(0);
   });
 
   it('y aparte, lo marcado «facturado» sin factura cargada: no suma, se enseña para arreglarlo', async () => {

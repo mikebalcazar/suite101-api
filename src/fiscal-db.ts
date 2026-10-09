@@ -613,6 +613,9 @@ export class MotorFiscal {
         mes,
         iva: { ...iva.meses[i], pagado: pagado('iva', mes) },
         isr: { ...isr[i], pagado: pagado('isr_provisional', mes) },
+        /* Lo que le toca a ese mes, junto: el IVA a pagar más el ISR del
+         * mes. Va aquí para que ninguna pantalla lo sume por su cuenta. */
+        a_pagar_estimado: iva.meses[i].a_pagar + isr[i].del_mes,
       })),
       iva_pendiente: { por_cobrar: iva.por_cobrar, por_pagar: iva.por_pagar },
       anual: { ...isrAnual(facturas, ej, dePago), pagado: pagado('isr_anual', String(anio)) },
