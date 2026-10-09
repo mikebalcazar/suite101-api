@@ -286,6 +286,23 @@ describe('cuando el SAT no está, o dice que no', () => {
     expect(e.ultimo_error).toBeNull();
   });
 
+  it('si nunca vuelve, cada solicitud se da por perdida tras doce intentos y la noche sigue llegando', async () => {
+    vi.setSystemTime(new Date('2026-10-13T20:00:00Z'));
+    sat.st.modo = 'caido';
+    expect((await o('mike', '/fiscal/sat/bajar', { method: 'POST' })).estado).toBe(200);
+    for (let i = 0; i < 80; i++) {
+      await runDurableObjectAlarm(elDO());
+      if (!(await o('mike', '/fiscal/sat')).data.trabajando) break;
+      vi.setSystemTime(Date.now() + 7 * 3600_000);
+    }
+    const e = (await o('mike', '/fiscal/sat')).data;
+    expect(e.trabajando, 'no se queda trabajando para siempre').toBe(false);
+    const perdidas = (e.solicitudes as any[]).filter((x) => x.estado === 'error' && /12 veces/.test(x.mensaje));
+    expect(perdidas.length).toBe(4);
+    expect(e.proxima_noche_at, 'y la noche queda puesta').toBeTruthy();
+    sat.st.modo = 'bien';
+  });
+
   it('rechaza la FIEL: se dice arriba, con las palabras del SAT', async () => {
     vi.setSystemTime(new Date('2026-10-14T15:00:00Z'));
     sat.st.modo = 'fiel_rechazada';
@@ -294,7 +311,8 @@ describe('cuando el SAT no está, o dice que no', () => {
     const e = (await o('mike', '/fiscal/sat')).data;
     expect(e.ultimo_error).toMatch(/rechazó.*revocado/i);
     sat.st.modo = 'bien';
-    vi.setSystemTime(Date.now() + 60 * 60_000);
+    // Tras tantas fallas seguidas la espera ya es la máxima: seis horas.
+    vi.setSystemTime(Date.now() + 7 * 3600_000);
     await trabajar();
     expect((await o('mike', '/fiscal/sat')).data.trabajando).toBe(false);
   });
@@ -336,6 +354,7 @@ describe('apagar y quitar', () => {
     expect(r.estado).toBe(200);
     expect(r.data.proxima_noche_at).toBeNull();
     expect((await o('ana', '/fiscal/sat/config', { method: 'PUT', json: { automatico: true } })).estado).toBe(403);
+    expect((await o('mike', '/fiscal/sat')).data.proxima_noche_at, 'apagado, no queda noche guardada').toBeNull();
     r = await o('mike', '/fiscal/sat/config', { method: 'PUT', json: { automatico: true } });
     const noche = new Date(r.data.proxima_noche_at);
     const hMx = (noche.getUTCHours() - 6 + 24) % 24;

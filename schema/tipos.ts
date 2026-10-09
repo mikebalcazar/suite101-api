@@ -2444,7 +2444,10 @@ export const TABLAS_INTERNAS = [
    * ruta. */
   'cfdi_conceptos', 'cfdi_pagos', 'fiscal_config', 'fiscal_ejercicios', 'fiscal_pagos',
   /* bill101 fase D (0046). Sólo por /orgs/:o/fiscal/sat. `sat_fiel` guarda
-   * la llave privada de la FIEL, cifrada: no sale por NINGUNA ruta. */
+   * la llave privada de la FIEL, cifrada: no sale por NINGUNA ruta. (Lo que
+   * de verdad la cierra al CRUD genérico es que no está en `TABLAS`, la
+   * lista blanca de src/tablas.ts; esta lista es para que las pruebas del
+   * esquema sepan que existe a propósito.) */
   'sat_fiel', 'sat_config', 'sat_solicitudes', 'sat_eventos',
 ] as const;
 

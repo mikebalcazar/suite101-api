@@ -51,6 +51,7 @@ export function montarFiscalSat(rutas: App, p: PermisosFiscales): void {
 
   rutas.put('/:o/fiscal/sat/fiel', async (c) => {
     if (!dirige(c)) return err(c, 'sin_permiso', 403, { motivo: 'la FIEL de la empresa sólo la sube quien dirige' });
+    if (Number(c.req.header('Content-Length') || 0) > TOPE_FORMA) return err(c, 'datos_invalidos', 413, { motivo: 'eso es demasiado grande para ser una FIEL' });
     const cuerpo = await c.req.arrayBuffer().catch(() => null);
     if (!cuerpo || cuerpo.byteLength > TOPE_FORMA) return err(c, 'datos_invalidos', 400, { motivo: 'se esperan tres cosas: el .cer, el .key y la contraseña' });
     let cer: Uint8Array | null = null, key: Uint8Array | null = null, clave = '';

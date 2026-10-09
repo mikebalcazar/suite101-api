@@ -77,6 +77,8 @@ export const LOTE_LISTA = 400;
 const TOPE_LLAMADAS = 40;
 const TOPE_MS = 20_000;
 const TOPE_PASOS = 30;
+/** Veces que se insiste con una solicitud a la que el SAT no contesta bien. */
+const TOPE_INTENTOS = 12;
 /** Cuánto se espera a una solicitud antes de darla por perdida. Lo normal
  *  son minutos; se han visto de hasta tres días. */
 const VENCE_MS = 96 * 3600_000;
@@ -101,6 +103,8 @@ const llaveXml = (org: string, id: string): string => `orgs/${org}/cfdi/${id}.xm
 export class MotorSat {
   private sql: SqlStorage;
   private llamadas = 0;
+  /** Los .zip del SAT que ya no hacen falta: se tiran al final del tic. */
+  private porTirar: string[] = [];
   constructor(private e: EntornoSat) { this.sql = e.sql; }
 
   private una(sql: string, ...args: SqlStorageValue[]): Fila | undefined {
@@ -135,7 +139,7 @@ export class MotorSat {
     const f = this.fiel();
     const c = this.cfg();
     const cubierto = (lado: Lado): string | null =>
-      (this.una(`SELECT MAX(hasta) AS h FROM sat_solicitudes WHERE lado = ? AND clase = 'cfdi' AND estado IN ('terminada','vacia')`, lado)?.h as string | null) ?? null;
+      (this.una(`SELECT MAX(hasta) AS h FROM sat_solicitudes WHERE lado = ? AND clase = 'cfdi' AND motivo != 'faltantes' AND estado IN ('terminada','vacia')`, lado)?.h as string | null) ?? null;
     const solicitudes = this.todas(
       `SELECT id, tanda, lado, clase, motivo, desde, hasta, estado, codigo, mensaje, cuantas, nuevas, actualizadas, repetidas, rechazadas,
               canceladas, revisadas, faltantes, intentos, proxima_at, creada_at, pedida_at, actualizada_at, terminada_at
@@ -212,7 +216,7 @@ export class MotorSat {
     this.cfg();
     if (d.automatico !== undefined) {
       if (typeof d.automatico !== 'boolean') return { error: 'datos_invalidos', detalle: { automatico: 'true o false' } };
-      this.sql.exec(`UPDATE sat_config SET automatico = ? WHERE id = 'sat'`, d.automatico ? 1 : 0);
+      this.sql.exec(`UPDATE sat_config SET automatico = ?, proxima_noche_at = NULL WHERE id = 'sat'`, d.automatico ? 1 : 0);
     }
     if (d.desde !== undefined) {
       const s = String(d.desde);
@@ -257,7 +261,7 @@ export class MotorSat {
     const piso = pedido > tope ? pedido : tope;
     const tanda = ulid();
     for (const lado of ['emitidas', 'recibidas'] as const) {
-      const ult = this.una(`SELECT MAX(hasta) AS h FROM sat_solicitudes WHERE lado = ? AND clase = 'cfdi' AND estado IN ('terminada','vacia')`, lado)?.h as string | null;
+      const ult = this.una(`SELECT MAX(hasta) AS h FROM sat_solicitudes WHERE lado = ? AND clase = 'cfdi' AND motivo != 'faltantes' AND estado IN ('terminada','vacia')`, lado)?.h as string | null;
       const atras = ult ? masSegundos(ult, -3 * 86_400) : piso;
       const desde = atras > piso ? atras : piso;
       if (desde < hasta) this.poner(tanda, lado, 'cfdi', ult ? motivo : 'inicial', desde, hasta, actor);
@@ -320,6 +324,11 @@ export class MotorSat {
       }
       if (!sigue) break;
     }
+    if (this.porTirar.length) {
+      const lista = this.porTirar.splice(0);
+      this.llamadas++;
+      try { await this.e.env.ARCHIVOS.delete(lista); } catch { /* se quedan; no cambian nada */ }
+    }
     await this.programar();
   }
 
@@ -347,20 +356,32 @@ export class MotorSat {
 
   /* ─────────────── los pasos ─────────────── */
 
-  private actualizar(id: string, campos: Record<string, SqlStorageValue>): void {
+  /** Escribe en la solicitud SÓLO si sigue en el estado con que se leyó.
+   *  Mientras un paso espera al SAT, la base deja entrar otras peticiones:
+   *  si en ese rato alguien quitó la FIEL (la fila pasó a `cancelada`), lo
+   *  que contestó el SAT ya no debe revivirla. Devuelve si escribió. */
+  private actualizar(s: Fila, campos: Record<string, SqlStorageValue>): boolean {
     const k = Object.keys(campos);
-    this.sql.exec(`UPDATE sat_solicitudes SET ${k.map((x) => `${x} = ?`).join(', ')}, actualizada_at = ? WHERE id = ?`, ...k.map((x) => campos[x]), ahora(), id);
+    const c = this.sql.exec(
+      `UPDATE sat_solicitudes SET ${k.map((x) => `${x} = ?`).join(', ')}, actualizada_at = ? WHERE id = ? AND estado = ?`,
+      ...k.map((x) => campos[x]), ahora(), String(s.id), String(s.estado),
+    ).rowsWritten;
+    if (c) { Object.assign(s, campos); }
+    return c > 0;
   }
 
   private aplazar(s: Fila, ms: number, cuenta = false): void {
-    this.actualizar(String(s.id), { proxima_at: new Date(Date.now() + ms).toISOString(), intentos: Number(s.intentos) + (cuenta ? 1 : 0) });
+    this.actualizar(s, { proxima_at: new Date(Date.now() + ms).toISOString(), intentos: Number(s.intentos) + (cuenta ? 1 : 0) });
   }
 
   private terminar(s: Fila, estado: string, campos: Record<string, SqlStorageValue> = {}): void {
-    this.actualizar(String(s.id), { estado, proxima_at: null, terminada_at: ahora(), ...campos });
+    const paquetes = JSON.parse(String(s.paquetes || '[]')) as string[];
+    if (!this.actualizar(s, { estado, proxima_at: null, terminada_at: ahora(), ...campos })) return;
     if (estado === 'terminada' || estado === 'vacia') {
       this.sql.exec(`UPDATE sat_config SET ultima_corrida_at = ?, fallas_seguidas = 0, ultimo_error = NULL, ultimo_error_at = NULL WHERE id = 'sat'`, ahora());
     }
+    // Lo bajado ya no sirve, termine como termine: lo que traía está guardado factura por factura, o no se pudo leer.
+    if (paquetes.length) this.porTirar.push(...paquetes.map((_, i) => llavePaquete(String(this.fiel()?.org_id ?? ''), String(s.id), i)));
   }
 
   /** El SAT no está, o no quiere a esta FIEL: no se le insiste en esta
@@ -375,6 +396,13 @@ export class MotorSat {
       this.aplazar(s, MIN, true);
       return true;
     }
+    // Demasiadas veces sin lograrlo: se da por perdida ESTA solicitud, para que
+    // la empresa no se quede «trabajando» para siempre sin que llegue la noche.
+    if (Number(s.intentos) >= TOPE_INTENTOS || (s.estado === 'pedida' && Date.now() - Date.parse(String(s.pedida_at ?? s.creada_at)) > VENCE_MS)) {
+      this.evento(String(s.id), r.detalle.paso, r.detalle.codigo ?? r.detalle.http ?? r.error, r.detalle.mensaje ?? null);
+      this.terminar(s, 'error', { mensaje: `el SAT no contestó bien ${Number(s.intentos)} veces seguidas (${r.detalle.paso})` });
+      return true;
+    }
     const c = this.cfg();
     const fallas = Number(c.fallas_seguidas) + 1;
     const rechazo = r.error === 'sat_rechaza';
@@ -387,7 +415,7 @@ export class MotorSat {
     const espera = Math.min(6 * 60, rechazo ? 30 * fallas : [2, 5, 15, 30][fallas - 1] ?? 60) * MIN;
     const hasta = new Date(Date.now() + espera).toISOString();
     this.sql.exec(`UPDATE sat_solicitudes SET proxima_at = ? WHERE estado IN ('por_pedir','pedida','lista') AND (proxima_at IS NULL OR proxima_at < ?)`, hasta, hasta);
-    this.actualizar(String(s.id), { intentos: Number(s.intentos) + 1 });
+    this.actualizar(s, { intentos: Number(s.intentos) + 1 });
     return false;
   }
 
@@ -432,7 +460,7 @@ export class MotorSat {
       if (esFallaSat(r)) return this.alto(s, r);
       this.evento(id, 'solicitar', r.codigo, r.mensaje);
       if (r.codigo === 5000 && r.id_solicitud) {
-        this.actualizar(id, { estado: 'pedida', id_solicitud: r.id_solicitud, codigo: r.codigo, mensaje: r.mensaje, pedida_at: ahora(), intentos: 0, proxima_at: new Date(Date.now() + MIN).toISOString() });
+        this.actualizar(s, { estado: 'pedida', id_solicitud: r.id_solicitud, codigo: r.codigo, mensaje: r.mensaje, pedida_at: ahora(), intentos: 0, proxima_at: new Date(Date.now() + MIN).toISOString() });
         return true;
       }
       return this.sinDatos(s, r.codigo, r.mensaje);
@@ -444,7 +472,7 @@ export class MotorSat {
       if (esFallaSat(r)) return this.alto(s, r);
       this.evento(id, 'verificar', `${r.codigo}/${r.estado}/${r.codigo_solicitud}`, r.mensaje);
       if (r.estado === 3 && r.paquetes.length) {
-        this.actualizar(id, { estado: 'lista', paquetes: JSON.stringify(r.paquetes), cuantas: r.cuantas, codigo: r.codigo_solicitud || r.codigo, mensaje: r.mensaje, paquete_n: 0, cursor: 0, intentos: 0, proxima_at: null });
+        this.actualizar(s, { estado: 'lista', paquetes: JSON.stringify(r.paquetes), cuantas: r.cuantas, codigo: r.codigo_solicitud || r.codigo, mensaje: r.mensaje, paquete_n: 0, cursor: 0, intentos: 0, proxima_at: null });
         return true;
       }
       if (r.estado === 3) { this.terminar(s, 'vacia', { cuantas: 0, codigo: r.codigo_solicitud || r.codigo, mensaje: r.mensaje }); return true; }
@@ -475,7 +503,7 @@ export class MotorSat {
       }
       await this.e.env.ARCHIVOS.put(llave, r.paquete, { httpMetadata: { contentType: 'application/zip' } });
     }
-    this.actualizar(id, { estado: 'importando', cursor: 0, intentos: 0, proxima_at: null });
+    this.actualizar(s, { estado: 'importando', cursor: 0, intentos: 0, proxima_at: null });
     return true;
   }
 
@@ -486,7 +514,7 @@ export class MotorSat {
     if (codigo === 5004) { this.terminar(s, 'vacia', { cuantas: 0, codigo, mensaje }); return true; }
     // 5002: ese periodo exacto ya se pidió dos veces en la vida. Un segundo menos es otro periodo.
     if (codigo === 5002 && Number(s.intentos) < 3 && masSegundos(String(s.hasta), -1) > String(s.desde)) {
-      this.actualizar(id, { estado: 'por_pedir', hasta: masSegundos(String(s.hasta), -1), intentos: Number(s.intentos) + 1, id_solicitud: null, proxima_at: null, codigo, mensaje });
+      this.actualizar(s, { estado: 'por_pedir', hasta: masSegundos(String(s.hasta), -1), intentos: Number(s.intentos) + 1, id_solicitud: null, proxima_at: null, codigo, mensaje });
       return true;
     }
     // 5003: son más de las que caben en una solicitud. Se pide en dos mitades.
@@ -518,7 +546,7 @@ export class MotorSat {
     const obj = await this.e.env.ARCHIVOS.get(llavePaquete(String(f.org_id), String(s.id), Number(s.paquete_n)));
     if (!obj) {
       // Se perdió lo guardado: se vuelve a pedir el paquete (si el SAT deja).
-      this.actualizar(String(s.id), { estado: 'lista', cursor: 0 });
+      this.actualizar(s, { estado: 'lista', cursor: 0 });
       return null;
     }
     return new Uint8Array(await obj.arrayBuffer());
@@ -529,10 +557,8 @@ export class MotorSat {
   private async siguientePaquete(s: Fila, f: Fila, campos: Record<string, SqlStorageValue>): Promise<void> {
     const paquetes = JSON.parse(String(s.paquetes || '[]')) as string[];
     const n = Number(s.paquete_n) + 1;
-    if (n < paquetes.length) { this.actualizar(String(s.id), { ...campos, estado: 'lista', paquete_n: n, cursor: 0 }); return; }
+    if (n < paquetes.length) { this.actualizar(s, { ...campos, estado: 'lista', paquete_n: n, cursor: 0 }); return; }
     this.terminar(s, 'terminada', campos);
-    this.llamadas++;
-    await this.e.env.ARCHIVOS.delete(paquetes.map((_, i) => llavePaquete(String(f.org_id), String(s.id), i)));
   }
 
   /** Un lote de XML del paquete: leerlos, meterlos y guardar su archivo. */
@@ -587,7 +613,7 @@ export class MotorSat {
       if (porGuardar.length) this.e.ponerArchivos(porGuardar);
     }
     if (desde + LOTE_XML >= total) await this.siguientePaquete(s, f, cuenta);
-    else this.actualizar(id, { ...cuenta, cursor: desde + LOTE_XML });
+    else this.actualizar(s, { ...cuenta, cursor: desde + LOTE_XML });
     return true;
   }
 
@@ -596,8 +622,11 @@ export class MotorSat {
    *  le parecería que falta—. */
   private async importarLista(s: Fila, f: Fila): Promise<boolean> {
     const id = String(s.id);
-    if (this.una(`SELECT 1 AS x FROM sat_solicitudes WHERE tanda = ? AND lado = ? AND clase = 'cfdi' AND estado IN ${EN_ACTIVAS} LIMIT 1`, String(s.tanda), String(s.lado))) {
-      this.aplazar(s, 20_000);
+    const esperando = this.una(`SELECT MAX(COALESCE(proxima_at, '')) AS p FROM sat_solicitudes WHERE tanda = ? AND lado = ? AND clase = 'cfdi' AND estado IN ${EN_ACTIVAS}`, String(s.tanda), String(s.lado));
+    if (esperando && esperando.p !== null) {
+      // Hasta que a ellos les toque, y un poco más; nunca menos de medio minuto.
+      const suya = esperando.p ? Date.parse(String(esperando.p)) - Date.now() : 0;
+      this.aplazar(s, Math.max(30_000, suya + 15_000));
       return true;
     }
     const bytes = await this.zip(s, f);
@@ -632,7 +661,7 @@ export class MotorSat {
         }
       }
     }
-    if (desde + LOTE_LISTA < filas.length) { this.actualizar(id, { ...c, cursor: desde + LOTE_LISTA }); return true; }
+    if (desde + LOTE_LISTA < filas.length) { this.actualizar(s, { ...c, cursor: desde + LOTE_LISTA }); return true; }
 
     /* La lista trae vigentes que aquí no están: se piden ésas, una vez. Si
      * ya se pidió ese mismo tramo antes y siguen faltando, no se insiste
