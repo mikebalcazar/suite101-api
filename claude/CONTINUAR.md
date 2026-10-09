@@ -216,6 +216,14 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
 
 ## 6. Lo que la fase 3 (peek101) tiene que saber
 
+- **bill101 timbrado real: Facturama ya acepta todo; falta el alta del CSD en el SAT (9-oct, API #303 #305 #306 #309 #311, bill101 #8).**
+  Cuatro requisitos reales de Facturama (serie en sucursal, CP de sucursal,
+  receptor inscrito → público en general, InformacionGlobal) y luego 305 del
+  SAT por CSD generado ese día (72 h). Tarea programada relanza el humo el
+  lunes 12-oct 10:00 MX. El humo deja su salida como comentario en el commit
+  (`gh api repos/…/commits/SHA/comments`); los logs de Actions no se bajan
+  desde aquí. En `prueba` la alarma del OrgDB va a un año (#311). Muro
+  `2026-10-09-1100-bill101-lo-que-facturama-exige.md`.
 - **`GET /orgs/:o/peek` ya sirve datos importados** y está probado con ellos: la
   clienta importada entra con su PIN, `acceso.ref_id` es su id de Firestore, y
   ve sus dos ítems con los totales ya sumados por la API.
