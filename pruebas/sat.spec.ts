@@ -151,6 +151,28 @@ describe('la FIEL entra por la ruta', () => {
   });
 });
 
+describe('una empresa recién nacida, sin tocar nada antes', () => {
+  it('la FIEL le pone el RFC aunque el renglón de empresa no exista todavía', async () => {
+    const NUEVA = 'sat-nueva';
+    const alta = await pedir('mike', '/admin/orgs', { method: 'POST', json: { id: NUEVA, nombre: 'Recién nacida', apps: { dash: true, bill: true } }, app: '' });
+    expect(alta.estado).toBe(201);
+    const r = await pedir('mike', `/orgs/${NUEVA}/fiscal/sat/fiel`, { method: 'PUT', body: forma(bytes(FIEL_CER_B64), bytes(FIEL_KEY_B64), FIEL_CLAVE) });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.rfc_empresa).toBe(RFC_EMPRESA);
+    expect((await pedir('mike', `/orgs/${NUEVA}/empresa`, { app: 'dash101' })).data.rfc).toBe(RFC_EMPRESA);
+    // Y lo que baje entra: `importar` ya sabe de quién es la empresa.
+    const nueva = entorno.ORG.get(entorno.ORG.idFromName(NUEVA));
+    entrega = () => ({ estado: 3, vueltas: 0, cuantas: 1, paquetes: [zipDe({ 'e1.xml': XML.E1 })] });
+    for (let i = 0; i < 10 && (await runDurableObjectAlarm(nueva)); i++) vi.setSystemTime(Date.now() + 61_000);
+    const e = (await pedir('mike', `/orgs/${NUEVA}/fiscal/sat`)).data;
+    expect((e.solicitudes as any[]).filter((x) => x.estado === 'error'), 'ninguna falla por falta de RFC').toEqual([]);
+    expect(e.facturas_del_sat).toBeGreaterThan(0);
+    await pedir('mike', `/admin/orgs/${NUEVA}`, { method: 'DELETE', app: '' });
+    // Lo que esta empresa le dijo al SAT no cuenta para las siguientes pruebas.
+    sat.st.llamadas.splice(0);
+  });
+});
+
 describe('la primera bajada', () => {
   it('pide cuatro cosas desde el 1-ene-2026: XML y lista, de cada lado', async () => {
     const e = (await o('mike', '/fiscal/sat')).data;
