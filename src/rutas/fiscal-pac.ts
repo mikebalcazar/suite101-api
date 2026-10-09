@@ -28,8 +28,12 @@ import { err, ok, type Ctx, type Vars } from '../http';
 import type { Env } from '../entorno';
 import type { ApiOrgDB } from '../org-db';
 import { cifrarLlave, descifrarLlave, llaveMaestraFiel } from '../fiel';
-import { esFallaXml, leerCfdi } from '../cfdi-xml';
+import { esFallaXml, extrasImpresa, leerCfdi } from '../cfdi-xml';
 import { horaMx } from '../sat-db';
+import { empresaDe } from '../empresa';
+import { correoFactura, enviarCorreo } from '../auth/correo';
+import { limpiarCorreos } from '../pac-db';
+import { armarPdf, impresaDeBorrador, impresaDeXml, type Empresa as EmpresaPdf, type PdfConfig } from '../pdf-cfdi';
 import {
   asegurarSerie, bajar, buscarPorFolio, cancelar, cuentas, cuerpoFacturama, esFallaPac, MOTIVOS_CANCELACION, perfil, revisarBorrador, timbrar,
   type Cuenta_, type Ventanilla,
@@ -156,6 +160,13 @@ export function montarFiscalPac(rutas: App, p: PermisosFiscales): void {
     const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
     const borrador = revisarBorrador(b.borrador ?? b);
     if (esFallaPac(borrador)) return err(c, borrador.error, 400, borrador.detalle);
+    // 0.89.0 · a qué correos mandarla (se guardan en el cliente) y si mandarla ya.
+    const correos = limpiarCorreos(b.correos);
+    if (b.correos !== undefined && b.correos !== null && !correos.length && (Array.isArray(b.correos) ? b.correos.length : String(b.correos).trim())) {
+      return err(c, 'borrador_invalido', 400, { campo: 'correos', motivo: 'ningún correo de la lista tiene forma de correo' });
+    }
+    const enviar = b.enviar === true;
+    if (enviar && !correos.length) return err(c, 'borrador_invalido', 400, { campo: 'correos', motivo: 'para mandarla hace falta al menos un correo' });
     const k = await abrirCuenta(c);
     if ('error' in k) return err(c, k.error, codigoDe(k.error), k.detalle);
     const cfg = await stub(c).pac('config');
@@ -184,16 +195,140 @@ export function montarFiscalPac(rutas: App, p: PermisosFiscales): void {
       return err(c, t.error, codigoDe(t.error), { ...t.detalle, emision_id: em.id, folio: `${em.serie}-${em.folio}`, ...(sinRespuesta ? { que_hacer: 'no se sabe si se timbró. Antes de volver a intentar, revisar en Facturama si existe el folio.' } : {}) });
     }
     // Timbrada. Su XML es la verdad: se baja, se lee y entra como cualquier otra.
-    const fin = await recuperar(c, k, { id: em.id, serie: em.serie, folio: em.folio }, t.pac_id, t.uuid);
+    const fin = await recuperar(c, k, { id: em.id, serie: em.serie, folio: em.folio }, t.pac_id, t.uuid, { correos });
     if ('error' in fin) return err(c, fin.error, fin.estado, fin.detalle);
-    return ok(c, fin.data, 201);
+    // Mandarla es cortesía: si el correo no sale, la factura ya está timbrada y se dice.
+    const correo = enviar ? await mandarFactura(c, String(fin.data.cfdi_id), correos) : null;
+    return ok(c, { ...fin.data, correo }, 201);
   });
+
+  /* ─────────────── 0.89.0 · vista previa, catálogo, clientes, correos, PDF propio ─────────────── */
+
+  /** El PDF de un borrador, con marca de agua: el mismo diseño que el de
+   *  verdad, para ver cómo queda antes de timbrar. */
+  rutas.post('/:o/fiscal/emitir/vista-previa', async (c) => {
+    if (!p.puedeLeer(c)) return err(c, 'sin_permiso', 403);
+    const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+    const borrador = revisarBorrador(b.borrador ?? b);
+    if (esFallaPac(borrador)) return err(c, borrador.error, 400, borrador.detalle);
+    const cfg = await stub(c).pac('config');
+    const cta = await stub(c).pac('cuenta');
+    const serie = String(cfg.cuenta?.serie ?? 'A');
+    const lugar = String(cta?.lugar_expedicion ?? '') || '—';
+    const { empresa, config } = await paraPdf(c);
+    const impresa = impresaDeBorrador(borrador, {
+      serie, folio: Number.isFinite(Number(cfg.cuenta?.folio_siguiente)) ? Number(cfg.cuenta.folio_siguiente) : null, fecha: horaMx(Date.now()), lugar_expedicion: lugar,
+      emisor: { rfc: String(cfg.rfc_empresa ?? cfg.cuenta?.perfil?.rfc ?? ''), nombre: empresa.nombre, regimen: cfg.cuenta?.perfil?.regimen ?? null },
+    });
+    const pdf = await armarPdf({ impresa, empresa, config, vista_previa: true });
+    return new Response(pdf, { headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="vista-previa.pdf"', 'Cache-Control': 'private, no-store' } });
+  });
+
+  rutas.get('/:o/fiscal/conceptos', async (c) => {
+    if (!p.puedeLeer(c)) return err(c, 'sin_permiso', 403);
+    return ok(c, { filas: await stub(c).pac('conceptos', [c.req.query('q') ?? '', Number(c.req.query('limite') || 30)]) });
+  });
+
+  rutas.get('/:o/fiscal/clientes', async (c) => {
+    if (!p.puedeLeer(c)) return err(c, 'sin_permiso', 403);
+    return ok(c, { filas: await stub(c).pac('clientes', [c.req.query('q') ?? '', Number(c.req.query('limite') || 30)]) });
+  });
+
+  rutas.put('/:o/fiscal/clientes/:id/correos', async (c) => {
+    if (!(await p.administra(c))) return err(c, 'sin_permiso', 403);
+    const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+    const r = await stub(c).pac('ponerCorreos', [c.req.param('id')!, b.correos]);
+    if (esFalla(r)) return err(c, r.error, 404, r.detalle);
+    return ok(c, r);
+  });
+
+  rutas.get('/:o/fiscal/pdf-config', async (c) => {
+    if (!p.puedeLeer(c)) return err(c, 'sin_permiso', 403);
+    return ok(c, await stub(c).pac('pdfConfig'));
+  });
+
+  rutas.put('/:o/fiscal/pdf-config', async (c) => {
+    if (!dirige(c)) return err(c, 'sin_permiso', 403, { motivo: 'los datos del PDF los pone quien dirige la empresa' });
+    const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+    const r = await stub(c).pac('ponerPdfConfig', [b, p.actor(c)]);
+    if (esFalla(r)) return err(c, r.error, 400, r.detalle);
+    return ok(c, r);
+  });
+
+  /** Mandar (o volver a mandar) una timbrada por correo, con PDF y XML. Sin
+   *  `correos` en el cuerpo, a los del cliente de la factura. */
+  rutas.post('/:o/fiscal/cfdi/:id/enviar', async (c) => {
+    if (!(await p.administra(c))) return err(c, 'sin_permiso', 403);
+    const id = c.req.param('id')!;
+    const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+    let correos = limpiarCorreos(b.correos);
+    if (!correos.length) {
+      const em = (await stub(c).pac('emisiones', [200])) as Record<string, unknown>[];
+      const mia = em.find((e) => e.cfdi_id === id);
+      if (mia?.cliente_id) correos = await stub(c).pac('correosDe', [String(mia.cliente_id)]);
+    }
+    if (!correos.length) return err(c, 'sin_correos', 400, { motivo: 'no hay a quién mandarla: pon un correo' });
+    const r = await mandarFactura(c, id, correos);
+    if ('error' in r && r.error) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 409, { motivo: r.motivo });
+    return ok(c, r);
+  });
+
+  /** Lo que el PDF lleva de la empresa (nombre, RFC, datos de contacto, logo) y lo de bill101 (banco, leyenda). */
+  async function paraPdf(c: Ctx): Promise<{ empresa: EmpresaPdf; config: PdfConfig }> {
+    const e = await empresaDe(c);
+    let logo: EmpresaPdf['logo'] = null;
+    if (e.logo_llave) {
+      const obj = await c.env.ARCHIVOS.get(String(e.logo_llave)).catch(() => null);
+      if (obj) logo = { bytes: new Uint8Array(await obj.arrayBuffer()), tipo: obj.httpMetadata?.contentType ?? (String(e.logo_llave).endsWith('.png') ? 'image/png' : 'image/jpeg') };
+    }
+    const texto = (k: string) => ((e[k] as string | null | undefined) ?? null) || null;
+    const config = (await stub(c).pac('pdfConfig')) as PdfConfig;
+    return {
+      empresa: { nombre: String(e.nombre ?? c.get('org_id')), rfc: texto('rfc'), regimen: null, direccion: texto('direccion'), telefono: texto('telefono'), correo: texto('correo'), sitio_web: texto('sitio_web'), logo },
+      config,
+    };
+  }
+
+  /** El PDF propio de una timbrada, desde su XML. null si no tiene XML. */
+  async function pdfPropio(c: Ctx, f: Record<string, unknown>): Promise<Uint8Array | null> {
+    if (!f.xml_llave) return null;
+    const obj = await c.env.ARCHIVOS.get(String(f.xml_llave)).catch(() => null);
+    if (!obj) return null;
+    const xml = await obj.text();
+    const leida = leerCfdi(xml);
+    if (esFallaXml(leida)) return null;
+    const { empresa, config } = await paraPdf(c);
+    const impresa = impresaDeXml(leida, extrasImpresa(xml));
+    // Las observaciones no van en el XML: se toman de la emisión, si fue de aquí.
+    const em = (await stub(c).pac('emisiones', [200])) as Record<string, unknown>[];
+    const mia = em.find((x) => x.cfdi_id === f.id);
+    if (mia) { const d = (await stub(c).pac('emision', [String(mia.id)])) as { borrador?: { observaciones?: string | null } } | null; impresa.observaciones = d?.borrador?.observaciones ?? null; }
+    if (leida.emisor.nombre) empresa.nombre = leida.emisor.nombre;
+    return armarPdf({ impresa, empresa, config });
+  }
+
+  async function mandarFactura(c: Ctx, id: string, correos: string[]): Promise<{ enviado: boolean; motivo?: string; a: string[]; error?: string }> {
+    const f = (await stub(c).fiscal('detalle', [id])) as Record<string, unknown> | null;
+    if (!f) return { enviado: false, error: 'no_encontrado', motivo: 'no existe esa factura', a: correos };
+    if (!f.xml_llave) return { enviado: false, error: 'sin_archivo', motivo: 'esta factura no tiene XML: no se puede mandar', a: correos };
+    const xml = await c.env.ARCHIVOS.get(String(f.xml_llave)).catch(() => null);
+    const pdf = await pdfPropio(c, f);
+    if (!xml || !pdf) return { enviado: false, error: 'sin_archivo', motivo: 'no se pudo armar el PDF', a: correos };
+    const empresa = await empresaDe(c);
+    const folio = `${String(f.serie ?? '')}${f.serie && f.folio ? '-' : ''}${String(f.folio ?? '')}`.trim() || String(f.uuid);
+    const msg = correoFactura({ empresa: String(empresa.nombre ?? c.get('org_id')), folio, uuid: String(f.uuid), total: Number(f.total ?? 0), fecha: String(f.fecha ?? '').slice(0, 10), receptor: String(f.razon_social ?? f.rfc ?? '') });
+    const r = await enviarCorreo(c.env, {
+      para: correos, ...msg,
+      adjuntos: [{ nombre: `${folio}.pdf`, contenido: pdf, tipo: 'application/pdf' }, { nombre: `${folio}.xml`, contenido: new Uint8Array(await xml.arrayBuffer()), tipo: 'application/xml' }],
+    });
+    return { ...r, a: correos };
+  }
 
   /** Lo que sigue a un timbre: bajar el XML, comprobar que es ÉSTE, meterlo.
    *  Si algo falla a medias, la emisión guarda lo que se sabe (id y folio
    *  fiscal) y se queda «timbrando» para resolverla después, nunca para
    *  timbrarla otra vez. */
-  async function recuperar(c: Ctx, k: Cuenta_, em: { id: string; serie: string; folio: number }, pac_id: string, uuid: string | null): Promise<{ data: Record<string, unknown> } | { error: string; estado: number; detalle?: unknown }> {
+  async function recuperar(c: Ctx, k: Cuenta_, em: { id: string; serie: string; folio: number }, pac_id: string, uuid: string | null, extra: { correos?: string[] } = {}): Promise<{ data: Record<string, unknown> } | { error: string; estado: number; detalle?: unknown }> {
     const sabido = { pac_id, uuid };
     const x = await bajar(k, ventanilla(c), pac_id, 'xml');
     if (esFallaPac(x)) {
@@ -209,7 +344,7 @@ export function montarFiscalPac(rutas: App, p: PermisosFiscales): void {
       await stub(c).pac('fallida', [em.id, `Facturama contestó el folio fiscal ${uuid} pero el XML trae ${leida.uuid}`, true, sabido]);
       return { error: 'xml_de_otra_factura', estado: 502, detalle: { esperado: uuid, vino: leida.uuid, emision_id: em.id } };
     }
-    const r = await stub(c).pac('timbrada', [em.id, leida, pac_id, p.actor(c)]);
+    const r = await stub(c).pac('timbrada', [em.id, leida, pac_id, p.actor(c), extra]);
     if (esFalla(r)) {
       await stub(c).pac('fallida', [em.id, `timbrada (${leida.uuid}) pero no entró a la base: ${r.error} ${JSON.stringify(r.detalle ?? {})}`, true, sabido]);
       return { error: r.error, estado: r.error === 'xml_de_otra_factura' ? 502 : 500, detalle: { ...((r.detalle as object) ?? {}), uuid: leida.uuid, emision_id: em.id } };
@@ -264,6 +399,12 @@ export function montarFiscalPac(rutas: App, p: PermisosFiscales): void {
     const entregar = (cuerpo: ReadableStream | Uint8Array) => new Response(cuerpo, {
       headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${nombre}.pdf"`, 'Cache-Control': 'private, no-store' },
     });
+    // 0.89.0 · Con XML, el PDF lo arma la API (diseño propio: logo, datos
+    // bancarios). Se arma cada vez: cambia si cambian los datos de la empresa.
+    if (c.req.query('de') !== 'facturama') {
+      const propio = await pdfPropio(c, f);
+      if (propio) return entregar(propio);
+    }
     if (f.pdf_llave) {
       const obj = await c.env.ARCHIVOS.get(String(f.pdf_llave));
       if (obj) return entregar(obj.body);

@@ -54,6 +54,8 @@ export const DEFS: Record<Tabla, Def> = {
       // 0047 · lo que la factura 4.0 exige del receptor (bill101 fase C). Se
       // llenan al facturarle; también se pueden teclear.
       razon_social: 'texto', regimen_fiscal: 'texto', cp_fiscal: 'texto', uso_cfdi: 'texto',
+      // 0048 · a qué correos se le manda la factura (lista JSON de textos).
+      correos_factura: 'texto',
     },
     requeridos: ['nombre'],
     filtros: ['usuario_id'],

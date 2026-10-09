@@ -17,10 +17,10 @@
  *                      repetido no.
  */
 
-import { ahora, ulid } from './lib';
+import { ahora, normalizar, normalizaCorreo, ulid } from './lib';
 import type { CfdiLeido } from './cfdi-xml';
 import type { Actor, Falla, ResultadoImportar } from './fiscal-db';
-import type { Borrador } from './pac';
+import { RFC_PUBLICO, type Borrador } from './pac';
 import type { LlaveCifrada } from './fiel';
 
 type Fila = Record<string, SqlStorageValue>;
@@ -157,7 +157,7 @@ export class MotorPac {
     }
     let cliente: Fila | undefined;
     if (cliente_id) {
-      cliente = this.una(`SELECT id, nombre, rfc, razon_social, regimen_fiscal, cp_fiscal, uso_cfdi, correo FROM clientes WHERE id = ?`, cliente_id);
+      cliente = this.una(`SELECT id, nombre, rfc, razon_social, regimen_fiscal, cp_fiscal, uso_cfdi, correo, correos_factura FROM clientes WHERE id = ?`, cliente_id);
       if (!cliente) return { error: 'cliente_desconocido' };
     }
     // Lo último que se le facturó a ese RFC, por si el cliente no tiene lo fiscal guardado.
@@ -169,7 +169,7 @@ export class MotorPac {
       : 0;
     return {
       proyecto: proyecto ? { id: proyecto.id, nombre: proyecto.nombre, precio_venta: proyecto.precio_venta, cobrado: proyecto.cobrado, facturado, estado: proyecto.estado } : null,
-      cliente: cliente ? { id: cliente.id, nombre: cliente.nombre, correo: cliente.correo } : null,
+      cliente: cliente ? { id: cliente.id, nombre: cliente.nombre, correo: cliente.correo, correos: correosDe(cliente) } : null,
       receptor: {
         rfc: cliente?.rfc ?? '',
         razon_social: cliente?.razon_social ?? ultima?.razon_social ?? cliente?.nombre ?? '',
@@ -222,7 +222,7 @@ export class MotorPac {
   /** Facturama timbró y la ruta ya tiene el XML leído: entra a `cfdi` por el
    *  camino de siempre, se liga a la emisión, al proyecto y al cliente, y al
    *  cliente se le guarda lo fiscal con que se le facturó. */
-  timbrada(emision_id: string, leida: CfdiLeido, pac_id: string, actor: Actor): Fila | Falla {
+  timbrada(emision_id: string, leida: CfdiLeido, pac_id: string, actor: Actor, extra: { correos?: string[] } = {}): Fila | Falla {
     const em = this.una(`SELECT * FROM emisiones WHERE id = ?`, emision_id);
     if (!em) return { error: 'emision_desconocida' };
     if (em.estado === 'timbrada') return { error: 'emision_cerrada', detalle: { estado: em.estado, cfdi_id: em.cfdi_id } };
@@ -237,17 +237,112 @@ export class MotorPac {
     const x = r.resultados[0];
     if (!x?.id || x.resultado === 'rechazada') return { error: 'cfdi_no_entro', detalle: { motivo: x?.motivo, detalle: x?.detalle } };
     const b = JSON.parse(String(em.borrador)) as Borrador;
+    const correos = limpiarCorreos(extra.correos);
+    let cliente_id: string | null = em.cliente_id ? String(em.cliente_id) : null;
     this.e.tx(() => {
       this.sql.exec(`UPDATE cfdi SET pac_id = ?, proyecto_id = COALESCE(?, proyecto_id), actualizado_at = ? WHERE id = ?`, pac_id, em.proyecto_id, ahora(), x.id!);
       this.sql.exec(`UPDATE emisiones SET estado = 'timbrada', pac_id = ?, uuid = ?, cfdi_id = ?, error = NULL, terminada_at = ? WHERE id = ?`, pac_id, leida.uuid, x.id!, ahora(), emision_id);
-      if (em.cliente_id) {
+      /* Mike, 9-oct: «si se genera una factura con un RFC nuevo, guardar ese
+       * RFC como cliente nuevo para futuras facturas». Sin cliente dicho, se
+       * busca por RFC; si no está, se da de alta con lo de la factura. Al
+       * público en general no se le abre cliente. */
+      if (!cliente_id && b.receptor.rfc !== RFC_PUBLICO) {
+        const ya = this.una(`SELECT id FROM clientes WHERE upper(replace(replace(replace(rfc,' ',''),'-',''),'.','')) = ? ORDER BY creado_at LIMIT 1`, b.receptor.rfc);
+        if (ya) cliente_id = String(ya.id);
+        else {
+          cliente_id = ulid();
+          this.sql.exec(
+            `INSERT INTO clientes (id, nombre, nombre_norm, rfc, creado_en_app, creado_at) VALUES (?,?,?,?,?,?)`,
+            cliente_id, b.receptor.razon_social, normalizar(b.receptor.razon_social), b.receptor.rfc, 'bill101', ahora(),
+          );
+        }
+      }
+      if (cliente_id) {
+        this.sql.exec(`UPDATE emisiones SET cliente_id = ? WHERE id = ?`, cliente_id, emision_id);
         this.sql.exec(
-          `UPDATE clientes SET rfc = ?, razon_social = ?, regimen_fiscal = ?, cp_fiscal = ?, uso_cfdi = ? WHERE id = ?`,
-          b.receptor.rfc, b.receptor.razon_social, b.receptor.regimen_fiscal, b.receptor.cp_fiscal, b.receptor.uso_cfdi, String(em.cliente_id),
+          `UPDATE clientes SET rfc = ?, razon_social = ?, regimen_fiscal = ?, cp_fiscal = ?, uso_cfdi = ?${correos.length ? ', correos_factura = ?' : ''} WHERE id = ?`,
+          b.receptor.rfc, b.receptor.razon_social, b.receptor.regimen_fiscal, b.receptor.cp_fiscal, b.receptor.uso_cfdi, ...(correos.length ? [JSON.stringify(correos)] : []), cliente_id,
         );
       }
+      this.anotarConceptos(b);
     });
-    return { emision_id, cfdi_id: x.id, uuid: leida.uuid, resultado: x.resultado, ligada_a: x.ligada_a ?? [] } as unknown as Fila;
+    return { emision_id, cfdi_id: x.id, uuid: leida.uuid, resultado: x.resultado, ligada_a: x.ligada_a ?? [], cliente_id } as unknown as Fila;
+  }
+
+  /* ─────────────── el catálogo de facturación ─────────────── */
+
+  /** Mike, 9-oct: «cada vez que se genere un concepto en la factura,
+   *  guardarlo en catálogo de facturación». Clave + descripción es la llave;
+   *  se guarda lo último con que se facturó y cuántas veces. */
+  private anotarConceptos(b: Borrador): void {
+    for (const r of b.renglones) {
+      const norm = normalizar(r.descripcion);
+      if (!norm) continue;
+      this.sql.exec(
+        `INSERT INTO conceptos_fact (id, clave_prod_serv, clave_unidad, unidad, descripcion, descripcion_norm, precio_unitario, iva, veces, usado_at, creado_at)
+           VALUES (?,?,?,?,?,?,?,?,1,?,?)
+         ON CONFLICT(clave_prod_serv, descripcion_norm) DO UPDATE SET
+           clave_unidad = excluded.clave_unidad, unidad = excluded.unidad, descripcion = excluded.descripcion,
+           precio_unitario = excluded.precio_unitario, iva = excluded.iva, veces = veces + 1, usado_at = excluded.usado_at`,
+        ulid(), r.clave_prod_serv, r.clave_unidad, r.unidad ?? null, r.descripcion, norm, r.precio_unitario, r.iva ?? null, ahora(), ahora(),
+      );
+    }
+  }
+
+  /** Para escoger: lo más usado primero; con `q`, lo que lo contenga. */
+  conceptos(q = '', limite = 30): Fila[] {
+    const n = normalizar(q);
+    const lim = Math.min(200, Math.max(1, Math.floor(limite) || 30));
+    const sel = `SELECT id, clave_prod_serv, clave_unidad, unidad, descripcion, precio_unitario, iva, veces, usado_at FROM conceptos_fact`;
+    if (!n) return this.todas(`${sel} ORDER BY veces DESC, usado_at DESC LIMIT ?`, lim);
+    const palabras = n.split(' ').filter(Boolean).slice(0, 6);
+    const donde = palabras.map(() => `(descripcion_norm LIKE ? OR clave_prod_serv LIKE ?)`).join(' AND ');
+    const args = palabras.flatMap((w) => [`%${w}%`, `${w}%`]);
+    return this.todas(`${sel} WHERE ${donde} ORDER BY veces DESC, usado_at DESC LIMIT ?`, ...args, lim);
+  }
+
+  /** Los clientes, para escoger a quién se le factura: por nombre, razón
+   *  social o RFC. Trae lo fiscal que se les conozca y sus correos. */
+  clientes(q = '', limite = 30): Record<string, unknown>[] {
+    const n = normalizar(q);
+    const lim = Math.min(200, Math.max(1, Math.floor(limite) || 30));
+    const sel = `SELECT id, nombre, rfc, razon_social, regimen_fiscal, cp_fiscal, uso_cfdi, correo, correos_factura FROM clientes`;
+    const filas = !n
+      ? this.todas(`${sel} ORDER BY nombre_norm LIMIT ?`, lim)
+      : this.todas(`${sel} WHERE nombre_norm LIKE ? OR lower(razon_social) LIKE ? OR upper(rfc) LIKE ? ORDER BY nombre_norm LIMIT ?`, `%${n}%`, `%${n}%`, `${n.toUpperCase().replace(/[\s.-]/g, '')}%`, lim);
+    return filas.map((c) => ({ id: c.id, nombre: c.nombre, rfc: c.rfc, razon_social: c.razon_social, regimen_fiscal: c.regimen_fiscal, cp_fiscal: c.cp_fiscal, uso_cfdi: c.uso_cfdi, correos: correosDe(c) }));
+  }
+
+  /** Los correos a donde se le manda la factura a este cliente. */
+  correosDe(cliente_id: string): string[] {
+    const c = this.una(`SELECT correo, correos_factura FROM clientes WHERE id = ?`, cliente_id);
+    return c ? correosDe(c) : [];
+  }
+
+  ponerCorreos(cliente_id: string, correos: unknown): Fila | Falla {
+    if (!this.una(`SELECT 1 AS x FROM clientes WHERE id = ?`, cliente_id)) return { error: 'cliente_desconocido' };
+    const lista = limpiarCorreos(correos);
+    this.sql.exec(`UPDATE clientes SET correos_factura = ? WHERE id = ?`, lista.length ? JSON.stringify(lista) : null, cliente_id);
+    return { cliente_id, correos: lista } as unknown as Fila;
+  }
+
+  /* ─────────────── lo que el PDF lleva además de lo fiscal ─────────────── */
+
+  pdfConfig(): Fila {
+    const f = this.una(`SELECT banco, clabe, cuenta, beneficiario, leyenda, puesta_por, puesta_at FROM pdf_config WHERE id = 'pdf'`);
+    return { banco: f?.banco ?? null, clabe: f?.clabe ?? null, cuenta: f?.cuenta ?? null, beneficiario: f?.beneficiario ?? null, leyenda: f?.leyenda ?? null, puesta_at: f?.puesta_at ?? null };
+  }
+
+  ponerPdfConfig(d: Record<string, unknown>, actor: Actor): Fila | Falla {
+    const t = (k: string, tope: number) => { const v = d[k]; return typeof v === 'string' && v.trim() ? v.trim().slice(0, tope) : null; };
+    const clabe = t('clabe', 18);
+    if (clabe && !/^\d{18}$/.test(clabe)) return { error: 'datos_invalidos', detalle: { campo: 'clabe', motivo: 'la CLABE son 18 dígitos' } };
+    this.sql.exec(
+      `INSERT INTO pdf_config (id, banco, clabe, cuenta, beneficiario, leyenda, puesta_por, puesta_at) VALUES ('pdf',?,?,?,?,?,?,?)
+       ON CONFLICT(id) DO UPDATE SET banco = excluded.banco, clabe = excluded.clabe, cuenta = excluded.cuenta, beneficiario = excluded.beneficiario, leyenda = excluded.leyenda, puesta_por = excluded.puesta_por, puesta_at = excluded.puesta_at`,
+      t('banco', 60), clabe, t('cuenta', 30), t('beneficiario', 200), t('leyenda', 500), actor.usuario_id, ahora(),
+    );
+    return this.pdfConfig();
   }
 
   /** Facturama dijo que no (o no se sabe). `sin_respuesta`: se mandó y no
@@ -313,4 +408,24 @@ export class MotorPac {
     });
     return { cfdi_id, estado: r.estado, cambio } as unknown as Fila;
   }
+}
+
+/* ─────────────── correos ─────────────── */
+
+/** Una lista de correos limpia: válidos, sin repetir, a lo más ocho. */
+export function limpiarCorreos(v: unknown): string[] {
+  const crudos = Array.isArray(v) ? v : typeof v === 'string' ? v.split(/[,;\s]+/) : [];
+  const vistos = new Set<string>();
+  for (const x of crudos) {
+    const c = normalizaCorreo(x);
+    if (c && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c)) vistos.add(c);
+    if (vistos.size >= 8) break;
+  }
+  return [...vistos];
+}
+
+/** Los correos de factura de un cliente; si no tiene, el del contacto. */
+function correosDe(c: Fila): string[] {
+  const lista = typeof c.correos_factura === 'string' ? limpiarCorreos((() => { try { return JSON.parse(String(c.correos_factura)); } catch { return c.correos_factura; } })()) : [];
+  return lista.length ? lista : limpiarCorreos(c.correo);
 }

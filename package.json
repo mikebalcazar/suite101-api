@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "fflate": "^0.8.3",
-    "hono": "^4.13.7"
+    "hono": "^4.13.7",
+    "pdf-lib": "^1.17.1",
+    "qrcode-generator": "^2.0.4"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",

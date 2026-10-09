@@ -60,6 +60,7 @@ import bill from '../migrations/org/0044_bill.sql';
 import ordenesCanceladas from '../migrations/org/0045_ordenes_canceladas.sql';
 import sat from '../migrations/org/0046_sat.sql';
 import timbrar from '../migrations/org/0047_timbrar.sql';
+import facturaV2 from '../migrations/org/0048_factura_v2.sql';
 import { MotorInversion } from './inversion-db';
 import { MotorFiscal } from './fiscal-db';
 import { MotorSat, type MemoriaSat } from './sat-db';
@@ -91,12 +92,12 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2];
 
 /** La 0027, la 0030, la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
  *  en la lista; el archivo .sql es sólo la nota que lo dice. */
-const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar'> = {
+const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar' | 'facturaV2'> = {
   [MIGRACIONES.indexOf(sinNegocios)]: 'quitarNegocios',
   [MIGRACIONES.indexOf(requerimientosHuerfanos)]: 'migrarRequerimientosHuerfanos',
   [MIGRACIONES.indexOf(obrasALaSuite)]: 'migrarObrasSueltas',
@@ -105,6 +106,7 @@ const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfano
   [MIGRACIONES.indexOf(inversionRiesgos)]: 'inversionRiesgos',
   [MIGRACIONES.indexOf(bill)]: 'bill101',
   [MIGRACIONES.indexOf(timbrar)]: 'timbrar',
+  [MIGRACIONES.indexOf(facturaV2)]: 'facturaV2',
 };
 
 /** La tabla `empresa` (0027): UN renglón, con id fijo, que es lo que antes
@@ -3600,6 +3602,15 @@ export class OrgDB extends DurableObject<Env> {
     }
   }
 
+  /** 0048, en código: la factura nueva, segunda vuelta. Misma forma que la 0047. */
+  private facturaV2(): void {
+    this.sql.exec(facturaV2.replace(/^ALTER TABLE .*$/gm, ''));
+    for (const m of facturaV2.matchAll(/^ALTER TABLE (\w+) ADD COLUMN (\w+) (\w+);$/gm)) {
+      const [, tabla, columna, tipo] = m;
+      if (!this.tieneColumna(tabla, columna)) this.sql.exec(`ALTER TABLE ${tabla} ADD COLUMN ${columna} ${tipo}`);
+    }
+  }
+
   /** 0044, en código: lo que bill101 le agrega a `cfdi` y sus cuatro tablas.
    *  El .sql ES la migración; aquí se corre de manera que repetirla no
    *  truene, por lo mismo que la 0041. Lo que ya estaba capturado no se
@@ -5778,6 +5789,7 @@ export class OrgDB extends DurableObject<Env> {
   private static readonly OPS_PAC: ReadonlySet<string> = new Set([
     'config', 'cuenta', 'guardarCuenta', 'quitarCuenta', 'ajustar', 'anotarPerfil', 'prellenar',
     'abrirEmision', 'timbrada', 'fallida', 'darPorFallida', 'emision', 'emisiones', 'paraCancelar', 'cancelacion',
+    'conceptos', 'clientes', 'correosDe', 'ponerCorreos', 'pdfConfig', 'ponerPdfConfig',
   ]);
 
   pac(op: string, args: unknown[] = []): unknown {
