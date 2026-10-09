@@ -799,6 +799,9 @@ export class OrgDB extends DurableObject<Env> {
    *  nacido: tablas vacías y las migraciones aplicadas. Para resembrar la org
    *  demo de staging; la ruta que lo llama no existe en producción. */
   async vaciar(): Promise<number> {
+    // La alarma del SAT no se va con `deleteAll`: se quita aparte, o la base
+    // vacía seguiría despertándose a buscar una FIEL que ya no está.
+    await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     this.migrar();
     return this.version();

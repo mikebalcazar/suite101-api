@@ -20,7 +20,7 @@ export default defineConfig({
         // de verdad, la de wrangler.toml. Con un comodin aqui, la prueba de
         // que un origen desconocido no recibe permiso saldria verde siempre y
         // no probaria nada.
-        bindings: { MIGRACIONES_D1: migraciones, ENTORNO: 'prueba' },
+        bindings: { MIGRACIONES_D1: migraciones, ENTORNO: 'prueba', SAT_BASE: 'https://sat.de-mentira' },
       },
     }),
   ],
