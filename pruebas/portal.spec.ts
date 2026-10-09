@@ -8,7 +8,7 @@
  */
 import { SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { DOMINIO_SUITE } from '../src/portal';
+import { DOMINIO_SUITE, destinoDeDescarga } from '../src/portal';
 
 const SUITE = `https://${DOMINIO_SUITE}`;
 /* Siete programas de la empresa. master101 NO va: es el panel del dueño de la
@@ -143,5 +143,56 @@ describe('la puerta de la suite', () => {
     const r = await SELF.fetch('https://api.local/');
     expect(r.headers.get('Content-Type')).toMatch(/json/);
     expect((await r.json() as { data: { servicio: string } }).data.servicio).toBe('suite101-api');
+  });
+});
+
+/* Mike, 9-oct-2026: «abajo de todos los íconos de las aplicaciones para
+ * descargar, y que siempre descarguen sus últimas versiones. Directo el ícono
+ * las descarga». */
+describe('las descargas de la puerta', () => {
+  const DESCARGAS = ['quell101-android', 'quell101-windows', 'draw101', 'nest101', 'shape101'];
+  const json = (cuerpo: unknown, status = 200) => async () => new Response(JSON.stringify(cuerpo), { status });
+
+  it('abajo de los programas va un ícono por cada cosa que se instala, y cada uno liga a /descargar', async () => {
+    const html = await (await SELF.fetch(`${SUITE}/`)).text();
+    expect(html.indexOf('class="descargas"'), 'después de los programas').toBeGreaterThan(html.indexOf('class="apps"'));
+    for (const d of DESCARGAS) expect(html, d).toContain(`<a class="baja" href="/descargar/${d}" data-descarga="${d}"`);
+    for (const app of ['draw101', 'nest101', 'shape101']) expect(html, app).toContain(`<symbol id="icono-${app}"`);
+    expect(html).toContain('<symbol id="plat-android"');
+    expect(html).toContain('<symbol id="plat-windows"');
+  });
+
+  it('quell101 manda a su .apk y a su .exe, que «Armar apps» sustituye siempre en la misma dirección', async () => {
+    for (const [d, destino] of [['quell101-android', 'https://quell101.taller101.com/descargas/android.apk'],
+                                ['quell101-windows', 'https://quell101.taller101.com/descargas/windows.exe']]) {
+      const r = await SELF.fetch(`${SUITE}/descargar/${d}`, { redirect: 'manual' });
+      expect(r.status, d).toBe(302);
+      expect(r.headers.get('Location'), d).toBe(destino);
+      expect(r.headers.get('Cache-Control'), 'nunca se guarda: la última versión se decide al picar').toBe('no-store');
+    }
+  });
+
+  it('draw101, nest101 y shape101 van al instalador que dice su <app>.json en `descargas`', async () => {
+    const url = 'https://github.com/mikebalcazar/descargas/releases/download/nest101-0.19.2/nest101-0.19.2-setup.exe';
+    let pedido = '';
+    const pedir = (async (u: string) => { pedido = u; return new Response(JSON.stringify({ nest101: { version: '0.19.2', windows: { url } } })); }) as unknown as typeof fetch;
+    expect(await destinoDeDescarga('nest101', pedir)).toBe(url);
+    expect(pedido).toBe('https://raw.githubusercontent.com/mikebalcazar/descargas/main/nest101.json');
+  });
+
+  it('si el .json no contesta o trae otra cosa, va a la página fija «<app>-ultima»; nunca a otro lado', async () => {
+    const ultima = 'https://github.com/mikebalcazar/descargas/releases/tag/draw101-ultima';
+    expect(await destinoDeDescarga('draw101', json({}, 500) as unknown as typeof fetch)).toBe(ultima);
+    expect(await destinoDeDescarga('draw101', (async () => { throw new Error('sin red'); }) as unknown as typeof fetch)).toBe(ultima);
+    expect(await destinoDeDescarga('draw101', json({ draw101: { windows: { url: 'https://malo.example/draw101.exe' } } }) as unknown as typeof fetch)).toBe(ultima);
+    expect(await destinoDeDescarga('draw101', json({ draw101: { windows: { url: 'https://github.com/mikebalcazar/descargas/releases/download/nest101-0.1/x.exe' } } }) as unknown as typeof fetch),
+      'el instalador tiene que ser del mismo programa').toBe(ultima);
+  });
+
+  it('lo que no está en la lista no existe', async () => {
+    expect(await destinoDeDescarga('master101')).toBeNull();
+    expect(await destinoDeDescarga('../algo')).toBeNull();
+    const r = await SELF.fetch(`${SUITE}/descargar/master101`, { redirect: 'manual' });
+    expect(r.status).toBe(404);
   });
 });
