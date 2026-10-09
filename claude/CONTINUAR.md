@@ -216,6 +216,16 @@ El documento (`suite101-arquitectura.md`) debería recoger estas cinco:
 
 ## 6. Lo que la fase 3 (peek101) tiene que saber
 
+- **bill101: la factura nueva, segunda vuelta (9-oct, API 0.89.0 #312/#313, bill101 0.4.0 #9–#12).**
+  RFC nuevo → cliente; catálogo de conceptos (`conceptos_fact`); correos del
+  cliente y envío con PDF+XML (Resend con adjuntos); vista previa; PDF propio
+  en `src/pdf-cfdi.ts` (pdf-lib + qrcode-generator; GET /fiscal/cfdi/:id/pdf
+  lo arma desde el XML, `?de=facturama` el de Facturama); `pdf_config` con
+  datos bancarios. bill101 trae el catálogo oficial del SAT en
+  public/datos/*.json. OJO: antes de un PR correr `npx tsc --noEmit` tal
+  cual (sin -p) y la batería completa; los logs de Actions no se bajan desde
+  aquí: la salida está en el comentario del commit. Muro
+  `2026-10-09-1730-bill101-factura-v2.md`.
 - **bill101 timbrado real: Facturama ya acepta todo; falta el alta del CSD en el SAT (9-oct, API #303 #305 #306 #309 #311, bill101 #8).**
   Cuatro requisitos reales de Facturama (serie en sucursal, CP de sucursal,
   receptor inscrito → público en general, InformacionGlobal) y luego 305 del
