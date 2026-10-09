@@ -107,11 +107,28 @@ describe('la puerta de la suite', () => {
     expect(html, 'el logotipo va en trazos, no en letras').not.toMatch(/<symbol[^>]*>[^]*?<text/);
   });
 
+  /* 9-oct-2026 · Mike: «agrega los íconos en grande en cada app; menos texto
+   * y más gráfico». Cada tarjeta lleva el ícono elegido, su logotipo y una
+   * sola línea corta; ya no lleva la dirección escrita. */
+  it('cada programa trae su ícono grande y una sola línea corta', async () => {
+    const html = await (await SELF.fetch(`${SUITE}/`)).text();
+    for (const app of [...APPS, 'suite101']) {
+      expect(html, app).toContain(`<symbol id="icono-${app}" viewBox="0 0 512 512">`);
+      expect(html, app).toContain(`href="#icono-${app}"`);
+    }
+    for (const t of html.match(/<a class="app" [^]*?<\/a>/g) ?? []) {
+      const lema = t.match(/<span class="lema">([^<]*)<\/span>/)?.[1] ?? '';
+      expect(lema.length, lema).toBeGreaterThan(0);
+      expect(lema.length, lema).toBeLessThanOrEqual(32);
+    }
+    expect((html.match(/<a class="app" /g) ?? []).length).toBe(APPS.length);
+  });
+
   /* 9-oct-2026 · bill101 lee facturas y estima impuestos; todavía no las
    * emite, no las timbra ni las baja del SAT. La tarjeta no lo promete. */
   it('la tarjeta de bill101 sólo dice lo que hace hoy', async () => {
     const html = await (await SELF.fetch(`${SUITE}/`)).text();
-    const tarjeta = html.match(/<a class="app vidrio" href="https:\/\/bill101\.taller101\.com"[^]*?<\/a>/)?.[0] ?? '';
+    const tarjeta = html.match(/<a class="app"[^>]*href="https:\/\/bill101\.taller101\.com"[^]*?<\/a>/)?.[0] ?? '';
     expect(tarjeta).toContain('estimados');
     expect(tarjeta).not.toMatch(/timbr|descarga|declaraci/i);
   });
