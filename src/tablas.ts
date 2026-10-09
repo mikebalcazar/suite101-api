@@ -51,6 +51,9 @@ export const DEFS: Record<Tabla, Def> = {
     cols: {
       ...IDENT, nombre: 'texto', nombre_norm: 'texto', correo: 'texto', telefono: 'texto',
       rfc: 'texto', notas: 'texto', usuario_id: 'texto', portal_activo: 'bool', creado_en_app: 'texto',
+      // 0047 · lo que la factura 4.0 exige del receptor (bill101 fase C). Se
+      // llenan al facturarle; también se pueden teclear.
+      razon_social: 'texto', regimen_fiscal: 'texto', cp_fiscal: 'texto', uso_cfdi: 'texto',
     },
     requeridos: ['nombre'],
     filtros: ['usuario_id'],

@@ -1555,6 +1555,9 @@ rutas.patch('/:o/negocios/:id', async (c) => {
 });
 
 montarOrdenes(rutas);
+// Ojo con el orden: POST /:o/fiscal/cfdi/:id/cancelar vive en las dos (la de
+// la 0009 aquí, la del PAC en montarFiscal → montarFiscalPac). La de aquí deja
+// pasar con next() lo timbrado por Facturama; para eso ésta va PRIMERO.
 montarObras(rutas);
 montarNomina(rutas);
 montarInversion(rutas);

@@ -59,9 +59,11 @@ import inversionRiesgos from '../migrations/org/0043_inversion_riesgos.sql';
 import bill from '../migrations/org/0044_bill.sql';
 import ordenesCanceladas from '../migrations/org/0045_ordenes_canceladas.sql';
 import sat from '../migrations/org/0046_sat.sql';
+import timbrar from '../migrations/org/0047_timbrar.sql';
 import { MotorInversion } from './inversion-db';
 import { MotorFiscal } from './fiscal-db';
 import { MotorSat, type MemoriaSat } from './sat-db';
+import { MotorPac } from './pac-db';
 import { atender as atenderQuell, poblarCostosDefault, ponerTiemposDefault, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { PREFIJOS, esRequerimiento, siguienteCodigo } from './quell/codigos.js';
 
@@ -89,12 +91,12 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar];
 
 /** La 0027, la 0030, la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
  *  en la lista; el archivo .sql es sólo la nota que lo dice. */
-const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101'> = {
+const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar'> = {
   [MIGRACIONES.indexOf(sinNegocios)]: 'quitarNegocios',
   [MIGRACIONES.indexOf(requerimientosHuerfanos)]: 'migrarRequerimientosHuerfanos',
   [MIGRACIONES.indexOf(obrasALaSuite)]: 'migrarObrasSueltas',
@@ -102,6 +104,7 @@ const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfano
   [MIGRACIONES.indexOf(costos)]: 'costosDeObra',
   [MIGRACIONES.indexOf(inversionRiesgos)]: 'inversionRiesgos',
   [MIGRACIONES.indexOf(bill)]: 'bill101',
+  [MIGRACIONES.indexOf(timbrar)]: 'timbrar',
 };
 
 /** La tabla `empresa` (0027): UN renglón, con id fijo, que es lo que antes
@@ -347,6 +350,8 @@ export interface ApiOrgDB {
   fiscal(op: string, args?: unknown[]): Promise<any>;
   /** bill101 fase D: la FIEL y lo que se baja del SAT (src/sat-db.ts). */
   sat(op: string, args?: unknown[]): Promise<any>;
+  /** bill101 fase C: la cuenta de Facturama y las emisiones (src/pac-db.ts). */
+  pac(op: string, args?: unknown[]): Promise<any>;
   crearOrden(args: Record<string, unknown>): Promise<Fila | { error: string; detalle?: unknown }>;
   misOrdenes(usuario_id: string): Promise<Fila[]>;
   buzon(hoy?: string, tipo?: TipoOrden | null): Promise<{ filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number }>;
@@ -3586,6 +3591,15 @@ export class OrgDB extends DurableObject<Env> {
     }
   }
 
+  /** 0047, en código: lo de timbrar (bill101 fase C). Misma forma que la 0044. */
+  private timbrar(): void {
+    this.sql.exec(timbrar.replace(/^ALTER TABLE .*$/gm, ''));
+    for (const m of timbrar.matchAll(/^ALTER TABLE (\w+) ADD COLUMN (\w+) (\w+);$/gm)) {
+      const [, tabla, columna, tipo] = m;
+      if (!this.tieneColumna(tabla, columna)) this.sql.exec(`ALTER TABLE ${tabla} ADD COLUMN ${columna} ${tipo}`);
+    }
+  }
+
   /** 0044, en código: lo que bill101 le agrega a `cfdi` y sus cuatro tablas.
    *  El .sql ES la migración; aquí se corre de manera que repetirla no
    *  truene, por lo mismo que la 0041. Lo que ya estaba capturado no se
@@ -5750,6 +5764,26 @@ export class OrgDB extends DurableObject<Env> {
   sat(op: string, args: unknown[] = []): unknown {
     if (!OrgDB.OPS_SAT.has(op)) return { error: 'operacion_desconocida', detalle: { op } };
     return (this.motorSat() as unknown as Record<string, (...a: unknown[]) => unknown>)[op](...args);
+  }
+
+  /* ─────────────── bill101 fase C: timbrar (0.88.0) ─────────────── */
+  private static readonly OPS_PAC: ReadonlySet<string> = new Set([
+    'config', 'cuenta', 'guardarCuenta', 'quitarCuenta', 'ajustar', 'anotarPerfil', 'prellenar',
+    'abrirEmision', 'timbrada', 'fallida', 'darPorFallida', 'emision', 'emisiones', 'paraCancelar', 'cancelacion',
+  ]);
+
+  pac(op: string, args: unknown[] = []): unknown {
+    if (!OrgDB.OPS_PAC.has(op)) return { error: 'operacion_desconocida', detalle: { op } };
+    const fiscal = (o: string, a: unknown[]) => this.fiscal(o, a) as any;
+    const motor = new MotorPac({
+      sql: this.sql,
+      tx: <T>(fn: () => T): T => this.ctx.storage.transactionSync(fn),
+      rfcEmpresa: () => String((this.sql.exec(`SELECT rfc FROM empresa WHERE id = 'empresa'`).toArray()[0] as Fila | undefined)?.rfc ?? ''),
+      importar: (lista, actor, rfcComo) => fiscal('importar', [lista, actor, 'timbrado', rfcComo]),
+      ponerArchivo: (id, a) => fiscal('ponerArchivo', [id, a]),
+      cancelar: (id) => this.cancelarCfdi(id),
+    }) as unknown as Record<string, (...a: unknown[]) => unknown>;
+    return motor[op](...args);
   }
 
   /** La despertada. Si truena, se vuelve a intentar en un rato: una alarma

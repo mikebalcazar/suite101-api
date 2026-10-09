@@ -18,6 +18,7 @@
  *   GET|PUT /fiscal/ejercicios/:anio   coeficiente, pérdidas, ajustes
  *   GET|POST /fiscal/pagos, DELETE /fiscal/pagos/:id   impuestos ya pagados
  *   /fiscal/sat/*                      la FIEL y lo que se baja del SAT (rutas/fiscal-sat.ts)
+ *   /fiscal/pac/*, /fiscal/emitir/*    la cuenta de Facturama y timbrar (rutas/fiscal-pac.ts)
  *
  * QUIÉN PUEDE. Leer: quien ve dinero y no es cliente, igual que el resto de
  * /fiscal. Cambiar lo que mueve la cuenta de los impuestos —el ejercicio,
@@ -35,6 +36,7 @@ import { consultarSat } from '../sat';
 import { hoyMx } from '../costos';
 import type { ResultadoImportar } from '../fiscal-db';
 import { montarFiscalSat } from './fiscal-sat';
+import { montarFiscalPac } from './fiscal-pac';
 
 type App = Hono<{ Bindings: Env; Variables: Vars }>;
 
@@ -318,4 +320,5 @@ export function montarFiscal(rutas: App): void {
   });
 
   montarFiscalSat(rutas, { puedeLeer, administra, actor });
+  montarFiscalPac(rutas, { puedeLeer, administra, actor });
 }
