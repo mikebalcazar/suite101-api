@@ -13,7 +13,7 @@ import { DOMINIO_SUITE } from '../src/portal';
 const SUITE = `https://${DOMINIO_SUITE}`;
 /* Siete programas de la empresa. master101 NO va: es el panel del dueño de la
  * suite y lo tiene sólo Mike (2-oct-2026). */
-const APPS = ['dash101', 'quell101', 'quote101', 'cost101', 'patron101', 'supply101', 'roster101', 'peek101', 'workshop101'];
+const APPS = ['dash101', 'quell101', 'quote101', 'cost101', 'patron101', 'bill101', 'supply101', 'roster101', 'peek101', 'workshop101'];
 
 describe('la puerta de la suite', () => {
   it('la raíz es una página con una liga a cada uno de los programas', async () => {
@@ -82,6 +82,15 @@ describe('la puerta de la suite', () => {
       expect(html, app).toContain(`href="#logo-${app}"`);
     }
     expect(html, 'el logotipo va en trazos, no en letras').not.toMatch(/<symbol[^>]*>[^]*?<text/);
+  });
+
+  /* 9-oct-2026 · bill101 lee facturas y estima impuestos; todavía no las
+   * emite, no las timbra ni las baja del SAT. La tarjeta no lo promete. */
+  it('la tarjeta de bill101 sólo dice lo que hace hoy', async () => {
+    const html = await (await SELF.fetch(`${SUITE}/`)).text();
+    const tarjeta = html.match(/<a class="app vidrio" href="https:\/\/bill101\.taller101\.com"[^]*?<\/a>/)?.[0] ?? '';
+    expect(tarjeta).toContain('estimados');
+    expect(tarjeta).not.toMatch(/timbr|descarga|declaraci/i);
   });
 
   it('/salud contesta también en la puerta, para medirla', async () => {
