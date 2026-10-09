@@ -5757,8 +5757,11 @@ export class OrgDB extends DurableObject<Env> {
         /* En las pruebas la alarma la dispara la prueba (runDurableObjectAlarm);
          * si además se disparara sola a los 500 ms, competiría con ella y las
          * pruebas saldrían distintas según lo rápida que fuera la máquina (pasó
-         * el 9-oct). Se deja puesta, pero lejos. */
-        const espera = this.env.ENTORNO === 'prueba' ? Math.max(ms, 3600_000) : ms;
+         * el 9-oct). Se deja puesta, pero lejos: la prueba congela Date en una
+         * hora fija y la alarma se compara contra el reloj de verdad, así que
+         * «a una hora» dejó de bastar en cuanto el reloj real rebasó esa hora
+         * fija (volvió a pasar el mismo 9-oct por la tarde). A un año. */
+        const espera = this.env.ENTORNO === 'prueba' ? Math.max(ms, 365 * 86400_000) : ms;
         await this.ctx.storage.setAlarm(Date.now() + espera);
       },
       memoria: this.memoriaSat,
