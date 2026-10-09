@@ -17,7 +17,32 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.86.0 (UNA ORDEN QUE YA NO SE NECESITA SE CANCELA.
+ * Versión del contrato: 0.87.0 (BILL101 FASE D: LAS FACTURAS SE BAJAN DEL SAT
+ * CON LA FIEL. Mike, 8-oct: «primero desarrollemos la fase para revisar
+ * facturas ya recibidas y emitidas en el SAT»; y con botones: la FIEL vive
+ * guardada cifrada, se sube una vez y bill101 baja solo cada noche.
+ *   · Cuatro tablas internas (org 0046): `sat_fiel` (lo público del
+ *     certificado y la llave privada CIFRADA —src/fiel.ts—; no sale por
+ *     ninguna ruta), `sat_config`, `sat_solicitudes`, `sat_eventos`.
+ *   · /orgs/:o/fiscal/sat (src/rutas/fiscal-sat.ts): GET el estado (la FIEL
+ *     —de quién, serie, vence—, `automatico`, `trabajando`, `cubierto_hasta`,
+ *     `facturas_del_sat`, `solicitudes`, `eventos`, `ultimo_error`);
+ *     PUT /fiel multipart `cer`+`key`+`clave` (sólo owner/admin; 400
+ *     `fiel_*` con el motivo; 409 `fiel_de_otro_rfc`; si la empresa no tenía
+ *     RFC, toma el de la FIEL); DELETE /fiel; PUT /config {automatico};
+ *     POST /bajar (quien dirige o el contador; 409 `sin_fiel`).
+ *   · La base de la empresa trabaja SOLA con su alarma (src/sat-db.ts): por
+ *     cada lado pide los XML vigentes desde donde se quedó (−3 días) y la
+ *     lista completa desde `sat_config.desde` (1-ene-2026); lo que baja entra
+ *     por `MotorFiscal.importar` con origen `sat` (misma `cfdi`, misma regla
+ *     de emitida/recibida, sin duplicar por UUID); una cancelada en la lista
+ *     se cancela aquí (regla de la 0009); una vigente que falte se pide una
+ *     vez. Cada noche entre las 3 y las 4:30 de México, si `automatico`.
+ *   · Variables nuevas, opcionales: `LLAVE_FIEL` (si no está, nace en
+ *     `config` del D1) y `SAT_BASE` (sólo fuera de producción: un SAT de
+ *     mentira para probar).)
+ * Antes:
+ * 0.86.0 (UNA ORDEN QUE YA NO SE NECESITA SE CANCELA.
  * Mike, 9-oct: «en supply, hay que poner un botón para cancelar una orden que
  * ya no se necesita».
  *   · `ordenes.estado` gana `cancelada` y `orden_eventos.que` gana
@@ -1396,7 +1421,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.86.0';
+export const VERSION_CONTRATO = '0.87.0';
 
 /* ─────────────── órdenes de compra (0.21.0; cancelada desde 0.86.0) ─────────────── */
 
@@ -2418,6 +2443,12 @@ export const TABLAS_INTERNAS = [
    * puede cambiar lo que mueve la cuenta de los impuestos se decide en cada
    * ruta. */
   'cfdi_conceptos', 'cfdi_pagos', 'fiscal_config', 'fiscal_ejercicios', 'fiscal_pagos',
+  /* bill101 fase D (0046). Sólo por /orgs/:o/fiscal/sat. `sat_fiel` guarda
+   * la llave privada de la FIEL, cifrada: no sale por NINGUNA ruta. (Lo que
+   * de verdad la cierra al CRUD genérico es que no está en `TABLAS`, la
+   * lista blanca de src/tablas.ts; esta lista es para que las pruebas del
+   * esquema sepan que existe a propósito.) */
+  'sat_fiel', 'sat_config', 'sat_solicitudes', 'sat_eventos',
 ] as const;
 
 /* ─────────────── lo que devuelven las rutas con nombre ─────────────── */

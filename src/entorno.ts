@@ -58,6 +58,13 @@ export interface Env {
   RESPALDO_SAAS?: string;
 
   ENTORNO: string; // 'produccion' | 'staging' | 'prueba'
+  /** bill101 fase D. El secreto del que se derivan las llaves con que se
+   *  cifra la FIEL de cada empresa (src/fiel.ts). Si no está, nace solo en
+   *  `config` del D1, como `SECRETO`. */
+  LLAVE_FIEL?: string;
+  /** Sólo para probar: la dirección de un SAT de mentira. En producción se
+   *  IGNORA aunque esté puesta (src/sat-db.ts). */
+  SAT_BASE?: string;
   ORIGENES: string; // CSV de orígenes con permiso de CORS
   CORREO_REMITENTE: string;
   CORREO_SUPERADMIN: string;
