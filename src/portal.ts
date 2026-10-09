@@ -64,6 +64,48 @@ export function paginaDeEmpresa(nombre: string, dominio: string): string {
     .replace('</header>', `  <p class="empresa">${esc(nombre)}</p>\n  </header>`);
 }
 
+/* 9-oct-2026 · Mike: «abajo de todos los íconos de las aplicaciones para
+ * descargar, y que siempre descarguen sus últimas versiones. Directo el
+ * ícono las descarga». La hoja liga a /descargar/<cuál> y aquí se decide a
+ * dónde ir EN ESE MOMENTO, así la página nunca se queda con una versión vieja:
+ *  · quell101 deja su .apk y su .exe siempre en la misma dirección (los
+ *    sustituye «Armar apps» en R2), así que basta mandar ahí;
+ *  · draw101, nest101 y shape101 viven en las Releases de `descargas`, y la
+ *    versión vigente la dice su <app>.json (el mismo que lee su actualizador).
+ *    Si ese archivo no contesta, se manda a la página fija «<app>-ultima»,
+ *    que siempre trae la última: más lento, nunca roto. */
+const QUELL: Record<string, string> = {
+  'quell101-android': 'https://quell101.taller101.com/descargas/android.apk',
+  'quell101-windows': 'https://quell101.taller101.com/descargas/windows.exe',
+};
+const DE_ESCRITORIO = ['draw101', 'nest101', 'shape101'];
+const RELEASES = 'https://github.com/mikebalcazar/descargas/releases/';
+
+export async function destinoDeDescarga(cual: string, pedir: typeof fetch = fetch): Promise<string | null> {
+  if (QUELL[cual]) return QUELL[cual];
+  if (!DE_ESCRITORIO.includes(cual)) return null;
+  const respaldo = `${RELEASES}tag/${cual}-ultima`;
+  try {
+    const r = await pedir(`https://raw.githubusercontent.com/mikebalcazar/descargas/main/${cual}.json`,
+      { cf: { cacheTtl: 300, cacheEverything: true } } as RequestInit);
+    if (!r.ok) return respaldo;
+    const m = (await r.json()) as Record<string, { windows?: { url?: unknown } }>;
+    const url = m?.[cual]?.windows?.url;
+    // Sólo se manda a un instalador de las Releases de `descargas`: lo que
+    // diga el archivo no puede llevar a nadie a otro lado.
+    return typeof url === 'string' && url.startsWith(`${RELEASES}download/${cual}-`) ? url : respaldo;
+  } catch {
+    return respaldo;
+  }
+}
+
+async function descarga(ruta: string): Promise<Response | null> {
+  if (!ruta.startsWith('/descargar/')) return null;
+  const destino = await destinoDeDescarga(ruta.slice('/descargar/'.length));
+  if (!destino) return null;
+  return new Response(null, { status: 302, headers: { Location: destino, 'Cache-Control': 'no-store' } });
+}
+
 export async function puertaDeLaSuite(c: Ctx, next: Next): Promise<Response | void> {
   const u = new URL(c.req.url);
   const dom = c.get('dominio');
@@ -75,6 +117,8 @@ export async function puertaDeLaSuite(c: Ctx, next: Next): Promise<Response | vo
         headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': 'private, max-age=60' },
       });
     }
+    const baja = await descarga(u.pathname);
+    if (baja) return baja;
     const ico = icono(u.pathname);
     if (ico) return ico;
     const letra = fuente(u.pathname);
@@ -91,6 +135,8 @@ export async function puertaDeLaSuite(c: Ctx, next: Next): Promise<Response | vo
       headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': 'public, max-age=300' },
     });
   }
+  const baja = await descarga(u.pathname);
+  if (baja) return baja;
   const ico = icono(u.pathname);
   if (ico) return ico;
   const letra = fuente(u.pathname);
