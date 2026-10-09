@@ -2056,11 +2056,16 @@ export async function atender(req, env, url, path) {
         const ok = await env.DB.prepare(`SELECT 1 FROM quell_project_members WHERE project_id = ? AND user_id = ?`).bind(pid, b.assignee_id).first();
         if (!ok) return err('Esa persona no está dada de alta en esta obra.', 400);
       }
+      /* 0.90.2 · Reasignar (Mike, 9-oct: «una vez creado el ítem de
+       * punchlist no puedo editar a quien se le asigna»). `assignee_id`
+       * vacío o null, mandado a propósito, lo deja SIN asignar; ausente, no
+       * lo toca. Antes el COALESCE no dejaba quitarlo. */
+      const quitaAsignado = b.assignee_id === '' || b.assignee_id === null;
       await env.DB.prepare(
         `UPDATE quell_punch_items SET title = COALESCE(?, title), description = COALESCE(?, description), resp = COALESCE(?, resp), due_date = COALESCE(?, due_date),
-          assignee_id = COALESCE(?, assignee_id),
+          assignee_id = CASE WHEN ? THEN NULL ELSE COALESCE(?, assignee_id) END,
           status = COALESCE(?, status), done_at = CASE WHEN ? = 'ok' THEN ? WHEN ? IS NOT NULL THEN NULL ELSE done_at END, done_by = CASE WHEN ? = 'ok' THEN ? ELSE done_by END WHERE id = ?`
-      ).bind(b.title ?? null, b.description ?? null, b.resp ?? null, b.due_date ?? null, b.assignee_id ?? null, st, st, now(), st, st, user.id, kid).run();
+      ).bind(b.title ?? null, b.description ?? null, b.resp ?? null, b.due_date ?? null, quitaAsignado ? 1 : 0, quitaAsignado ? null : (b.assignee_id ?? null), st, st, now(), st, st, user.id, kid).run();
       await apunta(env, b.op_id);
       return json({ ok: true });
     }
