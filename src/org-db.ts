@@ -3119,7 +3119,12 @@ export class OrgDB extends DurableObject<Env> {
     if (args.tipo) { donde.push('tipo = ?'); vals.push(args.tipo); }
     if (args.estado) { donde.push('estado = ?'); vals.push(args.estado); }
     const filtro = donde.length ? ` WHERE ${donde.join(' AND ')}` : '';
-    return this.leerInternas('cfdi', this.sql.exec(`SELECT * FROM cfdi${filtro} ORDER BY fecha DESC, creado_at DESC`, ...vals).toArray() as Fila[]);
+    /* 0.85.1 · `aplicado`: cuánto de cada factura ya está ligado a dinero.
+     * La lista de bill101 lo necesita para decir «por ligar» sin pedir el
+     * detalle de cada una. Es un campo más; lo que ya venía no cambia. */
+    return this.leerInternas('cfdi', this.sql.exec(
+      `SELECT cfdi.*, (SELECT COALESCE(SUM(lm.monto_aplicado),0) FROM cfdi_movimientos lm WHERE lm.cfdi_id = cfdi.id) AS aplicado
+         FROM cfdi${filtro} ORDER BY fecha DESC, creado_at DESC`, ...vals).toArray() as Fila[]);
   }
 
   /* ─────────────── el cliente es uno solo en las tres apps ───────────────
