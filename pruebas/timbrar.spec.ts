@@ -112,6 +112,8 @@ describe('el borrador, sin red', () => {
     expect(c.Items[1].Taxes[0]).toMatchObject({ Base: 2700, Total: 432 });
     const publico = cuerpoFacturama({ ...b, receptor: { ...b.receptor, rfc: 'XAXX010101000', uso_cfdi: 'G03', regimen_fiscal: '601', cp_fiscal: '65000' } }, { serie: 'A', folio: 9, fecha: '2026-10-09T10:00:00', lugar_expedicion: '64000' }) as any;
     expect(publico.Receiver, 'público en general: lo que el SAT exige, aunque la pantalla diga otra cosa').toEqual({ Rfc: 'XAXX010101000', Name: 'PUBLICO EN GENERAL', CfdiUse: 'S01', FiscalRegime: '616', TaxZipCode: '64000' });
+    expect(publico.GlobalInformation, 'público en general lleva InformacionGlobal: diaria, del mes y año de la factura').toEqual({ Periodicity: '01', Months: '10', Year: 2026 });
+    expect((cuerpoFacturama(b, { serie: 'A', folio: 9, fecha: '2026-10-09T10:00:00', lugar_expedicion: '64000' }) as any).GlobalInformation, 'un receptor con RFC no la lleva').toBeUndefined();
     const sin = cuerpoFacturama({ ...b, renglones: [{ ...b.renglones[0], iva: null }] }, { serie: 'A', folio: 8, fecha: '2026-10-09T10:00:00', lugar_expedicion: '64000' }) as any;
     expect(sin.Items[0].TaxObject).toBe('01');
     expect(sin.Items[0].Taxes).toBeUndefined();
