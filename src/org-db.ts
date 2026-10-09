@@ -5731,7 +5731,10 @@ export class OrgDB extends DurableObject<Env> {
       tx: <T>(fn: () => T): T => this.ctx.storage.transactionSync(fn),
       env: this.env,
       rfcEmpresa: () => String((this.sql.exec(`SELECT rfc FROM empresa WHERE id = 'empresa'`).toArray()[0] as Fila | undefined)?.rfc ?? ''),
-      ponerRfcEmpresa: (rfc) => { this.sql.exec(`UPDATE empresa SET rfc = ? WHERE id = 'empresa'`, rfc); },
+      // En una empresa recién nacida el renglón todavía no existe: se crea
+      // primero (con el nombre que la org tenga en el D1 no se cuenta aquí;
+      // GET /empresa lo corrige al primer uso).
+      ponerRfcEmpresa: (rfc) => { this.empresa(''); this.sql.exec(`UPDATE empresa SET rfc = ? WHERE id = 'empresa'`, rfc); },
       importar: (lista, actor) => fiscal('importar', [lista, actor, 'sat']),
       ponerArchivos: (lista) => { fiscal('ponerArchivos', [lista]); },
       anotarSat: (id, estado) => fiscal('anotarSat', [id, { estado }]),
