@@ -58,8 +58,10 @@ import inversion from '../migrations/org/0042_inversion.sql';
 import inversionRiesgos from '../migrations/org/0043_inversion_riesgos.sql';
 import bill from '../migrations/org/0044_bill.sql';
 import ordenesCanceladas from '../migrations/org/0045_ordenes_canceladas.sql';
+import sat from '../migrations/org/0046_sat.sql';
 import { MotorInversion } from './inversion-db';
 import { MotorFiscal } from './fiscal-db';
+import { MotorSat, type MemoriaSat } from './sat-db';
 import { atender as atenderQuell, poblarCostosDefault, ponerTiemposDefault, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { PREFIJOS, esRequerimiento, siguienteCodigo } from './quell/codigos.js';
 
@@ -87,7 +89,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat];
 
 /** La 0027, la 0030, la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
@@ -343,6 +345,8 @@ export interface ApiOrgDB {
   inversion(op: string, args?: unknown[]): Promise<any>;
   /** bill101 (0.85.0): una sola puerta al motor de src/fiscal-db.ts. */
   fiscal(op: string, args?: unknown[]): Promise<any>;
+  /** bill101 fase D: la FIEL y lo que se baja del SAT (src/sat-db.ts). */
+  sat(op: string, args?: unknown[]): Promise<any>;
   crearOrden(args: Record<string, unknown>): Promise<Fila | { error: string; detalle?: unknown }>;
   misOrdenes(usuario_id: string): Promise<Fila[]>;
   buzon(hoy?: string, tipo?: TipoOrden | null): Promise<{ filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number }>;
@@ -5707,6 +5711,51 @@ export class OrgDB extends DurableObject<Env> {
       cancelar: (id) => this.cancelarCfdi(id),
     }) as unknown as Record<string, (...a: unknown[]) => unknown>;
     return motor[op](...args);
+  }
+
+  /* ─────────────── bill101 fase D: el SAT (0.87.0) ───────────────
+   * El motor vive en src/sat-db.ts. Es el primero de esta base que trabaja
+   * SOLO: el SAT tarda en contestar, así que cada solicitud es un renglón y
+   * la base se despierta con su alarma a darle el siguiente paso. No hay
+   * otra alarma en esta clase; si un día la hay, tienen que compartirla. */
+  private static readonly OPS_SAT: ReadonlySet<string> = new Set(['estado', 'guardarFiel', 'quitarFiel', 'configurar', 'bajar']);
+  private memoriaSat: MemoriaSat = {};
+
+  private motorSat(): MotorSat {
+    const fiscal = (op: string, args: unknown[]) => this.fiscal(op, args) as any;
+    return new MotorSat({
+      sql: this.sql,
+      tx: <T>(fn: () => T): T => this.ctx.storage.transactionSync(fn),
+      env: this.env,
+      rfcEmpresa: () => String((this.sql.exec(`SELECT rfc FROM empresa WHERE id = 'empresa'`).toArray()[0] as Fila | undefined)?.rfc ?? ''),
+      ponerRfcEmpresa: (rfc) => { this.sql.exec(`UPDATE empresa SET rfc = ? WHERE id = 'empresa'`, rfc); },
+      importar: (lista, actor) => fiscal('importar', [lista, actor, 'sat']),
+      ponerArchivos: (lista) => { fiscal('ponerArchivos', [lista]); },
+      anotarSat: (id, estado) => fiscal('anotarSat', [id, { estado }]),
+      despertarEn: async (ms) => {
+        if (ms === null) await this.ctx.storage.deleteAlarm();
+        else await this.ctx.storage.setAlarm(Date.now() + ms);
+      },
+      memoria: this.memoriaSat,
+      traer: (a, b) => fetch(a, b),
+    });
+  }
+
+  sat(op: string, args: unknown[] = []): unknown {
+    if (!OrgDB.OPS_SAT.has(op)) return { error: 'operacion_desconocida', detalle: { op } };
+    return (this.motorSat() as unknown as Record<string, (...a: unknown[]) => unknown>)[op](...args);
+  }
+
+  /** La despertada. Si truena, se vuelve a intentar en un rato: una alarma
+   *  que lanza se reintenta sola seis veces seguidas y luego se pierde, y
+   *  aquí lo que se quiere es que la cola nunca se quede sin quien la mueva. */
+  async alarm(): Promise<void> {
+    try {
+      await this.motorSat().tic();
+    } catch (e) {
+      console.error('sat', e);
+      await this.ctx.storage.setAlarm(Date.now() + 15 * 60_000);
+    }
   }
 
   private avisar(aviso: Aviso, alcance: 'todos' | 'dinero'): void {

@@ -2418,6 +2418,9 @@ export const TABLAS_INTERNAS = [
    * puede cambiar lo que mueve la cuenta de los impuestos se decide en cada
    * ruta. */
   'cfdi_conceptos', 'cfdi_pagos', 'fiscal_config', 'fiscal_ejercicios', 'fiscal_pagos',
+  /* bill101 fase D (0046). Sólo por /orgs/:o/fiscal/sat. `sat_fiel` guarda
+   * la llave privada de la FIEL, cifrada: no sale por NINGUNA ruta. */
+  'sat_fiel', 'sat_config', 'sat_solicitudes', 'sat_eventos',
 ] as const;
 
 /* ─────────────── lo que devuelven las rutas con nombre ─────────────── */

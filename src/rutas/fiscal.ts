@@ -17,6 +17,7 @@
  *   GET|PUT /fiscal/config             régimen, razón social y código postal
  *   GET|PUT /fiscal/ejercicios/:anio   coeficiente, pérdidas, ajustes
  *   GET|POST /fiscal/pagos, DELETE /fiscal/pagos/:id   impuestos ya pagados
+ *   /fiscal/sat/*                      la FIEL y lo que se baja del SAT (rutas/fiscal-sat.ts)
  *
  * QUIÉN PUEDE. Leer: quien ve dinero y no es cliente, igual que el resto de
  * /fiscal. Cambiar lo que mueve la cuenta de los impuestos —el ejercicio,
@@ -33,6 +34,7 @@ import { esFallaXml, leerCfdi, TOPE_XML, type CfdiLeido } from '../cfdi-xml';
 import { consultarSat } from '../sat';
 import { hoyMx } from '../costos';
 import type { ResultadoImportar } from '../fiscal-db';
+import { montarFiscalSat } from './fiscal-sat';
 
 type App = Hono<{ Bindings: Env; Variables: Vars }>;
 
@@ -314,4 +316,6 @@ export function montarFiscal(rutas: App): void {
     if (esFalla(r)) return err(c, r.error, 404, r.detalle);
     return ok(c, r);
   });
+
+  montarFiscalSat(rutas, { puedeLeer, administra, actor });
 }
