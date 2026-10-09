@@ -17,7 +17,7 @@ import {
   CATEGORIA_PRESTAMO_CAPITAL, CATEGORIA_PRESTAMO_INTERES, CATEGORIA_PRESTAMO_RECIBIDO, CONTRAPARTE_INVERSIONISTA,
   type CondicionesPrestamo,
 } from '../schema/tipos';
-import { esDia, revisarCondiciones, sumarDias, tablaDePagos, totalesDe } from './inversion';
+import { RIESGOS_BASE, RIESGOS_MAX, esDia, revisarCondiciones, sumarDias, tablaDePagos, totalesDe } from './inversion';
 import { ahora, correoValido, normalizaCorreo, normalizar, ulid } from './lib';
 
 type Fila = Record<string, any>;
@@ -208,21 +208,32 @@ export class MotorInversion {
     const f = this.sql.exec(`SELECT valor FROM ajustes WHERE id = 'investor101:config'`).toArray()[0] as Fila | undefined;
     let v: Fila = {};
     try { v = f ? JSON.parse(String(f.valor)) : {}; } catch { v = {}; }
-    return { instrucciones: v.instrucciones ?? '', representante: v.representante ?? '', lugar: v.lugar ?? '' };
+    // `riesgos` es SIEMPRE el aviso vigente: el de la empresa si escribió uno,
+    // o el base. `riesgos_propio` dice cuál de los dos es, para que Ajustes
+    // pueda ofrecer «volver al texto base».
+    const propio = String(v.riesgos ?? '').trim();
+    return { instrucciones: v.instrucciones ?? '', representante: v.representante ?? '', lugar: v.lugar ?? '', riesgos: propio || RIESGOS_BASE, riesgos_propio: !!propio };
   }
 
   guardarAjustes(d: Fila): Fila {
-    const v = { ...this.ajustes() };
+    const actual = this.ajustes();
+    // Sólo se guarda el aviso si es de la empresa: guardar el base lo
+    // congelaría, y una mejora al base ya no le llegaría.
+    const v: Fila = { instrucciones: actual.instrucciones, representante: actual.representante, lugar: actual.lugar, riesgos: actual.riesgos_propio ? actual.riesgos : '' };
     if (d.instrucciones !== undefined) v.instrucciones = String(d.instrucciones ?? '').trim().slice(0, 2000);
     if (d.representante !== undefined) v.representante = String(d.representante ?? '').trim().slice(0, 160);
     if (d.lugar !== undefined) v.lugar = String(d.lugar ?? '').trim().slice(0, 160);
+    if (d.riesgos !== undefined) {
+      const r = String(d.riesgos ?? '').trim().slice(0, RIESGOS_MAX);
+      v.riesgos = r === RIESGOS_BASE ? '' : r;
+    }
     const t = ahora();
     this.sql.exec(
       `INSERT INTO ajustes (id, app, clave, valor, creado_at, actualizado_at) VALUES ('investor101:config','investor101','config',?,?,?)
        ON CONFLICT(id) DO UPDATE SET valor = excluded.valor, actualizado_at = excluded.actualizado_at`,
       JSON.stringify(v), t, t,
     );
-    return v;
+    return this.ajustes();
   }
 
   /* ─────────────── rondas ─────────────── */
@@ -387,6 +398,10 @@ export class MotorInversion {
          FROM ronda_ofertas o JOIN inversionistas i ON i.id = o.inversionista_id WHERE o.ronda_id = ? ORDER BY o.creado_at`, id).toArray() as Fila[];
     const prestamos = this.prestamos({ ronda_id: id });
     const ejemplo = this.ejemploDe(ronda);
+    // El texto que aceptó cada quien no viaja en la lista (son párrafos
+    // enteros por renglón): viaja cuándo lo aceptó, o null si la oferta la
+    // capturó quien dirige. El texto se lee en el préstamo.
+    for (const o of ofertas) delete o.riesgos_texto;
     return { ...ronda, avance: this.avance(ronda), ofertas, prestamos, ejemplo };
   }
 
@@ -409,7 +424,7 @@ export class MotorInversion {
   rondaPara(id: string, inversionista_id: string): Fila | null {
     const r = this.una('rondas', id);
     if (!r) return null;
-    const mias = this.sql.exec(`SELECT id, monto, monto_aprobado, nota, estado, motivo, prestamo_id, creado_at, resuelta_at FROM ronda_ofertas WHERE ronda_id = ? AND inversionista_id = ? ORDER BY creado_at`, id, inversionista_id).toArray() as Fila[];
+    const mias = this.sql.exec(`SELECT id, monto, monto_aprobado, nota, estado, motivo, prestamo_id, creado_at, resuelta_at, riesgos_aceptados_at FROM ronda_ofertas WHERE ronda_id = ? AND inversionista_id = ? ORDER BY creado_at`, id, inversionista_id).toArray() as Fila[];
     if (r.estado !== 'abierta' && !mias.length) return null;
     if (r.estado === 'borrador') return null;
     const a = this.avance(r);
@@ -421,6 +436,8 @@ export class MotorInversion {
       fecha_inicio: r.fecha_inicio, fecha_primer_pago: r.fecha_primer_pago, fecha_vencimiento: r.fecha_vencimiento,
       // A dónde depositar sólo se le dice a quien ya se le aceptó.
       instrucciones: aprobada ? r.instrucciones : null,
+      // El aviso que tiene que leer y aceptar antes de ofrecer (0.84.0).
+      riesgos: this.ajustes().riesgos,
       avance: { juntado: a.juntado, falta: a.falta, porcentaje: a.porcentaje },
       ejemplo: this.ejemploDe(r),
       mis_ofertas: mias,
@@ -440,7 +457,7 @@ export class MotorInversion {
 
   /** «Le entro con tanto». Una sola oferta pendiente por persona y ronda:
    *  ofrecer otra vez la cambia, no la duplica. */
-  ofrecer(a: { ronda_id: string; inversionista_id: string; monto: unknown; nota?: unknown }, actor: Actor, hoy: string): Fila | Falla {
+  ofrecer(a: { ronda_id: string; inversionista_id: string; monto: unknown; nota?: unknown; exige_riesgos?: boolean; acepta_riesgos?: unknown }, actor: Actor, hoy: string): Fila | Falla {
     const ronda = this.una('rondas', a.ronda_id);
     if (!ronda) return { error: 'no_encontrado' };
     if (ronda.estado !== 'abierta') return { error: 'ronda_no_esta_abierta', detalle: { estado: ronda.estado } };
@@ -451,15 +468,26 @@ export class MotorInversion {
     if (monto === null || monto <= 0) return { error: 'datos_invalidos', detalle: { errores: { monto: 'Con cuánto: centavos, entero y mayor que cero.' } } };
     if (ronda.monto_minimo && monto < ronda.monto_minimo) return { error: 'datos_invalidos', detalle: { errores: { monto: 'Es menos que el mínimo de la ronda.' }, monto_minimo: ronda.monto_minimo } };
     const nota = texto(a.nota, 500);
+    /* EL AVISO DE RIESGOS (0.84.0; Mike con botones: «Aceptación obligatoria»).
+     * Quien presta no ofrece sin decir que lo leyó y lo acepta, y se guarda el
+     * texto que tuvo enfrente y la hora. Vale también al CAMBIAR una oferta:
+     * es otro monto, y el aviso pudo haber cambiado. Quien dirige captura la
+     * oferta de alguien que se lo dijo por teléfono sin aceptación —nadie la
+     * dio en pantalla—, y queda en NULL para que se vea. */
+    if (a.exige_riesgos && a.acepta_riesgos !== true) {
+      return { error: 'riesgos_sin_aceptar', detalle: { mensaje: 'Antes de ofrecer, marca que leíste y aceptas los riesgos.' } };
+    }
+    const acepto = a.exige_riesgos ? ahora() : null;
+    const aviso = a.exige_riesgos ? String(this.ajustes().riesgos) : null;
     const previa = this.sql.exec(`SELECT id FROM ronda_ofertas WHERE ronda_id = ? AND inversionista_id = ? AND estado = 'pendiente'`, a.ronda_id, a.inversionista_id).toArray()[0] as Fila | undefined;
     let id = previa ? String(previa.id) : '';
     if (previa) {
-      this.sql.exec(`UPDATE ronda_ofertas SET monto = ?, nota = ? WHERE id = ?`, monto, nota, id);
+      this.sql.exec(`UPDATE ronda_ofertas SET monto = ?, nota = ?, riesgos_aceptados_at = ?, riesgos_texto = ? WHERE id = ?`, monto, nota, acepto, aviso, id);
       this.apuntar({ que: 'oferta_cambiada', actor, ronda_id: a.ronda_id, inversionista_id: a.inversionista_id, datos: { monto } });
     } else {
       id = ulid();
-      this.sql.exec(`INSERT INTO ronda_ofertas (id, ronda_id, inversionista_id, monto, nota, estado, creado_at) VALUES (?,?,?,?,?,'pendiente',?)`, id, a.ronda_id, a.inversionista_id, monto, nota, ahora());
-      this.apuntar({ que: 'oferta', actor, ronda_id: a.ronda_id, inversionista_id: a.inversionista_id, datos: { monto } });
+      this.sql.exec(`INSERT INTO ronda_ofertas (id, ronda_id, inversionista_id, monto, nota, estado, creado_at, riesgos_aceptados_at, riesgos_texto) VALUES (?,?,?,?,?,'pendiente',?,?,?)`, id, a.ronda_id, a.inversionista_id, monto, nota, ahora(), acepto, aviso);
+      this.apuntar({ que: 'oferta', actor, ronda_id: a.ronda_id, inversionista_id: a.inversionista_id, datos: { monto, acepto_riesgos: !!acepto } });
     }
     return this.una('ronda_ofertas', id)!;
   }
@@ -732,7 +760,16 @@ export class MotorInversion {
     const archivos = this.sql.exec(`SELECT id, pago_id, clase, nombre, mime, bytes, subido_por_nombre, creado_at FROM inversion_archivos WHERE prestamo_id = ? ORDER BY creado_at`, id).toArray() as Fila[];
     let eventos = this.varias('inversion_eventos', `SELECT * FROM inversion_eventos WHERE prestamo_id = ? ORDER BY ts`, id);
     const ronda = p.ronda_id ? this.sql.exec(`SELECT id, folio, nombre FROM rondas WHERE id = ?`, String(p.ronda_id)).toArray()[0] ?? null : null;
-    const base: Fila = { ...p, ronda, pagos, archivos, resumen: this.resumenDe(p, pagos, opciones.hoy) };
+    /* Los riesgos de ESTE préstamo (0.84.0): si nació de una oferta en la que
+     * quien presta los aceptó, son el texto que aceptó ese día, con su hora;
+     * si no (préstamo directo, u oferta capturada por quien dirige), el aviso
+     * vigente, sin aceptación. Es lo que el pagaré imprime: firmarlo es la
+     * aceptación que falta en ese caso. */
+    const of = p.oferta_id ? this.sql.exec(`SELECT riesgos_aceptados_at, riesgos_texto FROM ronda_ofertas WHERE id = ?`, String(p.oferta_id)).toArray()[0] as Fila | undefined : undefined;
+    const riesgos = of?.riesgos_aceptados_at && of.riesgos_texto
+      ? { texto: of.riesgos_texto, aceptados_at: of.riesgos_aceptados_at }
+      : { texto: this.ajustes().riesgos, aceptados_at: null };
+    const base: Fila = { ...p, ronda, pagos, archivos, riesgos, resumen: this.resumenDe(p, pagos, opciones.hoy) };
     if (opciones.para === 'inversionista') {
       delete base.notas; delete base.creado_por; delete base.recibido_por; delete base.cuenta_id; delete base.movimiento_id;
       base.pagos = pagos.map(({ cuenta_id: _c, movimiento_capital_id: _a, movimiento_interes_id: _b, pagado_por: _p, ...g }) => g);

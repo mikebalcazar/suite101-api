@@ -55,6 +55,7 @@ import obrasALaSuite from '../migrations/org/0039_obras_a_la_suite.sql';
 import empresaLogoYDatos from '../migrations/org/0040_empresa_logo_y_datos.sql';
 import costos from '../migrations/org/0041_costos.sql';
 import inversion from '../migrations/org/0042_inversion.sql';
+import inversionRiesgos from '../migrations/org/0043_inversion_riesgos.sql';
 import { MotorInversion } from './inversion-db';
 import { atender as atenderQuell, poblarCostosDefault, ponerTiemposDefault, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { PREFIJOS, esRequerimiento, siguienteCodigo } from './quell/codigos.js';
@@ -83,17 +84,18 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos];
 
 /** La 0027, la 0030, la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
  *  en la lista; el archivo .sql es sólo la nota que lo dice. */
-const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra'> = {
+const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos'> = {
   [MIGRACIONES.indexOf(sinNegocios)]: 'quitarNegocios',
   [MIGRACIONES.indexOf(requerimientosHuerfanos)]: 'migrarRequerimientosHuerfanos',
   [MIGRACIONES.indexOf(obrasALaSuite)]: 'migrarObrasSueltas',
   [MIGRACIONES.indexOf(empresaLogoYDatos)]: 'empresaLogoYDatos',
   [MIGRACIONES.indexOf(costos)]: 'costosDeObra',
+  [MIGRACIONES.indexOf(inversionRiesgos)]: 'inversionRiesgos',
 };
 
 /** La tabla `empresa` (0027): UN renglón, con id fijo, que es lo que antes
@@ -3505,6 +3507,16 @@ export class OrgDB extends DurableObject<Env> {
     this.sql.exec(SQL_EMPRESA);
     for (const col of COLUMNAS_0040) {
       if (!this.tieneColumna('empresa', col)) this.sql.exec(`ALTER TABLE empresa ADD COLUMN ${col} TEXT`);
+    }
+  }
+
+  /** 0043, en código: las dos columnas de la aceptación de riesgos de una
+   *  oferta (patron101, 0.84.0). El .sql es la migración; aquí se corre de
+   *  modo que repetirla no truene, por lo mismo que la 0041: SQLite no tiene
+   *  `ADD COLUMN IF NOT EXISTS` y hay pruebas que regresan la versión. */
+  private inversionRiesgos(): void {
+    for (const m of inversionRiesgos.matchAll(/^ALTER TABLE (\w+) ADD COLUMN (\w+) (\w+);$/gm)) {
+      if (!this.tieneColumna(m[1], m[2])) this.sql.exec(`ALTER TABLE ${m[1]} ADD COLUMN ${m[2]} ${m[3]}`);
     }
   }
 

@@ -17,7 +17,26 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.83.0 (PATRON101 EN LOS REPORTES. Encargo del chat
+ * Versión del contrato: 0.84.0 (PATRON101: EL AVISO DE RIESGOS. Mike, 8-oct:
+ * «Necesito agregar un disclaimer de los riesgos de la inversión, sobre todo
+ * riesgos de no pago del cliente»; y con botones: «Aceptación obligatoria».
+ *   · `ajustes` de inversión trae `riesgos` (el aviso vigente: el de la
+ *     empresa o el base) y `riesgos_propio`; PUT /inversion/ajustes acepta
+ *     `riesgos` (vacío = volver al base).
+ *   · La ronda que ve quien presta trae `riesgos`, y cada una de
+ *     `mis_ofertas`, `riesgos_aceptados_at`.
+ *   · ROMPE: POST /inversion/rondas/:id/ofertas, hecho por quien presta,
+ *     exige `acepta_riesgos: true`; sin eso, 400 `riesgos_sin_aceptar`. Se
+ *     guarda la hora y el texto aceptado. Quien dirige captura sin eso.
+ *   · El préstamo trae `riesgos: { texto, aceptados_at }`: lo que imprime el
+ *     pagaré.
+ *   · El correo y el mensaje de WhatsApp de una ronda dicen el riesgo en una
+ *     frase.
+ *   · DEFECTO: quien ya era cliente (peek101) o personal (roster101) de la
+ *     empresa y se daba de alta como inversionista no entraba: la puerta le
+ *     dejaba su otra clase y /inversion contestaba 403. En investor101, quien
+ *     presta entra como inversionista.) Antes:
+ * 0.83.0 (PATRON101 EN LOS REPORTES. Encargo del chat
  * que construyó patron101, 8-oct. Lo que entra de un préstamo
  * (`prestamo_recibido`) no es ingreso y lo que se le devuelve de capital
  * (`prestamo_capital`) no es gasto: el cuadre fiscal (GET /fiscal/cuadre) ya
@@ -1305,7 +1324,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.83.0';
+export const VERSION_CONTRATO = '0.84.0';
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 

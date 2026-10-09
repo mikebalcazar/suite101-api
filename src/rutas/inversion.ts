@@ -306,7 +306,12 @@ export function montarInversion(rutas: App): void {
     const b = await cuerpo(c);
     const inversionista_id = p.tipo === 'admin' ? String(b.inversionista_id ?? '') : p.id;
     if (!inversionista_id) return err(c, 'datos_invalidos', 400, { errores: { inversionista_id: 'Escoge de quién es la oferta.' } });
-    const r = await motor(c, 'ofrecer', { ronda_id: c.req.param('id')!, inversionista_id, monto: b.monto, nota: b.nota }, actor(c), hoyMx());
+    const r = await motor(c, 'ofrecer', {
+      ronda_id: c.req.param('id')!, inversionista_id, monto: b.monto, nota: b.nota,
+      // 0.84.0 · Quien presta acepta los riesgos para ofrecer; quien dirige
+      // captura lo que le dijeron por teléfono, y ahí no hay aceptación.
+      exige_riesgos: p.tipo === 'inversionista', acepta_riesgos: b.acepta_riesgos,
+    }, actor(c), hoyMx());
     if (esFalla(r)) return falla(c, r);
     // A quien dirige le llega el aviso sólo cuando ofrece el inversionista:
     // lo que capturó él mismo ya lo sabe.
