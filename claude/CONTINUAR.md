@@ -1,3 +1,5 @@
+> **9-oct-2026 · bill101 entra a la suite, fase A (API 0.85.0).** Lo hace el chat de bill101. La factura se lee sola de su XML (`src/cfdi-xml.ts`), se propone contra el gasto que se le parece, se le pregunta al SAT si sigue vigente (`src/sat.ts`) y de ahí salen el estado de cuenta fiscal y los impuestos (`src/fiscal.ts`, la única cuenta; `src/fiscal-db.ts`, el motor). org/0044, d1/0026 (licencia `bill`, sólo en `demo`). Las rutas de la 0009 no cambian. Faltan: B la pantalla, C timbrar con Facturama, D bajar del SAT con FIEL, E que dash101 suelte lo fiscal. Ver `muro/2026-10-09-0225-…` y `muro/2026-10-09-0255-…`.
+
 > **8-oct-2026 · patron101: aviso de riesgos (API 0.84.0).** Aceptación obligatoria para ofrecer, texto editable en Ajustes, impreso en el pagaré; y arreglado que un cliente o personal dado de alta como inversionista no entraba. Ver `muro/2026-10-09-0045-…`.
 
 > **8-oct-2026 · investor101 se llama patron101 para la gente** (Mike). Marca y dominio `patron101.taller101.com`; app `investor101`, llave `investor`, Worker, repo y `URL_INVESTOR` conservan el nombre. Ver `muro/2026-10-08-2110-…`.

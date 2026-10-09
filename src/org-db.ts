@@ -56,7 +56,9 @@ import empresaLogoYDatos from '../migrations/org/0040_empresa_logo_y_datos.sql';
 import costos from '../migrations/org/0041_costos.sql';
 import inversion from '../migrations/org/0042_inversion.sql';
 import inversionRiesgos from '../migrations/org/0043_inversion_riesgos.sql';
+import bill from '../migrations/org/0044_bill.sql';
 import { MotorInversion } from './inversion-db';
+import { MotorFiscal } from './fiscal-db';
 import { atender as atenderQuell, poblarCostosDefault, ponerTiemposDefault, type BaseQuell, type SesionQuell } from './quell/motor.js';
 import { PREFIJOS, esRequerimiento, siguienteCodigo } from './quell/codigos.js';
 
@@ -84,18 +86,19 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill];
 
 /** La 0027, la 0030, la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
  *  en la lista; el archivo .sql es sólo la nota que lo dice. */
-const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos'> = {
+const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101'> = {
   [MIGRACIONES.indexOf(sinNegocios)]: 'quitarNegocios',
   [MIGRACIONES.indexOf(requerimientosHuerfanos)]: 'migrarRequerimientosHuerfanos',
   [MIGRACIONES.indexOf(obrasALaSuite)]: 'migrarObrasSueltas',
   [MIGRACIONES.indexOf(empresaLogoYDatos)]: 'empresaLogoYDatos',
   [MIGRACIONES.indexOf(costos)]: 'costosDeObra',
   [MIGRACIONES.indexOf(inversionRiesgos)]: 'inversionRiesgos',
+  [MIGRACIONES.indexOf(bill)]: 'bill101',
 };
 
 /** La tabla `empresa` (0027): UN renglón, con id fijo, que es lo que antes
@@ -337,6 +340,8 @@ export interface ApiOrgDB {
   marcarContador(args: { personal_id: string; valor: boolean; quien_usuario_id: string; quien_nombre?: string | null }): Promise<Fila | null>;
   /** investor101 (0.82.0): una sola puerta al motor de src/inversion-db.ts. */
   inversion(op: string, args?: unknown[]): Promise<any>;
+  /** bill101 (0.85.0): una sola puerta al motor de src/fiscal-db.ts. */
+  fiscal(op: string, args?: unknown[]): Promise<any>;
   crearOrden(args: Record<string, unknown>): Promise<Fila | { error: string; detalle?: unknown }>;
   misOrdenes(usuario_id: string): Promise<Fila[]>;
   buzon(hoy?: string, tipo?: TipoOrden | null): Promise<{ filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number }>;
@@ -3026,9 +3031,16 @@ export class OrgDB extends DurableObject<Env> {
   } {
     const d = String(desde).slice(0, 10), h = String(hasta).slice(0, 10);
     // De la empresa entera: el RFC es uno (0.63.0).
+    /* 0.85.0 · Desde que las facturas entran leídas de su XML (bill101) la
+     * tabla también trae notas de crédito, que RESTAN, y complementos de
+     * pago y recibos de nómina, que no llevan IVA ni son «una factura» para
+     * este conteo. Lo capturado antes trae `tipo_comprobante` nulo y se
+     * suma como siempre: para esos datos la respuesta es la misma. */
     const suma = (tipo: string) => this.sql
-      .exec(`SELECT COALESCE(SUM(iva),0) AS iva, COALESCE(SUM(retenciones),0) AS ret, COUNT(*) AS n
-             FROM cfdi WHERE estado = 'vigente' AND tipo = ? AND fecha >= ? AND fecha <= ?`, tipo, d, h)
+      .exec(`SELECT COALESCE(SUM(CASE WHEN tipo_comprobante = 'E' THEN -iva ELSE iva END),0) AS iva,
+                    COALESCE(SUM(CASE WHEN tipo_comprobante = 'E' THEN -retenciones ELSE retenciones END),0) AS ret, COUNT(*) AS n
+             FROM cfdi WHERE estado = 'vigente' AND tipo = ? AND fecha >= ? AND fecha <= ?
+               AND COALESCE(tipo_comprobante, 'I') IN ('I', 'E')`, tipo, d, h)
       .one() as { iva: number; ret: number; n: number };
     const ing = suma('ingreso'), egr = suma('egreso');
     const canceladas = (this.sql
@@ -3517,6 +3529,19 @@ export class OrgDB extends DurableObject<Env> {
   private inversionRiesgos(): void {
     for (const m of inversionRiesgos.matchAll(/^ALTER TABLE (\w+) ADD COLUMN (\w+) (\w+);$/gm)) {
       if (!this.tieneColumna(m[1], m[2])) this.sql.exec(`ALTER TABLE ${m[1]} ADD COLUMN ${m[2]} ${m[3]}`);
+    }
+  }
+
+  /** 0044, en código: lo que bill101 le agrega a `cfdi` y sus cuatro tablas.
+   *  El .sql ES la migración; aquí se corre de manera que repetirla no
+   *  truene, por lo mismo que la 0041. Lo que ya estaba capturado no se
+   *  toca: sus columnas nuevas quedan nulas, y nulo se lee como «a mano»,
+   *  «factura normal» y «trato normal» (src/fiscal-db.ts). */
+  private bill101(): void {
+    this.sql.exec(bill.replace(/^ALTER TABLE .*$/gm, ''));
+    for (const m of bill.matchAll(/^ALTER TABLE (\w+) ADD COLUMN (\w+) (\w+);$/gm)) {
+      const [, tabla, columna, tipo] = m;
+      if (!this.tieneColumna(tabla, columna)) this.sql.exec(`ALTER TABLE ${tabla} ADD COLUMN ${columna} ${tipo}`);
     }
   }
 
@@ -5611,6 +5636,28 @@ export class OrgDB extends DurableObject<Env> {
       tx: <T>(fn: () => T): T => this.ctx.storage.transactionSync(fn),
       apartarNumero: (serie) => this.apartarNumero(serie),
       alMover: (id) => this.avisar({ t: 'movimiento.nuevo', id, proyecto_id: null }, 'dinero'),
+    }) as unknown as Record<string, (...a: unknown[]) => unknown>;
+    return motor[op](...args);
+  }
+
+  /* ─────────────── bill101 (0.85.0) ───────────────
+   * El motor vive en src/fiscal-db.ts. Misma forma que el de arriba: una
+   * entrada por RPC y la lista de lo que se puede llamar. Ligar y cancelar
+   * se le prestan: son de la 0009 y siguen viviendo aquí. */
+  private static readonly OPS_FISCAL: ReadonlySet<string> = new Set([
+    'importar', 'ponerArchivo', 'ponerArchivos', 'detalle', 'sugerencias', 'desligar', 'tratar',
+    'porVerificar', 'anotarSat', 'estadoDeCuenta', 'impuestos',
+    'ejercicio', 'guardarEjercicio', 'pagos', 'registrarPago', 'borrarPago', 'config', 'guardarConfig',
+  ]);
+
+  fiscal(op: string, args: unknown[] = []): unknown {
+    if (!OrgDB.OPS_FISCAL.has(op)) return { error: 'operacion_desconocida', detalle: { op } };
+    const motor = new MotorFiscal({
+      sql: this.sql,
+      tx: <T>(fn: () => T): T => this.ctx.storage.transactionSync(fn),
+      rfcEmpresa: () => String((this.sql.exec(`SELECT rfc FROM empresa WHERE id = 'empresa'`).toArray()[0] as Fila | undefined)?.rfc ?? ''),
+      ligar: (a) => this.ligarCfdi(a),
+      cancelar: (id) => this.cancelarCfdi(id),
     }) as unknown as Record<string, (...a: unknown[]) => unknown>;
     return motor[op](...args);
   }
