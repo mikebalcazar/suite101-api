@@ -314,6 +314,34 @@ export function montarOrdenes(rutas: App): void {
     return ok(c, r);
   });
 
+  /** 0.86.0 · Cancelar una orden que ya no se necesita (Mike, 9-oct-2026,
+   *  para supply101). Sólo quien la pidió —igual que corregirla—, y sólo
+   *  mientras está en el buzón o devuelta: una pagada nunca. El motivo es
+   *  opcional, hasta 500 letras, y queda en la historia. No manda correo:
+   *  quien cancela es quien lo recibiría. */
+  rutas.post('/:o/ordenes/:id/cancelar', async (c) => {
+    const id = c.req.param('id')!;
+    const actual = await stub(c).verOrden(id);
+    if (!actual) return err(c, 'no_encontrado', 404);
+    if (String(actual.orden.solicitante_usuario_id) !== c.get('quien').usuario_id) {
+      return err(c, 'sin_permiso', 403, { motivo: 'solo_quien_la_pidio' });
+    }
+    const b = await c.req.json<{ nota?: unknown }>().catch(() => ({}) as { nota?: unknown });
+    if (b.nota !== undefined && b.nota !== null && typeof b.nota !== 'string') {
+      return err(c, 'datos_invalidos', 400, { campo: 'nota', porque: 'el motivo es texto' });
+    }
+    const nota = typeof b.nota === 'string' ? b.nota.trim() : '';
+    if (nota.length > 500) return err(c, 'datos_invalidos', 400, { campo: 'nota', maximo: 500, largo: nota.length });
+    const r = await stub(c).cancelarOrden({
+      id, nota: nota || null, quien_usuario_id: c.get('quien').usuario_id, quien_nombre: c.get('sesion').correo,
+    });
+    if (esFalla(r)) {
+      const estado = r.error === 'no_encontrado' ? 404 : r.error === 'orden_no_se_puede_cancelar' ? 409 : 400;
+      return err(c, r.error, estado, r.detalle);
+    }
+    return ok(c, r);
+  });
+
   /* ─────────────── contabilidad fiscal ───────────────
    * Es dinero: no la abre un cliente del portal ni alguien de personal sin
    * `ve_dinero`, igual que las demás tablas de dinero. */

@@ -17,7 +17,24 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.85.1 (GET /fiscal/cfdi trae `aplicado` en cada
+ * Versión del contrato: 0.86.0 (UNA ORDEN QUE YA NO SE NECESITA SE CANCELA.
+ * Mike, 9-oct: «en supply, hay que poner un botón para cancelar una orden que
+ * ya no se necesita».
+ *   · `ordenes.estado` gana `cancelada` y `orden_eventos.que` gana
+ *     `cancelada` (org 0045: se rehacen las dos tablas con los mismos ids,
+ *     como la 0014). Ver `ESTADOS_ORDEN` y `EVENTOS_ORDEN`.
+ *   · POST /orgs/:o/ordenes/:id/cancelar {nota?} — sólo quien la pidió (si
+ *     no, 403 `sin_permiso` con `motivo: 'solo_quien_la_pidio'`, igual que
+ *     el PATCH), y sólo en el buzón o devuelta: si no, 409
+ *     `orden_no_se_puede_cancelar` con `detalle.estado`. Una pagada nunca.
+ *     `nota` es el porqué, opcional, hasta 500 letras (más: 400
+ *     `datos_invalidos`); queda en la historia. `nota_contador` no se toca.
+ *     Contesta la orden ya cancelada. No manda correo.
+ *   · Una cancelada no sale en el buzón, ni en sus totales, ni en
+ *     GET /ordenes/resumen, ni en /pagadas: no se debe. Sí sale en
+ *     GET /ordenes (lo mío), con su estado.)
+ * Antes:
+ * 0.85.1 (GET /fiscal/cfdi trae `aplicado` en cada
  * factura: cuánto de ella ya está ligado a dinero. Cada mes de
  * GET /fiscal/impuestos trae `a_pagar_estimado` (IVA a pagar + ISR del mes),
  * para que ninguna pantalla lo sume. Y los orígenes de bill101 en ORIGENES.)
@@ -1379,7 +1396,20 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.85.1';
+export const VERSION_CONTRATO = '0.86.0';
+
+/* ─────────────── órdenes de compra (0.21.0; cancelada desde 0.86.0) ─────────────── */
+
+/** En qué va una orden. `cancelada` (0.86.0): la canceló quien la pidió
+ *  porque ya no se necesita; no se paga ni suma a lo que se debe. */
+export const ESTADOS_ORDEN = ['en_buzon', 'devuelta', 'pagada', 'rechazada', 'cancelada'] as const;
+export type EstadoOrden = (typeof ESTADOS_ORDEN)[number];
+
+/** Los renglones de la historia de una orden (`orden_eventos.que`).
+ *  `contador` y `nominas` no son de una orden sino del permiso, y van con
+ *  `orden_id` nulo. */
+export const EVENTOS_ORDEN = ['creada', 'devuelta', 'corregida', 'pagada', 'rechazada', 'contador', 'nominas', 'cancelada'] as const;
+export type EventoOrden = (typeof EVENTOS_ORDEN)[number];
 
 /* ─────────────── licencias por suscripción (0.13.0) ─────────────── */
 
