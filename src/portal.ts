@@ -19,6 +19,9 @@ import raleway400 from './paginas/fuentes/raleway-400.woff2';
 import raleway600 from './paginas/fuentes/raleway-600.woff2';
 import raleway700 from './paginas/fuentes/raleway-700.woff2';
 import raleway800 from './paginas/fuentes/raleway-800.woff2';
+import iconoSvg from './paginas/icono/icono.svg';
+import iconoIco from './paginas/icono/favicon.ico';
+import iconoCelular from './paginas/icono/apple-touch-icon.png';
 
 export const DOMINIO_SUITE = 'suite101.taller101.com';
 
@@ -36,7 +39,18 @@ const fuente = (ruta: string) => FUENTES[ruta]
   ? new Response(FUENTES[ruta], { headers: { 'Content-Type': 'font/woff2', 'Cache-Control': 'public, max-age=31536000, immutable' } })
   : null;
 
-const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="#0080C1"/><text x="32" y="41" text-anchor="middle" font-family="Raleway,system-ui,sans-serif" font-weight="800" font-size="26" fill="#fff">101</text></svg>`;
+/* 9-oct-2026 · el ícono que eligió Mike en sondeo.taller101.com («En
+ * órbita»): el de la pestaña, el del celular y el /favicon.ico. /favicon.svg
+ * sigue contestando —con el nuevo— para las páginas que ya lo tenían guardado. */
+const ICONOS: Record<string, [string | ArrayBuffer, string]> = {
+  '/icono.svg': [iconoSvg, 'image/svg+xml'],
+  '/favicon.svg': [iconoSvg, 'image/svg+xml'],
+  '/favicon.ico': [iconoIco, 'image/x-icon'],
+  '/apple-touch-icon.png': [iconoCelular, 'image/png'],
+};
+const icono = (ruta: string) => ICONOS[ruta]
+  ? new Response(ICONOS[ruta][0], { headers: { 'Content-Type': ICONOS[ruta][1], 'Cache-Control': 'public, max-age=86400' } })
+  : null;
 
 /** La misma puerta, para una empresa con dominio propio (2-oct): el nombre
  *  de la empresa arriba y cada liga a su app en SU dominio
@@ -61,9 +75,8 @@ export async function puertaDeLaSuite(c: Ctx, next: Next): Promise<Response | vo
         headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': 'private, max-age=60' },
       });
     }
-    if (u.pathname === '/favicon.svg') {
-      return new Response(FAVICON, { headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' } });
-    }
+    const ico = icono(u.pathname);
+    if (ico) return ico;
     const letra = fuente(u.pathname);
     if (letra) return letra;
     return c.json({ ok: false, error: 'no_encontrado', detalle: { aqui_solo: ['/'] } }, 404);
@@ -78,9 +91,8 @@ export async function puertaDeLaSuite(c: Ctx, next: Next): Promise<Response | vo
       headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': 'public, max-age=300' },
     });
   }
-  if (u.pathname === '/favicon.svg') {
-    return new Response(FAVICON, { headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' } });
-  }
+  const ico = icono(u.pathname);
+  if (ico) return ico;
   const letra = fuente(u.pathname);
   if (letra) return letra;
   return c.json({ ok: false, error: 'no_encontrado', detalle: { aqui_solo: ['/'] } }, 404);

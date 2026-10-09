@@ -49,13 +49,36 @@ describe('la puerta de la suite', () => {
     expect((html.match(/class="lema"/g) ?? []).length).toBe(APPS.length + 1);
   });
 
-  it('trae su favicon y nada más: cualquier otra ruta es 404', async () => {
+  it('trae su ícono y nada más: cualquier otra ruta es 404', async () => {
     expect((await SELF.fetch(`${SUITE}/favicon.svg`)).headers.get('Content-Type')).toMatch(/svg/);
     const r = await SELF.fetch(`${SUITE}/orgs/demo/cuentas`);
     expect(r.status).toBe(404);
     expect((await r.json() as { error: string }).error).toBe('no_encontrado');
     const p = await SELF.fetch(`${SUITE}/auth/codigo`, { method: 'POST', body: '{}' });
     expect(p.status).toBe(404);
+  });
+
+  /* 9-oct-2026 · el ícono que eligió Mike («En órbita»): la página lo pide
+   * en sus tres formas y se sirve byte por byte el de la carpeta final. */
+  it('la página trae el ícono elegido: pestaña, .ico y celular', async () => {
+    const html = await (await SELF.fetch(`${SUITE}/`)).text();
+    expect(html).toContain('<link rel="icon" href="/icono.svg" type="image/svg+xml">');
+    expect(html).toContain('<link rel="icon" href="/favicon.ico" sizes="any">');
+    expect(html).toContain('<link rel="apple-touch-icon" href="/apple-touch-icon.png">');
+    const huella = async (b: ArrayBuffer) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', b))]
+      .map((x) => x.toString(16).padStart(2, '0')).join('');
+    const esperado: Record<string, [string, string]> = {
+      '/icono.svg': ['image/svg+xml', 'f03ca0971849461ab463f1403cf2cb74b617979ad7152879946f337d752e5b3c'],
+      '/favicon.svg': ['image/svg+xml', 'f03ca0971849461ab463f1403cf2cb74b617979ad7152879946f337d752e5b3c'],
+      '/favicon.ico': ['image/x-icon', 'a6a76b87ed349bd5f92ede02160d2d2445f1ac027e08a42e8310bb7d5ba80096'],
+      '/apple-touch-icon.png': ['image/png', '26a34b9043a413a41ef7438f6aa674228b6f9db0f1d782d1131735387351ee35'],
+    };
+    for (const [ruta, [tipo, sha]] of Object.entries(esperado)) {
+      const r = await SELF.fetch(`${SUITE}${ruta}`);
+      expect(r.status, ruta).toBe(200);
+      expect(r.headers.get('Content-Type'), ruta).toBe(tipo);
+      expect(await huella(await r.arrayBuffer()), ruta).toBe(sha);
+    }
   });
 
   /* 8-oct-2026 · el look de cost101 con la tipografía y los logotipos de la
