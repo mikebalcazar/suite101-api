@@ -323,6 +323,27 @@ export async function cancelar(c: Cuenta_, v: Ventanilla, pac_id: string, motivo
   return { estado, mensaje: texto(o, 'AcuseStatusDetails') ?? texto(o, 'Message'), acuse_b64: texto(o, 'AcuseXmlBase64') };
 }
 
+/** Facturama exige que la serie exista en la sucursal de la cuenta («El
+ *  atributo 'Serie' debe existir en la sucursal»: lo dijo el 9-oct en la
+ *  primera prueba real de Mike). Aquí se asegura: se busca la sucursal (la
+ *  predeterminada, o la primera) y, si la serie no está, se da de alta con
+ *  el folio que sigue. Devuelve si tuvo que crearla. */
+export async function asegurarSerie(c: Cuenta_, v: Ventanilla, serie: string, folio: number): Promise<{ creada: boolean; sucursal: string } | FallaPac> {
+  const s = await llamar(c, v, 'sucursales', 'GET', '/BranchOffice');
+  if (esFallaPac(s)) return s;
+  const lista = Array.isArray(s.json) ? (s.json as Record<string, unknown>[]) : [];
+  const sucursal = lista.find((x) => x.IsDefault === true) ?? lista[0];
+  const id = sucursal ? texto(sucursal, 'Id') : null;
+  if (!id) return { error: 'pac_sin_sucursal', detalle: { paso: 'sucursales', motivo: 'la cuenta de Facturama no tiene ninguna sucursal (lugar de expedición); se crea en su portal' } };
+  const l = await llamar(c, v, 'series', 'GET', `/serie/${encodeURIComponent(id)}`);
+  if (esFallaPac(l)) return l;
+  const series = Array.isArray(l.json) ? (l.json as Record<string, unknown>[]) : [];
+  if (series.some((x) => String(x.Name ?? '').toUpperCase() === serie.toUpperCase())) return { creada: false, sucursal: id };
+  const r = await llamar(c, v, 'crear_serie', 'POST', `/serie/${encodeURIComponent(id)}`, { IdBranchOffice: id, Name: serie, Description: `Serie ${serie} (bill101)`, Folio: folio });
+  if (esFallaPac(r)) return r;
+  return { creada: true, sucursal: id };
+}
+
 /** Buscar en Facturama una factura emitida por su serie y folio: para saber
  *  si una emisión que se quedó sin respuesta de verdad se timbró. */
 export async function buscarPorFolio(c: Cuenta_, v: Ventanilla, serie: string, folio: number): Promise<{ pac_id: string; uuid: string | null } | null | FallaPac> {

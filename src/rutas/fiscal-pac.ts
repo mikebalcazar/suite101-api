@@ -31,7 +31,7 @@ import { cifrarLlave, descifrarLlave, llaveMaestraFiel } from '../fiel';
 import { esFallaXml, leerCfdi } from '../cfdi-xml';
 import { horaMx } from '../sat-db';
 import {
-  bajar, buscarPorFolio, cancelar, cuentas, cuerpoFacturama, esFallaPac, MOTIVOS_CANCELACION, perfil, revisarBorrador, timbrar,
+  asegurarSerie, bajar, buscarPorFolio, cancelar, cuentas, cuerpoFacturama, esFallaPac, MOTIVOS_CANCELACION, perfil, revisarBorrador, timbrar,
   type Cuenta_, type Ventanilla,
 } from '../pac';
 import type { PermisosFiscales } from './fiscal-sat';
@@ -98,7 +98,11 @@ export function montarFiscalPac(rutas: App, p: PermisosFiscales): void {
     clave = '';
     const r = await stub(c).pac('guardarCuenta', [{ org_id: org, usuario, cifrada, sandbox: b.sandbox, serie: b.serie }, p.actor(c)]);
     if (esFalla(r)) return err(c, r.error, 400, r.detalle);
-    return ok(c, await conPermisos(c, await stub(c).pac('anotarPerfil', [pf])));
+    const cfg = await stub(c).pac('anotarPerfil', [pf]);
+    // La serie tiene que existir en la sucursal de Facturama: se asegura ya,
+    // para que la primera factura no se tope con eso.
+    const serie = await asegurarSerie(cuenta, ventanilla(c), String(cfg.cuenta.serie), Number(cfg.cuenta.folio_siguiente));
+    return ok(c, await conPermisos(c, { ...cfg, serie_en_facturama: esFallaPac(serie) ? { error: serie.error, detalle: serie.detalle } : serie }));
   });
 
   rutas.delete('/:o/fiscal/pac', async (c) => {
@@ -111,7 +115,12 @@ export function montarFiscalPac(rutas: App, p: PermisosFiscales): void {
     const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
     const r = await stub(c).pac('ajustar', [b]);
     if (esFalla(r)) return err(c, r.error, codigoDe(r.error), r.detalle);
-    return ok(c, await conPermisos(c, r));
+    let serie_en_facturama: unknown = null;
+    if (b.serie !== undefined) {
+      const k = await abrirCuenta(c);
+      if (!('error' in k)) { const s = await asegurarSerie(k, ventanilla(c), String(r.cuenta.serie), Number(r.cuenta.folio_siguiente)); serie_en_facturama = esFallaPac(s) ? { error: s.error, detalle: s.detalle } : s; }
+    }
+    return ok(c, await conPermisos(c, { ...r, serie_en_facturama }));
   });
 
   rutas.post('/:o/fiscal/pac/perfil', async (c) => {
@@ -159,6 +168,9 @@ export function montarFiscalPac(rutas: App, p: PermisosFiscales): void {
     const lugar = k.lugar_expedicion;
     if (!lugar || !/^\d{5}$/.test(lugar)) return err(c, 'falta_cp_empresa', 409, { motivo: 'falta el código postal fiscal de la empresa (Ajustes), que es el lugar de expedición' });
 
+    // Por si la serie se puso a mano en Facturama, o se borró allá: se asegura antes de apartar folio.
+    const serie = await asegurarSerie(k, ventanilla(c), k.serie, Number(cfg.cuenta?.folio_siguiente ?? 1));
+    if (esFallaPac(serie)) return err(c, serie.error, codigoDe(serie.error), serie.detalle);
     const em = await stub(c).pac('abrirEmision', [borrador, { proyecto_id: typeof b.proyecto_id === 'string' ? b.proyecto_id : null, cliente_id: typeof b.cliente_id === 'string' ? b.cliente_id : null }, p.actor(c)]);
     if (esFalla(em)) return err(c, em.error, em.error === 'emision_repetida' || em.error === 'emision_en_camino' ? 409 : codigoDe(em.error), em.detalle);
     const org = c.get('org_id');
