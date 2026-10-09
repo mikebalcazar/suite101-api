@@ -57,6 +57,7 @@ import costos from '../migrations/org/0041_costos.sql';
 import inversion from '../migrations/org/0042_inversion.sql';
 import inversionRiesgos from '../migrations/org/0043_inversion_riesgos.sql';
 import bill from '../migrations/org/0044_bill.sql';
+import ordenesCanceladas from '../migrations/org/0045_ordenes_canceladas.sql';
 import { MotorInversion } from './inversion-db';
 import { MotorFiscal } from './fiscal-db';
 import { atender as atenderQuell, poblarCostosDefault, ponerTiemposDefault, type BaseQuell, type SesionQuell } from './quell/motor.js';
@@ -74,7 +75,7 @@ import { DEFS, type Def, type Tipo } from './tablas';
 import { calcular, hoyMx, limpiarApu, usaA, type Apu, type Desglose, type Fuentes } from './costos';
 import { ahora, normalizar, ulid } from './lib';
 import { alcanceDeItem, CATEGORIA_PRESTAMO_CAPITAL, CATEGORIA_PRESTAMO_RECIBIDO, type MovimientoAlcance } from '../schema/tipos';
-import { TABLAS, type Aviso, type ConteoQuote, type Etapa, type Peek, type Pool, type ProveedorDePago, type Tabla } from '../schema/tipos';
+import { TABLAS, type Aviso, type ConteoQuote, type Etapa, type EventoOrden, type Peek, type Pool, type ProveedorDePago, type Tabla } from '../schema/tipos';
 import type { Env } from './entorno';
 
 /* Las migraciones del OrgDB, en orden. Para agregar una: se escribe el .sql,
@@ -86,7 +87,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas];
 
 /** La 0027, la 0030, la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
@@ -357,6 +358,8 @@ export interface ApiOrgDB {
   pagarOrden(args: Record<string, unknown>): Promise<{ ok: true; orden: Fila; movimiento: Fila; partida_id: string | null } | { error: string; detalle?: unknown }>;
   resolverOrden(args: { id: string; que: 'devuelta' | 'rechazada'; nota: string; quien_usuario_id: string; quien_nombre?: string | null }): Promise<Fila | { error: string; detalle?: unknown }>;
   corregirOrden(args: { id: string; quien_usuario_id: string; quien_nombre?: string | null; cambios: Record<string, unknown> }): Promise<Fila | { error: string; detalle?: unknown }>;
+  /** 0.86.0 · Quien la pidió la cancela, mientras está en el buzón o devuelta. */
+  cancelarOrden(args: { id: string; nota?: string | null; quien_usuario_id: string; quien_nombre?: string | null }): Promise<Fila | { error: string; detalle?: unknown }>;
 
   /* Contabilidad fiscal (0009). Una sola lista de movimientos; la fiscal es
    * la misma filtrada por `facturado`. */
@@ -629,11 +632,14 @@ export class OrgDB extends DurableObject<Env> {
    * El documento decía `PRAGMA user_version`. Se usa una tabla en su lugar:
    * el SQLite del Durable Object no expone ese pragma para escritura, y una
    * tabla además deja fecha de cuándo corrió cada una. */
-  private migrar(): void {
+  /** `hasta` es sólo para las pruebas: arma una base como la tenía una
+   *  empresa en esa versión —con las migraciones en código incluidas— para
+   *  medir la siguiente sobre datos de verdad. El DO siempre llega al final. */
+  private migrar(hasta = MIGRACIONES.length): void {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS _migraciones (version INTEGER PRIMARY KEY, aplicada_at TEXT NOT NULL)`);
     const fila = this.sql.exec(`SELECT MAX(version) AS v FROM _migraciones`).one() as { v: number | null };
     const desde = fila?.v ?? 0;
-    for (let i = desde; i < MIGRACIONES.length; i++) {
+    for (let i = desde; i < Math.min(hasta, MIGRACIONES.length); i++) {
       if (EN_CODIGO[i]) this[EN_CODIGO[i]]();
       else this.sql.exec(MIGRACIONES[i]);
       this.sql.exec(`INSERT INTO _migraciones (version, aplicada_at) VALUES (?, ?)`, i + 1, new Date().toISOString());
@@ -2505,7 +2511,7 @@ export class OrgDB extends DurableObject<Env> {
   }
 
   private apuntarOrden(e: {
-    orden_id: string | null; que: string; quien_usuario_id: string;
+    orden_id: string | null; que: EventoOrden; quien_usuario_id: string;
     quien_nombre?: string | null; sobre_personal_id?: string | null; nota?: string | null;
   }): void {
     this.sql.exec(
@@ -2876,6 +2882,37 @@ export class OrgDB extends DurableObject<Env> {
       orden_id: args.id, que: 'corregida', quien_usuario_id: args.quien_usuario_id,
       quien_nombre: args.quien_nombre ?? null, nota: 'corregida y de vuelta al buzón',
     });
+    return this.leerInterna('ordenes', args.id)!;
+  }
+
+  /** 0.86.0 · Quien la pidió la cancela: ya no se necesita. Mike, 9-oct-2026:
+   *  «en supply, hay que poner un botón para cancelar una orden que ya no se
+   *  necesita».
+   *
+   *  Sólo mientras nadie la ha pagado ni rechazado: en el buzón o devuelta.
+   *  Una pagada NUNCA se cancela —el dinero ya salió, y eso se arregla con el
+   *  movimiento, no borrando el papel—. La orden se queda con su folio y su
+   *  historia; sale del buzón, de sus totales y de lo que se debe porque
+   *  todos ellos leen `estado = 'en_buzon'`. `nota_contador` no se toca: si
+   *  quien paga ya había dicho algo al devolverla, sigue dicho. Quién puede
+   *  llamarla lo decide el Worker (sólo quien la pidió). */
+  cancelarOrden(args: { id: string; nota?: string | null; quien_usuario_id: string; quien_nombre?: string | null }):
+    Fila | { error: string; detalle?: unknown } {
+    const orden = this.leerInterna('ordenes', args.id);
+    if (!orden) return { error: 'no_encontrado' };
+    if (orden.estado !== 'en_buzon' && orden.estado !== 'devuelta') {
+      return { error: 'orden_no_se_puede_cancelar', detalle: { estado: orden.estado } };
+    }
+    const nota = String(args.nota ?? '').trim() || null;
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(`UPDATE ordenes SET estado = 'cancelada', actualizado_at = ? WHERE id = ?`, ahora(), args.id);
+      this.apuntarOrden({
+        orden_id: args.id, que: 'cancelada', quien_usuario_id: args.quien_usuario_id,
+        quien_nombre: args.quien_nombre ?? null, nota,
+      });
+    });
+    // El buzón de quien paga tiene que enterarse de que una se fue.
+    this.avisar({ t: 'orden.cancelada', id: args.id, folio: orden.folio } as unknown as Aviso, 'dinero');
     return this.leerInterna('ordenes', args.id)!;
   }
 

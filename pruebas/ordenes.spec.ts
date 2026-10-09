@@ -777,3 +777,140 @@ describe('0.67.0 · los datos de pago del proveedor vienen en la orden', () => {
     expect(r.data.proveedor).toBeNull();
   });
 });
+
+/* 0.86.0 · Cancelar una orden que ya no se necesita. Mike, 9-oct-2026: «en
+ * supply, hay que poner un botón para cancelar una orden que ya no se
+ * necesita». Lo que de verdad importa medir: que sólo la cancele quien la
+ * pidió, que una pagada no se cancele nunca, y que una cancelada deje de
+ * contar como dinero que se debe —fuera del buzón, de sus totales y del
+ * resumen del inicio— sin desaparecer de la lista de quien la pidió. */
+describe('0.86.0 · cancelar una orden que ya no se necesita', () => {
+  let enBuzon = '', devuelta = '';
+
+  const pedirUna = async (concepto: string, monto: number) => {
+    const r = await o('ana', '/ordenes', { method: 'POST', json: { proveedor_nombre: 'Ferretería', concepto, monto, fecha_maxima_pago: dia(2) } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    return r.data as { id: string; folio: string; monto: number };
+  };
+
+  it('quien la pidió cancela una orden en el buzón, con su porqué, y sigue con el mismo folio', async () => {
+    const oc = await pedirUna('Clavos que ya no hacen falta', 321_00);
+    enBuzon = oc.id;
+    const r = await o('ana', `/ordenes/${oc.id}/cancelar`, { method: 'POST', json: { nota: '  Ya los trajo el cliente  ' } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.estado).toBe('cancelada');
+    expect(r.data.folio, 'el mismo papel, con el mismo número').toBe(oc.folio);
+    expect(r.data.monto).toBe(321_00);
+    expect(r.data.actualizado_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(r.data.nota_contador, 'el porqué de quien cancela no es nota de quien paga').toBeNull();
+    expect(r.data.movimiento_id, 'no hay egreso').toBeNull();
+    expect('correo' in r.data, 'no manda correo').toBe(false);
+  });
+
+  it('queda apuntado en su historia: quién, cuándo y por qué', async () => {
+    const r = await o('ana', `/ordenes/${enBuzon}`);
+    expect(r.estado).toBe(200);
+    expect(r.data.eventos.map((e: any) => e.que)).toEqual(['creada', 'cancelada']);
+    const ev = r.data.eventos[1];
+    expect(ev.quien_usuario_id).toBe(uAna);
+    expect(ev.quien_nombre).toBe(GENTE.ana.correo);
+    expect(ev.nota, 'el porqué, ya sin espacios de sobra').toBe('Ya los trajo el cliente');
+    expect(ev.ts).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('quien la pidió cancela una devuelta, sin porqué, y lo que dijo quien paga sigue dicho', async () => {
+    const oc = await pedirUna('Bisagras', 88_00);
+    devuelta = oc.id;
+    const dev = await o('beto', `/ordenes/${oc.id}/devolver`, { method: 'POST', json: { nota: 'Falta la cotización' } });
+    expect(dev.estado, JSON.stringify(dev)).toBe(200);
+    const r = await o('ana', `/ordenes/${oc.id}/cancelar`, { method: 'POST' });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.estado).toBe('cancelada');
+    expect(r.data.nota_contador, 'nota_contador no se toca').toBe('Falta la cotización');
+    const det = await o('ana', `/ordenes/${oc.id}`);
+    expect(det.data.eventos.map((e: any) => e.que)).toEqual(['creada', 'devuelta', 'cancelada']);
+    expect(det.data.eventos[2].nota, 'sin porqué, la historia no inventa uno').toBeNull();
+  });
+
+  it('nadie más la cancela, ni quien paga: 403 solo_quien_la_pidio', async () => {
+    const oc = await pedirUna('Lijas de Ana', 45_00);
+    for (const quien of ['beto', 'caro', 'mike']) {
+      const r = await o(quien, `/ordenes/${oc.id}/cancelar`, { method: 'POST', json: { nota: 'no es mía' } });
+      expect(r.estado, `${quien}: ${JSON.stringify(r)}`).toBe(403);
+      expect(r.error).toBe('sin_permiso');
+      expect(r.detalle).toEqual({ motivo: 'solo_quien_la_pidio' });
+    }
+    const sigue = await o('ana', `/ordenes/${oc.id}`);
+    expect(sigue.data.orden.estado, 'y la orden sigue en el buzón').toBe('en_buzon');
+    expect(sigue.data.eventos.map((e: any) => e.que)).toEqual(['creada']);
+    expect((await o('ana', '/ordenes/01NOEXISTE/cancelar', { method: 'POST' })).estado).toBe(404);
+  });
+
+  it('una pagada no se cancela nunca: 409 con su estado; tampoco una rechazada ni una ya cancelada', async () => {
+    const pagada = await pedirUna('Pegamento', 60_00);
+    expect((await o('beto', `/ordenes/${pagada.id}/pagar`, { method: 'POST', json: { cuenta_id: cuenta } })).estado).toBe(200);
+    const r = await o('ana', `/ordenes/${pagada.id}/cancelar`, { method: 'POST', json: { nota: 'ya no' } });
+    expect(r.estado, JSON.stringify(r)).toBe(409);
+    expect(r.error).toBe('orden_no_se_puede_cancelar');
+    expect(r.detalle).toEqual({ estado: 'pagada' });
+    const sigue = await o('ana', `/ordenes/${pagada.id}`);
+    expect(sigue.data.orden.estado, 'sigue pagada').toBe('pagada');
+    expect(sigue.data.eventos.map((e: any) => e.que)).toEqual(['creada', 'pagada']);
+
+    const rechazada = await pedirUna('Brochas', 30_00);
+    expect((await o('beto', `/ordenes/${rechazada.id}/rechazar`, { method: 'POST', json: { nota: 'Hay en bodega' } })).estado).toBe(200);
+    const r2 = await o('ana', `/ordenes/${rechazada.id}/cancelar`, { method: 'POST' });
+    expect([r2.estado, r2.detalle]).toEqual([409, { estado: 'rechazada' }]);
+
+    const otraVez = await o('ana', `/ordenes/${enBuzon}/cancelar`, { method: 'POST' });
+    expect([otraVez.estado, otraVez.detalle], 'cancelar dos veces').toEqual([409, { estado: 'cancelada' }]);
+  });
+
+  it('una cancelada ya no se paga, ni se devuelve, ni se rechaza, ni se corrige', async () => {
+    const pagar = await o('beto', `/ordenes/${enBuzon}/pagar`, { method: 'POST', json: { cuenta_id: cuenta } });
+    expect([pagar.estado, pagar.error], 'pagarla sería un egreso de algo que ya no se compra').toEqual([409, 'orden_no_esta_en_buzon']);
+    expect((await o('beto', `/ordenes/${enBuzon}/devolver`, { method: 'POST', json: { nota: 'x' } })).estado).toBe(409);
+    expect((await o('beto', `/ordenes/${enBuzon}/rechazar`, { method: 'POST', json: { nota: 'x' } })).estado).toBe(409);
+    expect((await o('ana', `/ordenes/${devuelta}`, { method: 'PATCH', json: { monto: 99_00 } })).estado, 'corregirla la regresaría al buzón').toBe(409);
+  });
+
+  it('el porqué es texto de hasta 500 letras', async () => {
+    const oc = await pedirUna('Tornillos', 20_00);
+    const largo = await o('ana', `/ordenes/${oc.id}/cancelar`, { method: 'POST', json: { nota: 'x'.repeat(501) } });
+    expect([largo.estado, largo.error, largo.detalle?.maximo]).toEqual([400, 'datos_invalidos', 500]);
+    const numero = await o('ana', `/ordenes/${oc.id}/cancelar`, { method: 'POST', json: { nota: 12 } });
+    expect(numero.estado).toBe(400);
+    expect((await o('ana', `/ordenes/${oc.id}`)).data.orden.estado, 'un rechazo no la cancela a medias').toBe('en_buzon');
+    const justo = await o('ana', `/ordenes/${oc.id}/cancelar`, { method: 'POST', json: { nota: 'y'.repeat(500) } });
+    expect(justo.estado, JSON.stringify(justo).slice(0, 200)).toBe(200);
+  });
+
+  it('una cancelada sale del buzón, de sus totales y del resumen; no es dinero que se debe', async () => {
+    const antesBuzon = await o('beto', '/ordenes/buzon');
+    const antesResumen = await o('ana', '/ordenes/resumen');
+    const oc = await pedirUna('Silicón', 777_00);
+    const conElla = await o('beto', '/ordenes/buzon');
+    expect(conElla.data.filas.some((f: any) => f.id === oc.id)).toBe(true);
+    expect(conElla.data.total).toBe(antesBuzon.data.total + 777_00);
+
+    expect((await o('ana', `/ordenes/${oc.id}/cancelar`, { method: 'POST' })).estado).toBe(200);
+
+    const buzon = await o('beto', '/ordenes/buzon');
+    expect(buzon.data.filas.some((f: any) => f.id === oc.id), 'ya no está en el buzón').toBe(false);
+    for (const id of [enBuzon, devuelta]) expect(buzon.data.filas.some((f: any) => f.id === id)).toBe(false);
+    expect(buzon.data.total, 'ni en su total').toBe(antesBuzon.data.total);
+    expect(buzon.data.vence_esta_semana, 'ni en lo que vence esta semana').toBe(antesBuzon.data.vence_esta_semana);
+    expect((await o('beto', '/ordenes/buzon?tipo=compra')).data.filas.some((f: any) => f.id === oc.id)).toBe(false);
+    const resumen = await o('ana', '/ordenes/resumen');
+    expect(resumen.data.compras, 'el resumen del inicio no la cuenta').toEqual(antesResumen.data.compras);
+    const pagadas = await o('beto', '/ordenes/pagadas');
+    expect(pagadas.data.filas.some((f: any) => f.estado === 'cancelada'), 'y no es historial de pagos').toBe(false);
+  });
+
+  it('quien la pidió la sigue viendo en su lista, con su estado', async () => {
+    const mias = await o('ana', '/ordenes');
+    const canceladas = mias.data.filas.filter((f: any) => f.estado === 'cancelada').map((f: any) => f.id);
+    expect(canceladas).toEqual(expect.arrayContaining([enBuzon, devuelta]));
+    expect((await o('beto', '/ordenes')).data.filas.some((f: any) => f.id === enBuzon), 'y nadie más').toBe(false);
+  });
+});

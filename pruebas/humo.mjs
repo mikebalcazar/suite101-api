@@ -866,6 +866,15 @@ async function ordenesYFiscal() {
   const otra = await pedir(STAGING, `/orgs/${ORG}/ordenes/${oc.data?.id}/pagar`, { app, method: 'POST', body: { cuenta_id: cta.data?.id } });
   rev(otra.estado === 409, 'la misma orden no se paga dos veces: nada de dobles egresos', `${otra.estado} ${otra.error ?? ''}`);
 
+  // 0.86.0 · quien la pidió cancela la que ya no se necesita; una pagada, nunca.
+  const sobra = await pedir(STAGING, `/orgs/${ORG}/ordenes`, { app, method: 'POST', body: { proveedor_nombre: 'Maderas de humo', concepto: 'Ya no hace falta', monto: 5000 } });
+  const cancelada = await pedir(STAGING, `/orgs/${ORG}/ordenes/${sobra.data?.id}/cancelar`, { app, method: 'POST', body: { nota: 'humo' } });
+  rev(cancelada.estado === 200 && cancelada.data?.estado === 'cancelada', 'quien la pidió cancela una orden en el buzón', `${cancelada.estado} ${cancelada.error ?? ''}`);
+  const sinElla = await pedir(STAGING, `/orgs/${ORG}/ordenes/buzon`, { app });
+  rev(sinElla.estado === 200 && !(sinElla.data?.filas || []).some((f) => f.id === sobra.data?.id), 'y sale del buzón de quien paga');
+  const noPagada = await pedir(STAGING, `/orgs/${ORG}/ordenes/${oc.data?.id}/cancelar`, { app, method: 'POST' });
+  rev(noPagada.estado === 409 && noPagada.detalle?.estado === 'pagada', 'una pagada no se cancela', `${noPagada.estado} ${noPagada.error ?? ''}`);
+
   // La factura llega después del pago y se cuelga del movimiento que ya existe.
   const uuid = `HUMO-${Date.now()}`;
   const hoy = new Date().toISOString().slice(0, 10);
