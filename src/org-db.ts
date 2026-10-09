@@ -5753,8 +5753,13 @@ export class OrgDB extends DurableObject<Env> {
       ponerArchivos: (lista) => { fiscal('ponerArchivos', [lista]); },
       anotarSat: (id, estado) => fiscal('anotarSat', [id, { estado }]),
       despertarEn: async (ms) => {
-        if (ms === null) await this.ctx.storage.deleteAlarm();
-        else await this.ctx.storage.setAlarm(Date.now() + ms);
+        if (ms === null) { await this.ctx.storage.deleteAlarm(); return; }
+        /* En las pruebas la alarma la dispara la prueba (runDurableObjectAlarm);
+         * si además se disparara sola a los 500 ms, competiría con ella y las
+         * pruebas saldrían distintas según lo rápida que fuera la máquina (pasó
+         * el 9-oct). Se deja puesta, pero lejos. */
+        const espera = this.env.ENTORNO === 'prueba' ? Math.max(ms, 3600_000) : ms;
+        await this.ctx.storage.setAlarm(Date.now() + espera);
       },
       memoria: this.memoriaSat,
       traer: (a, b) => fetch(a, b),
