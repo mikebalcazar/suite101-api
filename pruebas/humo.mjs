@@ -808,15 +808,16 @@ async function timbrar() {
   const pdf = await fetch(`${STAGING}/orgs/${ORG}/fiscal/cfdi/${id}/pdf`, { headers: { 'X-App': app, Cookie: galleta } });
   const bytes = new Uint8Array(await pdf.arrayBuffer());
   rev(pdf.status === 200 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46, 'el PDF lo arma Facturama y aquí se sirve', `${pdf.status} · ${bytes.length} bytes`);
-  // El SAT tarda unos segundos en registrar lo recién timbrado: cancelar al
-  // instante puede contestar error; se intenta hasta tres veces, 15 s entre una y otra.
-  let can = null;
-  for (let intento = 1; intento <= 3; intento++) {
-    can = await pedir(STAGING, `/orgs/${ORG}/fiscal/cfdi/${id}/cancelar`, { app, method: 'POST', body: { motivo: '02' } });
-    if (can.estado === 200) break;
-    if (intento < 3) await new Promise((r) => setTimeout(r, 15_000));
-  }
-  rev(can.estado === 200 && ['cancelada', 'pendiente'].includes(can.data?.estado), 'y se cancela ante el SAT (sandbox) con motivo 02', `${can.estado} ${can.error ?? ''} ${JSON.stringify(can.detalle?.motivos ?? can.detalle?.motivo ?? '')} · ${can.data?.estado ?? ''} · ${can.data?.mensaje ?? ''} · ${can.ms} ms`);
+  // Facturama (guía «Cancelar CFDI»): «Para sandbox, solamente se pueden
+  // cancelar las facturas que utilicen el RFC de EKU9003173C9 como emisor».
+  // El sandbox de Mike factura con su RFC real: ahí la cancelación contesta
+  // «Ups! Ocurrió un problema al cancelar» siempre (10-oct, tres corridas).
+  // Se pide igual, para ver que la ruta responde; sólo se exige que cancele
+  // cuando el emisor es el RFC de pruebas.
+  const can = await pedir(STAGING, `/orgs/${ORG}/fiscal/cfdi/${id}/cancelar`, { app, method: 'POST', body: { motivo: '02' } });
+  const emisorDePruebas = (cuenta.data?.cuenta?.perfil?.rfc || '') === 'EKU9003173C9';
+  if (emisorDePruebas) rev(can.estado === 200 && ['cancelada', 'pendiente'].includes(can.data?.estado), 'y se cancela ante el SAT (sandbox) con motivo 02', `${can.estado} ${can.error ?? ''} ${JSON.stringify(can.detalle?.motivos ?? can.detalle?.motivo ?? '')} · ${can.data?.estado ?? ''} · ${can.data?.mensaje ?? ''} · ${can.ms} ms`);
+  else rev([200, 502].includes(can.estado), 'cancelar: en sandbox con RFC real Facturama no cancela (sólo con EKU9003173C9); la ruta contesta y dice el motivo', `${can.estado} ${can.error ?? ''} ${JSON.stringify(can.detalle?.motivos ?? '').slice(0, 90)}`);
   const em = await pedir(STAGING, `/orgs/${ORG}/fiscal/emisiones`, { app });
   rev(em.estado === 200 && em.data?.filas?.[0]?.estado === 'timbrada' && em.data.filas[0].serie === 'HUMO', 'la emisión quedó registrada con su folio', JSON.stringify(em.data?.filas?.[0] ?? {}).slice(0, 120));
 }
