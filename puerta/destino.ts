@@ -11,24 +11,40 @@
  *
  *   · lo nuestro (taller101.com y sus subdominios) pasa tal cual: `fetch(req)`
  *     va al origen de siempre —el Worker con dominio propio de cada app—;
- *   · roster101.acme.com va al Worker de roster101 (t101-portal) por su enlace
+ *   · roster.acme.com va al Worker de roster101 (t101-portal) por su enlace
  *     de servicio, con `X-Dominio-Empresa: acme.com` y `X-Host-Original`;
  *     la API vuelve a resolver el dominio y acota la sesión a esa empresa;
- *   · una primera palabra que no es una app con puerta (master101, www,
- *     nada) es una página que dice que esa dirección no es de la suite.
+ *   · una primera palabra que no es una app con puerta (master, www,
+ *     nada) es una página que dice que esa dirección no es de la suite;
+ *   · lo que Cloudflare usa para validar el certificado pasa tal cual.
  */
 
-/** La primera palabra del host → el binding del Worker de esa app. */
+/** La primera palabra del host → el binding del Worker de esa app. Sin el
+ *  «101» (Mike, 9-oct: «son sin el "101" para los dominios»), salvo la
+ *  plataforma: suite101.acme.com. Todas las apps desde el 10-oct (se suman
+ *  cost, patron y bill). Tiene que cuadrar con PREFIJO de src/dominios.ts:
+ *  lo revisa pruebas/puerta-empresas.spec.ts. */
 export const BINDINGS: Record<string, string> = {
-  dash101: 'DASH',
-  quell101: 'QUELL',
-  quote101: 'QUOTE',
-  supply101: 'SUPPLY',
-  roster101: 'ROSTER',
-  peek101: 'PEEK',
-  workshop101: 'WORKSHOP',
+  dash: 'DASH',
+  quell: 'QUELL',
+  quote: 'QUOTE',
+  cost: 'COST',
+  patron: 'PATRON',
+  bill: 'BILL',
+  supply: 'SUPPLY',
+  roster: 'ROSTER',
+  peek: 'PEEK',
+  workshop: 'WORKSHOP',
   suite101: 'API',
 };
+
+/** Lo que Cloudflare pide para emitir el certificado de cada nombre de la
+ *  empresa: esas rutas pasan tal cual, sin ir a ninguna app («ensure it
+ *  passes through /.well-known/pki-validation/* and
+ *  /.well-known/acme-challenge/* without modification», docs de Cloudflare
+ *  for SaaS con Worker como origen). */
+export const esValidacionDeCertificado = (ruta: string): boolean =>
+  ruta.startsWith('/.well-known/acme-challenge/') || ruta.startsWith('/.well-known/pki-validation/');
 
 export const ZONAS_PROPIAS = ['taller101.com'];
 

@@ -177,7 +177,7 @@ rutas.post('/orgs', async (c) => {
  *
  * Mike: «poder poner su dominio en la plataforma (desde master101) y que al
  * abrirla les abra sus portales personalizados (ej. roster101.dominioempresa.com)».
- * De `orgs.dominio` salen ocho nombres, uno por app, que se dan de alta en
+ * De `orgs.dominio` salen los nombres, uno por app, que se dan de alta en
  * Cloudflare como custom hostnames de la zona (DOMINIOS.md). master101 no.
  */
 
@@ -205,7 +205,7 @@ async function cambiarDominio(c: Ctx, antes: Org, pedido: string | null): Promis
   return { ok: true, org: (await org(c.env, antes.id))! };
 }
 
-/** GET /admin/orgs/:o/dominio — el dominio, sus ocho nombres con su estado
+/** GET /admin/orgs/:o/dominio — el dominio, sus nombres con su estado
  *  (vuelto a preguntar a Cloudflare los que no están activos) y lo que la
  *  empresa tiene que poner en su DNS. */
 rutas.get('/orgs/:o/dominio', async (c) => {

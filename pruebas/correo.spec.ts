@@ -206,13 +206,14 @@ describe('la bienvenida trae la lista de plataformas con su dirección', () => {
     const l = plataformasDe({ apps, dominio: 'acme.com' });
     const por = Object.fromEntries(l.map((p) => [p.nombre, p]));
     expect(por.suite101.url).toBe('https://suite101.acme.com');
-    expect(por.workshop101.url).toBe('https://workshop101.acme.com');
-    expect(por.quell101).toEqual(expect.objectContaining({ url: 'https://quell101.acme.com', general: 'https://quell101.taller101.com' }));
-    expect(por.quote101.url).toBe('https://quote101.acme.com');
-    expect(por.roster101).toEqual(expect.objectContaining({ url: 'https://roster101.acme.com/admin', general: 'https://roster101.taller101.com/admin' }));
-    // Lo que no tiene puerta en el dominio de la empresa va con la general.
-    expect(por.bill101).toEqual(expect.objectContaining({ url: 'https://bill101.taller101.com', general: null }));
-    expect(por.patron101.url).toBe('https://patron101.taller101.com');
+    expect(por.workshop101.url).toBe('https://workshop.acme.com');
+    expect(por.quell101).toEqual(expect.objectContaining({ url: 'https://quell.acme.com', general: 'https://quell101.taller101.com' }));
+    expect(por.quote101.url).toBe('https://quote.acme.com');
+    expect(por.roster101).toEqual(expect.objectContaining({ url: 'https://roster.acme.com/admin', general: 'https://roster101.taller101.com/admin' }));
+    // 10-oct · todas las apps tienen puerta en el dominio de la empresa.
+    expect(por.bill101).toEqual(expect.objectContaining({ url: 'https://bill.acme.com', general: 'https://bill101.taller101.com' }));
+    expect(por.patron101.url).toBe('https://patron.acme.com');
+    expect(por.nest101.url, 'la descarga sale de la puerta de la suite de la empresa').toBe('https://suite101.acme.com/descargar/nest101');
   });
 
   it('el correo trae cada plataforma con su dirección, en texto y en HTML', () => {

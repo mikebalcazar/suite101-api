@@ -17,7 +17,17 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.92.0 (LA CUENTA A LA QUE SE REEMBOLSA. Mike, 10-oct:
+ * Versión del contrato: 0.93.0 (TODAS LAS APPS CON EL DOMINIO DE LA EMPRESA.
+ * Mike, 10-oct: «ya necesito que todas las apps funcionen con el dominio de la
+ * empresa». Los nombres que la API da de alta para una empresa con dominio
+ * propio son ahora ONCE y van sin «101» (regla de Mike, 9-oct): dash, quell,
+ * quote, cost, patron, bill, supply, roster, peek, workshop .acme.com; la
+ * plataforma conserva el suyo: suite101.acme.com. Se suman cost, patron y
+ * bill. GET /orgs/:o/dominio y POST …/dominio devuelven esos `nombres` y las
+ * `instrucciones` con esos CNAME; la bienvenida y la página de la empresa
+ * ligan a esas direcciones. Ninguna forma cambia; cambian los valores.)
+ * Antes:
+ * 0.92.0 (LA CUENTA A LA QUE SE REEMBOLSA. Mike, 10-oct:
  * un reembolso se le paga SÓLO a quien lo pidió —nunca a la cuenta de un
  * proveedor ni de un tercero—, «requieras su cuenta bancaria cuando pida un
  * reembolso si es que no la tiene registrada (…) y esa info de cuenta
@@ -1534,7 +1544,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.92.0';
+export const VERSION_CONTRATO = '0.93.0';
 
 /* ─────────────── órdenes de compra (0.21.0; cancelada desde 0.86.0) ─────────────── */
 

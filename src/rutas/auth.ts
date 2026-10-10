@@ -263,7 +263,7 @@ async function volverAPermitido(c: Ctx, volver_a: string): Promise<boolean> {
   }
   const permitidos = String(c.env.ORIGENES || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (permitidos.includes('*') || permitidos.includes(origen)) return true;
-  // 2-oct · la puerta de una empresa con dominio propio (dash101.acme.com).
+  // 2-oct · la puerta de una empresa con dominio propio (dash.acme.com).
   return origenDeEmpresa(c.env, origen);
 }
 
@@ -432,7 +432,7 @@ export async function yo(c: Ctx) {
   // Qué puede ofrecer la pantalla la próxima vez (contrato 0.7.0). Nunca los
   // hashes: sólo si existen.
   const secretos = await secretosDe(c.env, s.usuario_id);
-  /* 2-oct · por el dominio de una empresa (dash101.acme.com) sólo se ve ESA
+  /* 2-oct · por el dominio de una empresa (dash.acme.com) sólo se ve ESA
    * empresa, también para el dueño de la suite: la pantalla abre directo la
    * de la casa, sin escoger. `empresa` es para que la app se nombre. */
   const dom = c.get('dominio');

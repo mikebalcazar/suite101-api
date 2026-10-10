@@ -6,11 +6,11 @@
  *
  * Una por app prendida, más la puerta de la suite y el panel del director.
  * Si la empresa tiene dominio propio (DOMINIOS.md), la dirección es la suya
- * (`quell101.acme.com`) y se da también la general (`quell101.taller101.com`)
- * por si su DNS todavía no está listo: el correo sale en el alta y los CNAME
- * los pone después la gente de sistemas de la empresa. Las apps que no
- * tienen puerta en el dominio de la empresa (cost101, patron101, bill101 y
- * la descarga de nest101) van con la general.
+ * (`quell.acme.com`, sin el «101»; la plataforma `suite101.acme.com`) y se da
+ * también la general (`quell101.taller101.com`) por si su DNS todavía no está
+ * listo: el correo sale en el alta y los CNAME los pone después la gente de
+ * sistemas de la empresa. La descarga de nest101 sale de la puerta de la suite
+ * de la empresa (suite101.acme.com/descargar/nest101).
  *
  * Los nombres y las líneas son los de la puerta de la suite
  * (`src/paginas/suite.html`): la gente las conoce por esos nombres, no por
@@ -18,7 +18,7 @@
 
 import type { Org } from '../schema/tipos';
 import { LLAVE_APP, type App } from '../schema/tipos';
-import { APPS_DOMINIO } from './dominios';
+import { APPS_DOMINIO, PREFIJO, type AppDominio } from './dominios';
 
 export interface Plataforma {
   nombre: string;
@@ -33,7 +33,7 @@ const BASE = 'taller101.com';
 
 /** Lo que sale en la lista, en el orden de la puerta de la suite. `sub` es el
  *  nombre del sitio; `ruta`, lo que va después (el panel de roster101). */
-const CATALOGO: Array<{ app: App; nombre: string; lema: string; sub: string; ruta?: string; url?: string }> = [
+const CATALOGO: Array<{ app: App; nombre: string; lema: string; sub: string; ruta?: string }> = [
   { app: 'dash101', nombre: 'dash101', lema: 'El dinero del taller', sub: 'dash101' },
   { app: 'quell101', nombre: 'quell101', lema: 'La obra sobre el plano', sub: 'quell101' },
   { app: 'cotizador101', nombre: 'quote101', lema: 'Cotizaciones', sub: 'quote101' },
@@ -43,14 +43,14 @@ const CATALOGO: Array<{ app: App; nombre: string; lema: string; sub: string; rut
   { app: 'supply101', nombre: 'supply101', lema: 'Compras y reembolsos', sub: 'supply101' },
   { app: 'roster101', nombre: 'roster101', lema: 'Expedientes del personal', sub: 'roster101', ruta: '/admin' },
   { app: 'peek101', nombre: 'peek101', lema: 'Lo que ve tu cliente', sub: 'peek101' },
-  { app: 'nest101', nombre: 'nest101', lema: 'Programa para Windows (se descarga)', sub: 'suite101', url: `https://suite101.${BASE}/descargar/nest101` },
+  { app: 'nest101', nombre: 'nest101', lema: 'Programa para Windows (se descarga)', sub: 'suite101', ruta: '/descargar/nest101' },
 ];
 
 /** La dirección de un sitio: en el dominio de la empresa si ese sitio tiene
  *  puerta ahí, y si no la general. */
 function direccion(sub: string, ruta: string, dominio: string | null): { url: string; general: string | null } {
   const general = `https://${sub}.${BASE}${ruta}`;
-  if (dominio && (APPS_DOMINIO as readonly string[]).includes(sub)) return { url: `https://${sub}.${dominio}${ruta}`, general };
+  if (dominio && (APPS_DOMINIO as readonly string[]).includes(sub)) return { url: `https://${PREFIJO[sub as AppDominio]}.${dominio}${ruta}`, general };
   return { url: general, general: null };
 }
 
@@ -65,7 +65,6 @@ export function plataformasDe(o: Pick<Org, 'apps' | 'dominio'>, urlPanel = `http
   lista.push({ nombre: 'workshop101', lema: 'Tu equipo y sus accesos', url: dominio ? panel.url : urlPanel, general: dominio ? panel.general : null });
   for (const p of CATALOGO) {
     if (o.apps?.[LLAVE_APP[p.app]] !== true) continue;
-    if (p.url) { lista.push({ nombre: p.nombre, lema: p.lema, url: p.url, general: null }); continue; }
     lista.push({ nombre: p.nombre, lema: p.lema, ...direccion(p.sub, p.ruta || '', dominio) });
   }
   return lista;

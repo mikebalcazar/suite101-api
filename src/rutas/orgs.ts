@@ -77,7 +77,7 @@ rutas.use('/:o/*', async (c, next) => {
   const app = nombreApp as App;
 
   const org_id = c.req.param('o')!;
-  /* 2-oct · quien entra por dash101.acme.com sólo alcanza a acme: el dominio
+  /* 2-oct · quien entra por dash.acme.com sólo alcanza a acme: el dominio
    * acota, aunque la cuenta sea miembro de otra empresa también. */
   const dom = c.get('dominio');
   if (dom && dom.org_id !== org_id) return err(c, 'otra_empresa', 403, { dominio: dom.dominio, empresa_del_dominio: dom.org_id, pedida: org_id });

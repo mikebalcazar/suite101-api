@@ -12,6 +12,7 @@
  * `/salud` contesta en los dos, para que un verificador pueda medir cualquiera. */
 import type { Next } from 'hono';
 import type { Ctx } from './http';
+import { APPS_DOMINIO, PREFIJO, type AppDominio } from './dominios';
 import pagina from './paginas/suite.html';
 import cifras400 from './paginas/fuentes/fira-cifras-400.woff2';
 import cifras600 from './paginas/fuentes/fira-cifras-600.woff2';
@@ -53,13 +54,14 @@ const icono = (ruta: string) => ICONOS[ruta]
   : null;
 
 /** La misma puerta, para una empresa con dominio propio (2-oct): el nombre
- *  de la empresa arriba y cada liga a su app en SU dominio
- *  (dash101.acme.com…). Es la misma hoja con las ligas cambiadas: una sola
- *  página que mantener. */
+ *  de la empresa arriba y cada liga a su app en SU dominio (dash.acme.com…,
+ *  sin el «101» desde el 10-oct; todas las apps). Es la misma hoja con las
+ *  ligas cambiadas: una sola página que mantener. */
 export function paginaDeEmpresa(nombre: string, dominio: string): string {
   const esc = (t: string) => t.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
   return pagina
-    .replace(/https:\/\/(dash101|quell101|quote101|supply101|roster101|peek101|workshop101)\.taller101\.com/g, `https://$1.${dominio}`)
+    .replace(/https:\/\/([a-z]+101)\.taller101\.com/g, (todo, sitio: string) =>
+      (APPS_DOMINIO as readonly string[]).includes(sitio) ? `https://${PREFIJO[sitio as AppDominio]}.${dominio}` : todo)
     .replace('</style>', '.empresa{margin:4px 0 0;font-size:1.05rem;font-weight:700;color:#86c9ec;letter-spacing:.01em}\n</style>')
     .replace('</header>', `  <p class="empresa">${esc(nombre)}</p>\n  </header>`);
 }
