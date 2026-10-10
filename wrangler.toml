@@ -61,7 +61,7 @@ fallthrough = true
 # nada se le pide a Google (regla de la casa).
 [[rules]]
 type = "Data"
-globs = ["**/*.woff2", "**/paginas/icono/*.png", "**/paginas/icono/*.ico"]
+globs = ["**/*.woff2", "**/paginas/icono/*.png", "**/paginas/icono/*.ico", "**/marca/*.ttf", "**/marca/*.png"]
 fallthrough = true
 
 [vars]
@@ -154,7 +154,7 @@ fallthrough = true
 # nada se le pide a Google (regla de la casa).
 [[env.staging.rules]]
 type = "Data"
-globs = ["**/*.woff2", "**/paginas/icono/*.png", "**/paginas/icono/*.ico"]
+globs = ["**/*.woff2", "**/paginas/icono/*.png", "**/paginas/icono/*.ico", "**/marca/*.ttf", "**/marca/*.png"]
 fallthrough = true
 
 [env.staging.vars]

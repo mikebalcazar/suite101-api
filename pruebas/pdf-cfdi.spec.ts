@@ -3,6 +3,7 @@
  * original del timbre, y que de un XML y de un borrador salga un PDF con
  * lo que una representación impresa tiene que llevar.
  */
+import { PDFDocument } from 'pdf-lib';
 import { describe, expect, it } from 'vitest';
 import { armarPdf, cadenaOriginal, impresaDeBorrador, impresaDeXml, ligaSat, totalEnLetras } from '../src/pdf-cfdi';
 import { extrasImpresa, leerCfdi } from '../src/cfdi-xml';
@@ -70,6 +71,9 @@ describe('de un XML y de un borrador sale un PDF', () => {
     const largo: Borrador = { ...b, renglones: Array.from({ length: 60 }, (_, i) => ({ ...b.renglones[0], descripcion: `Renglón ${i} 🙂 ${'palabra '.repeat(40)}` })) };
     const imp2 = impresaDeBorrador(largo, { serie: 'A', folio: null, fecha: '2026-10-09T11:02:00', lugar_expedicion: '10900', emisor: { rfc: RFC_EMPRESA, nombre: 'Taller', regimen: null } });
     const pdf2 = await armarPdf({ impresa: imp2, empresa: { ...empresa, logo: { bytes: new Uint8Array([1, 2, 3]), tipo: 'image/png' } }, config, vista_previa: true });
-    expect(pdf2.length, 'varias páginas').toBeGreaterThan(pdf.length * 3);
+    // Las letras pesan lo mismo en un PDF de una página que en uno de diez: se cuentan páginas, no bytes.
+    const paginas = async (b: Uint8Array) => (await PDFDocument.load(b)).getPageCount();
+    expect(await paginas(pdf)).toBe(1);
+    expect(await paginas(pdf2), 'varias páginas').toBeGreaterThan(3);
   });
 });

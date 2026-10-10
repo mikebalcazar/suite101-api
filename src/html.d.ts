@@ -19,6 +19,11 @@ declare module '*.svg' {
   const contenido: string;
   export default contenido;
 }
+// Las letras y los logos del PDF de la factura (src/marca/, 10-oct-2026).
+declare module '*.ttf' {
+  const datos: ArrayBuffer;
+  export default datos;
+}
 declare module '*.png' {
   const datos: ArrayBuffer;
   export default datos;
