@@ -15,12 +15,33 @@
  * y el QR de verificación. Todo eso va aquí; lo demás (logo, datos
  * bancarios, leyenda) es cortesía.
  *
- * Se arma con pdf-lib (puro JS, corre en el Worker) y Helvetica, que trae
- * los acentos del español (WinAnsi). Lo que no quepa en WinAnsi (un emoji,
- * una comilla rara) se cambia por «?» en vez de tronar.
+ * Se arma con pdf-lib (puro JS, corre en el Worker). Lo que no quepa en
+ * WinAnsi (un emoji, una comilla rara) se cambia por «?» en vez de tronar.
+ *
+ * El diseño (Mike, 10-oct-2026, con botones, tras tres rondas de cinco
+ * alternativas: «5b3»): una columna negra a la izquierda con el logo de
+ * FORESPOT en blanco, el emisor, los datos bancarios, el timbre y el QR, y
+ * un pie lima con el logo de taller101 en tinta («marca de FORESPOT»); el
+ * cuerpo en blanco con la tabla de conceptos de cabecera lima y el total en
+ * caja negra con cifra lima. Letras de los manuales: Raleway para el texto y
+ * Fira Sans para toda cifra (Mike lo pidió explícito: «deben ser Fira los
+ * números»). Los logos salen de los manuales de imagen (vectores del PDF de
+ * FORESPOT y del SVG maestro de taller101) y viajan dentro del Worker
+ * (src/marca/, regla Data en wrangler.toml); FORESPOT es la razón social que
+ * factura y taller101 su marca, por eso van fijos y no dependen del logo que
+ * la empresa suba en Ajustes (ese, si existe, sustituye al de FORESPOT en la
+ * columna, sobre un recuadro blanco para que cualquier logo se vea).
  */
-import { PDFDocument, PDFFont, PDFImage, PDFPage, StandardFonts, degrees, rgb, type RGB } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
+import { PDFDocument, PDFFont, PDFImage, PDFPage, degrees, rgb, type RGB } from 'pdf-lib';
 import qrcode from 'qrcode-generator';
+import fira400 from './marca/fira-400.ttf';
+import fira600 from './marca/fira-600.ttf';
+import logoEmisorBlanco from './marca/forespot-blanco.png';
+import raleway400 from './marca/raleway-400.ttf';
+import raleway600 from './marca/raleway-600.ttf';
+import raleway700 from './marca/raleway-700.ttf';
+import logoMarcaTinta from './marca/taller101-tinta.png';
 import type { CfdiLeido, ExtrasImpresa } from './cfdi-xml';
 import type { Borrador } from './pac';
 import { cuentas as cuentasDe, RFC_PUBLICO, receptorPublico } from './pac';
@@ -205,8 +226,11 @@ export function cadenaOriginal(t: NonNullable<Impresa['timbre']>): string {
 
 /* ─────────────── dibujar ─────────────── */
 
-const ANCHO = 612, ALTO = 792, MARGEN = 40;
-const TINTA = rgb(0.13, 0.13, 0.13), GRIS = rgb(0.45, 0.45, 0.45), LINEA = rgb(0.85, 0.85, 0.85), FONDO = rgb(0.96, 0.96, 0.96), AZUL = rgb(0, 0.5, 0.757);
+const ANCHO = 612, ALTO = 792;
+/** La columna negra: ancho, margen interior; el cuerpo empieza en X0 y termina en XR. */
+const COL = 168, MC = 24, X0 = COL + 28, XR = ANCHO - 36, PIE_COL = 72, PIE_CUERPO = 44;
+const NEGRO = rgb(0.137, 0.122, 0.125), LIMA = rgb(0.839, 0.878, 0.243), BLANCO = rgb(1, 1, 1), GRIS_CLARO = rgb(0.725, 0.725, 0.725);
+const TINTA = rgb(0.071, 0.153, 0.2), GRIS = rgb(0.357, 0.42, 0.463), LINEA = rgb(0.875, 0.902, 0.918), NUBE = rgb(0.957, 0.969, 0.976), AZUL = rgb(0, 0.5, 0.757);
 
 const pesosTxt = (centavos: number): string => {
   const neg = centavos < 0; const n = Math.abs(Math.round(centavos));
@@ -215,60 +239,73 @@ const pesosTxt = (centavos: number): string => {
 const cantidadTxt = (c: string): string => { const n = Number(c); return Number.isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: 6 }) : c; };
 const fechaTxt = (iso: string): string => iso.replace('T', ' ').slice(0, 19);
 
-/** Helvetica es WinAnsi: lo que no está ahí se cambia por «?». */
+/** Las letras cubren el latín extendido; lo que no está ahí se cambia por «?». */
 function limpio(s: unknown): string {
-  return String(s ?? '').replace(/[^\x09\x0a\x0d\x20-\x7e\xa0-\xff–—‘’“”•…€]/g, '?').replace(/[\x09\x0a\x0d]+/g, ' ');
+  return String(s ?? '').replace(/[^\x09\x0a\x0d\x20-\x7e\xa0-\xff–—‘’“”•…€×]/g, '?').replace(/[\x09\x0a\x0d]+/g, ' ');
 }
+
+/** Toda cifra va en Fira: un importe, un folio, una fecha, un RFC, un UUID, una CLABE. */
+const CIFRA = /\$?\d[\d.,:%/]*|(?=[A-Z-]*\d)[A-Z0-9-]{10,}/g;
+
+type Peso = 'normal' | 'semi' | 'negra';
+interface Letras { texto: Record<Peso, PDFFont>; cifra: Record<Peso, PDFFont> }
 
 class Lienzo {
   doc!: PDFDocument;
-  fuente!: PDFFont;
-  negra!: PDFFont;
+  L!: Letras;
   pagina!: PDFPage;
-  y = ALTO - MARGEN;
+  y = ALTO - 50;
   paginas = 0;
   constructor(private marca: string | null) {}
 
   async abrir(): Promise<void> {
     this.doc = await PDFDocument.create();
-    this.fuente = await this.doc.embedFont(StandardFonts.Helvetica);
-    this.negra = await this.doc.embedFont(StandardFonts.HelveticaBold);
-    this.nuevaPagina();
+    this.doc.registerFontkit(fontkit);
+    const f = (b: ArrayBuffer) => this.doc.embedFont(b, { subset: true });
+    this.L = {
+      texto: { normal: await f(raleway400), semi: await f(raleway600), negra: await f(raleway700) },
+      cifra: { normal: await f(fira400), semi: await f(fira600), negra: await f(fira600) },
+    };
   }
 
-  nuevaPagina(): void {
-    this.pagina = this.doc.addPage([ANCHO, ALTO]);
-    this.paginas += 1;
-    this.y = ALTO - MARGEN;
-    if (this.marca) {
-      this.pagina.drawText(this.marca, { x: 90, y: 250, size: 72, font: this.negra, color: rgb(0.93, 0.93, 0.93), rotate: degrees(35) });
+  /** Los tramos de un texto: lo que es cifra va en Fira, lo demás en Raleway. */
+  tramos(t: string, peso: Peso): Array<[string, PDFFont]> {
+    const out: Array<[string, PDFFont]> = []; let i = 0;
+    for (const m of t.matchAll(CIFRA)) {
+      const at = m.index ?? 0;
+      if (at > i) out.push([t.slice(i, at), this.L.texto[peso]]);
+      out.push([m[0], this.L.cifra[peso]]); i = at + m[0].length;
     }
+    if (i < t.length) out.push([t.slice(i), this.L.texto[peso]]);
+    return out;
   }
+  ancho(t: string, tam: number, peso: Peso = 'normal'): number { return this.tramos(t, peso).reduce((a, [s, f]) => a + f.widthOfTextAtSize(s, tam), 0); }
 
-  texto(s: string, x: number, y: number, o: { tam?: number; negra?: boolean; color?: RGB; ancho?: number; derecha?: boolean } = {}): void {
-    const f = o.negra ? this.negra : this.fuente, tam = o.tam ?? 8;
+  texto(s: string, x: number, y: number, o: { tam?: number; peso?: Peso; color?: RGB; ancho?: number; derecha?: boolean } = {}): number {
+    const tam = o.tam ?? 7.5, peso = o.peso ?? 'normal';
     let t = limpio(s);
-    if (o.ancho) while (t.length > 1 && f.widthOfTextAtSize(t, tam) > o.ancho) t = t.slice(0, -1);
-    const dx = o.derecha ? (o.ancho ?? 0) - f.widthOfTextAtSize(t, tam) : 0;
-    this.pagina.drawText(t, { x: x + dx, y, size: tam, font: f, color: o.color ?? TINTA });
+    if (o.ancho) while (t.length > 1 && this.ancho(t, tam, peso) > o.ancho) t = t.slice(0, -1);
+    const w = this.ancho(t, tam, peso);
+    let tx = x + (o.derecha ? (o.ancho ?? 0) - w : 0);
+    for (const [seg, f] of this.tramos(t, peso)) { this.pagina.drawText(seg, { x: tx, y, size: tam, font: f, color: o.color ?? TINTA }); tx += f.widthOfTextAtSize(seg, tam); }
+    return w;
   }
 
   /** Parte un texto en renglones que quepan en `ancho`. */
-  partir(s: string, ancho: number, tam = 8, negra = false): string[] {
-    const f = negra ? this.negra : this.fuente;
+  partir(s: string, ancho: number, tam = 7.5, peso: Peso = 'normal'): string[] {
     const out: string[] = [];
     for (const parrafo of limpio(s).split(/\n/)) {
       let linea = '';
       for (const palabra of parrafo.split(' ')) {
         let p = palabra;
         // Una palabra más ancha que el renglón (un sello) se corta a lo bruto.
-        while (f.widthOfTextAtSize(p, tam) > ancho) {
-          let k = p.length; while (k > 1 && f.widthOfTextAtSize(p.slice(0, k), tam) > ancho) k--;
+        while (this.ancho(p, tam, peso) > ancho) {
+          let k = p.length; while (k > 1 && this.ancho(p.slice(0, k), tam, peso) > ancho) k--;
           if (linea) { out.push(linea); linea = ''; }
           out.push(p.slice(0, k)); p = p.slice(k);
         }
         const prueba = linea ? `${linea} ${p}` : p;
-        if (f.widthOfTextAtSize(prueba, tam) <= ancho) linea = prueba;
+        if (this.ancho(prueba, tam, peso) <= ancho) linea = prueba;
         else { if (linea) out.push(linea); linea = p; }
       }
       out.push(linea);
@@ -276,190 +313,196 @@ class Lienzo {
     return out.length ? out : [''];
   }
 
-  parrafo(s: string, x: number, ancho: number, o: { tam?: number; negra?: boolean; color?: RGB; interlinea?: number } = {}): number {
-    const tam = o.tam ?? 8, paso = o.interlinea ?? tam * 1.25;
-    const lineas = this.partir(s, ancho, tam, o.negra);
-    for (const l of lineas) { this.asegurar(paso); this.texto(l, x, this.y - tam, { tam, negra: o.negra, color: o.color }); this.y -= paso; }
-    return lineas.length;
+  caja(x: number, y: number, w: number, h: number, color: RGB): void { this.pagina.drawRectangle({ x, y, width: w, height: h, color }); }
+  linea(x1: number, y: number, x2: number, color = LINEA, grosor = 0.6): void { this.pagina.drawLine({ start: { x: x1, y }, end: { x: x2, y }, thickness: grosor, color }); }
+  imagen(im: PDFImage, x: number, y: number, alto: number, anchoMax?: number): { w: number; h: number } {
+    let esc = alto / im.height; if (anchoMax && im.width * esc > anchoMax) esc = anchoMax / im.width;
+    const w = im.width * esc, h = im.height * esc;
+    this.pagina.drawImage(im, { x, y, width: w, height: h }); return { w, h };
   }
+  qr(texto: string, x: number, y: number, tam: number, color = NEGRO): void {
+    const q = qrcode(0, 'M'); q.addData(texto); q.make();
+    const n = q.getModuleCount(), celda = tam / n;
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) this.pagina.drawRectangle({ x: x + c * celda, y: y + tam - (r + 1) * celda, width: celda + 0.2, height: celda + 0.2, color });
+  }
+  marcaDeAgua(): void {
+    if (this.marca) this.pagina.drawText(this.marca, { x: 250, y: 230, size: 64, font: this.L.texto.negra, color: rgb(0.92, 0.92, 0.92), rotate: degrees(35) });
+  }
+}
 
-  asegurar(alto: number): void { if (this.y - alto < MARGEN + 20) this.nuevaPagina(); }
-  linea(y: number, color = LINEA): void { this.pagina.drawLine({ start: { x: MARGEN, y }, end: { x: ANCHO - MARGEN, y }, thickness: 0.6, color }); }
-  caja(x: number, y: number, w: number, h: number, color = FONDO): void { this.pagina.drawRectangle({ x, y, width: w, height: h, color }); }
+/** Los datos que van en la columna negra de cada página. */
+interface Columna { f: Impresa; e: Empresa; k: PdfConfig; logoEmisor: PDFImage; logoMarca: PDFImage; logoEmpresa: PDFImage | null }
+
+function columna(L: Lienzo, c: Columna): void {
+  const { f, e, k } = c;
+  const cw = COL - 2 * MC;
+  L.caja(0, 0, COL, ALTO, NEGRO); L.caja(COL, 0, 2, ALTO, LIMA);
+  // El logo: el de la empresa (sobre blanco, para que cualquiera se vea) o el de FORESPOT en blanco.
+  let y = ALTO - 36;
+  if (c.logoEmpresa) {
+    const alto = Math.min(80, cw / (c.logoEmpresa.width / c.logoEmpresa.height));
+    L.caja(MC - 6, y - alto - 6, cw + 12, alto + 12, BLANCO);
+    L.imagen(c.logoEmpresa, MC, y - alto, alto, cw); y -= alto + 34;
+  } else {
+    const { h } = L.imagen(c.logoEmisor, MC, y - 96, 96, cw); y -= h + 28;
+  }
+  const seccion = (t: string) => { L.texto(t, MC, y, { tam: 6.5, peso: 'negra', color: LIMA }); L.caja(MC, y - 3, 18, 1.2, LIMA); y -= 13; };
+  const renglon = (t: string, o: { peso?: Peso; tam?: number; color?: RGB } = {}) => {
+    for (const l of L.partir(t, cw, o.tam ?? 6.5, o.peso)) { L.texto(l, MC, y, { tam: o.tam ?? 6.5, peso: o.peso, color: o.color ?? BLANCO }); y -= 8.5; }
+  };
+  seccion('EMISOR');
+  renglon(e.nombre || f.emisor.nombre, { peso: 'semi' });
+  renglon(`RFC ${f.emisor.rfc}`);
+  if (f.emisor.regimen) renglon(`${f.emisor.regimen} · ${REGIMEN_NOMBRE[f.emisor.regimen] ?? ''}`, { color: GRIS_CLARO });
+  if (e.direccion) renglon(e.direccion, { color: GRIS_CLARO });
+  const contacto = [e.telefono, e.correo, e.sitio_web].filter(Boolean).join(' · ');
+  if (contacto) renglon(contacto, { color: GRIS_CLARO });
+  y -= 8;
+  if (k.clabe || k.cuenta || k.banco) {
+    seccion('DATOS BANCARIOS');
+    if (k.banco) renglon(k.banco);
+    if (k.clabe) renglon(`CLABE ${k.clabe.replace(/(\d{3})(\d{3})(\d{11})(\d)/, '$1 $2 $3 $4')}`, { peso: 'semi' });
+    if (k.cuenta) renglon(`Cuenta ${k.cuenta}`);
+    if (k.beneficiario) renglon(k.beneficiario, { color: GRIS_CLARO });
+    y -= 8;
+  }
+  if (f.timbre) {
+    seccion('TIMBRE FISCAL');
+    renglon('Folio fiscal', { color: GRIS_CLARO });
+    renglon(f.timbre.uuid, { peso: 'semi', tam: 6 });
+    if (f.timbre.fecha_timbrado) renglon(`Timbrado ${fechaTxt(f.timbre.fecha_timbrado)}`, { color: GRIS_CLARO });
+    if (f.timbre.no_certificado) renglon(`CSD ${f.timbre.no_certificado}`, { color: GRIS_CLARO });
+    if (f.timbre.no_certificado_sat) renglon(`CSD SAT ${f.timbre.no_certificado_sat}`, { color: GRIS_CLARO });
+    if (f.timbre.rfc_prov_certif) renglon(`PAC ${f.timbre.rfc_prov_certif}`, { color: GRIS_CLARO });
+    y -= 6;
+    const qrTam = 86;
+    if (y - qrTam - 8 > PIE_COL + 10) {
+      L.caja(MC - 4, y - qrTam - 8, qrTam + 8, qrTam + 8, BLANCO);
+      L.qr(ligaSat({ uuid: f.timbre.uuid, rfc_emisor: f.emisor.rfc, rfc_receptor: f.receptor.rfc, total_original: f.timbre.total_original, sello: f.timbre.sello }), MC, y - qrTam - 4, qrTam);
+    }
+  }
+  // El pie lima con la marca.
+  L.caja(0, 0, COL, PIE_COL, LIMA);
+  L.imagen(c.logoMarca, MC, 40, 18);
+  L.texto('marca de FORESPOT', MC, 30, { tam: 5.5, color: NEGRO });
 }
 
 export async function armarPdf(d: { impresa: Impresa; empresa: Empresa; config: PdfConfig; vista_previa?: boolean }): Promise<Uint8Array> {
   const { impresa: f, empresa: e, config: k } = d;
   const L = new Lienzo(d.vista_previa ? 'VISTA PREVIA' : null);
   await L.abrir();
-  const ancho = ANCHO - 2 * MARGEN;
+  const anchoC = XR - X0;
 
-  /* ── Cabecera: logo + empresa a la izquierda, «FACTURA» y folio a la derecha ── */
-  let xTexto = MARGEN;
-  let logo: PDFImage | null = null;
+  let logoEmpresa: PDFImage | null = null;
   if (e.logo) {
     try {
-      logo = /png/i.test(e.logo.tipo) ? await L.doc.embedPng(e.logo.bytes) : /jpe?g/i.test(e.logo.tipo) ? await L.doc.embedJpg(e.logo.bytes) : null;
-    } catch { logo = null; }
+      logoEmpresa = /png/i.test(e.logo.tipo) ? await L.doc.embedPng(e.logo.bytes) : /jpe?g/i.test(e.logo.tipo) ? await L.doc.embedJpg(e.logo.bytes) : null;
+    } catch { logoEmpresa = null; }
   }
-  if (logo) {
-    const esc = Math.min(150 / logo.width, 56 / logo.height);
-    const w = logo.width * esc, h = logo.height * esc;
-    L.pagina.drawImage(logo, { x: MARGEN, y: L.y - h, width: w, height: h });
-    xTexto = MARGEN + w + 12;
-  }
-  const anchoEmp = ANCHO - MARGEN - 190 - xTexto;
-  let yEmp = L.y - 11;
-  L.texto(e.nombre, xTexto, yEmp, { tam: 11, negra: true, ancho: anchoEmp }); yEmp -= 13;
-  if (e.rfc) { L.texto(`RFC ${e.rfc}`, xTexto, yEmp, { tam: 8, ancho: anchoEmp }); yEmp -= 10; }
-  if (f.emisor.regimen) { L.texto(`${f.emisor.regimen} · ${REGIMEN_NOMBRE[f.emisor.regimen] ?? ''}`, xTexto, yEmp, { tam: 7.5, color: GRIS, ancho: anchoEmp }); yEmp -= 10; }
-  for (const l of [e.direccion, [e.telefono, e.correo, e.sitio_web].filter(Boolean).join(' · ')].filter((x): x is string => !!x)) {
-    L.texto(l, xTexto, yEmp, { tam: 7.5, color: GRIS, ancho: anchoEmp }); yEmp -= 10;
-  }
+  const col: Columna = { f, e, k, logoEmisor: await L.doc.embedPng(logoEmisorBlanco), logoMarca: await L.doc.embedPng(logoMarcaTinta), logoEmpresa };
 
-  const xDer = ANCHO - MARGEN - 180;
-  L.caja(xDer, L.y - 64, 180, 64);
-  L.texto(d.vista_previa ? 'VISTA PREVIA' : 'FACTURA', xDer + 10, L.y - 16, { tam: 12, negra: true, color: AZUL });
-  const folio = `${f.serie ?? ''}${f.serie && f.folio ? '-' : ''}${f.folio ?? ''}`;
-  L.texto(folio || (d.vista_previa ? 'sin folio' : ''), xDer + 170 - L.negra.widthOfTextAtSize(limpio(folio || (d.vista_previa ? 'sin folio' : '')), 12), L.y - 16, { tam: 12, negra: true });
-  L.texto(`Fecha: ${fechaTxt(f.fecha_hora)}`, xDer + 10, L.y - 31, { tam: 7.5 });
-  L.texto(`Lugar de expedición: ${f.lugar_expedicion ?? '—'}`, xDer + 10, L.y - 42, { tam: 7.5 });
-  L.texto(`Tipo: I · Ingreso · ${f.moneda}`, xDer + 10, L.y - 53, { tam: 7.5 });
-  L.y = Math.min(yEmp, L.y - 64) - 10;
+  const folio = `${f.serie ?? ''}${f.serie && f.folio ? ' ' : ''}${f.folio ?? ''}`;
+  const nuevaPagina = () => {
+    L.pagina = L.doc.addPage([ANCHO, ALTO]); L.paginas += 1;
+    columna(L, col); L.marcaDeAgua();
+    L.y = ALTO - 50;
+  };
+  const asegurar = (alto: number) => { if (L.y - alto < PIE_CUERPO) { nuevaPagina(); cabecera(); } };
 
-  /* ── Timbre (folio fiscal) ── */
-  if (f.timbre) {
-    L.caja(MARGEN, L.y - 34, ancho, 34);
-    L.texto('Folio fiscal (UUID)', MARGEN + 8, L.y - 11, { tam: 6.5, color: GRIS });
-    L.texto(f.timbre.uuid, MARGEN + 8, L.y - 24, { tam: 9, negra: true });
-    L.texto('No. certificado emisor', MARGEN + 250, L.y - 11, { tam: 6.5, color: GRIS });
-    L.texto(f.timbre.no_certificado ?? '—', MARGEN + 250, L.y - 24, { tam: 8 });
-    L.texto('No. certificado SAT', MARGEN + 370, L.y - 11, { tam: 6.5, color: GRIS });
-    L.texto(f.timbre.no_certificado_sat ?? '—', MARGEN + 370, L.y - 24, { tam: 8 });
-    L.texto('Fecha de timbrado', MARGEN + 470, L.y - 11, { tam: 6.5, color: GRIS });
-    L.texto(f.timbre.fecha_timbrado ? fechaTxt(f.timbre.fecha_timbrado) : '—', MARGEN + 470, L.y - 24, { tam: 7.5 });
-    L.y -= 44;
-  }
+  /* ── Cabecera del cuerpo: FACTURA, folio, fecha; receptor; cómo se paga ── */
+  nuevaPagina();
+  L.texto(d.vista_previa ? 'VISTA PREVIA' : 'FACTURA', X0, L.y, { tam: 22, peso: 'negra', color: NEGRO });
+  L.texto(folio || (d.vista_previa ? 'sin folio' : ''), XR - 200, L.y + 2, { tam: 16, peso: 'negra', color: NEGRO, ancho: 200, derecha: true });
+  L.y -= 14;
+  L.texto(`Emitida ${fechaTxt(f.fecha_hora)}   ·   Lugar de expedición C.P. ${f.lugar_expedicion ?? '—'}   ·   Tipo I · Ingreso`, X0, L.y, { tam: 7, color: GRIS, ancho: anchoC });
+  L.y -= 24;
+  L.texto('RECEPTOR', X0, L.y, { tam: 6.5, peso: 'semi', color: GRIS }); L.y -= 12;
+  L.texto(f.receptor.nombre, X0, L.y, { tam: 9, peso: 'negra', ancho: anchoC }); L.y -= 11;
+  L.texto(`RFC ${f.receptor.rfc}   ·   C.P. ${f.receptor.cp ?? '—'}   ·   ${f.receptor.regimen ?? '—'} · ${REGIMEN_NOMBRE[f.receptor.regimen ?? ''] ?? ''}`, X0, L.y, { tam: 7, ancho: anchoC }); L.y -= 10;
+  L.texto(`Uso CFDI ${f.receptor.uso ?? '—'} · ${USO_NOMBRE[f.receptor.uso ?? ''] ?? ''}`, X0, L.y, { tam: 7, color: GRIS, ancho: anchoC }); L.y -= 18;
+  L.caja(X0, L.y - 16, anchoC, 16, NUBE);
+  L.texto(`${f.metodo_pago ?? '—'} · ${METODO_PAGO_NOMBRE[f.metodo_pago ?? ''] ?? ''}   ·   ${f.forma_pago ?? '—'} · ${FORMA_PAGO_NOMBRE[f.forma_pago ?? ''] ?? ''}   ·   ${f.moneda}   ·   Exportación ${f.exportacion ?? '01'} · ${EXPORTACION_NOMBRE[f.exportacion ?? '01'] ?? ''}`, X0 + 6, L.y - 11, { tam: 6.5, ancho: anchoC - 12 });
+  L.y -= 26;
 
-  /* ── Receptor ── */
-  L.texto('RECEPTOR', MARGEN, L.y - 8, { tam: 7, negra: true, color: AZUL });
-  L.y -= 12;
-  L.linea(L.y);
-  L.y -= 4;
-  const colR = (ancho - 10) / 2;
-  const yR = L.y;
-  L.texto(f.receptor.nombre, MARGEN, yR - 10, { tam: 9.5, negra: true, ancho: colR });
-  L.texto(`RFC ${f.receptor.rfc}`, MARGEN, yR - 21, { tam: 8 });
-  L.texto(`Régimen: ${f.receptor.regimen ?? '—'} · ${REGIMEN_NOMBRE[f.receptor.regimen ?? ''] ?? ''}`, MARGEN, yR - 31, { tam: 7.5, color: GRIS, ancho: colR });
-  L.texto(`Domicilio fiscal (CP): ${f.receptor.cp ?? '—'}`, MARGEN + colR + 10, yR - 10, { tam: 8 });
-  L.texto(`Uso del CFDI: ${f.receptor.uso ?? '—'} · ${USO_NOMBRE[f.receptor.uso ?? ''] ?? ''}`, MARGEN + colR + 10, yR - 21, { tam: 7.5, color: GRIS, ancho: colR });
-  L.texto(`Exportación: ${f.exportacion ?? '01'} · ${EXPORTACION_NOMBRE[f.exportacion ?? '01'] ?? ''}`, MARGEN + colR + 10, yR - 31, { tam: 7.5, color: GRIS, ancho: colR });
-  L.y = yR - 42;
-
-  /* ── Conceptos ── */
+  /* ── Conceptos: cabecera lima, Fira en las cifras ── */
   const cols = [
-    { t: 'Clave SAT', w: 52 }, { t: 'Cant.', w: 38, der: true }, { t: 'Unidad', w: 50 }, { t: 'Descripción', w: 0 },
-    { t: 'P. unitario', w: 62, der: true }, { t: 'Desc.', w: 48, der: true }, { t: 'IVA', w: 52, der: true }, { t: 'Importe', w: 66, der: true },
+    { t: 'Clave SAT', w: 40 }, { t: 'Unidad', w: 50 }, { t: 'Descripción', w: 0 }, { t: 'Cant.', w: 30, der: true },
+    { t: 'P. unitario', w: 52, der: true }, { t: 'Importe', w: 52, der: true }, { t: 'IVA', w: 42, der: true },
   ];
-  const fijo = cols.reduce((s, c) => s + c.w, 0) + (cols.length - 1) * 6;
-  cols[3].w = ancho - fijo;
+  cols[2].w = anchoC - 8 - cols.reduce((s, c) => s + c.w, 0) - (cols.length - 1) * 4;
   const cabecera = () => {
-    L.asegurar(30);
-    L.caja(MARGEN, L.y - 14, ancho, 14, rgb(0.92, 0.95, 0.98));
-    let x = MARGEN + 3;
-    for (const c of cols) { L.texto(c.t, x, L.y - 10, { tam: 7, negra: true, ancho: c.w, derecha: c.der }); x += c.w + 6; }
-    L.y -= 16;
+    L.caja(X0, L.y - 14, anchoC, 14, LIMA);
+    let x = X0 + 4;
+    for (const c of cols) { L.texto(c.t, x, L.y - 10, { tam: 6.5, peso: 'semi', color: NEGRO, ancho: c.w, derecha: c.der }); x += c.w + 4; }
+    L.y -= 14;
   };
   cabecera();
   for (const r of f.renglones) {
-    const desc = L.partir(r.descripcion, cols[3].w - 2, 7.5);
-    const alto = Math.max(1, desc.length) * 9.5 + 6;
-    if (L.y - alto < MARGEN + 20) { L.nuevaPagina(); cabecera(); }
+    const desc = L.partir(r.descripcion, cols[2].w - 2, 7);
+    const extra = [r.descuento ? `Descuento ${pesosTxt(r.descuento)}` : null, r.tasa_iva !== null ? `Objeto ${r.objeto_imp} · IVA ${(Number(r.tasa_iva) * 100).toFixed(0)} %` : OBJETO_IMP_NOMBRE[r.objeto_imp] ?? null].filter(Boolean).join(' · ');
+    const alto = desc.length * 9.5 + (extra ? 8 : 0) + 8;
+    if (L.y - alto < PIE_CUERPO) { nuevaPagina(); cabecera(); }
     const y0 = L.y;
-    let x = MARGEN + 3;
-    const celdas = [r.clave_prod_serv, cantidadTxt(r.cantidad), [r.clave_unidad, r.unidad].filter(Boolean).join(' '), '', pesosTxt(r.valor_unitario), r.descuento ? pesosTxt(r.descuento) : '—', r.tasa_iva === null ? 'No objeto' : pesosTxt(r.iva), pesosTxt(r.importe)];
+    let x = X0 + 4;
+    const celdas = [r.clave_prod_serv, [r.clave_unidad, r.unidad].filter(Boolean).join(' · '), '', cantidadTxt(r.cantidad), pesosTxt(r.valor_unitario), pesosTxt(r.importe), r.tasa_iva === null ? '—' : pesosTxt(r.iva)];
     celdas.forEach((v, i) => {
-      if (i === 3) desc.forEach((l, j) => L.texto(l, x, y0 - 9 - j * 9.5, { tam: 7.5 }));
-      else L.texto(v, x, y0 - 9, { tam: 7.5, ancho: cols[i].w, derecha: cols[i].der });
-      x += cols[i].w + 6;
+      if (i === 2) desc.forEach((l, j) => L.texto(l, x, y0 - 11 - j * 9.5, { tam: 7 }));
+      else L.texto(v, x, y0 - 11, { tam: 7, ancho: cols[i].w, derecha: cols[i].der, color: i < 2 ? GRIS : TINTA });
+      x += cols[i].w + 4;
     });
-    if (r.tasa_iva !== null) L.texto(`Objeto ${r.objeto_imp} · IVA ${(Number(r.tasa_iva) * 100).toFixed(0)} %`, MARGEN + 3, y0 - 9 - desc.length * 9.5, { tam: 6, color: GRIS });
-    L.y = y0 - alto - (r.tasa_iva !== null ? 6 : 0);
-    L.linea(L.y + 2);
+    if (extra) L.texto(extra, X0 + 4, y0 - 11 - desc.length * 9.5, { tam: 5.5, color: GRIS });
+    L.y = y0 - alto;
+    L.linea(X0, L.y, XR);
   }
 
-  /* ── Totales + con letra ── */
-  L.asegurar(90);
-  const xT = ANCHO - MARGEN - 190;
-  const fila = (etq: string, val: string, negra = false) => { L.texto(etq, xT, L.y - 10, { tam: 8, negra }); L.texto(val, xT + 90, L.y - 10, { tam: 8, negra, ancho: 100, derecha: true }); L.y -= 12; };
+  /* ── Totales (caja negra, cifra lima) y el total con letra ── */
+  asegurar(70);
+  L.y -= 16;
   const yTot = L.y;
+  const fila = (etq: string, val: string) => { L.texto(etq, XR - 170, L.y, { tam: 7.5, color: GRIS, ancho: 84, derecha: true }); L.texto(val, XR - 80, L.y, { tam: 7.5, ancho: 76, derecha: true }); L.y -= 12; };
   fila('Subtotal', pesosTxt(f.subtotal));
   if (f.descuento) fila('Descuento', `-${pesosTxt(f.descuento)}`);
-  fila('IVA trasladado', pesosTxt(f.iva));
-  L.caja(xT - 6, L.y - 15, 200, 16, rgb(0.92, 0.95, 0.98));
-  fila('TOTAL', pesosTxt(f.total), true);
-  const yDespTot = L.y;
+  fila('IVA 16 %', pesosTxt(f.iva));
+  L.caja(XR - 170, L.y - 6, 170, 18, NEGRO);
+  L.texto('Total', XR - 170, L.y, { tam: 9, peso: 'negra', color: LIMA, ancho: 84, derecha: true });
+  L.texto(pesosTxt(f.total), XR - 80, L.y, { tam: 9.5, peso: 'negra', color: LIMA, ancho: 76, derecha: true });
+  const yDespTot = L.y - 8;
   L.y = yTot;
-  const anchoIzq = xT - 16 - MARGEN;
-  L.parrafo(`Importe con letra: ${totalEnLetras(f.total, f.moneda)}`, MARGEN, anchoIzq, { tam: 7.5, negra: true });
-  L.y -= 2;
-  L.parrafo(`Forma de pago: ${f.forma_pago ?? '—'} · ${FORMA_PAGO_NOMBRE[f.forma_pago ?? ''] ?? ''}`, MARGEN, anchoIzq, { tam: 7.5 });
-  L.parrafo(`Método de pago: ${f.metodo_pago ?? '—'} · ${METODO_PAGO_NOMBRE[f.metodo_pago ?? ''] ?? ''}`, MARGEN, anchoIzq, { tam: 7.5 });
-  L.parrafo(`Moneda: ${f.moneda}${f.condiciones ? ` · Condiciones: ${f.condiciones}` : ''}`, MARGEN, anchoIzq, { tam: 7.5 });
-  L.y = Math.min(L.y, yDespTot) - 10;
+  const anchoIzq = XR - 180 - X0;
+  for (const l of L.partir(totalEnLetras(f.total, f.moneda), anchoIzq, 7, 'semi')) { L.texto(l, X0, L.y, { tam: 7, peso: 'semi' }); L.y -= 9.5; }
+  if (f.condiciones) { L.y -= 2; for (const l of L.partir(`Condiciones: ${f.condiciones}`, anchoIzq, 7)) { L.texto(l, X0, L.y, { tam: 7, color: GRIS }); L.y -= 9.5; } }
+  L.y = Math.min(L.y, yDespTot) - 12;
 
-  /* ── Datos bancarios y observaciones ── */
-  const hayBanco = !!(k.clabe || k.cuenta || k.banco);
-  if (hayBanco || f.observaciones || k.leyenda) {
-    L.asegurar(60);
-    const colB = hayBanco ? (ancho - 10) / 2 : ancho;
-    const y0 = L.y;
-    if (hayBanco) {
-      L.caja(MARGEN, y0 - 54, colB, 54);
-      L.texto('PARA PAGAR', MARGEN + 8, y0 - 11, { tam: 7, negra: true, color: AZUL });
-      let yb = y0 - 23;
-      for (const l of [k.beneficiario ? `Beneficiario: ${k.beneficiario}` : null, k.banco ? `Banco: ${k.banco}` : null, k.clabe ? `CLABE: ${k.clabe.replace(/(\d{3})(\d{3})(\d{11})(\d)/, '$1 $2 $3 $4')}` : null, k.cuenta ? `Cuenta: ${k.cuenta}` : null].filter((x): x is string => !!x).slice(0, 4)) {
-        L.texto(l, MARGEN + 8, yb, { tam: 7.5, ancho: colB - 16 }); yb -= 9.5;
-      }
-    }
-    const xO = hayBanco ? MARGEN + colB + 10 : MARGEN;
-    L.y = y0;
-    if (f.observaciones) { L.texto('OBSERVACIONES', xO, L.y - 11, { tam: 7, negra: true, color: AZUL }); L.y -= 16; L.parrafo(f.observaciones, xO, colB, { tam: 7.5 }); }
-    if (k.leyenda) { L.y -= 2; L.parrafo(k.leyenda, xO, colB, { tam: 7, color: GRIS }); }
-    L.y = Math.min(L.y, y0 - (hayBanco ? 54 : 0)) - 10;
+  /* ── Observaciones y leyenda ── */
+  if (f.observaciones || k.leyenda) {
+    asegurar(40);
+    if (f.observaciones) { L.texto('OBSERVACIONES', X0, L.y, { tam: 6.5, peso: 'semi', color: GRIS }); L.y -= 11; for (const l of L.partir(f.observaciones, anchoC, 7)) { L.texto(l, X0, L.y, { tam: 7 }); L.y -= 9.5; } L.y -= 4; }
+    if (k.leyenda) { for (const l of L.partir(k.leyenda, anchoC, 6.5)) { L.texto(l, X0, L.y, { tam: 6.5, color: GRIS }); L.y -= 9; } L.y -= 4; }
+    L.y -= 6;
   }
 
-  /* ── Sellos, cadena original y QR ── */
+  /* ── Sellos y cadena original (el QR va en la columna) ── */
   if (f.timbre) {
-    L.asegurar(150);
-    const qrTam = 96;
-    const xQr = ANCHO - MARGEN - qrTam;
-    const qr = qrcode(0, 'M');
-    qr.addData(ligaSat({ uuid: f.timbre.uuid, rfc_emisor: f.emisor.rfc, rfc_receptor: f.receptor.rfc, total_original: f.timbre.total_original, sello: f.timbre.sello }));
-    qr.make();
-    const n = qr.getModuleCount(), celda = qrTam / n;
-    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) L.pagina.drawRectangle({ x: xQr + c * celda, y: L.y - (r + 1) * celda, width: celda + 0.2, height: celda + 0.2, color: TINTA });
-    const anchoS = xQr - 10 - MARGEN;
-    const yS = L.y;
+    asegurar(120);
     const bloque = (titulo: string, cuerpo: string) => {
-      L.texto(titulo, MARGEN, L.y - 8, { tam: 6, negra: true, color: GRIS }); L.y -= 10;
-      L.parrafo(cuerpo || '—', MARGEN, anchoS, { tam: 5.5, interlinea: 6.5 }); L.y -= 3;
+      L.texto(titulo, X0, L.y, { tam: 5.5, peso: 'semi', color: GRIS }); L.y -= 9;
+      for (const l of L.partir(cuerpo || '—', anchoC, 5.2)) { asegurar(8); L.texto(l, X0, L.y, { tam: 5.2 }); L.y -= 6.5; }
+      L.y -= 4;
     };
-    bloque('Sello digital del CFDI', f.timbre.sello ?? '');
-    bloque('Sello digital del SAT', f.timbre.sello_sat ?? '');
-    bloque('Cadena original del complemento de certificación digital del SAT', cadenaOriginal(f.timbre));
-    L.y = Math.min(L.y, yS - qrTam) - 6;
-    if (f.timbre.rfc_prov_certif) L.texto(`RFC del proveedor de certificación: ${f.timbre.rfc_prov_certif}`, MARGEN, L.y - 6, { tam: 6, color: GRIS });
-    L.y -= 10;
-    L.texto('Este documento es una representación impresa de un CFDI.', MARGEN, L.y - 6, { tam: 6.5, color: GRIS });
+    bloque('SELLO DIGITAL DEL CFDI', f.timbre.sello ?? '');
+    bloque('SELLO DIGITAL DEL SAT', f.timbre.sello_sat ?? '');
+    bloque('CADENA ORIGINAL DEL COMPLEMENTO DE CERTIFICACIÓN DIGITAL DEL SAT', cadenaOriginal(f.timbre));
   } else {
-    L.asegurar(30);
-    L.texto('Vista previa: esta factura todavía no está timbrada ante el SAT. Sin folio fiscal no tiene valor.', MARGEN, L.y - 8, { tam: 7.5, negra: true, color: AZUL });
+    asegurar(20);
+    L.texto('Vista previa: esta factura todavía no está timbrada ante el SAT. Sin folio fiscal no tiene valor.', X0, L.y, { tam: 7, peso: 'semi', color: AZUL, ancho: anchoC });
   }
 
-  /* ── pie: página n de m ── */
+  /* ── pie del cuerpo: representación impresa · página n de m ── */
   const paginas = L.doc.getPages();
-  paginas.forEach((p, i) => p.drawText(limpio(`${folio || 'Factura'} · página ${i + 1} de ${paginas.length}`), { x: MARGEN, y: 22, size: 6.5, font: L.fuente, color: GRIS }));
+  paginas.forEach((p, i) => {
+    L.pagina = p;
+    L.texto(`${f.timbre ? 'Este documento es una representación impresa de un CFDI versión 4.0' : folio || 'Vista previa'}   ·   Página ${i + 1} de ${paginas.length}`, X0, 28, { tam: 6, color: GRIS, ancho: anchoC, derecha: true });
+  });
 
   return L.doc.save();
 }
