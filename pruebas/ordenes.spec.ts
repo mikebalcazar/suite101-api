@@ -31,6 +31,10 @@ const GENTE = {
 
 const galletas: Record<string, string> = {};
 
+/* CLABEs que cuadran (18 dígitos, verificador con pesos 3-7-1), inventadas. */
+const CLABE_ANA = '012180015621788594';
+const CLABE_DORA = '002010077777777771';
+
 async function pedir(quien: string, ruta: string, o: RequestInit & { app?: string; json?: unknown } = {}) {
   const cabeceras: Record<string, string> = {};
   if (o.app !== '') cabeceras['X-App'] = o.app ?? 'dash101';
@@ -622,11 +626,21 @@ describe('0.47.0 · reembolsos: la misma orden, de otro tipo', () => {
   const supply = (quien: string, ruta: string, op: Parameters<typeof pedir>[2] = {}) => o(quien, ruta, { ...op, app: 'supply101' });
 
   it('un reembolso nace en el buzón con folio RE- y tipo reembolso; lo de antes sigue siendo compra', async () => {
+    /* 0.92.0 · Sin cuenta a dónde pagarlo, el reembolso no entra. Ana da la
+     * suya en la misma petición y queda guardada para las siguientes. */
+    const sin = await o('ana', '/ordenes', { method: 'POST', json: {
+      negocio_id: negocio, tipo: 'reembolso', concepto: 'Gasolina de la camioneta', monto: 850_00, con_factura: false,
+    } });
+    expect(sin.estado, JSON.stringify(sin)).toBe(400);
+    expect(sin.error).toBe('falta_cuenta_reembolso');
     const r = await o('ana', '/ordenes', { method: 'POST', json: {
       negocio_id: negocio, tipo: 'reembolso', concepto: 'Gasolina de la camioneta', monto: 850_00, con_factura: false,
+      cuenta: { clabe: CLABE_ANA, banco: 'BBVA' },
     } });
     expect(r.estado, JSON.stringify(r)).toBe(201);
     expect(r.data.tipo).toBe('reembolso');
+    expect(r.data.reembolso_clabe, 'la cuenta queda copiada en la orden').toBe(CLABE_ANA);
+    expect(r.data.reembolso_beneficiario, 'sin beneficiario, es quien pide').toBe(GENTE.ana.nombre);
     expect(r.data.folio).toMatch(/^RE-\d{6}$/);
     expect(r.data.estado).toBe('en_buzon');
     re1 = r.data.id;
@@ -711,7 +725,7 @@ describe('0.47.0 · reembolsos: la misma orden, de otro tipo', () => {
     expect(compra.error).toBe('compras_no_autorizadas');
     expect(compra.detalle.mensaje).toBe('Tu usuario no está autorizado para compras');
 
-    const re = await supply('dora', '/ordenes', { method: 'POST', json: { negocio_id: negocio, tipo: 'reembolso', concepto: 'Pasaje', monto: 60_00 } });
+    const re = await supply('dora', '/ordenes', { method: 'POST', json: { negocio_id: negocio, tipo: 'reembolso', concepto: 'Pasaje', monto: 60_00, cuenta: { clabe: CLABE_DORA } } });
     expect(re.estado, JSON.stringify(re)).toBe(201);
     expect(re.data.folio).toMatch(/^RE-/);
 
@@ -912,5 +926,113 @@ describe('0.86.0 · cancelar una orden que ya no se necesita', () => {
     const canceladas = mias.data.filas.filter((f: any) => f.estado === 'cancelada').map((f: any) => f.id);
     expect(canceladas).toEqual(expect.arrayContaining([enBuzon, devuelta]));
     expect((await o('beto', '/ordenes')).data.filas.some((f: any) => f.id === enBuzon), 'y nadie más').toBe(false);
+  });
+});
+
+/* ─────────────── 0.92.0 · la cuenta a la que se reembolsa ───────────────
+ * Mike, 10-oct-2026: un reembolso se le paga SÓLO a quien lo pidió, nunca a
+ * la cuenta de un proveedor ni de un tercero. «Necesito que requieras su
+ * cuenta bancaria cuando pida un reembolso si es que no la tiene registrada
+ * (…) y esa info de cuenta bancaria cuando se va a pagar el reembolso debe
+ * aparecer para poder ingresarla en el sistema bancario o copiarla».
+ *
+ * Lo que de verdad miden: que la cuenta sea de quien pregunta y nadie más
+ * (no lleva id, no se puede poner la de otro); que una CLABE que no cuadra
+ * no se guarde; que la orden se quede con la COPIA aunque la persona cambie
+ * su cuenta después; y que quien paga la vea con la orden. */
+describe('0.92.0 · la cuenta a la que se reembolsa', () => {
+  let reBeto = '';
+  const CLABE_BETO_1 = '014180000000000000';
+  const CLABE_BETO_2 = '021180000000000006';
+
+  it('mi cuenta: no la tengo, no la aceptan mal, la guardo, y /permisos la trae', async () => {
+    const antes = await o('beto', '/ordenes/permisos');
+    expect(antes.estado).toBe(200);
+    expect(antes.data.cuenta_reembolso, 'Beto nunca la ha dado').toBeNull();
+
+    const mal = await o('beto', '/ordenes/cuenta-reembolso', { method: 'PUT', json: { clabe: '014180000000000001', banco: 'Santander' } });
+    expect(mal.estado).toBe(400);
+    expect(mal.error).toBe('datos_invalidos');
+    expect(mal.detalle.errores.clabe).toMatch(/no cuadra/);
+    expect((await o('beto', '/ordenes/cuenta-reembolso', { method: 'PUT', json: { banco: 'Santander' } })).detalle.errores.clabe).toMatch(/Falta/);
+
+    const bien = await o('beto', '/ordenes/cuenta-reembolso', { method: 'PUT', json: { clabe: '014 180 00000000000 0', banco: 'Santander' } });
+    expect(bien.estado, JSON.stringify(bien)).toBe(200);
+    expect(bien.data.cuenta.clabe, 'sin espacios').toBe(CLABE_BETO_1);
+    expect(bien.data.cuenta.banco).toBe('Santander');
+    expect(bien.data.cuenta.beneficiario, 'sin beneficiario, es quien la guarda').toBe(GENTE.beto.nombre);
+
+    const despues = await o('beto', '/ordenes/permisos');
+    expect(despues.data.cuenta_reembolso.clabe).toBe(CLABE_BETO_1);
+    // Y es SÓLO suya: Ana sigue viendo la que dio ella.
+    expect((await o('ana', '/ordenes/permisos')).data.cuenta_reembolso.clabe).toBe(CLABE_ANA);
+    // Un cliente del portal no tiene cuenta de reembolso que guardar.
+    expect((await pedir('mike', `/orgs/${ORG}/ordenes/cuenta-reembolso`, { method: 'PUT', json: { clabe: CLABE_BETO_1 }, app: 'peek101' })).estado).not.toBe(200);
+  });
+
+  it('con la cuenta guardada el reembolso entra sin mandarla, y la orden se queda con la COPIA', async () => {
+    const r = await o('beto', '/ordenes', { method: 'POST', json: { tipo: 'reembolso', concepto: 'Casetas', monto: 300_00, con_factura: false } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    expect(r.data.reembolso_clabe).toBe(CLABE_BETO_1);
+    expect(r.data.reembolso_banco).toBe('Santander');
+    expect(r.data.reembolso_beneficiario).toBe(GENTE.beto.nombre);
+    reBeto = r.data.id;
+
+    // Beto cambia su cuenta mañana: la orden de hoy sigue diciendo a dónde se paga.
+    const cambio = await o('beto', '/ordenes/cuenta-reembolso', { method: 'PUT', json: { clabe: CLABE_BETO_2, banco: 'HSBC', beneficiario: 'Beto Paga Ortega' } });
+    expect(cambio.estado).toBe(200);
+    const v = await o('beto', `/ordenes/${reBeto}`);
+    expect(v.data.orden.reembolso_clabe).toBe(CLABE_BETO_1);
+    expect(v.data.reembolso_a, 'con la orden viene a quién y a qué cuenta').toEqual({
+      nombre: GENTE.beto.nombre, correo: GENTE.beto.correo, clabe: CLABE_BETO_1, banco: 'Santander', beneficiario: GENTE.beto.nombre,
+    });
+    // Y la siguiente ya sale con la nueva.
+    const otra = await o('beto', '/ordenes', { method: 'POST', json: { tipo: 'reembolso', concepto: 'Estacionamiento', monto: 80_00, con_factura: false } });
+    expect(otra.data.reembolso_clabe).toBe(CLABE_BETO_2);
+    expect(otra.data.reembolso_beneficiario).toBe('Beto Paga Ortega');
+  });
+
+  it('una CLABE que no cuadra tampoco entra con la orden; una compra ignora `cuenta`', async () => {
+    const mal = await o('beto', '/ordenes', { method: 'POST', json: { tipo: 'reembolso', concepto: 'Taxi', monto: 100_00, cuenta: { clabe: '123' } } });
+    expect(mal.estado).toBe(400);
+    expect(mal.error).toBe('datos_invalidos');
+    expect(mal.detalle.errores.clabe).toBeTruthy();
+    // Y no le cambió la cuenta guardada.
+    expect((await o('beto', '/ordenes/permisos')).data.cuenta_reembolso.clabe).toBe(CLABE_BETO_2);
+
+    const compra = await o('ana', '/ordenes', { method: 'POST', json: { concepto: 'Lijas', monto: 50_00, cuenta: { clabe: '123' } } });
+    expect(compra.estado, 'en una compra no hay cuenta de reembolso que revisar').toBe(201);
+    expect(compra.data.reembolso_clabe).toBeNull();
+    const v = await o('ana', `/ordenes/${compra.data.id}`);
+    expect(v.data.reembolso_a, 'una compra no trae reembolso_a').toBeNull();
+  });
+
+  it('quien paga ve la cuenta con la orden; al corregir se puede cambiar, y sin cuenta no vuelve al buzón', async () => {
+    const v = await o('beto', `/ordenes/${reBeto}`);
+    expect(v.data.reembolso_a.clabe).toBe(CLABE_BETO_1);
+
+    // Devuelta y corregida con otra cuenta: la orden toma la nueva y Beto se queda con ella.
+    const dev = await o('beto', `/ordenes/${reBeto}/devolver`, { method: 'POST', json: { nota: 'Sube el ticket' } });
+    expect(dev.estado).toBe(200);
+    const malCorr = await o('beto', `/ordenes/${reBeto}`, { method: 'PATCH', json: { monto: 310_00, cuenta: { clabe: '000' } } });
+    expect(malCorr.estado).toBe(400);
+    expect(malCorr.data?.estado ?? (await o('beto', `/ordenes/${reBeto}`)).data.orden.estado, 'sigue devuelta').toBe('devuelta');
+    const corr = await o('beto', `/ordenes/${reBeto}`, { method: 'PATCH', json: { monto: 310_00, cuenta: { clabe: CLABE_BETO_1, banco: 'Santander' } } });
+    expect(corr.estado, JSON.stringify(corr)).toBe(200);
+    expect(corr.data.estado).toBe('en_buzon');
+    expect(corr.data.reembolso_clabe).toBe(CLABE_BETO_1);
+    expect((await o('beto', '/ordenes/permisos')).data.cuenta_reembolso.clabe, 'la corrección también cambia la suya').toBe(CLABE_BETO_1);
+
+    // Corregir sin mandar cuenta conserva la de la orden.
+    expect((await o('beto', `/ordenes/${reBeto}/devolver`, { method: 'POST', json: { nota: 'Otra vez' } })).estado).toBe(200);
+    const corr2 = await o('beto', `/ordenes/${reBeto}`, { method: 'PATCH', json: { monto: 320_00 } });
+    expect(corr2.estado).toBe(200);
+    expect(corr2.data.reembolso_clabe).toBe(CLABE_BETO_1);
+
+    // Y pagarlo sigue igual: egreso a nombre de la persona.
+    const pago = await o('beto', `/ordenes/${reBeto}/pagar`, { method: 'POST', json: { cuenta_id: cuenta } });
+    expect(pago.estado, JSON.stringify(pago)).toBe(200);
+    expect(pago.data.movimiento.categoria).toBe('reembolso');
+    expect(pago.data.movimiento.contraparte_nombre).toBe(GENTE.beto.nombre);
   });
 });

@@ -17,7 +17,34 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.91.0 (PATRON101: LA TASA ANUAL EQUIVALENTE. Mike,
+ * Versión del contrato: 0.92.0 (LA CUENTA A LA QUE SE REEMBOLSA. Mike, 10-oct:
+ * un reembolso se le paga SÓLO a quien lo pidió —nunca a la cuenta de un
+ * proveedor ni de un tercero—, «requieras su cuenta bancaria cuando pida un
+ * reembolso si es que no la tiene registrada (…) y esa info de cuenta
+ * bancaria cuando se va a pagar el reembolso debe aparecer para poder
+ * ingresarla en el sistema bancario o copiarla».
+ *   · org 0050: `reembolso_cuentas` (interna; una por `usuario_id`: CLABE,
+ *     banco, beneficiario) y `ordenes.reembolso_clabe/_banco/_beneficiario`,
+ *     la COPIA tomada al pedir.
+ *   · GET /orgs/:o/ordenes/permisos trae además `cuenta_reembolso`
+ *     (`CuentaDeReembolso` | null): la de quien pregunta.
+ *   · PUT /orgs/:o/ordenes/cuenta-reembolso {clabe, banco?, beneficiario?}
+ *     la guarda o la cambia. CLABE de 18 dígitos con verificador (400
+ *     `datos_invalidos` con `errores.clabe`); beneficiario vacío = el nombre
+ *     de quien pide.
+ *   · POST /orgs/:o/ordenes con tipo reembolso acepta `cuenta` (misma forma):
+ *     si viene se guarda como la suya y se copia en la orden; si no, se usa
+ *     la guardada; sin ninguna, 400 `falta_cuenta_reembolso` con
+ *     `detalle.mensaje`. PATCH /orgs/:o/ordenes/:id (corregir) acepta
+ *     `cuenta` igual. Una compra ignora `cuenta`.
+ *   · GET /orgs/:o/ordenes/:id trae además `reembolso_a` (`ReembolsoA` |
+ *     null): nombre, correo, CLABE, banco y beneficiario de a quién se le
+ *     paga. Null en una compra; en un reembolso de antes de la 0050 viene con
+ *     `clabe: null`. `proveedor` no cambia: en un reembolso es sólo dónde se
+ *     compró.
+ *   Sólo agrega, salvo una cosa: un reembolso SIN cuenta ya no entra.)
+ * Antes:
+ * 0.91.0 (PATRON101: LA TASA ANUAL EQUIVALENTE. Mike,
  * 9-oct: «Si en 2 meses se va a pagar el 3% (…) poner que es una tasa de
  * rendimiento del 18% anual para que la gente pueda compararlo». El `ejemplo`
  * de una ronda trae `tasa_anual_pb` (anual simple, sin reinversión) y `plazo`
@@ -1507,7 +1534,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.91.0';
+export const VERSION_CONTRATO = '0.92.0';
 
 /* ─────────────── órdenes de compra (0.21.0; cancelada desde 0.86.0) ─────────────── */
 
@@ -1957,6 +1984,29 @@ export interface ProveedorDePago {
   telefono: string | null;
   terminos_pago: string | null;
   cuentas: Array<Pick<ProveedorCuenta, 'id' | 'alias' | 'clabe' | 'banco' | 'beneficiario' | 'notas'>>;
+}
+
+/** 0.92.0 · La cuenta a la que se le reembolsa a quien pide (0050). Una por
+ *  usuario; se da la primera vez que pide un reembolso y se reusa. Mike,
+ *  10-oct-2026: un reembolso se le paga SÓLO a quien lo pidió. */
+export interface CuentaDeReembolso {
+  clabe: string;
+  banco: string | null;
+  beneficiario: string | null;
+  actualizado_at: string;
+}
+
+/** 0.92.0 · A quién y a qué cuenta se le paga un reembolso, tal como quedó
+ *  COPIADO en la orden al pedirla (si la persona cambia su cuenta después, la
+ *  orden sigue diciendo a dónde se pagó). Viene con la orden en
+ *  GET /orgs/:o/ordenes/:id; null en una compra. `clabe` null sólo en un
+ *  reembolso pedido antes de la 0050. */
+export interface ReembolsoA {
+  nombre: string | null;
+  correo: string | null;
+  clabe: string | null;
+  banco: string | null;
+  beneficiario: string | null;
 }
 
 /** Un accionista de la empresa (0025, contrato 0.57.0). Mike, 30-sep-2026:
@@ -2495,6 +2545,10 @@ export const TABLAS_INTERNAS = [
   /* La bitácora del alcance (0028): entra/sale, quién, app, motivo, cuándo.
    * Append-only; se lee por GET /orgs/:o/items/:id/alcance. */
   'alcance_movimientos',
+  /* La cuenta a la que se le reembolsa a cada usuario (0050, 0.92.0). Una
+   * por `usuario_id`. Va por /ordenes/permisos y /ordenes/cuenta-reembolso,
+   * nunca por el CRUD: es la cuenta de una persona. */
+  'reembolso_cuentas',
   'quell_users', 'quell_projects', 'quell_project_members', 'quell_plans', 'quell_elements', 'quell_log_entries',
   'quell_punch_items', 'quell_photos', 'quell_operaciones', 'quell_etapas', 'quell_element_etapas', 'quell_dudas',
   'quell_duda_respuestas', 'quell_element_contratistas',

@@ -62,6 +62,7 @@ import sat from '../migrations/org/0046_sat.sql';
 import timbrar from '../migrations/org/0047_timbrar.sql';
 import facturaV2 from '../migrations/org/0048_factura_v2.sql';
 import disenoDelItem from '../migrations/org/0049_diseno_del_item.sql';
+import cuentaDeReembolso from '../migrations/org/0050_cuenta_de_reembolso.sql';
 import { MotorInversion } from './inversion-db';
 import { MotorFiscal } from './fiscal-db';
 import { MotorSat, type MemoriaSat } from './sat-db';
@@ -81,7 +82,7 @@ import { DEFS, type Def, type Tipo } from './tablas';
 import { calcular, hoyMx, limpiarApu, usaA, type Apu, type Desglose, type Fuentes } from './costos';
 import { ahora, normalizar, ulid } from './lib';
 import { alcanceDeItem, CATEGORIA_PRESTAMO_CAPITAL, CATEGORIA_PRESTAMO_RECIBIDO, type MovimientoAlcance } from '../schema/tipos';
-import { TABLAS, type Aviso, type ConteoQuote, type Etapa, type EventoOrden, type Peek, type Pool, type ProveedorDePago, type Tabla } from '../schema/tipos';
+import { TABLAS, type Aviso, type ConteoQuote, type Etapa, type EventoOrden, type Peek, type Pool, type ProveedorDePago, type CuentaDeReembolso, type ReembolsoA, type Tabla } from '../schema/tipos';
 import type { Env } from './entorno';
 
 /* Las migraciones del OrgDB, en orden. Para agregar una: se escribe el .sql,
@@ -93,12 +94,12 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso];
 
 /** La 0027, la 0030, la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
  *  en la lista; el archivo .sql es sólo la nota que lo dice. */
-const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar' | 'facturaV2' | 'disenoDelItem'> = {
+const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar' | 'facturaV2' | 'disenoDelItem' | 'cuentaDeReembolso'> = {
   [MIGRACIONES.indexOf(sinNegocios)]: 'quitarNegocios',
   [MIGRACIONES.indexOf(requerimientosHuerfanos)]: 'migrarRequerimientosHuerfanos',
   [MIGRACIONES.indexOf(obrasALaSuite)]: 'migrarObrasSueltas',
@@ -109,6 +110,7 @@ const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfano
   [MIGRACIONES.indexOf(timbrar)]: 'timbrar',
   [MIGRACIONES.indexOf(facturaV2)]: 'facturaV2',
   [MIGRACIONES.indexOf(disenoDelItem)]: 'disenoDelItem',
+  [MIGRACIONES.indexOf(cuentaDeReembolso)]: 'cuentaDeReembolso',
 };
 
 /** La tabla `empresa` (0027): UN renglón, con id fijo, que es lo que antes
@@ -357,6 +359,10 @@ export interface ApiOrgDB {
   /** bill101 fase C: la cuenta de Facturama y las emisiones (src/pac-db.ts). */
   pac(op: string, args?: unknown[]): Promise<any>;
   crearOrden(args: Record<string, unknown>): Promise<Fila | { error: string; detalle?: unknown }>;
+  /** 0.92.0 · La cuenta a la que se le reembolsa a este usuario (0050), o null si nunca la dio. */
+  cuentaDeReembolsoDe(usuario_id: string): Promise<CuentaDeReembolso | null>;
+  /** 0.92.0 · Guardar (o cambiar) esa cuenta. La CLABE ya viene revisada por el Worker. */
+  guardarCuentaDeReembolso(args: { usuario_id: string; clabe: string; banco?: string | null; beneficiario?: string | null }): Promise<CuentaDeReembolso>;
   misOrdenes(usuario_id: string): Promise<Fila[]>;
   buzon(hoy?: string, tipo?: TipoOrden | null): Promise<{ filas: Fila[]; total: number; vence_esta_semana: number; vencidas: number }>;
   /** 0.59.0 · El historial: las órdenes ya pagadas, la más reciente arriba (Mike, 1-oct: «un historial completo de las órdenes de compra ya pagadas»). */
@@ -365,12 +371,12 @@ export interface ApiOrgDB {
    *  accionista jalándolo de ahí (0.60.0). */
   accionistasDeRoster(): Promise<Array<{ id: string; nombre: string; rfc: string; correo: string; puesto: string }>>;
   pendientesDeOrdenes(): Promise<{ compras: { total: number; cuantas: number }; reembolsos: { total: number; cuantas: number } }>;
-  verOrden(id: string): Promise<{ orden: Fila; eventos: Fila[]; archivos: Fila[]; proveedor: ProveedorDePago | null } | null>;
+  verOrden(id: string): Promise<{ orden: Fila; eventos: Fila[]; archivos: Fila[]; proveedor: ProveedorDePago | null; reembolso_a: ReembolsoA | null } | null>;
   /** 0.56.1 · La orden que dejó ese egreso (o null): para que desde el movimiento se llegue a la orden con toda su historia y sus papeles. */
   ordenDeMovimiento(movimiento_id: string): Promise<{ orden: Fila; eventos: Fila[]; archivos: Fila[] } | null>;
   pagarOrden(args: Record<string, unknown>): Promise<{ ok: true; orden: Fila; movimiento: Fila; partida_id: string | null } | { error: string; detalle?: unknown }>;
   resolverOrden(args: { id: string; que: 'devuelta' | 'rechazada'; nota: string; quien_usuario_id: string; quien_nombre?: string | null }): Promise<Fila | { error: string; detalle?: unknown }>;
-  corregirOrden(args: { id: string; quien_usuario_id: string; quien_nombre?: string | null; cambios: Record<string, unknown> }): Promise<Fila | { error: string; detalle?: unknown }>;
+  corregirOrden(args: { id: string; quien_usuario_id: string; quien_nombre?: string | null; cambios: Record<string, unknown>; cuenta?: { clabe: string; banco?: string | null; beneficiario?: string | null } | null }): Promise<Fila | { error: string; detalle?: unknown }>;
   /** 0.86.0 · Quien la pidió la cancela, mientras está en el buzón o devuelta. */
   cancelarOrden(args: { id: string; nota?: string | null; quien_usuario_id: string; quien_nombre?: string | null }): Promise<Fila | { error: string; detalle?: unknown }>;
 
@@ -2574,6 +2580,12 @@ export class OrgDB extends DurableObject<Env> {
      *  dinero y se le regresa. Mismo camino, otra serie de folio y otra
      *  categoría en el egreso. Sin él, es compra. */
     tipo?: TipoOrden;
+    /** 0.92.0 · Sólo en un reembolso: la cuenta a la que se le paga a quien
+     *  lo pide. Si viene, se guarda como SU cuenta (una por usuario) y se
+     *  copia en la orden; si no viene, se usa la que ya tenía guardada; y si
+     *  no tiene ninguna, el reembolso no se pide: `falta_cuenta_reembolso`.
+     *  La CLABE llega ya revisada por el Worker. */
+    cuenta?: { clabe: string; banco?: string | null; beneficiario?: string | null } | null;
   }): Fila | { error: string; detalle?: unknown } {
     const monto = Math.round(Number(args.monto));
     if (!Number.isFinite(monto) || monto <= 0) return { error: 'monto_invalido' };
@@ -2583,6 +2595,16 @@ export class OrgDB extends DurableObject<Env> {
     const d = this.desglosar(monto, !!args.con_factura, Number(args.tasa_iva ?? 1600), { subtotal: args.subtotal, iva: args.iva });
     if ('error' in d) return { error: d.error, detalle: { monto, subtotal: args.subtotal, iva: args.iva } };
 
+    /* Un reembolso sin cuenta a dónde pagarlo no entra al buzón: es la regla
+     * de Mike (10-oct), y se cierra aquí, no en la pantalla. */
+    let cuenta: CuentaDeReembolso | null = null;
+    if (tipo === 'reembolso') {
+      cuenta = args.cuenta?.clabe
+        ? this.guardarCuentaDeReembolso({ usuario_id: args.solicitante_usuario_id, ...args.cuenta, beneficiario: args.cuenta.beneficiario || args.solicitante_nombre || null })
+        : this.cuentaDeReembolsoDe(args.solicitante_usuario_id);
+      if (!cuenta) return { error: 'falta_cuenta_reembolso', detalle: { mensaje: 'Para pedir un reembolso hace falta la cuenta a la que se te paga: la CLABE, el banco y a nombre de quién está.' } };
+    }
+
     const id = ulid();
     const serie = tipo === 'reembolso' ? 'RE' : 'OC';
     const folio = `${serie}-${String(this.apartarNumero(serie)).padStart(6, '0')}`;
@@ -2590,8 +2612,9 @@ export class OrgDB extends DurableObject<Env> {
     this.sql.exec(
       `INSERT INTO ordenes (id, folio, tipo, solicitante_usuario_id, solicitante_id, solicitante_correo,
         solicitante_nombre, proveedor_id, proveedor_nombre, proyecto_id, partida_id, concepto, monto, moneda,
-        con_factura, subtotal, iva, tasa_iva, fecha_maxima_pago, urgente, estado, creado_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'en_buzon',?)`,
+        con_factura, subtotal, iva, tasa_iva, fecha_maxima_pago, urgente, estado, creado_at,
+        reembolso_clabe, reembolso_banco, reembolso_beneficiario)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'en_buzon',?,?,?,?)`,
       id, folio, tipo, args.solicitante_usuario_id, args.solicitante_id ?? null,
       args.solicitante_correo ?? null, args.solicitante_nombre ?? null,
       args.proveedor_id ?? null, args.proveedor_nombre ?? null,
@@ -2599,6 +2622,7 @@ export class OrgDB extends DurableObject<Env> {
       String(args.concepto).trim(), monto, args.moneda ?? 'MXN',
       args.con_factura ? 1 : 0, d.subtotal, d.iva, d.tasa_iva,
       args.fecha_maxima_pago ?? null, args.urgente ? 1 : 0, t,
+      cuenta?.clabe ?? null, cuenta?.banco ?? null, cuenta ? (cuenta.beneficiario ?? args.solicitante_nombre ?? null) : null,
     );
     this.apuntarOrden({
       orden_id: id, que: 'creada', quien_usuario_id: args.solicitante_usuario_id,
@@ -2609,6 +2633,30 @@ export class OrgDB extends DurableObject<Env> {
     });
     this.avisar({ t: 'orden.nueva', id, folio, monto, tipo } as unknown as Aviso, 'dinero');
     return this.leerInterna('ordenes', id)!;
+  }
+
+  /* ─────────────── 0.92.0 · la cuenta a la que se reembolsa ───────────────
+   * Mike, 10-oct-2026: un reembolso se le paga SÓLO a quien lo pidió. Una
+   * cuenta por usuario (0050), por `usuario_id` y no por `personal`, porque
+   * quien pide puede no tener fila ahí. Se pide la primera vez y se reusa. */
+  cuentaDeReembolsoDe(usuario_id: string): CuentaDeReembolso | null {
+    const f = this.sql.exec(`SELECT * FROM reembolso_cuentas WHERE usuario_id = ?`, usuario_id).toArray()[0] as Fila | undefined;
+    return f ? OrgDB.cuentaDeReembolso_(f) : null;
+  }
+
+  guardarCuentaDeReembolso(args: { usuario_id: string; clabe: string; banco?: string | null; beneficiario?: string | null }): CuentaDeReembolso {
+    const limpio = (v: unknown) => (v == null || String(v).trim() === '' ? null : String(v).trim());
+    this.sql.exec(
+      `INSERT INTO reembolso_cuentas (usuario_id, clabe, banco, beneficiario, actualizado_at) VALUES (?,?,?,?,?)
+       ON CONFLICT(usuario_id) DO UPDATE SET clabe = excluded.clabe, banco = excluded.banco, beneficiario = excluded.beneficiario, actualizado_at = excluded.actualizado_at`,
+      args.usuario_id, String(args.clabe), limpio(args.banco), limpio(args.beneficiario), ahora(),
+    );
+    return this.cuentaDeReembolsoDe(args.usuario_id)!;
+  }
+
+  private static cuentaDeReembolso_(f: Fila): CuentaDeReembolso {
+    const texto = (v: unknown) => (v == null || String(v).trim() === '' ? null : String(v));
+    return { clabe: String(f.clabe), banco: texto(f.banco), beneficiario: texto(f.beneficiario), actualizado_at: String(f.actualizado_at) };
   }
 
   /** Lo que ve quien pidió: SÓLO lo suyo. El filtro va aquí y no en la
@@ -2713,9 +2761,20 @@ export class OrgDB extends DurableObject<Env> {
     return f ? this.verOrden(String(f.id)) : null;
   }
 
-  verOrden(id: string): { orden: Fila; eventos: Fila[]; archivos: Fila[]; proveedor: ProveedorDePago | null } | null {
+  verOrden(id: string): { orden: Fila; eventos: Fila[]; archivos: Fila[]; proveedor: ProveedorDePago | null; reembolso_a: ReembolsoA | null } | null {
     const orden = this.leerInterna('ordenes', id);
     if (!orden) return null;
+    /* 0.92.0 · En un reembolso, a quién y a qué cuenta se le paga: lo que
+     * quedó COPIADO en la orden al pedirla. Un reembolso de antes de la 0050
+     * no trae cuenta; sale con `clabe: null` y la pantalla lo dice. En una
+     * compra es null: ahí se le paga al proveedor. */
+    const texto = (v: unknown) => (v == null || String(v).trim() === '' ? null : String(v));
+    const reembolso_a: ReembolsoA | null = orden.tipo === 'reembolso'
+      ? {
+          nombre: texto(orden.solicitante_nombre), correo: texto(orden.solicitante_correo),
+          clabe: texto(orden.reembolso_clabe), banco: texto(orden.reembolso_banco), beneficiario: texto(orden.reembolso_beneficiario),
+        }
+      : null;
     /* 0.67.0 · Con la orden viene lo que hace falta para pagarle (Mike,
      * 5-oct: «ahí mismo en la orden (desde dash) aparezcan los datos
      * bancarios o de pago del proveedor»). Las cuentas son las filas de
@@ -2733,6 +2792,7 @@ export class OrgDB extends DurableObject<Env> {
       eventos: this.sql.exec(`SELECT * FROM orden_eventos WHERE orden_id = ? ORDER BY ts`, id).toArray() as Fila[],
       archivos,
       proveedor,
+      reembolso_a,
     };
   }
 
@@ -2869,6 +2929,9 @@ export class OrgDB extends DurableObject<Env> {
   corregirOrden(args: {
     id: string; quien_usuario_id: string; quien_nombre?: string | null;
     cambios: Record<string, unknown>;
+    /** 0.92.0 · En un reembolso, otra cuenta: se guarda como la suya y se
+     *  copia en la orden. Sin ella, la que la orden ya traía se queda. */
+    cuenta?: { clabe: string; banco?: string | null; beneficiario?: string | null } | null;
   }): Fila | { error: string; detalle?: unknown } {
     const orden = this.leerInterna('ordenes', args.id);
     if (!orden) return { error: 'no_encontrado' };
@@ -2888,6 +2951,13 @@ export class OrgDB extends DurableObject<Env> {
     };
     for (const k of ['concepto', 'proveedor_id', 'proveedor_nombre', 'proyecto_id', 'partida_id', 'fecha_maxima_pago', 'urgente'] as const) {
       if (c[k] !== undefined) campos[k] = k === 'urgente' ? (c[k] ? 1 : 0) : (c[k] as string | null);
+    }
+    if (orden.tipo === 'reembolso') {
+      const cuenta = args.cuenta?.clabe
+        ? this.guardarCuentaDeReembolso({ usuario_id: String(orden.solicitante_usuario_id), ...args.cuenta, beneficiario: args.cuenta.beneficiario || (orden.solicitante_nombre as string | null) })
+        : orden.reembolso_clabe ? null : this.cuentaDeReembolsoDe(String(orden.solicitante_usuario_id));
+      if (cuenta) { campos.reembolso_clabe = cuenta.clabe; campos.reembolso_banco = cuenta.banco; campos.reembolso_beneficiario = cuenta.beneficiario; }
+      else if (!orden.reembolso_clabe) return { error: 'falta_cuenta_reembolso', detalle: { mensaje: 'Para volver a mandar el reembolso hace falta la cuenta a la que se te paga.' } };
     }
     const llaves = Object.keys(campos);
     this.sql.exec(
@@ -3613,6 +3683,17 @@ export class OrgDB extends DurableObject<Env> {
       this.sql.exec(`ALTER TABLE quell_element_docs ADD COLUMN diseno INTEGER NOT NULL DEFAULT 0`);
     }
     this.sql.exec(disenoDelItem.replace(/^ALTER TABLE .*$/gm, ''));
+  }
+
+  /** 0050, en código: la cuenta a la que se reembolsa (0.92.0). Misma forma
+   *  que la 0047: la tabla es `IF NOT EXISTS`, las columnas se agregan sólo si
+   *  faltan. */
+  private cuentaDeReembolso(): void {
+    this.sql.exec(cuentaDeReembolso.replace(/^ALTER TABLE .*$/gm, ''));
+    for (const m of cuentaDeReembolso.matchAll(/^ALTER TABLE (\w+) ADD COLUMN (\w+) (\w+);$/gm)) {
+      const [, tabla, columna, tipo] = m;
+      if (!this.tieneColumna(tabla, columna)) this.sql.exec(`ALTER TABLE ${tabla} ADD COLUMN ${columna} ${tipo}`);
+    }
   }
 
   /** 0048, en código: la factura nueva, segunda vuelta. Misma forma que la 0047. */
