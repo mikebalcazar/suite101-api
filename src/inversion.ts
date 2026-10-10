@@ -174,6 +174,59 @@ export function totalesDe(tabla: Array<{ fecha: string; capital: number; interes
   return { capital, interes, total: capital + interes, pagos: tabla.length, primera: fechas[0] ?? null, ultima: fechas[fechas.length - 1] ?? null };
 }
 
+/* ─────────────── la tasa anual equivalente (0.91.0) ───────────────
+ *
+ * Mike, 9-oct-2026: «Si en 2 meses se va a pagar el 3%, hay que enviar en el
+ * mensaje esos términos y en algún lugar poner que es una tasa de rendimiento
+ * del 18% anual para que la gente pueda compararlo con algún número más
+ * familiar».
+ *
+ * Es una tasa anual SIMPLE, sin reinversión: 3 % en 2 meses son 1.5 % al mes,
+ * y 1.5 × 12 = 18. Es la cuenta de Mike y es la que la gente hace de cabeza;
+ * la compuesta daría 19.4 % y nadie la reconocería.
+ *
+ *   · `mensual`: la tasa × 12.
+ *   · `anual`: ya lo es.
+ *   · `fija`: el interés de todo el plazo entre el dinero que de verdad
+ *     estuvo prestado, por el tiempo que lo estuvo. En un solo pago eso es
+ *     la tasa × 12 ÷ los meses del plazo. En parcialidades el capital va
+ *     regresando, así que el mismo interés se gana con menos dinero prestado
+ *     y la tasa anual sale más alta: es lo que es, y por eso se calcula sobre
+ *     el saldo y no sobre el monto original.
+ *
+ * El tiempo se mide como en `mensual`: meses enteros, y los días sueltos
+ * entre 30. Así «2 meses» son 2, sea octubre o febrero. */
+export function tasaAnualEquivalente(c: CondicionesPrestamo): number | null {
+  if (c.tipo_tasa === 'anual') return c.tasa_pb;
+  if (c.tipo_tasa === 'mensual') return c.tasa_pb * 12;
+  const tabla = tablaDePagos(c);
+  let saldo = c.monto, desde = c.fecha_inicio, pesoMeses = 0, interes = 0;
+  for (const r of tabla) {
+    const { meses, dias } = mesesYDias(desde, r.fecha);
+    pesoMeses += saldo * (meses + dias / 30);
+    interes += r.interes;
+    saldo -= r.capital;
+    desde = r.fecha;
+  }
+  if (pesoMeses <= 0) return null;
+  return Math.round((interes * 12 * 10_000) / pesoMeses);
+}
+
+/** «18 %», «19.5 %»: la tasa anual, con un decimal si lo tiene. */
+export function porcientoEnPalabras(pb: number): string {
+  return `${(Math.round(pb / 10) / 10).toFixed(1).replace(/\.0$/, '')} %`;
+}
+
+/** Cuánto dura, dicho como se dice: «2 meses», «3 semanas», «1 mes y 15
+ *  días», «45 días». Del día en que llega el dinero al último pago. */
+export function plazoEnPalabras(desde: string, hasta: string): string {
+  const { meses, dias } = mesesYDias(desde, hasta);
+  const m = meses === 1 ? '1 mes' : `${meses} meses`;
+  const d = dias === 1 ? '1 día' : dias % 7 === 0 && meses === 0 ? (dias === 7 ? '1 semana' : `${dias / 7} semanas`) : `${dias} días`;
+  if (meses && dias) return `${m} y ${d}`;
+  return meses ? m : d;
+}
+
 /* ─────────────── el aviso de riesgos (0.84.0) ───────────────
  *
  * Mike, 8-oct-2026: «Necesito agregar un disclaimer de los riesgos de la

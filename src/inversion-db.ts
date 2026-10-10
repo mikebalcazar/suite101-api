@@ -17,7 +17,7 @@ import {
   CATEGORIA_PRESTAMO_CAPITAL, CATEGORIA_PRESTAMO_INTERES, CATEGORIA_PRESTAMO_RECIBIDO, CONTRAPARTE_INVERSIONISTA,
   type CondicionesPrestamo,
 } from '../schema/tipos';
-import { RIESGOS_BASE, RIESGOS_MAX, esDia, revisarCondiciones, sumarDias, tablaDePagos, totalesDe } from './inversion';
+import { RIESGOS_BASE, RIESGOS_MAX, plazoEnPalabras, tasaAnualEquivalente, esDia, revisarCondiciones, sumarDias, tablaDePagos, totalesDe } from './inversion';
 import { ahora, correoValido, normalizaCorreo, normalizar, ulid } from './lib';
 
 type Fila = Record<string, any>;
@@ -411,7 +411,14 @@ export class MotorInversion {
     const c = this.condicionesDe(ronda, 1_000_000);
     if (Object.keys(revisarCondiciones(c)).length) return null;
     const tabla = tablaDePagos(c as CondicionesPrestamo);
-    return { monto: 1_000_000, tabla, totales: totalesDe(tabla) };
+    const totales = totalesDe(tabla);
+    // 0.91.0 · La tasa anual equivalente y el plazo, para que el aviso de la
+    // ronda diga un número con el que la gente sí compara.
+    return {
+      monto: 1_000_000, tabla, totales,
+      tasa_anual_pb: tasaAnualEquivalente(c as CondicionesPrestamo),
+      plazo: totales.ultima ? plazoEnPalabras(String(c.fecha_inicio), totales.ultima) : null,
+    };
   }
 
   rondas(): Fila[] {

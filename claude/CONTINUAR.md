@@ -1,3 +1,5 @@
+> **9-oct-2026 · patron101: tasa anual equivalente (API 0.91.0).** El aviso de una ronda (correo, WhatsApp, pantalla) dice a cuánto equivale en tasa anual simple. Ver `muro/2026-10-10-0020-…`.
+
 > **9-oct-2026 · compartir manda SÓLO el archivo (quell #131, Android v22).** Mike: «quiero compartir el PDF como tal, no el link». Con título o texto junto al archivo, WhatsApp en el iPhone se queda con el texto. Ver `muro/2026-10-09-2038-…`.
 
 > **9-oct-2026 · el reporte de quell se comparte como PDF directo a WhatsApp (quell #130, Android v21).** El PDF se arma en el teléfono al abrir el reporte (`reportePdf.js`); `entregar()` en `compartir.js` comparte con los plugins Filesystem + Share en la app de Android y con navigator.share en el navegador. Ver `muro/2026-10-09-2030-…`.

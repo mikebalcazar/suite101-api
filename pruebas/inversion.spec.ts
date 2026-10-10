@@ -378,6 +378,8 @@ describe('una ronda, de punta a punta', () => {
     for (const k of ['ofertas', 'prestamos', 'origen', 'creado_por']) expect(r.data, k).not.toHaveProperty(k);
     // 0.84.0 · El aviso de riesgos viene con la ronda, y dice lo del no pago del cliente.
     expect(r.data.riesgos).toContain('Si un cliente se atrasa o no paga');
+    // 0.91.0 · 3 % mensual son 36 % anual, y lo trae la ronda.
+    expect(r.data.ejemplo).toMatchObject({ tasa_anual_pb: 3600, plazo: '3 semanas' });
   });
 
   it('0.84.0 · sin aceptar los riesgos, quien presta no ofrece; aceptarlos deja la hora y el texto', async () => {
@@ -856,5 +858,52 @@ describe('préstamos directos, cancelar y cerrar', () => {
       expect((await i(quien, '/inversionistas')).estado).toBe(403);
       expect((await pedir(quien, `/orgs/${ORG}/movimientos`, { app: 'investor101' })).estado).toBe(403);
     }
+  });
+});
+
+describe('0.91.0 · la tasa anual equivalente, para comparar', () => {
+  const base = { monto: 10_000_00, fecha_inicio: '2026-10-10' } as const;
+  it('el caso de Mike: 3 % por dos meses son 18 % anual', async () => {
+    const { tasaAnualEquivalente, plazoEnPalabras, porcientoEnPalabras } = await import('../src/inversion');
+    const c = { ...base, tipo_tasa: 'fija', tasa_pb: 300, esquema: 'unico', fecha_vencimiento: '2026-12-10' } as any;
+    expect(tasaAnualEquivalente(c)).toBe(1800);
+    expect(porcientoEnPalabras(1800)).toBe('18 %');
+    expect(plazoEnPalabras('2026-10-10', '2026-12-10')).toBe('2 meses');
+  });
+  it('mensual es por doce; anual ya lo es; tres semanas fijas se anualizan por días entre 30', async () => {
+    const { tasaAnualEquivalente, plazoEnPalabras, porcientoEnPalabras } = await import('../src/inversion');
+    expect(tasaAnualEquivalente({ ...base, tipo_tasa: 'mensual', tasa_pb: 250, esquema: 'unico', fecha_vencimiento: '2026-10-31' } as any)).toBe(3000);
+    expect(tasaAnualEquivalente({ ...base, tipo_tasa: 'anual', tasa_pb: 2400, esquema: 'unico', fecha_vencimiento: '2027-01-10' } as any)).toBe(2400);
+    // 2 % fijo por 21 días: 2 × 12 ÷ (21/30) = 34.29 %
+    expect(tasaAnualEquivalente({ ...base, tipo_tasa: 'fija', tasa_pb: 200, esquema: 'unico', fecha_vencimiento: '2026-10-31' } as any)).toBe(3429);
+    expect(porcientoEnPalabras(3429)).toBe('34.3 %');
+    expect(plazoEnPalabras('2026-10-10', '2026-10-31')).toBe('3 semanas');
+    expect(plazoEnPalabras('2026-10-10', '2026-11-25')).toBe('1 mes y 15 días');
+    expect(plazoEnPalabras('2026-10-10', '2026-10-11')).toBe('1 día');
+  });
+  it('fija en parcialidades: el capital va regresando, así que la anual sale más alta que en un solo pago', async () => {
+    const { tasaAnualEquivalente } = await import('../src/inversion');
+    // 10 % fijo en 10 pagos mensuales: el dinero prestado promedia 5.5 meses de los 10.
+    // interés 1,000 × 12 ÷ (1,000 × (10+9+…+1)) = 12,000 ÷ 55,000 = 21.82 %
+    const parcial = tasaAnualEquivalente({ ...base, tipo_tasa: 'fija', tasa_pb: 1000, esquema: 'parcialidades', frecuencia: 'mensual', num_pagos: 10 } as any);
+    expect(parcial).toBe(2182);
+    const unico = tasaAnualEquivalente({ ...base, tipo_tasa: 'fija', tasa_pb: 1000, esquema: 'unico', fecha_vencimiento: '2027-08-10' } as any);
+    expect(unico).toBe(1200);
+  });
+  it('el correo y el WhatsApp de la ronda lo dicen, con el plazo; si la tasa ya es anual, no se repite', async () => {
+    const { correoRondaAbierta, mensajeWhatsApp } = await import('../src/inversion-correo');
+    const d = { empresa: 'Taller', nombre_persona: 'Ana', ronda: 'Puente', descripcion: null, monto_meta: 90_000_00, monto_minimo: null, tipo_tasa: 'fija', tasa_pb: 300, esquema: 'unico', frecuencia: null, num_pagos: null, fecha_inicio: '2026-10-10', fecha_vencimiento: '2026-12-10', fecha_limite: null, ejemplo_total: 10_300_00, tasa_anual_pb: 1800, plazo: '2 meses', url: 'https://x' } as any;
+    const c = correoRondaAbierta(d);
+    expect(c.texto).toContain('Rendimiento: 3 % por todo el plazo (2 meses)');
+    expect(c.texto).toContain('Equivale a una tasa de rendimiento de: 18 % anual');
+    expect(c.html).toContain('18 % anual');
+    const w = mensajeWhatsApp(d);
+    expect(w).toContain('• Rendimiento: 3 % por todo el plazo (2 meses)');
+    expect(w).toContain('• Equivale a una tasa de rendimiento de *18 % anual*');
+    const anual = { ...d, tipo_tasa: 'anual', tasa_pb: 2400, tasa_anual_pb: 2400 };
+    expect(correoRondaAbierta(anual).texto).not.toContain('Equivale a');
+    expect(mensajeWhatsApp(anual)).not.toContain('Equivale a');
+    // Una app vieja que no manda el dato no rompe el aviso.
+    expect(mensajeWhatsApp({ ...d, tasa_anual_pb: undefined, plazo: undefined })).toContain('• Rendimiento: 3 % por todo el plazo');
   });
 });
