@@ -9,6 +9,7 @@
 
 import { Buffer } from 'node:buffer';
 import type { Env } from '../entorno';
+import type { Plataforma } from '../plataformas';
 
 const AZUL = '#0080C1';
 const OSCURO = '#122733';
@@ -132,10 +133,15 @@ export function correoCodigo(codigo: string): { asunto: string; html: string; te
 
 /** 0.14.0 · lo que recibe el director cuando MASTER101 abre su empresa. No
  *  lleva ningún secreto: entra con su correo y el código que le llega al
- *  momento, en el panel de su empresa o en cualquiera de sus apps. */
-export function correoBienvenida(d: { empresa: string; director: string | null; correo: string; urlPanel: string; apps: string[] }): { asunto: string; html: string; texto: string } {
+ *  momento, en el panel de su empresa o en cualquiera de sus apps.
+ *
+ *  10-oct-2026 · trae la lista de sus plataformas con su dirección (Mike:
+ *  «debe llegarle una lista con las URLs de las plataformas a las que tiene
+ *  acceso, con su URL de empresa»). La arma `plataformasDe` (src/plataformas.ts). */
+export function correoBienvenida(d: { empresa: string; director: string | null; correo: string; urlPanel: string; plataformas: Plataforma[] }): { asunto: string; html: string; texto: string } {
   const saludo = d.director ? `Hola, ${d.director}.` : 'Hola.';
-  const apps = d.apps.length ? d.apps.join(', ') : 'las que se prendan después';
+  const conGeneral = d.plataformas.some((p) => p.general);
+  const lista = d.plataformas.map((p) => `· ${p.nombre} (${p.lema}): ${p.url}${p.general ? `\n  si todavía no abre: ${p.general}` : ''}`).join('\n');
   const texto = `${saludo}
 
 Tu empresa ${d.empresa} ya está dada de alta en la Suite 101 y tú quedaste como su director.
@@ -143,11 +149,18 @@ Tu empresa ${d.empresa} ya está dada de alta en la Suite 101 y tú quedaste com
 Entra aquí con este correo (${d.correo}): ${d.urlPanel}
 No hay contraseña que recordar: al escribir tu correo te llega un código de acceso. Si prefieres, ahí mismo puedes ponerte una contraseña o entrar con tu cuenta de Google.
 
-Desde ese panel das de alta a tu gente y decides quién entra a qué. Apps de tu empresa: ${apps}.
+Desde ese panel das de alta a tu gente y decides quién entra a qué.
 
+Tus plataformas (guarda este correo):
+${lista}
+${conGeneral ? '\nLas direcciones con el dominio de tu empresa abren en cuanto tu gente de sistemas termine de configurarlo; mientras, entra por la otra.\n' : ''}
 Si tú no esperabas este correo, ignóralo.
 
 ${NO_SE_CONTESTA}`;
+  const filas = d.plataformas.map((p) => `<tr><td style="padding:9px 0;border-top:1px solid #e6ebef;vertical-align:top">
+        <div style="font-size:15px;font-weight:700;color:${OSCURO}">${escapa(p.nombre)} <span style="font-weight:400;font-size:13px;color:#6b7a85">· ${escapa(p.lema)}</span></div>
+        <a href="${escapa(p.url)}" style="font-size:14px;color:${AZUL};word-break:break-all">${escapa(p.url.replace(/^https:\/\//, ''))}</a>${p.general ? `<div style="font-size:12px;color:#6b7a85;margin-top:2px">Si todavía no abre: <a href="${escapa(p.general)}" style="color:#6b7a85;word-break:break-all">${escapa(p.general.replace(/^https:\/\//, ''))}</a></div>` : ''}
+      </td></tr>`).join('');
   return {
     asunto: `${d.empresa} ya está en la Suite 101 — tu acceso como director`,
     texto,
@@ -162,7 +175,11 @@ ${NO_SE_CONTESTA}`;
       <p style="margin:0 0 14px;font-size:15px;line-height:1.6">${escapa(saludo)} Quedaste como <b>director</b> de la empresa: desde tu panel das de alta a tu gente y decides quién entra a qué.</p>
       <p style="margin:0 0 18px;font-size:15px;line-height:1.6">Entra con este correo, <b>${escapa(d.correo)}</b>. No hay contraseña que recordar: al escribirlo te llega un código de acceso. Ahí mismo puedes ponerte una contraseña o entrar con tu cuenta de Google.</p>
       <p style="margin:0 0 22px;text-align:center"><a href="${escapa(d.urlPanel)}" style="display:inline-block;background:${AZUL};color:#fff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 22px;border-radius:9px">Entrar a mi panel</a></p>
-      <p style="margin:0;font-size:13px;color:#6b7a85">Apps de tu empresa: ${escapa(apps)}.<br>Si tú no esperabas este correo, ignóralo.</p>
+      <h2 style="margin:0 0 6px;font-size:16px;font-family:${TEXTO}">Tus plataformas</h2>
+      <p style="margin:0 0 6px;font-size:13px;color:#6b7a85">Guarda este correo: aquí están las direcciones de tu empresa.</p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" data-plataformas>${filas}</table>
+      ${conGeneral ? `<p style="margin:12px 0 0;font-size:12.5px;color:#6b7a85;line-height:1.5">Las direcciones con el dominio de tu empresa abren en cuanto tu gente de sistemas termine de configurarlo; mientras, entra por la otra.</p>` : ''}
+      <p style="margin:16px 0 0;font-size:13px;color:#6b7a85">Si tú no esperabas este correo, ignóralo.</p>
     </td></tr>
     <tr><td style="padding:16px 26px 24px;border-top:1px solid #e6ebef;font-size:12px;color:#6b7a85">
       Mensaje automático de la Suite 101. ${NO_SE_CONTESTA}

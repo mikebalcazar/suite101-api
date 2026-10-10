@@ -19,6 +19,7 @@
 
 import { describe, expect, it, afterEach } from 'vitest';
 import { enviarCorreo, correoCodigo, correoBienvenida, correoOrdenPagada, correoOrdenResuelta, NO_SE_CONTESTA } from '../src/auth/correo';
+import { plataformasDe } from '../src/plataformas';
 import type { Env } from '../src/entorno';
 
 const MSG = { para: 'nadie@ejemplo.mx', asunto: 'x', html: '<p>x</p>', texto: 'x' };
@@ -171,7 +172,7 @@ describe('la forma del mensaje, para no caer en basura', () => {
      * justamente quien no va a ver el pie del HTML. */
     const plantillas = [
       correoCodigo('481920'),
-      correoBienvenida({ empresa: 'Forespot', director: 'Mike', correo: 'mike@forespot.com', urlPanel: 'https://x.mx', apps: ['dash101'] }),
+      correoBienvenida({ empresa: 'Forespot', director: 'Mike', correo: 'mike@forespot.com', urlPanel: 'https://x.mx', plataformas: plataformasDe({ apps: { dash: true }, dominio: null }) }),
       correoOrdenPagada({ folio: 'OC-1', proveedor: 'Maderas', concepto: 'Triplay', monto: 116_00, moneda: 'MXN', fecha: '2026-03-20', cuenta: 'Banco', nota: '', url: 'https://x.mx' }),
       correoOrdenResuelta('devuelta', { folio: 'OC-2', proveedor: 'Maderas', concepto: 'Triplay', monto: 116_00, moneda: 'MXN', fecha: '', cuenta: '', nota: 'Falta el precio', url: '' }),
     ];
@@ -181,3 +182,52 @@ describe('la forma del mensaje, para no caer en basura', () => {
     }
   });
 });
+
+/* 10-oct-2026 · Mike: «cuando se abre una empresa nueva, al correo que se
+ * envía la invitación de inicio, debe llegarle una lista con las URLs de las
+ * plataformas a las que tiene acceso, con su URL de empresa». */
+describe('la bienvenida trae la lista de plataformas con su dirección', () => {
+  const apps = { dash: true, quell: true, cotizador: true, roster: true, bill: true, investor: true, nest: true, peek: false, supply: false, cost: false };
+
+  it('sin dominio propio: las direcciones generales, sólo de lo que tiene prendido', () => {
+    const l = plataformasDe({ apps, dominio: null }, 'https://workshop101.taller101.com');
+    const por = Object.fromEntries(l.map((p) => [p.nombre, p]));
+    expect(l.map((p) => p.nombre)).toEqual(['suite101', 'workshop101', 'dash101', 'quell101', 'quote101', 'patron101', 'bill101', 'roster101', 'nest101']);
+    expect(por.quell101.url).toBe('https://quell101.taller101.com');
+    expect(por.quote101.url, 'cotizador101 se llama quote101').toBe('https://quote101.taller101.com');
+    expect(por.patron101.url, 'investor101 se llama patron101').toBe('https://patron101.taller101.com');
+    expect(por.roster101.url, 'roster101 abre el panel').toBe('https://roster101.taller101.com/admin');
+    expect(por.nest101.url).toBe('https://suite101.taller101.com/descargar/nest101');
+    expect(l.every((p) => p.general === null), 'sin dominio no hay «otra» dirección').toBe(true);
+    expect(por.peek101, 'lo apagado no sale').toBeUndefined();
+  });
+
+  it('con dominio propio: la de la empresa, y la general por si su DNS no está listo', () => {
+    const l = plataformasDe({ apps, dominio: 'acme.com' });
+    const por = Object.fromEntries(l.map((p) => [p.nombre, p]));
+    expect(por.suite101.url).toBe('https://suite101.acme.com');
+    expect(por.workshop101.url).toBe('https://workshop101.acme.com');
+    expect(por.quell101).toEqual(expect.objectContaining({ url: 'https://quell101.acme.com', general: 'https://quell101.taller101.com' }));
+    expect(por.quote101.url).toBe('https://quote101.acme.com');
+    expect(por.roster101).toEqual(expect.objectContaining({ url: 'https://roster101.acme.com/admin', general: 'https://roster101.taller101.com/admin' }));
+    // Lo que no tiene puerta en el dominio de la empresa va con la general.
+    expect(por.bill101).toEqual(expect.objectContaining({ url: 'https://bill101.taller101.com', general: null }));
+    expect(por.patron101.url).toBe('https://patron101.taller101.com');
+  });
+
+  it('el correo trae cada plataforma con su dirección, en texto y en HTML', () => {
+    const plataformas = plataformasDe({ apps, dominio: 'acme.com' });
+    const m = correoBienvenida({ empresa: 'Acme', director: 'Ana', correo: 'ana@acme.com', urlPanel: 'https://workshop101.taller101.com', plataformas });
+    for (const p of plataformas) {
+      expect(m.texto, `${p.nombre} en el texto`).toContain(p.url);
+      expect(m.html, `${p.nombre} en el HTML`).toContain(`href="${p.url}"`);
+    }
+    expect(m.texto).toContain('Tus plataformas');
+    expect(m.html).toContain('Tus plataformas');
+    expect(m.texto, 'y la general como respaldo').toContain('si todavía no abre: https://quell101.taller101.com');
+    expect(m.html).toContain('abren en cuanto tu gente de sistemas termine de configurarlo');
+    const sin = correoBienvenida({ empresa: 'Acme', director: 'Ana', correo: 'ana@acme.com', urlPanel: 'https://x.mx', plataformas: plataformasDe({ apps, dominio: null }) });
+    expect(sin.texto, 'sin dominio no se habla de configurarlo').not.toContain('sistemas termine');
+  });
+});
+
