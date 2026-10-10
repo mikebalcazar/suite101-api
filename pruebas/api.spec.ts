@@ -571,9 +571,15 @@ describe('3b · Google detrás de un proxy: el boleto de entrada', () => {
       expect(r.estado, app).toBe(501);
       expect(r.error, app).toBe('google_no_configurado');
     }
-    // El dominio pelón y cualquier otro subdominio siguen siendo ajenos.
-    // El dominio pelón, otro subdominio y la API misma (a ella no se le manda boleto) siguen siendo ajenos.
-    for (const ajeno of ['https://taller101.com/', 'https://otra.taller101.com/', 'https://api.taller101.com/']) {
+    // El dominio pelón dejó de ser ajeno el 9-oct-2026: ahí vive la página comercial (Worker
+    // taller101-web) y su portal, https://taller101.com/admin, entra con la cuenta de la suite.
+    {
+      const r = await pedir('/auth/google?volver_a=' + encodeURIComponent('https://taller101.com/admin/entrar.html'));
+      expect(r.estado, 'taller101.com').toBe(501);
+      expect(r.error, 'taller101.com').toBe('google_no_configurado');
+    }
+    // www (el portal no vive ahí), otro subdominio y la API misma (a ella no se le manda boleto) siguen siendo ajenos.
+    for (const ajeno of ['https://www.taller101.com/', 'https://otra.taller101.com/', 'https://api.taller101.com/']) {
       const r = await pedir('/auth/google?volver_a=' + encodeURIComponent(ajeno));
       expect(r.estado, ajeno).toBe(403);
       expect(r.error, ajeno).toBe('origen_no_permitido');
