@@ -392,6 +392,7 @@ describe('B · la cara de cliente, con la invitación pasando por la suite', () 
     expect(aviso.liga).toMatch(new RegExp(`^https://peek101[^/]*/#/obra/${obraA}$`));
     expect(sitioPeek('https://quell101.taller101.com')).toBe('https://peek101.taller101.com');
     expect(sitioPeek('https://quell101.acme.com.mx')).toBe('https://peek101.acme.com.mx');
+    expect(sitioPeek('https://quell.acme.com.mx'), 'en el dominio de la empresa, sin el 101').toBe('https://peek.acme.com.mx');
     expect(sitioPeek('https://bitacora-obra-staging.mike-929.workers.dev')).toBe('https://peek101-staging.mike-929.workers.dev');
     expect(sitioPeek('')).toBe('https://peek101.taller101.com');
     expect(aviso.dudas).toEqual([{ texto: '¿De qué color va el mueble de TV?', pieza: expect.stringMatching(/^[A-Z]+-\d+ · /) }]);

@@ -8,13 +8,13 @@
  * DOMINIOS.md.
  *
  * Lo que vive aquí:
- *   · la forma de un dominio y los OCHO nombres que salen de él (uno por app;
- *     master101 no: ése es sólo de Mike);
+ *   · la forma de un dominio y los nombres que salen de él (uno por app, sin
+ *     el «101» salvo suite101; master101 no: ése es sólo de Mike);
  *   · hablar con Cloudflare para dar de alta, leer y borrar cada nombre como
  *     custom hostname de la zona (token `CLOUDFLARE_SAAS_TOKEN`, de Mike);
  *   · un DOBLE de Cloudflare para las pruebas (ENTORNO 'prueba'), que se
  *     comporta como el de verdad: nace pendiente y se activa al releerlo;
- *   · resolver un host (roster101.acme.com) a su empresa y su app, que es lo
+ *   · resolver un host (roster.acme.com) a su empresa y su app, que es lo
  *     que la puerta de las empresas (puerta/) le pregunta a la API.
  */
 
@@ -22,12 +22,26 @@ import type { Env } from './entorno';
 import { ahora } from './lib';
 
 /** Las apps que tienen puerta propia en el dominio de la empresa. master101
- *  no está a propósito: «ese solo lo tengo yo» (Mike, 2-oct). */
-export const APPS_DOMINIO = ['dash101', 'quell101', 'quote101', 'supply101', 'roster101', 'peek101', 'workshop101', 'suite101'] as const;
+ *  no está a propósito: «ese solo lo tengo yo» (Mike, 2-oct). Desde el
+ *  10-oct-2026 son TODAS (Mike: «ya necesito que todas las apps funcionen
+ *  con el dominio de la empresa»): se suman cost101, patron101 y bill101. */
+export const APPS_DOMINIO = ['dash101', 'quell101', 'quote101', 'cost101', 'patron101', 'bill101', 'supply101', 'roster101', 'peek101', 'workshop101', 'suite101'] as const;
 export type AppDominio = (typeof APPS_DOMINIO)[number];
 
-/** Dominios que son nuestros y no de una empresa: nunca se dan de alta. */
-const NUESTROS = ['taller101.com', 'taller101.mx', 'workers.dev', 'suite101.mx'];
+/** La primera palabra del nombre en el dominio de la empresa. Mike, 9-oct:
+ *  «son sin el "101" para los dominios. Para los logos y nombres sí van con
+ *  "101"»: quell.acme.com, quote.acme.com. La plataforma lo conserva
+ *  (contestado con botones el mismo día): suite101.acme.com. */
+export const PREFIJO: Record<AppDominio, string> = {
+  dash101: 'dash', quell101: 'quell', quote101: 'quote', cost101: 'cost', patron101: 'patron', bill101: 'bill',
+  supply101: 'supply', roster101: 'roster', peek101: 'peek', workshop101: 'workshop', suite101: 'suite101',
+};
+const APP_DE_PREFIJO: Record<string, AppDominio> = Object.fromEntries(APPS_DOMINIO.map((a) => [PREFIJO[a], a]));
+
+/** Dominios que son nuestros y no de una empresa: nunca se dan de alta.
+ *  taller101.mx NO está: Mike lo escogió como el dominio de prueba de la
+ *  puerta (9-oct), y se da de alta como el de una empresa más. */
+const NUESTROS = ['taller101.com', 'workers.dev', 'suite101.mx', 'suite101.app'];
 
 /** Deja el dominio limpio (minúsculas, sin protocolo, sin ruta, sin «www.»)
  *  o devuelve null si no tiene forma de dominio. */
@@ -40,20 +54,20 @@ export function dominioLimpio(entrada: unknown): string | null {
   return d;
 }
 
-/** Los ocho nombres de una empresa. */
+/** Los nombres de una empresa, uno por app: quell.acme.com, …, suite101.acme.com. */
 export const nombresDe = (dominio: string): Array<{ app: AppDominio; hostname: string }> =>
-  APPS_DOMINIO.map((app) => ({ app, hostname: `${app}.${dominio}` }));
+  APPS_DOMINIO.map((app) => ({ app, hostname: `${PREFIJO[app]}.${dominio}` }));
 
-/** Parte un host en su app y su dominio: roster101.acme.com → roster101 +
+/** Parte un host en su app y su dominio: roster.acme.com → roster101 +
  *  acme.com. Null si la primera palabra no es una app con puerta. */
 export function partirHost(host: string): { app: AppDominio; dominio: string } | null {
   const h = String(host ?? '').trim().toLowerCase().split(':')[0];
   const i = h.indexOf('.');
   if (i <= 0) return null;
-  const app = h.slice(0, i);
+  const app = APP_DE_PREFIJO[h.slice(0, i)];
   const dominio = h.slice(i + 1);
-  if (!(APPS_DOMINIO as readonly string[]).includes(app) || !dominio) return null;
-  return { app: app as AppDominio, dominio };
+  if (!app || !dominio) return null;
+  return { app, dominio };
 }
 
 /* ─────────────── Cloudflare ─────────────── */
@@ -234,7 +248,7 @@ export interface DominioResuelto { org_id: string; nombre: string; dominio: stri
 const CACHE = new Map<string, { hasta: number; valor: DominioResuelto | null }>();
 const VIDA_CACHE_MS = 60_000;
 
-/** roster101.acme.com → la empresa dueña de acme.com y la app. Null si no
+/** roster.acme.com → la empresa dueña de acme.com y la app. Null si no
  *  hay. Se guarda un minuto por isolate: la puerta pregunta en cada
  *  petición. */
 export async function resolverHost(env: Env, host: string): Promise<DominioResuelto | null> {
@@ -257,7 +271,7 @@ export async function resolverHost(env: Env, host: string): Promise<DominioResue
  *  minuto de verdad vieja. */
 export const olvidarDominio = (dominio: string | null | undefined): void => { if (dominio) CACHE.delete(dominio); };
 
-/** ¿Este origen (https://dash101.acme.com) es la puerta de una empresa con
+/** ¿Este origen (https://dash.acme.com) es la puerta de una empresa con
  *  dominio? Lo pregunta el regreso de Google. */
 export async function origenDeEmpresa(env: Env, origen: string): Promise<boolean> {
   let u: URL;

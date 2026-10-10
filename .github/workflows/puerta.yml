@@ -1,0 +1,122 @@
+# Publica la puerta de las empresas (puerta/): el Worker que recibe lo que
+# entra con el dominio de una empresa (quell.acme.com) y lo pasa a la app.
+# Ver DOMINIOS.md, «La puerta publicada».
+#
+# El orden importa y por eso es un flujo aparte del de la API:
+#   1. Se pone en la zona una ruta SIN Worker para `*taller101.com/*`. Con
+#      ella, la ruta comodín `*/*` de la puerta sólo recibe lo de las
+#      empresas: las apps de taller101.com no pasan nunca por la puerta.
+#   2. Sólo entonces se publica la puerta.
+#   3. Se mide que lo nuestro sigue contestando igual.
+# Si el token no alcanza la zona, se detiene en el paso 1 y no publica nada.
+# Lo medido se deja como comentario del commit (OPERAR.md §6).
+
+name: Publicar la puerta de las empresas
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'puerta/**'
+      - '.github/workflows/puerta.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: despliegue-puerta
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  puerta:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      ZONA: taller101.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      - name: Lo nuestro se queda fuera de la puerta
+        id: fuera
+        run: |
+          set -uo pipefail
+          exec > >(tee -a /tmp/salida.txt) 2>&1
+          echo "== 1. Ruta sin Worker para lo nuestro =="
+          API=https://api.cloudflare.com/client/v4
+          AUT="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          zonas=$(curl -sS -H "$AUT" "$API/zones?name=$ZONA")
+          zona=$(echo "$zonas" | jq -r '.result[0].id // empty')
+          if [ -z "$zona" ]; then
+            echo "SIN PERMISO: el token no puede leer la zona $ZONA. Le faltan, en la zona: Zone · Zone · Read y Zone · Workers Routes · Edit."
+            echo "$zonas" | jq -c '.errors' || true
+            echo "La puerta NO se publico."
+            exit 1
+          fi
+          rutas=$(curl -sS -H "$AUT" "$API/zones/$zona/workers/routes")
+          if ! echo "$rutas" | jq -e '.success' >/dev/null; then
+            echo "SIN PERMISO para leer las rutas de Workers de $ZONA (Zone · Workers Routes · Edit)."
+            echo "$rutas" | jq -c '.errors' || true
+            echo "La puerta NO se publico."
+            exit 1
+          fi
+          echo "rutas que ya habia:"
+          echo "$rutas" | jq -r '.result[] | "  \(.pattern)  ->  \(.script // "(sin Worker)")"'
+          patron="*$ZONA/*"
+          if echo "$rutas" | jq -e --arg p "$patron" '.result[] | select(.pattern == $p)' >/dev/null; then
+            echo "ya estaba: $patron"
+          else
+            r=$(curl -sS -X POST -H "$AUT" -H 'Content-Type: application/json' "$API/zones/$zona/workers/routes" -d "$(jq -nc --arg p "$patron" '{pattern: $p}')")
+            if ! echo "$r" | jq -e '.success' >/dev/null; then
+              echo "No se pudo crear $patron: $(echo "$r" | jq -c '.errors')"
+              echo "La puerta NO se publico."
+              exit 1
+            fi
+            echo "creada (sin Worker): $patron"
+          fi
+          echo "zona=$zona" >> "$GITHUB_OUTPUT"
+
+      - name: Publicar la puerta
+        run: |
+          set -uo pipefail
+          exec > >(tee -a /tmp/salida.txt) 2>&1
+          echo "== 2. Publicar suite101-puerta =="
+          npx wrangler deploy -c puerta/wrangler.toml
+
+      - name: Medir que lo nuestro sigue igual
+        run: |
+          set -uo pipefail
+          exec > >(tee -a /tmp/salida.txt) 2>&1
+          echo "== 3. Lo nuestro, despues de publicar =="
+          mal=0
+          for u in https://api.taller101.com/salud https://suite101.taller101.com/ https://quell101.taller101.com/ https://dash101.taller101.com/ https://quote101.taller101.com/ https://roster101.taller101.com/ https://workshop101.taller101.com/ https://peek101.taller101.com/ https://supply101.taller101.com/ https://cost101.taller101.com/ https://bill101.taller101.com/ https://patron101.taller101.com/; do
+            c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$u")
+            echo "  $c  $u"
+            case "$c" in 5*|000) mal=1 ;; esac
+          done
+          echo "rutas de la zona ahora:"
+          curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/zones/${{ steps.fuera.outputs.zona }}/workers/routes" | jq -r '.result[] | "  \(.pattern)  ->  \(.script // "(sin Worker)")"'
+          if [ "$mal" = 1 ]; then echo "RESULTADO: algo nuestro contesta 5xx"; exit 1; fi
+          echo "RESULTADO: lo nuestro contesta igual"
+
+      - name: Dejar lo medido en el commit
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -u
+          [ -f /tmp/salida.txt ] || echo "No hubo salida que reportar." > /tmp/salida.txt
+          jq -Rs '{body: ("**Puerta de las empresas**\n\n```\n" + .[-60000:] + "\n```")}' /tmp/salida.txt > /tmp/comentario.json
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/commits/$SHA/comments" \
+            -d @/tmp/comentario.json -o /tmp/respuesta.json -w 'comentario: %{http_code}\n'

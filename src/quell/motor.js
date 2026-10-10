@@ -160,6 +160,8 @@ export function sitioPeek(sitioQuell) {
   let h = '';
   try { h = new URL(sitioQuell).hostname.toLowerCase(); } catch { /* sin dirección */ }
   if (h.startsWith('quell101.')) return `https://peek101.${h.slice('quell101.'.length)}`;
+  // En el dominio de una empresa los nombres van sin el «101» (10-oct-2026).
+  if (h.startsWith('quell.')) return `https://peek.${h.slice('quell.'.length)}`;
   if (h.endsWith('.workers.dev') || h === 'localhost' || h === '127.0.0.1') return 'https://peek101-staging.mike-929.workers.dev';
   return 'https://peek101.taller101.com';
 }

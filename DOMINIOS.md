@@ -9,11 +9,16 @@ día: dominio propio con alta automática.
 ## Cómo funciona
 
 1. En master101 se le pone a la empresa su dominio (`acme.com`).
-2. La API da de alta en Cloudflare ocho nombres —uno por app— como *custom
-   hostnames* de la zona `taller101.com`: `dash101.acme.com`,
-   `quell101.acme.com`, `quote101.acme.com`, `supply101.acme.com`,
-   `roster101.acme.com`, `peek101.acme.com`, `workshop101.acme.com` y
-   `suite101.acme.com`. master101 no: ése es sólo de Mike.
+2. La API da de alta en Cloudflare un nombre por app como *custom
+   hostnames* de la zona `taller101.com`. Desde el 10-oct-2026 son TODAS las
+   apps (Mike: «ya necesito que todas las apps funcionen con el dominio de la
+   empresa») y van **sin el «101»** (Mike, 9-oct: «son sin el "101" para los
+   dominios»), salvo la plataforma: `dash.acme.com`, `quell.acme.com`,
+   `quote.acme.com`, `cost.acme.com`, `patron.acme.com`, `bill.acme.com`,
+   `supply.acme.com`, `roster.acme.com`, `peek.acme.com`, `workshop.acme.com`
+   y `suite101.acme.com`. master101 no: ése es sólo de Mike. La lista vive en
+   `PREFIJO` de `src/dominios.ts` y la puerta la repite en
+   `puerta/destino.ts` (una prueba revisa que cuadren).
 3. La empresa (su gente de sistemas) agrega en SU DNS un `CNAME` por nombre,
    apuntando a `empresas.taller101.com`. master101 enseña la lista exacta
    para copiarla o compartirla.
@@ -27,9 +32,9 @@ día: dominio propio con alta automática.
    es la puerta de la suite con el nombre de la empresa y sus ligas.
 
 Cloudflare for SaaS incluye 100 nombres gratis en la zona; después cuesta
-0.10 USD por nombre al mes. Ocho nombres por empresa: unas 12 empresas gratis
-y luego 0.80 USD por empresa al mes. Los comodines (`*.acme.com`) son sólo de
-plan Enterprise, por eso son ocho nombres y no uno.
+0.10 USD por nombre al mes. Once nombres por empresa: unas 9 empresas gratis
+y luego 1.10 USD por empresa al mes. Los comodines (`*.acme.com`) son sólo de
+plan Enterprise, por eso son once nombres y no uno.
 
 `taller101.mx` NO sirve para esto: su DNS vive en GoDaddy, no en Cloudflare
 (se midió el 2-oct: NS ns55/ns56.domaincontrol.com). La zona es `taller101.com`.
@@ -62,19 +67,38 @@ intentar dar de alta un dominio, y lo demás sigue igual.
 
 ## Lo que hace cada empresa (su DNS, una vez)
 
-Ocho registros `CNAME`, uno por app, todos a `empresas.taller101.com`:
+Un registro `CNAME` por app, todos a `empresas.taller101.com`:
 
 ```
-dash101.acme.com      CNAME  empresas.taller101.com
-quell101.acme.com     CNAME  empresas.taller101.com
-quote101.acme.com     CNAME  empresas.taller101.com
-supply101.acme.com    CNAME  empresas.taller101.com
-roster101.acme.com    CNAME  empresas.taller101.com
-peek101.acme.com      CNAME  empresas.taller101.com
-workshop101.acme.com  CNAME  empresas.taller101.com
-suite101.acme.com     CNAME  empresas.taller101.com
+dash.acme.com       CNAME  empresas.taller101.com
+quell.acme.com      CNAME  empresas.taller101.com
+quote.acme.com      CNAME  empresas.taller101.com
+cost.acme.com       CNAME  empresas.taller101.com
+patron.acme.com     CNAME  empresas.taller101.com
+bill.acme.com       CNAME  empresas.taller101.com
+supply.acme.com     CNAME  empresas.taller101.com
+roster.acme.com     CNAME  empresas.taller101.com
+peek.acme.com       CNAME  empresas.taller101.com
+workshop.acme.com   CNAME  empresas.taller101.com
+suite101.acme.com   CNAME  empresas.taller101.com
 ```
 
 Si la empresa también usa Cloudflare, el registro puede ir con nube naranja o
 gris: la puerta recibe todo lo que entra a la zona, así que funciona de las
 dos maneras.
+
+
+## La puerta publicada (10-oct-2026)
+
+La puerta se publica con su propio flujo, `.github/workflows/puerta.yml`
+(cuando cambia `puerta/` o a mano). Antes de publicarla, el flujo pone en la
+zona una ruta **sin Worker** para `*taller101.com/*`: así la ruta comodín
+`*/*` de la puerta sólo recibe lo que entra con el dominio de una empresa, y
+las apps de taller101.com no pasan por ella nunca (la ruta más específica
+gana; así lo recomienda Cloudflare para un Worker como origen de SaaS). Si
+el token del despliegue no puede leer la zona ni sus rutas, el flujo se
+detiene ANTES de publicar y lo dice en el commit.
+
+La puerta deja pasar tal cual `/.well-known/acme-challenge/*` y
+`/.well-known/pki-validation/*`: es por donde Cloudflare comprueba cada
+nombre para emitir su certificado.

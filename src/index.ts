@@ -62,7 +62,7 @@ app.use('*', async (c, next) => {
 });
 
 /* 2-oct · la empresa del dominio. La puerta de las empresas (puerta/) recibe
- * roster101.acme.com, averigua de quién es y lo reenvía a la app con
+ * roster.acme.com, averigua de quién es y lo reenvía a la app con
  * `X-Dominio-Empresa: acme.com` y `X-Host-Original`. Aquí se vuelve a
  * resolver —no se confía en la cabecera para nada que abra puertas: sólo
  * ACOTA (la sesión ve esa empresa y nada más) y da el nombre para la
@@ -82,7 +82,7 @@ app.use('*', async (c, next) => {
  * una página pública con ligas, no necesita saber quién la abre. */
 app.use('*', puertaDeLaSuite);
 
-/** GET /dominios/resolver?host=roster101.acme.com — para la puerta de las
+/** GET /dominios/resolver?host=roster.acme.com — para la puerta de las
  *  empresas: de quién es ese host y a qué app va. Público y sin nada que no
  *  esté ya en el propio nombre: la empresa y su nombre comercial. */
 app.get('/dominios/resolver', async (c) => {

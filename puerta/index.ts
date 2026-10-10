@@ -5,7 +5,7 @@
  * un minuto en el isolate) y se reenvía al Worker de la app que dice la
  * primera palabra del host. No toca sesiones ni cuerpos: es un cartero.
  */
-import { BINDINGS, cabecerasDeEmpresa, destinoDe, paginaDeNadie } from './destino';
+import { BINDINGS, cabecerasDeEmpresa, destinoDe, esValidacionDeCertificado, paginaDeNadie } from './destino';
 
 interface Servicio { fetch(req: Request): Promise<Response> }
 type Env = { API: Servicio } & Partial<Record<string, Servicio>>;
@@ -39,6 +39,7 @@ export default {
     const u = new URL(req.url);
     const d = destinoDe(u.hostname);
     if (d.tipo === 'propio') return fetch(req);
+    if (esValidacionDeCertificado(u.pathname)) return fetch(req);
     if (d.tipo === 'nadie') return html(paginaDeNadie(d.host, d.motivo), 404);
 
     const { valor, estado } = await resolver(env, d.host);
