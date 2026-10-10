@@ -1,3 +1,5 @@
+> **10-oct-2026 · un reembolso se paga SÓLO a quien lo pidió, a su cuenta (API 0.92.0, org/0050).** Mike, con botones: nada de cuentas de terceros; la cuenta se pide al pedir el reembolso si no está, y quien paga la ve para copiarla. `reembolso_cuentas` (una por usuario) + `ordenes.reembolso_*` (la copia). `GET /ordenes/permisos` → `cuenta_reembolso`; `PUT /ordenes/cuenta-reembolso`; `POST /ordenes` reembolso acepta `cuenta` y sin ninguna da 400 `falta_cuenta_reembolso`; `GET /ordenes/:id` → `reembolso_a`. supply101 y dash101 en dash101. Ver `muro/2026-10-10-0100-…`.
+
 > **9-oct-2026 · patron101: tasa anual equivalente (API 0.91.0).** El aviso de una ronda (correo, WhatsApp, pantalla) dice a cuánto equivale en tasa anual simple. Ver `muro/2026-10-10-0020-…`.
 
 > **9-oct-2026 · compartir manda SÓLO el archivo (quell #131, Android v22).** Mike: «quiero compartir el PDF como tal, no el link». Con título o texto junto al archivo, WhatsApp en el iPhone se queda con el texto. Ver `muro/2026-10-09-2038-…`.

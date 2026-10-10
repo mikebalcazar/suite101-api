@@ -134,11 +134,18 @@ describe('la migración 0045 sobre una base con órdenes y eventos', () => {
 
   it('migrar() aplica la 0045: ni una fila, ni un id, ni un centavo cambia, y las llaves cuadran', async () => {
     const r = await dentro(elDO(), (db: any) => {
+      /* La foto y las columnas se toman JUSTO después de la 0045: las que
+       * vienen detrás (la 0050 le agrega columnas a `ordenes`) se miden en
+       * su propia prueba. Luego se migra hasta el final, que es como la
+       * tiene una empresa, y el resto se compara ahí. */
+      db.migrar(HASTA + 1);
+      const foto45 = foto(db);
+      const cols45 = { ordenes: columnas(db, 'ordenes'), orden_eventos: columnas(db, 'orden_eventos') };
       db.migrar();
       return {
         version: db.version(),
-        foto: foto(db),
-        cols: { ordenes: columnas(db, 'ordenes'), orden_eventos: columnas(db, 'orden_eventos') },
+        foto: foto45,
+        cols: cols45,
         indices: { ordenes: indices(db, 'ordenes'), orden_eventos: indices(db, 'orden_eventos') },
         tablas: db.sql.exec(`SELECT name FROM sqlite_master WHERE type = 'table'`).toArray().map((t: any) => String(t.name)),
         fk: db.sql.exec(`PRAGMA foreign_key_check`).toArray(),

@@ -21,6 +21,7 @@ import { err, ok, type Ctx, type Vars } from '../http';
 import type { Env } from '../entorno';
 import { TIPOS_ORDEN, type ApiOrgDB, type TipoOrden } from '../org-db';
 import { miembrosDe } from '../maestro';
+import { clabeValida } from './orgs';
 import { enviarCorreo, correoOrdenPagada, correoOrdenResuelta } from '../auth/correo';
 
 type App = Hono<{ Bindings: Env; Variables: Vars }>;
@@ -28,6 +29,24 @@ type App = Hono<{ Bindings: Env; Variables: Vars }>;
 const stub = (c: Ctx): ApiOrgDB => c.env.ORG.get(c.env.ORG.idFromName(c.get('org_id'))) as unknown as ApiOrgDB;
 const esFalla = (r: unknown): r is { error: string; detalle?: unknown } =>
   !!r && typeof r === 'object' && 'error' in (r as Record<string, unknown>);
+
+/** 0.92.0 · La cuenta a la que se le reembolsa a quien pide, revisada antes
+ *  de guardarla: la CLABE son 18 dígitos y el último los verifica (la misma
+ *  regla que una cuenta de proveedor); banco y beneficiario son texto corto y
+ *  opcionales. Devuelve la cuenta limpia, o los errores por campo. Con
+ *  `undefined` no viene nada —y eso no es un error: el reembolso usa la
+ *  guardada—. */
+function revisarCuentaDeReembolso(v: unknown): { cuenta: { clabe: string; banco: string | null; beneficiario: string | null } } | { errores: Record<string, string> } | undefined {
+  if (v === undefined || v === null) return undefined;
+  const b = (typeof v === 'object' ? v : {}) as Record<string, unknown>;
+  const texto = (k: string, max: number) => (b[k] == null ? null : String(b[k]).trim().slice(0, max) || null);
+  const clabe = String(b.clabe ?? '').replace(/[\s-]/g, '');
+  const errores: Record<string, string> = {};
+  if (!clabe) errores.clabe = 'Falta la CLABE: son 18 dígitos.';
+  else if (!clabeValida(clabe)) errores.clabe = 'La CLABE no cuadra: son 18 dígitos y el último los verifica.';
+  if (Object.keys(errores).length) return { errores };
+  return { cuenta: { clabe, banco: texto('banco', 60), beneficiario: texto('beneficiario', 200) } };
+}
 
 /** El primer día del mes de una fecha, y el último. Para que la pantalla no
  *  tenga que calcular meses: los meses de 28, 30 y 31 días son justo donde se
@@ -107,7 +126,25 @@ export function montarOrdenes(rutas: App): void {
    *  después de llenar el formulario. */
   rutas.get('/:o/ordenes/permisos', async (c) => {
     if (!puedePedir(c)) return err(c, 'sin_permiso', 403);
-    return ok(c, { puede_comprar: !c.get('quien').sin_compras, puede_pagar: await esContador(c) });
+    const q = c.get('quien');
+    // 0.92.0 · Y su cuenta de reembolso, para que supply101 la pida sólo si falta.
+    return ok(c, { puede_comprar: !q.sin_compras, puede_pagar: await esContador(c), cuenta_reembolso: await stub(c).cuentaDeReembolsoDe(q.usuario_id) });
+  });
+
+  /** 0.92.0 · Guardar o cambiar la cuenta a la que se me reembolsa. Es MI
+   *  cuenta: la de quien pregunta, nunca la de otro —por eso no lleva id—.
+   *  Mike, 10-oct-2026: un reembolso se le paga sólo a quien lo pidió. */
+  rutas.put('/:o/ordenes/cuenta-reembolso', async (c) => {
+    if (!puedePedir(c)) return err(c, 'sin_permiso', 403);
+    const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+    const r = revisarCuentaDeReembolso(b);
+    if (!r || 'errores' in r) return err(c, 'datos_invalidos', 400, { errores: r?.errores ?? { clabe: 'Falta la CLABE: son 18 dígitos.' } });
+    const persona = (await stub(c).personalDeUsuario(c.get('quien').usuario_id)) as Record<string, unknown> | null;
+    const cuenta = await stub(c).guardarCuentaDeReembolso({
+      usuario_id: c.get('quien').usuario_id, ...r.cuenta,
+      beneficiario: r.cuenta.beneficiario ?? (persona ? String(persona.nombre) : c.get('sesion').correo),
+    });
+    return ok(c, { cuenta });
   });
 
   /** Lo pendiente en el buzón, en dos cifras: compras y reembolsos
@@ -220,8 +257,13 @@ export function montarOrdenes(rutas: App): void {
     }
     const s = c.get('sesion');
     const persona = (await stub(c).personalDeUsuario(q.usuario_id)) as Record<string, unknown> | null;
+    // 0.92.0 · La cuenta a la que se reembolsa, si la mandan: se revisa aquí
+    // y el DO la guarda como la suya. Una compra no trae cuenta: se ignora.
+    const cuenta = tipo === 'reembolso' ? revisarCuentaDeReembolso(b.cuenta) : undefined;
+    if (cuenta && 'errores' in cuenta) return err(c, 'datos_invalidos', 400, { errores: cuenta.errores });
     const r = await stub(c).crearOrden({
       ...b,
+      cuenta: cuenta ? cuenta.cuenta : null,
       // 0.62.1 rellenaba aquí `negocio_id`; desde 0.63.0 no hay negocios ni
       // columna: si una pantalla vieja lo manda, `crearOrden` no lo usa.
       // Estos cuatro NO los manda la pantalla: los pone la API. Si los
@@ -307,8 +349,13 @@ export function montarOrdenes(rutas: App): void {
       return err(c, 'sin_permiso', 403, { motivo: 'solo_quien_la_pidio' });
     }
     const cambios = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+    // 0.92.0 · Al corregir un reembolso se puede cambiar la cuenta; `cuenta`
+    // no es una columna, así que sale de `cambios` y va aparte.
+    const cuenta = actual.orden.tipo === 'reembolso' ? revisarCuentaDeReembolso(cambios.cuenta) : undefined;
+    if (cuenta && 'errores' in cuenta) return err(c, 'datos_invalidos', 400, { errores: cuenta.errores });
+    delete cambios.cuenta;
     const r = await stub(c).corregirOrden({
-      id, cambios, quien_usuario_id: c.get('quien').usuario_id, quien_nombre: c.get('sesion').correo,
+      id, cambios, cuenta: cuenta ? cuenta.cuenta : null, quien_usuario_id: c.get('quien').usuario_id, quien_nombre: c.get('sesion').correo,
     });
     if (esFalla(r)) return err(c, r.error, r.error === 'orden_no_esta_devuelta' ? 409 : 400, r.detalle);
     return ok(c, r);
