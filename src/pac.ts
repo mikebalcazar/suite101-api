@@ -286,7 +286,11 @@ async function llamar(c: Cuenta_, v: Ventanilla, paso: string, metodo: string, r
   let json: unknown = null;
   try { json = texto ? JSON.parse(texto) : null; } catch { json = texto; }
   if (r.status === 401 || r.status === 403) return { error: 'pac_credenciales', detalle: { paso, http: r.status, motivo: 'Facturama no acepta el usuario y la contraseña' } };
-  if (r.status >= 500) return { error: 'pac_no_responde', detalle: { paso, http: r.status, motivos: frases(json) } };
+  if (r.status >= 500) {
+    // Un 5xx con mensaje (el sandbox lo da al cancelar recién timbrado) se dice tal cual: «no contestó» a secas esconde el porqué.
+    const motivos = frases(json);
+    return { error: 'pac_no_responde', detalle: { paso, http: r.status, motivos, ...(motivos.length ? { motivo: `Facturama contestó con error (${r.status}): ${motivos.join(' · ')}` } : {}) } };
+  }
   if (!r.ok) return { error: 'pac_rechaza', detalle: { paso, http: r.status, motivos: frases(json) } };
   return { estado: r.status, json };
 }

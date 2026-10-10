@@ -804,12 +804,19 @@ async function timbrar() {
   const id = t.data.cfdi_id;
   const xml = await fetch(`${STAGING}/orgs/${ORG}/fiscal/cfdi/${id}/xml`, { headers: { 'X-App': app, Cookie: galleta } });
   const texto = await xml.text();
-  rev(xml.status === 200 && texto.includes('TimbreFiscalDigital') && texto.includes(t.data.uuid), 'su XML timbrado quedó guardado, con el timbre de Facturama', `${xml.status} · ${texto.length} caracteres`);
+  rev(xml.status === 200 && texto.includes('TimbreFiscalDigital') && texto.toUpperCase().includes(String(t.data.uuid).toUpperCase()), 'su XML timbrado quedó guardado, con el timbre de Facturama', `${xml.status} · ${texto.length} caracteres · timbre ${texto.includes('TimbreFiscalDigital')} · uuid ${texto.toUpperCase().includes(String(t.data.uuid).toUpperCase())}`);
   const pdf = await fetch(`${STAGING}/orgs/${ORG}/fiscal/cfdi/${id}/pdf`, { headers: { 'X-App': app, Cookie: galleta } });
   const bytes = new Uint8Array(await pdf.arrayBuffer());
   rev(pdf.status === 200 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46, 'el PDF lo arma Facturama y aquí se sirve', `${pdf.status} · ${bytes.length} bytes`);
-  const can = await pedir(STAGING, `/orgs/${ORG}/fiscal/cfdi/${id}/cancelar`, { app, method: 'POST', body: { motivo: '02' } });
-  rev(can.estado === 200 && ['cancelada', 'pendiente'].includes(can.data?.estado), 'y se cancela ante el SAT (sandbox) con motivo 02', `${can.estado} ${can.error ?? ''} · ${can.data?.estado ?? ''} · ${can.data?.mensaje ?? ''} · ${can.ms} ms`);
+  // El SAT tarda unos segundos en registrar lo recién timbrado: cancelar al
+  // instante puede contestar error; se intenta hasta tres veces, 15 s entre una y otra.
+  let can = null;
+  for (let intento = 1; intento <= 3; intento++) {
+    can = await pedir(STAGING, `/orgs/${ORG}/fiscal/cfdi/${id}/cancelar`, { app, method: 'POST', body: { motivo: '02' } });
+    if (can.estado === 200) break;
+    if (intento < 3) await new Promise((r) => setTimeout(r, 15_000));
+  }
+  rev(can.estado === 200 && ['cancelada', 'pendiente'].includes(can.data?.estado), 'y se cancela ante el SAT (sandbox) con motivo 02', `${can.estado} ${can.error ?? ''} ${JSON.stringify(can.detalle?.motivos ?? can.detalle?.motivo ?? '')} · ${can.data?.estado ?? ''} · ${can.data?.mensaje ?? ''} · ${can.ms} ms`);
   const em = await pedir(STAGING, `/orgs/${ORG}/fiscal/emisiones`, { app });
   rev(em.estado === 200 && em.data?.filas?.[0]?.estado === 'timbrada' && em.data.filas[0].serie === 'HUMO', 'la emisión quedó registrada con su folio', JSON.stringify(em.data?.filas?.[0] ?? {}).slice(0, 120));
 }
