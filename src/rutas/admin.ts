@@ -20,7 +20,7 @@ import {
 import { correoValido, normalizaCorreo } from '../lib';
 import { cloudflareDe, darDeAltaNombres, dominioLimpio, olvidarDominio, quitarNombres, refrescarNombres, nombresDeLaOrg } from '../dominios';
 import { correoBienvenida, enviarCorreo } from '../auth/correo';
-import { LLAVE_APP, APPS } from '../../schema/tipos';
+import { plataformasDe } from '../plataformas';
 import type { Org } from '../../schema/tipos';
 import { err, ok, type Ctx, type Vars } from '../http';
 import type { Env } from '../entorno';
@@ -105,15 +105,12 @@ rutas.get('/orgs/:o/roster', async (c) => {
 const DIA = /^\d{4}-\d{2}-\d{2}$/;
 const texto = (v: unknown, max = 120): string | null => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 
-/** Los nombres con los que se le cuentan al director sus apps. */
-const nombresDeApps = (o: Org): string[] =>
-  APPS.filter((a) => o.apps[LLAVE_APP[a]] === true && !['master101', 'workshop101', 'suite101'].includes(a));
-
 /** Manda el correo de bienvenida al director y lo apunta. Nunca truena: si el
  *  correo no sale, la empresa ya quedó creada y master101 lo dice con palabras. */
 async function mandarBienvenida(c: Ctx, o: Org, correo: string, nombre: string | null): Promise<{ enviado: boolean; motivo?: string }> {
   const urlPanel = c.env.URL_PANEL_DIRECTOR || 'https://workshop101.taller101.com';
-  const msg = correoBienvenida({ empresa: o.nombre, director: nombre, correo, urlPanel, apps: nombresDeApps(o) });
+  // La lista de sus plataformas, con la dirección de su dominio si tiene (10-oct).
+  const msg = correoBienvenida({ empresa: o.nombre, director: nombre, correo, urlPanel, plataformas: plataformasDe(o, urlPanel) });
   const envio = await enviarCorreo(c.env, { para: correo, ...msg, conBaja: true });
   if (envio.enviado) await marcarBienvenida(c.env, o.id);
   await apuntaAdmin(c.env, { quien: quien(c), org_id: o.id, campo: 'bienvenida', despues: envio.enviado ? `enviada a ${correo}` : `no salió (${envio.motivo}) a ${correo}` });
@@ -152,6 +149,17 @@ rutas.post('/orgs', async (c) => {
 
   await apuntaAdmin(c.env, { quien: quien(c), org_id: id, campo: 'creada', despues: `${nueva.nombre} · ${Object.entries(nueva.apps).filter(([, v]) => v).map(([k]) => k).join(', ') || 'sin apps'} · ${nueva.cortesia ? 'cortesía' : `pagada hasta ${nueva.paga_hasta}`}` });
 
+  /* 2-oct · el dominio propio, desde el alta (Mike: «cuando abra una nueva
+   * empresa, quiero poder poner su dominio»). Si falla —token sin poner, un
+   * dominio que no tiene forma— la empresa YA quedó creada y se dice en
+   * `dominio_aviso`, en vez de deshacer el alta por un CNAME. */
+  /* Va ANTES de la bienvenida (10-oct): el correo lleva las direcciones con
+   * el dominio de la empresa. */
+  let dominio_aviso: string | null = null;
+  if (cuerpo.dominio) {
+    const r = await cambiarDominio(c, (await org(c.env, id))!, cuerpo.dominio);
+    if ('error' in r) dominio_aviso = `${r.error}${r.detalle ? ': ' + JSON.stringify(r.detalle) : ''}`;
+  }
   let director: { usuario_id: string; correo: string; rol: 'owner' } | null = null;
   let bienvenida: { enviado: boolean; motivo?: string } | null = null;
   if (directorCorreo) {
@@ -159,16 +167,7 @@ rutas.post('/orgs', async (c) => {
     await ponerMiembro(c.env, id, usuario.id, 'owner', []);
     await apuntaAdmin(c.env, { quien: quien(c), org_id: id, campo: 'miembro', antes: null, despues: `${directorCorreo} (owner) · director` });
     director = { usuario_id: usuario.id, correo: directorCorreo, rol: 'owner' };
-    bienvenida = await mandarBienvenida(c, nueva, directorCorreo, texto(cuerpo.director?.nombre));
-  }
-  /* 2-oct · el dominio propio, desde el alta (Mike: «cuando abra una nueva
-   * empresa, quiero poder poner su dominio»). Si falla —token sin poner, un
-   * dominio que no tiene forma— la empresa YA quedó creada y se dice en
-   * `dominio_aviso`, en vez de deshacer el alta por un CNAME. */
-  let dominio_aviso: string | null = null;
-  if (cuerpo.dominio) {
-    const r = await cambiarDominio(c, (await org(c.env, id))!, cuerpo.dominio);
-    if ('error' in r) dominio_aviso = `${r.error}${r.detalle ? ': ' + JSON.stringify(r.detalle) : ''}`;
+    bienvenida = await mandarBienvenida(c, (await org(c.env, id))!, directorCorreo, texto(cuerpo.director?.nombre));
   }
   const conTodo = (await org(c.env, id))!;
   return ok(c, { org: conTodo, org_db_version: version, director, bienvenida, dominio_aviso }, 201);
