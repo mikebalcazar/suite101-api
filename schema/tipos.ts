@@ -17,7 +17,13 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.90.2 (EL PENDIENTE SE REASIGNA. Mike, 9-oct: «una vez
+ * Versión del contrato: 0.91.0 (PATRON101: LA TASA ANUAL EQUIVALENTE. Mike,
+ * 9-oct: «Si en 2 meses se va a pagar el 3% (…) poner que es una tasa de
+ * rendimiento del 18% anual para que la gente pueda compararlo». El `ejemplo`
+ * de una ronda trae `tasa_anual_pb` (anual simple, sin reinversión) y `plazo`
+ * («2 meses»); el correo y el mensaje de WhatsApp de la ronda lo dicen. Sólo
+ * agrega.) Antes:
+ * 0.90.2 (EL PENDIENTE SE REASIGNA. Mike, 9-oct: «una vez
  * creado el ítem de punchlist no puedo editar a quien se le asigna». PATCH
  * /quell/punch/:id con `assignee_id` vacío o null lo deja SIN asignar; sin
  * el campo, no lo toca. Cambiarlo a otro ya se podía.)
@@ -1501,7 +1507,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.90.2';
+export const VERSION_CONTRATO = '0.91.0';
 
 /* ─────────────── órdenes de compra (0.21.0; cancelada desde 0.86.0) ─────────────── */
 

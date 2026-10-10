@@ -11,7 +11,7 @@
  * dinero en pesos —llega en centavos y se pinta aquí, una sola vez—.
  */
 
-import { tasaEnPalabras } from './inversion';
+import { porcientoEnPalabras, tasaEnPalabras } from './inversion';
 import type { TipoTasa } from '../schema/tipos';
 
 const AZUL = '#0080C1';
@@ -71,7 +71,27 @@ export interface DatosRonda {
   fecha_inicio: string; fecha_vencimiento: string | null; fecha_limite: string | null;
   /** Lo que regresa un préstamo de $10,000 con estas condiciones. */
   ejemplo_total: number | null;
+  /** La tasa anual simple a la que equivale (0.91.0), en puntos base. */
+  tasa_anual_pb?: number | null;
+  /** Cuánto dura: «2 meses». */
+  plazo?: string | null;
   url: string;
+}
+
+/** El rendimiento como se pactó, con su plazo cuando la tasa es por todo el
+ *  plazo: «3 % por todo el plazo (2 meses)». Sin el plazo, ese 3 % no dice
+ *  nada. */
+export function rendimientoEnPalabras(d: Pick<DatosRonda, 'tipo_tasa' | 'tasa_pb' | 'plazo'>): string {
+  const t = tasaEnPalabras(d.tipo_tasa, d.tasa_pb);
+  return d.tipo_tasa === 'fija' && d.plazo ? `${t} (${d.plazo})` : t;
+}
+
+/** «18 % anual», o nada si la tasa ya es anual (decirlo dos veces estorba).
+ *  Mike, 9-oct: «para que la gente pueda compararlo con algún número más
+ *  familiar (tasa anual de rendimiento)». */
+export function anualEnPalabras(d: Pick<DatosRonda, 'tipo_tasa' | 'tasa_anual_pb'>): string | null {
+  if (d.tipo_tasa === 'anual' || d.tasa_anual_pb == null || d.tasa_anual_pb <= 0) return null;
+  return `${porcientoEnPalabras(d.tasa_anual_pb)} anual`;
 }
 
 /** El riesgo, en una frase, en todo aviso de ronda (0.84.0; Mike, 8-oct:
@@ -90,10 +110,12 @@ export function comoSePaga(d: Pick<DatosRonda, 'esquema' | 'frecuencia' | 'num_p
 }
 
 export function correoRondaAbierta(d: DatosRonda): Mensaje {
-  const tasa = tasaEnPalabras(d.tipo_tasa, d.tasa_pb);
+  const tasa = rendimientoEnPalabras(d);
+  const anual = anualEnPalabras(d);
   const lineas = [
     `Se busca juntar: ${pesos(d.monto_meta)}`,
     `Rendimiento: ${tasa}`,
+    ...(anual ? [`Equivale a una tasa de rendimiento de: ${anual}`] : []),
     `Cómo se paga: ${comoSePaga(d)}`,
     `El dinero se necesita el: ${diaEnPalabras(d.fecha_inicio)}`,
     ...(d.monto_minimo ? [`Se entra desde: ${pesos(d.monto_minimo)}`] : []),
@@ -113,6 +135,7 @@ export function correoRondaAbierta(d: DatosRonda): Mensaje {
       + tabla(
         renglon('Se busca juntar', pesos(d.monto_meta), true)
         + renglon('Rendimiento', tasa, true)
+        + (anual ? renglon('Equivale a una tasa de rendimiento de', anual, true) : '')
         + renglon('Cómo se paga', comoSePaga(d))
         + renglon('El dinero se necesita el', diaEnPalabras(d.fecha_inicio))
         + (d.monto_minimo ? renglon('Se entra desde', pesos(d.monto_minimo), true) : '')
@@ -132,7 +155,8 @@ export function mensajeWhatsApp(d: DatosRonda): string {
     `Hola, ${d.nombre_persona}. ${d.empresa} abrió una ronda de inversión: *${d.ronda}*.`,
     '',
     `• Se busca juntar: ${pesos(d.monto_meta)}`,
-    `• Rendimiento: ${tasaEnPalabras(d.tipo_tasa, d.tasa_pb)}`,
+    `• Rendimiento: ${rendimientoEnPalabras(d)}`,
+    ...(anualEnPalabras(d) ? [`• Equivale a una tasa de rendimiento de *${anualEnPalabras(d)}*`] : []),
     `• ${comoSePaga(d)}`,
     `• El dinero se necesita el ${diaEnPalabras(d.fecha_inicio)}`,
     ...(d.ejemplo_total ? [`• Por cada $10,000.00 regresan ${pesos(d.ejemplo_total)}`] : []),

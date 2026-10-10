@@ -118,7 +118,8 @@ function datosDeRonda(empresa: string, ronda: Fila, persona: string, url: string
     tipo_tasa: ronda.tipo_tasa, tasa_pb: Number(ronda.tasa_pb), esquema: ronda.esquema,
     frecuencia: ronda.frecuencia ?? null, num_pagos: ronda.num_pagos ?? null,
     fecha_inicio: String(ronda.fecha_inicio), fecha_vencimiento: ronda.fecha_vencimiento ?? null, fecha_limite: ronda.fecha_limite ?? null,
-    ejemplo_total: ronda.ejemplo?.totales?.total ?? null, url,
+    ejemplo_total: ronda.ejemplo?.totales?.total ?? null,
+    tasa_anual_pb: ronda.ejemplo?.tasa_anual_pb ?? null, plazo: ronda.ejemplo?.plazo ?? null, url,
   };
 }
 
