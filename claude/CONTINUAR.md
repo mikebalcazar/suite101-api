@@ -1,3 +1,5 @@
+> **11-oct-2026 · menú de la suite sin destello al pasar el mouse (API #347).** Sólo el pulso neón; fuera `neonStrobe` en `src/paginas/suite.html`.
+
 > **11-oct-2026 · el generador de una partida en PDF y Excel (API 0.96.0 #345; cost101 #13) y «Otros documentos» legible en quote (#95).** `GET /orgs/:o/productos/:id/xlsx`; en cost101, «PDF» y «Excel» en la ficha de la partida. Ver `muro/…-jr-generador-pdf-excel.md`.
 
 > **11-oct-2026 · cost y quote: tipo de precio base editable, «Artículos comprados» (API 0.95.0 #342 #343, org 0051; cost101 #12; quote #93), «agregar desde catálogo» en el renglón de quote (#92) y el producto de cost entra a quote con su PU con IVA (#94).** Ver `muro/…-jr-cost-quote-tipos-y-catalogo.md`.
