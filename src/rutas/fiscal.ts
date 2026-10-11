@@ -11,6 +11,8 @@
  *   POST /fiscal/cfdi/:id/desligar     deshacer una liga con un movimiento
  *   POST /fiscal/cfdi/:id/trato        normal | inversion | no_deducible
  *   GET  /fiscal/sugerencias           factura ↔ movimiento que se le parece
+ *   GET  /fiscal/cfdi/:id/pagos-posibles  los pagos que pueden ser parte de ella (0.94.0)
+ *   POST /fiscal/cfdi/:id/componer     ligar dos o más pagos de una vez (0.94.0)
  *   POST /fiscal/verificar             preguntarle al SAT si siguen vigentes
  *   GET  /fiscal/estado-de-cuenta      sólo lo facturado, ingresos y egresos
  *   GET  /fiscal/impuestos?anio=       IVA, ISR provisional e ISR anual
@@ -205,6 +207,26 @@ export function montarFiscal(rutas: App): void {
   });
 
   /* ─────────────── la liga con el dinero ─────────────── */
+
+  /* 0.94.0 · Una factura cobrada (o pagada) en varios pagos: los que pueden
+   * ser parte de ella, y ligar varios de una vez, todos o ninguno. */
+  rutas.get('/:o/fiscal/cfdi/:id/pagos-posibles', async (c) => {
+    if (!puedeLeer(c)) return err(c, 'sin_permiso', 403);
+    const r = await stub(c).fiscal('pagosPosibles', [c.req.param('id')!]);
+    if (esFalla(r)) return err(c, r.error, 404, r.detalle);
+    return ok(c, r);
+  });
+
+  rutas.post('/:o/fiscal/cfdi/:id/componer', async (c) => {
+    if (!puedeLeer(c)) return err(c, 'sin_permiso', 403);
+    const b = await c.req.json<{ movimientos?: unknown }>().catch(() => ({}) as never);
+    const r = await stub(c).fiscal('componer', [{ cfdi_id: c.req.param('id')!, movimientos: b?.movimientos }]);
+    if (esFalla(r)) {
+      const estado = r.error === 'cfdi_desconocido' ? 404 : r.error === 'excede_la_factura' || r.error === 'pagos_invalidos' || r.error === 'cfdi_cancelada' ? 409 : 400;
+      return err(c, r.error, estado, r.detalle);
+    }
+    return ok(c, r);
+  });
 
   rutas.get('/:o/fiscal/sugerencias', async (c) => {
     if (!puedeLeer(c)) return err(c, 'sin_permiso', 403);

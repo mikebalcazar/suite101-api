@@ -338,6 +338,103 @@ export class MotorFiscal {
     return salida;
   }
 
+  /** 0.94.0 · Los pagos que pueden ser PARTE de una factura (Mike, 11-oct:
+   *  «esta factura me la pagaron en 2 transferencias, el mismo día (…) poder
+   *  seleccionar 2 o más pagos que son parte del monto de la factura para
+   *  ligarlos»). `sugerencias` sólo propone el que trae el monto completo;
+   *  aquí van todos los del mismo lado que caben en lo que falta, a 45 días
+   *  o menos, libres (no respaldan otra factura vigente), del más cercano al
+   *  más lejano. Y `combinaciones`: de dos o tres de ellos, las que suman lo
+   *  que falta (con un peso de tolerancia), las más juntas en fecha primero. */
+  pagosPosibles(cfdi_id: string): { cfdi: Fila; restante: number; movimientos: Fila[]; combinaciones: Array<{ ids: string[]; suma: number; dias: number }> } | Falla {
+    const f = this.cfdi(cfdi_id);
+    if (!f) return { error: 'cfdi_desconocido' };
+    const aplicado = Number((this.una(`SELECT COALESCE(SUM(monto_aplicado),0) AS s FROM cfdi_movimientos WHERE cfdi_id = ?`, cfdi_id) as Fila).s);
+    const restante = Number(f.total) - aplicado;
+    const vacia = { cfdi: this.forma(f), restante, movimientos: [], combinaciones: [] };
+    if (f.estado !== 'vigente' || (f.tipo_comprobante ?? 'I') !== 'I' || restante <= TOLERANCIA_MONTO) return vacia;
+    const delNombre = fichas(f.razon_social);
+    const movs = this.todas(
+      `SELECT m.id, m.fecha, m.monto, m.tipo, m.descripcion, m.contraparte_tipo, m.contraparte_id, m.contraparte_nombre, m.cuenta_id, m.proyecto_id
+         FROM movimientos m
+        WHERE m.tipo = ? AND m.transfer_id IS NULL
+          AND COALESCE(m.categoria, '') NOT IN (?, ?)
+          AND m.monto > 0 AND m.monto <= ?
+          AND m.fecha >= date(?, ?) AND m.fecha <= date(?, ?)
+          AND NOT EXISTS (SELECT 1 FROM cfdi_movimientos lm JOIN cfdi k ON k.id = lm.cfdi_id
+                           WHERE lm.movimiento_id = m.id AND k.estado = 'vigente')`,
+      String(f.tipo), CATEGORIA_PRESTAMO_RECIBIDO, CATEGORIA_PRESTAMO_CAPITAL,
+      restante + TOLERANCIA_MONTO,
+      String(f.fecha), `-${DIAS_LEJOS} days`, String(f.fecha), `+${DIAS_LEJOS} days`,
+    )
+      .map((m): Fila & { dias: number; coincide_nombre: boolean } => {
+        const suyo = fichas(`${m.contraparte_nombre ?? ''} ${m.descripcion ?? ''}`);
+        return { ...m, dias: diasEntre(String(m.fecha), String(f.fecha)), coincide_nombre: delNombre.some((x) => suyo.includes(x)) };
+      })
+      .sort((a, b) => a.dias - b.dias || Number(b.coincide_nombre) - Number(a.coincide_nombre) || Number(b.monto) - Number(a.monto))
+      .slice(0, 60);
+    /* Las combinaciones salen de los 30 más cercanos: con tres de cada uno
+     * son unas cuatro mil sumas, nada para la base. */
+    const base = movs.slice(0, 30);
+    const combinaciones: Array<{ ids: string[]; suma: number; dias: number }> = [];
+    const prueba = (grupo: typeof base) => {
+      const suma = grupo.reduce((t, m) => t + Number(m.monto), 0);
+      if (Math.abs(suma - restante) <= TOLERANCIA_MONTO) combinaciones.push({ ids: grupo.map((m) => String(m.id)), suma, dias: Math.max(...grupo.map((m) => m.dias)) });
+    };
+    for (let i = 0; i < base.length; i++) {
+      for (let j = i + 1; j < base.length; j++) {
+        prueba([base[i], base[j]]);
+        for (let k = j + 1; k < base.length; k++) prueba([base[i], base[j], base[k]]);
+      }
+    }
+    combinaciones.sort((a, b) => a.ids.length - b.ids.length || a.dias - b.dias);
+    return { cfdi: this.forma(f), restante, movimientos: movs, combinaciones: combinaciones.slice(0, 5) };
+  }
+
+  /** 0.94.0 · Ligar VARIOS pagos a una factura de una vez: todos o ninguno.
+   *  Cada pago se aplica completo; la suma no puede pasar de lo que falta
+   *  (con un peso de tolerancia), porque el sobrante de un pago no se
+   *  quedaría en ningún lado. Sólo pagos del mismo lado, que no sean un
+   *  traspaso ni un préstamo y que no respalden ya otra factura vigente. */
+  componer(a: { cfdi_id: string; movimientos: unknown }): { ok: true; cfdi: Fila; ligados: string[]; aplicado_total: number } | Falla {
+    const f = this.cfdi(a.cfdi_id);
+    if (!f) return { error: 'cfdi_desconocido' };
+    if (f.estado !== 'vigente') return { error: 'cfdi_cancelada' };
+    if ((f.tipo_comprobante ?? 'I') !== 'I') return { error: 'no_es_factura', detalle: { motivo: 'sólo una factura (tipo I) se liga con pagos' } };
+    const ids = Array.isArray(a.movimientos) ? [...new Set(a.movimientos.filter((x): x is string => typeof x === 'string' && !!x))] : [];
+    if (ids.length < 2) return { error: 'datos_invalidos', detalle: { motivo: 'se escogen dos o más pagos; para uno solo está «Es éste»' } };
+    const aplicado = Number((this.una(`SELECT COALESCE(SUM(monto_aplicado),0) AS s FROM cfdi_movimientos WHERE cfdi_id = ?`, a.cfdi_id) as Fila).s);
+    const restante = Number(f.total) - aplicado;
+    const malos: Array<{ movimiento_id: string; motivo: string }> = [];
+    let suma = 0;
+    for (const id of ids) {
+      const m = this.una(`SELECT id, tipo, monto, transfer_id, categoria FROM movimientos WHERE id = ?`, id) as Fila | null;
+      if (!m) { malos.push({ movimiento_id: id, motivo: 'no existe' }); continue; }
+      if (m.tipo !== f.tipo) malos.push({ movimiento_id: id, motivo: f.tipo === 'ingreso' ? 'no es un cobro' : 'no es un pago' });
+      else if (m.transfer_id) malos.push({ movimiento_id: id, motivo: 'es un traspaso entre cuentas' });
+      else if ([CATEGORIA_PRESTAMO_RECIBIDO, CATEGORIA_PRESTAMO_CAPITAL].includes(String(m.categoria ?? ''))) malos.push({ movimiento_id: id, motivo: 'es un préstamo' });
+      else if (this.una(`SELECT 1 AS x FROM cfdi_movimientos lm JOIN cfdi k ON k.id = lm.cfdi_id WHERE lm.movimiento_id = ? AND k.estado = 'vigente' AND k.id <> ?`, id, a.cfdi_id)) {
+        malos.push({ movimiento_id: id, motivo: 'ya respalda otra factura' });
+      } else if (this.una(`SELECT 1 AS x FROM cfdi_movimientos WHERE movimiento_id = ? AND cfdi_id = ?`, id, a.cfdi_id)) {
+        malos.push({ movimiento_id: id, motivo: 'ya está ligado a esta factura' });
+      }
+      suma += Number(m.monto || 0);
+    }
+    if (malos.length) return { error: 'pagos_invalidos', detalle: { malos } };
+    if (suma > restante + TOLERANCIA_MONTO) return { error: 'excede_la_factura', detalle: { suma, restante, sobra: suma - restante } };
+    const ligados: string[] = [];
+    this.e.tx(() => {
+      for (const id of ids) {
+        const m = this.una(`SELECT monto FROM movimientos WHERE id = ?`, id) as Fila;
+        const r = this.e.ligar({ cfdi_id: a.cfdi_id, movimiento_id: id, monto_aplicado: Number(m.monto) });
+        if (esFalla(r)) throw new Error(`no se pudo ligar ${id}: ${r.error}`);
+        ligados.push(id);
+      }
+    });
+    const total = Number((this.una(`SELECT COALESCE(SUM(monto_aplicado),0) AS s FROM cfdi_movimientos WHERE cfdi_id = ?`, a.cfdi_id) as Fila).s);
+    return { ok: true, cfdi: this.forma(this.cfdi(a.cfdi_id)!), ligados, aplicado_total: total };
+  }
+
   /** Deshacer una liga. Quien confirma se puede equivocar, y sin esto la
    *  única salida era cancelar la factura. El movimiento vuelve a estar sin
    *  facturar sólo si ninguna otra factura vigente lo respalda. */

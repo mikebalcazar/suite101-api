@@ -5818,7 +5818,7 @@ export class OrgDB extends DurableObject<Env> {
    * entrada por RPC y la lista de lo que se puede llamar. Ligar y cancelar
    * se le prestan: son de la 0009 y siguen viviendo aquí. */
   private static readonly OPS_FISCAL: ReadonlySet<string> = new Set([
-    'importar', 'ponerArchivo', 'ponerArchivos', 'detalle', 'sugerencias', 'desligar', 'tratar',
+    'importar', 'ponerArchivo', 'ponerArchivos', 'detalle', 'sugerencias', 'pagosPosibles', 'componer', 'desligar', 'tratar',
     'porVerificar', 'anotarSat', 'estadoDeCuenta', 'impuestos',
     'ejercicio', 'guardarEjercicio', 'pagos', 'registrarPago', 'borrarPago', 'config', 'guardarConfig',
   ]);

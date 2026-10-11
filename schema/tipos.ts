@@ -17,7 +17,20 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.93.0 (TODAS LAS APPS CON EL DOMINIO DE LA EMPRESA.
+ * Versión del contrato: 0.94.0 (UNA FACTURA COBRADA EN VARIOS PAGOS. Mike,
+ * 11-oct: «esta factura me la pagaron en 2 transferencias, el mismo día (…)
+ * poder seleccionar 2 o más pagos que son parte del monto de la factura para
+ * ligarlos».
+ *   · GET /orgs/:o/fiscal/cfdi/:id/pagos-posibles → `PagosPosibles`: los
+ *     movimientos del mismo lado que caben en lo que falta, libres, a 45
+ *     días o menos (del más cercano), y `combinaciones` de 2 o 3 que suman
+ *     lo que falta con un peso de tolerancia.
+ *   · POST /orgs/:o/fiscal/cfdi/:id/componer {movimientos: string[]} (dos o
+ *     más): los liga todos o ninguno, cada uno completo. 409
+ *     `excede_la_factura` (detalle.sobra) o `pagos_invalidos`
+ *     (detalle.malos: [{movimiento_id, motivo}]); 400 con uno solo.)
+ * Antes:
+ * 0.93.0 (TODAS LAS APPS CON EL DOMINIO DE LA EMPRESA.
  * Mike, 10-oct: «ya necesito que todas las apps funcionen con el dominio de la
  * empresa». Los nombres que la API da de alta para una empresa con dominio
  * propio son ahora ONCE y van sin «101» (regla de Mike, 9-oct): dash, quell,
@@ -1544,7 +1557,16 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.93.0';
+export const VERSION_CONTRATO = '0.94.0';
+
+/** 0.94.0 · Los pagos que pueden ser parte de una factura. */
+export interface PagosPosibles {
+  cfdi: Record<string, unknown>;
+  /** Lo que le falta a la factura, en centavos. */
+  restante: number;
+  movimientos: Array<{ id: string; fecha: string; monto: number; tipo: string; descripcion: string | null; contraparte_nombre: string | null; dias: number; coincide_nombre: boolean }>;
+  combinaciones: Array<{ ids: string[]; suma: number; dias: number }>;
+}
 
 /* ─────────────── órdenes de compra (0.21.0; cancelada desde 0.86.0) ─────────────── */
 
