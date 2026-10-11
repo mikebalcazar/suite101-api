@@ -2,9 +2,10 @@
 
 **De:** draw101 · **6-oct-2026** · **Repo:** `descargas` · **Un archivo, un paso.**
 
-> **Al día, 7-oct 00:15 UTC.** Este recado se escribió después de la primera vez
-> que pasó. Al cerrar el día habían sido **TRES**, y las tres las corregí a mano.
-> La cuenta está abajo, en «Qué pasa hoy». El parche no cambió.
+> **Al día, 11-oct 17:05 UTC.** Este recado se escribió después de la primera
+> vez que pasó. Van **CUATRO**, y las cuatro las corregí a mano. La cuenta está
+> abajo, en «Qué pasa hoy». **El parche no ha cambiado ni una línea** desde el
+> 6-oct: sigue aplicando limpio y sigue siendo un archivo y un paso.
 
 ## Qué pasa hoy
 
@@ -19,17 +20,25 @@ guardia `revisar-descargas.py` —que vive dentro de ese flujo— tampoco. La p�
 se queda vieja y **nada sale rojo**. El guardia existe y no se está ejecutando en
 el momento en que hace falta.
 
-**LAS TRES VECES DE HOY**, cada una con la página apuntando a la versión
-anterior y cada una corregida a mano por mí:
+**LAS CUATRO VECES**, cada una con la página apuntando a la versión anterior y
+cada una corregida a mano por mí:
 
 | Entrega | Publicada (UTC) | La página seguía en | Commit del arreglo |
 |---|---|---|---|
-| draw101 **0.23.0** | 20:17 | 0.22.2 | `815d288` |
-| draw101 **0.23.1** | 21:10 | 0.23.0 | `1766b38` |
-| draw101 **0.24.0** | 23:54 | 0.23.1 | `ee74644` |
+| draw101 **0.23.0** | 6-oct 20:17 | 0.22.2 | `815d288` |
+| draw101 **0.23.1** | 6-oct 21:10 | 0.23.0 | `1766b38` |
+| draw101 **0.24.0** | 6-oct 23:54 | 0.23.1 | `ee74644` |
+| draw101 **0.25.0** | 11-oct 16:54 | 0.24.0 | `75207d8` |
 
-Tres entregas, tres arreglos a mano, el mismo día. Si hubiera estado puesto el
-paso de abajo, habrían sido cero.
+Cuatro entregas, cuatro arreglos a mano. Si hubiera estado puesto el paso de
+abajo, habrían sido cero. **Y la cuarta dice algo que las tres primeras no
+podían decir:** aquellas fueron el mismo día y se podía pensar que fue una mala
+tarde. Ésta es cinco días después, en una entrega hecha con calma, y volvió a
+pasar igual. No es despiste de un día: es que el paso no está.
+
+Lo único que cambia mientras no se aplique es el riesgo de que a alguien se le
+pase. La 0.25.0 la cacé porque corrí el guardia a mano; el día que no lo corra,
+el botón de la página va a bajar una versión vieja y nada va a salir rojo.
 
 ## Qué te pido
 
@@ -54,7 +63,7 @@ empuja `GITHUB_TOKEN`, no vuelve a disparar nada.
 El conector de GitHub que uso **no puede escribir archivos dentro de
 `.github/workflows/`** (403: `refusing to allow a GitHub App to create or update
 workflow ... without 'workflows' permission`). Por eso te lo paso. Todo lo demás
-de las tres entregas ya está publicado y verificado.
+de las cuatro entregas ya está publicado y verificado.
 
 ## Lo que ya comprobé
 
@@ -67,6 +76,11 @@ de las tres entregas ya está publicado y verificado.
     O sea que `armar-sitio.py` es idempotente y esto no va a andar commiteando
     de a gratis en cada corrida.
 - `revisar-descargas.py` después de rearmar: **0 problemas** (antes: 1).
+- **11-oct, con la 0.25.0:** las dos ramas otra vez, sobre un clon recién bajado.
+  Antes de rearmar, el guardia decía 1 problema y nombraba las dos ligas, la
+  vieja y la que debía ser; después, 0. Y `armar-sitio.py` corrido de nuevo
+  sobre la página ya al día no cambia nada: idempotente, confirmado en la
+  cuarta.
 
 ## El parche
 
@@ -141,4 +155,4 @@ tiene que decir `0 problema(s)`, y el log del flujo tiene que traer el paso
 
 Si quieres probarlo ya, sin esperar entrega: dispara `publicar-sitio` a mano
 (`workflow_dispatch`) y debe decir «la página ya estaba al día», porque dejé la
-página corregida en la 0.24.0.
+página corregida en la 0.25.0.
