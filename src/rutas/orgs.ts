@@ -18,9 +18,10 @@ import { invitarClienteEnSuite } from '../clientes';
 import { crearUsuario } from '../maestro';
 import { guardarPin, normalizaCorreo, pinAceptable, ulid } from '../lib';
 import { TIPO_XLSX, xlsx, type Celda } from '../xlsx';
+import { libroDelGenerador } from '../generador-xlsx';
 import { empresaDe } from '../empresa';
 import { tituloDeLiga, urlPermitida } from '../titulo';
-import { ESTADOS_PRODUCTO, TIPOS_COSTO, limpiarMiembros } from '../costos';
+import { ESTADOS_PRODUCTO, TIPOS_COSTO, hoyMx, limpiarMiembros } from '../costos';
 import { montarOrdenes } from './ordenes';
 import { montarObras } from './obras';
 import { montarNomina } from './nomina';
@@ -1598,6 +1599,35 @@ rutas.get('/:o/costos', async (c) => {
     puede_aprobar: dirige(c),
     rol: quien.rol ?? null,
     iva: 0.16,
+  });
+});
+
+/** GET /orgs/:o/productos/:id/xlsx — el generador de una partida en Excel
+ *  (Mike, 11-oct-2026: «exportar el generador del producto del catálogo en
+ *  cost101 en formato PDF y excel»). Lo mismo que puede leer /costos. */
+rutas.get('/:o/productos/:id/xlsx', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro') return err(c, 'sin_permiso', 403, { motivo: 'los costos los ven los miembros de la empresa' });
+  if (!APPS_DE_COSTOS.has(c.get('app'))) return err(c, 'sin_permiso', 403, { motivo: 'los costos se leen desde cost101 o quote101', app: c.get('app') });
+  const sujeto = { usuario_id: quien.usuario_id, clase: quien.clase, ref_id: quien.ref_id, ve_dinero: quien.ve_dinero };
+  const [costos, cuadrillas, productos] = await Promise.all([
+    stub(c).listar('costos_base', {}, sujeto, TOPE_MAXIMO),
+    stub(c).listar('cuadrillas', {}, sujeto, TOPE_MAXIMO),
+    stub(c).listar('productos', {}, sujeto, TOPE_MAXIMO),
+  ]);
+  const producto = productos.filas.find((p) => p.id === c.req.param('id'));
+  if (!producto) return err(c, 'no_encontrado', 404);
+  if (!producto.apu) return err(c, 'sin_receta', 409, { motivo: 'ese producto no se arma en cost101: no tiene generador' });
+  const libro = xlsx(libroDelGenerador(producto, costos.filas, cuadrillas.filas, productos.filas));
+  const limpio = String(producto.codigo || producto.nombre || 'partida')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'partida';
+  return new Response(libro as unknown as BodyInit, {
+    headers: {
+      'content-type': TIPO_XLSX,
+      'content-disposition': `attachment; filename="generador-${limpio}-${hoyMx()}.xlsx"`,
+      'cache-control': 'no-store',
+    },
   });
 });
 
