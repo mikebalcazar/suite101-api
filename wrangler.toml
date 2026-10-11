@@ -105,14 +105,14 @@ ORIGENES = "https://t101-portal.mike-929.workers.dev,https://bitacora-obra.mike-
 URL_PUBLICA = "https://suite101-api.mike-929.workers.dev"
 # Desde el 25-sep-2026 workshop101 vive en su dominio propio; la de
 # workers.dev sigue viva, pero manda para allá. Los correos llevan la buena.
-URL_PANEL_DIRECTOR = "https://workshop101.taller101.com"
+URL_PANEL_DIRECTOR = "https://workshop.suite101.app"
 # supply101, a donde manda el correo de «orden pagada» (29-sep-2026: antes
 # apuntaba a esta API y salía `sin_sesion`).
-URL_SUPPLY = "https://supply101.taller101.com"
+URL_SUPPLY = "https://supply.suite101.app"
 # patron101 (nació como investor101 el 8-oct-2026; Mike le cambió el nombre ese
 # día): a donde mandan los correos de rondas, ofertas y pagos. La variable y el
 # Worker conservan el nombre interno.
-URL_INVESTOR = "https://patron101.taller101.com"
+URL_INVESTOR = "https://patron.suite101.app"
 CORREO_QUELL = "quell101 <bitacora@envios.taller101.mx>"
 CORREO_ROSTER = "roster101 <expedientes@envios.taller101.mx>"
 # El dominio propio de cada empresa (DOMINIOS.md): la zona de Cloudflare for

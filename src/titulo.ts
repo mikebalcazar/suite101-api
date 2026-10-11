@@ -59,7 +59,7 @@ export async function tituloDeLiga(u: URL, traer: typeof fetch = fetch): Promise
   try {
     r = await traer(u.toString(), {
       redirect: 'follow',
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Suite101/1.0; +https://taller101.com)', Accept: 'text/html,application/xhtml+xml' },
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Suite101/1.0; +https://suite101.app)', Accept: 'text/html,application/xhtml+xml' },
       signal: AbortSignal.timeout(5000),
     });
   } catch { return null; }

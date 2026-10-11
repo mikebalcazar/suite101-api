@@ -389,12 +389,12 @@ describe('B · la cara de cliente, con la invitación pasando por la suite', () 
      * y abajo «Responder» con la liga a los puntos de la obra. */
     /* 5-oct: el portal del cliente es peek101. La liga va a la obra en peek
      * (`#/obra/OBRA`), y la dirección de peek se deduce de la de quell. */
-    expect(aviso.liga).toMatch(new RegExp(`^https://peek101[^/]*/#/obra/${obraA}$`));
+    expect(aviso.liga).toMatch(new RegExp(`^https://peek(101)?[.-][^/]*/#/obra/${obraA}$`));
     expect(sitioPeek('https://quell101.taller101.com')).toBe('https://peek101.taller101.com');
     expect(sitioPeek('https://quell101.acme.com.mx')).toBe('https://peek101.acme.com.mx');
     expect(sitioPeek('https://quell.acme.com.mx'), 'en el dominio de la empresa, sin el 101').toBe('https://peek.acme.com.mx');
     expect(sitioPeek('https://bitacora-obra-staging.mike-929.workers.dev')).toBe('https://peek101-staging.mike-929.workers.dev');
-    expect(sitioPeek('')).toBe('https://peek101.taller101.com');
+    expect(sitioPeek('')).toBe('https://peek.suite101.app');
     expect(aviso.dudas).toEqual([{ texto: '¿De qué color va el mueble de TV?', pieza: expect.stringMatching(/^[A-Z]+-\d+ · /) }]);
     const correo = correoDePuntos({ sitio: 'https://peek101.taller101.com', quien: { name: 'Cliente' }, obra: { id: obraA, name: 'Obra <A>' }, dudas: aviso.dudas });
     expect(correo.asunto).toBe('1 punto por definir en Obra <A>');

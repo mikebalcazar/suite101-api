@@ -5721,7 +5721,7 @@ export class OrgDB extends DurableObject<Env> {
         FILES: e.ARCHIVOS,
         SESION: sesion,
         PREFIJO_R2: `orgs/${org}/quell/`,
-        SITIO: req.headers.get('x-sitio') || 'https://quell101.taller101.com',
+        SITIO: req.headers.get('x-sitio') || 'https://quell.suite101.app',
         APP_NAME: 'quell101',
         MAIL_FROM: e.CORREO_QUELL || 'quell101 <bitacora@envios.taller101.mx>',
         RESEND_API_KEY: e.RESEND_API_KEY,
