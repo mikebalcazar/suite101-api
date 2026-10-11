@@ -329,6 +329,14 @@ describe('cambiar de tipo y los artículos comprados (0.95.0)', () => {
     const p = (await o('mike', `/productos/${partida}`)).data;
     expect(p.desglose).toMatchObject({ mat: 264000, art: 0, cd: 264000 });
   });
+  it('un destajo (mano de obra por unidad) que pasa a comprado queda por pieza; y a mano de obra se llega por hora', async () => {
+    const c = await o('mike', '/costos_base', { method: 'POST', json: { nombre: 'Tarja prefabricada', tipo: 'mo', unidad: 'unidad', precio: 90000 } });
+    expect(c.data.unidad).toBe('unidad');
+    const r = await o('mike', `/costos_base/${c.data.id}`, { method: 'PATCH', json: { tipo: 'comprado' } });
+    expect(r.data.unidad).toBe('pza');
+    const m = await o('mike', `/costos_base/${c.data.id}`, { method: 'PATCH', json: { tipo: 'mo' } });
+    expect(m.data.unidad).toBe('h');
+  });
   it('una clave escrita a mano se respeta al cambiar de tipo', async () => {
     const c = await o('mike', '/costos_base', { method: 'POST', json: { clave: 'MIO-7', nombre: 'Cubierta de granito', tipo: 'material', precio: 500000 } });
     const r = await o('mike', `/costos_base/${c.data.id}`, { method: 'PATCH', json: { tipo: 'comprado' } });
@@ -394,7 +402,7 @@ describe('quote101 lee; no escribe', () => {
   it('lee los precios base y el catálogo de productos', async () => {
     const base = await o('mike', '/costos_base?limite=5000', { app: 'cotizador101' });
     expect(base.estado, JSON.stringify(base)).toBe(200);
-    expect(base.data.total).toBe(64); // 61 + la base prefabricada, el cajón y la cubierta (0.95.0)
+    expect(base.data.total).toBe(65); // 61 + la base prefabricada, el cajón, la tarja y la cubierta (0.95.0)
     const cat = await o('mike', '/productos?limite=5000', { app: 'cotizador101' });
     expect(cat.estado).toBe(200);
     const muro = cat.data.filas.find((p: Fila) => p.codigo === 'PAR-301');
