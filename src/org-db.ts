@@ -63,6 +63,7 @@ import timbrar from '../migrations/org/0047_timbrar.sql';
 import facturaV2 from '../migrations/org/0048_factura_v2.sql';
 import disenoDelItem from '../migrations/org/0049_diseno_del_item.sql';
 import cuentaDeReembolso from '../migrations/org/0050_cuenta_de_reembolso.sql';
+import articulosComprados from '../migrations/org/0051_articulos_comprados.sql';
 import { MotorInversion } from './inversion-db';
 import { MotorFiscal } from './fiscal-db';
 import { MotorSat, type MemoriaSat } from './sat-db';
@@ -79,7 +80,7 @@ import { invitarClienteEnSuite } from './clientes';
 import { secretoDe } from './maestro';
 import type { Quien } from './http';
 import { DEFS, type Def, type Tipo } from './tablas';
-import { calcular, hoyMx, limpiarApu, usaA, type Apu, type Desglose, type Fuentes } from './costos';
+import { PREFIJO_COSTO, TIPOS_COSTO, calcular, hoyMx, limpiarApu, usaA, type Apu, type Desglose, type Fuentes } from './costos';
 import { ahora, normalizar, ulid } from './lib';
 import { alcanceDeItem, CATEGORIA_PRESTAMO_CAPITAL, CATEGORIA_PRESTAMO_RECIBIDO, type MovimientoAlcance } from '../schema/tipos';
 import { TABLAS, type Aviso, type ConteoQuote, type Etapa, type EventoOrden, type Peek, type Pool, type ProveedorDePago, type CuentaDeReembolso, type ReembolsoA, type Tabla } from '../schema/tipos';
@@ -94,7 +95,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso, articulosComprados];
 
 /** La 0027, la 0030, la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
@@ -1086,7 +1087,7 @@ export class OrgDB extends DurableObject<Env> {
      * `despuesDeCostos` haga la cuenta dos renglones abajo. */
     if (tabla === 'costos_base') {
       const tipo = String(fila.tipo ?? 'material');
-      fila.clave = String(fila.clave ?? '').trim() || this.siguienteClave('costos_base', 'clave', tipo === 'mo' ? 'MO-' : tipo === 'equipo' ? 'EQ-' : 'MAT-', 3);
+      fila.clave = String(fila.clave ?? '').trim() || this.siguienteClave('costos_base', 'clave', PREFIJO_COSTO[tipo] ?? 'MAT-', 3);
       /* 8-oct-2026 · la mano de obra va por hora o por unidad (destajo); el
        * equipo, por hora siempre. */
       if (tipo === 'equipo') fila.unidad = 'h';
@@ -1141,6 +1142,23 @@ export class OrgDB extends DurableObject<Env> {
 
   actualizar(tabla: Tabla, id: string, datos: Fila, contexto: Partial<ContextoEscritura> = {}): Fila | null {
     const def = DEFS[tabla];
+    /* 0.95.0 · un insumo que se cambia de tipo (Mike, 11-oct: «lo puse en Mano
+     * de Obra y quiero pasarlo a Materiales»): si su clave era la que puso la
+     * base (MO-104), estrena la de su tipo nuevo (MAT-160); una clave escrita
+     * a mano se respeta. El equipo va por hora. */
+    if (tabla === 'costos_base' && datos.tipo !== undefined) {
+      const antes = this.obtener('costos_base', id);
+      const nuevo = String(datos.tipo);
+      if (antes && antes.tipo !== nuevo) {
+        const viejo = PREFIJO_COSTO[String(antes.tipo)];
+        if (datos.clave === undefined && viejo && new RegExp(`^${viejo}\\d+$`).test(String(antes.clave ?? ''))) {
+          datos.clave = this.siguienteClave('costos_base', 'clave', PREFIJO_COSTO[nuevo] ?? 'MAT-', 3);
+        }
+        if (nuevo === 'equipo') datos.unidad = 'h';
+        // Lo que era por hora y deja de ser oficio o equipo pasa a pieza.
+        else if (nuevo !== 'mo' && datos.unidad === undefined && antes.unidad === 'h') datos.unidad = 'pza';
+      }
+    }
     const cols = Object.keys(datos).filter((c) => c in def.cols && c !== 'id');
     if (!cols.length) return this.obtener(tabla, id);
     /* El precio de ANTES, para poder contarlo en la bitácora de la obra. Se
@@ -1433,7 +1451,7 @@ export class OrgDB extends DurableObject<Env> {
           const clave = String(c.clave ?? '').trim();
           const hay = idPorClave('costos_base', 'clave', clave);
           if (hay) { ids.costos.set(c.ref, hay); ya.costos++; continue; }
-          const tipo = ['material', 'mo', 'equipo'].includes(c.tipo) ? c.tipo : 'material';
+          const tipo = (TIPOS_COSTO as readonly string[]).includes(c.tipo) ? c.tipo : 'material';
           const precio = Math.max(0, Math.trunc(Number(c.precio)) || 0);
           const historial = Array.isArray(c.historial) && c.historial.length
             ? c.historial.map((h) => ({ f: String(h.f).slice(0, 10), precio: Math.max(0, Math.trunc(Number(h.precio)) || 0) }))
@@ -1441,7 +1459,7 @@ export class OrgDB extends DurableObject<Env> {
           const id = ulid();
           this.sql.exec(
             `INSERT INTO costos_base (id, clave, nombre, nombre_norm, tipo, unidad, precio, categoria, historial, creado_at, creado_por) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-            id, clave || this.siguienteClave('costos_base', 'clave', tipo === 'mo' ? 'MO-' : tipo === 'equipo' ? 'EQ-' : 'MAT-', 3),
+            id, clave || this.siguienteClave('costos_base', 'clave', PREFIJO_COSTO[tipo] ?? 'MAT-', 3),
             String(c.nombre).trim(), normalizar(c.nombre), tipo, tipo === 'equipo' ? 'h' : (String(c.unidad ?? '').trim() || (tipo === 'mo' ? 'h' : 'pza')), precio,
             String(c.categoria ?? '').trim(), JSON.stringify(historial), t, args.usuario_id,
           );

@@ -25,7 +25,13 @@
  */
 
 export const IVA = 0.16;
-export const TIPOS_COSTO = ['material', 'mo', 'equipo'] as const;
+/* 0.95.0 · 'comprado': lo que se compra ya hecho, con marca y precio (una base
+ * o un cajón prefabricado). Mike, 11-oct-2026. En la receta suma aparte
+ * (`art`) y entra al costo directo como los materiales, sin desperdicio ni
+ * herramienta menor. */
+export const TIPOS_COSTO = ['material', 'mo', 'equipo', 'comprado'] as const;
+/** El principio de la clave que pone la base a cada tipo. */
+export const PREFIJO_COSTO: Record<string, string> = { material: 'MAT-', mo: 'MO-', equipo: 'EQ-', comprado: 'ART-' };
 export type TipoCosto = (typeof TIPOS_COSTO)[number];
 export const ESTADOS_PRODUCTO = ['borrador', 'aprobado'] as const;
 export const PROFUNDIDAD_MAXIMA = 5;
@@ -38,7 +44,7 @@ export interface ProductoApu { id: string; apu: Apu | null; nombre?: string }
 
 /** Todo en centavos enteros. `pu` trae IVA; `precio` es `pu` sin IVA, que es
  *  lo que va a `productos.precio`. */
-export interface Desglose { mat: number; mo: number; eq: number; herr: number; sub: number; cd: number; ind: number; util: number; pu: number; iva: number; precio: number }
+export interface Desglose { mat: number; art: number; mo: number; eq: number; herr: number; sub: number; cd: number; ind: number; util: number; pu: number; iva: number; precio: number }
 
 const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 
@@ -58,16 +64,17 @@ export function jornada(q: Cuadrilla, f: Fuentes): number {
   return porHora * num(q.horas || 8);
 }
 
-interface Crudo { mat: number; mo: number; eq: number; herr: number; sub: number; cd: number; ind: number; util: number; pu: number }
+interface Crudo { mat: number; art: number; mo: number; eq: number; herr: number; sub: number; cd: number; ind: number; util: number; pu: number }
 
 function crudo(apu: Apu, f: Fuentes, nivel: number): Crudo {
-  let mat = 0, mo = 0, eq = 0, sub = 0;
+  let mat = 0, art = 0, mo = 0, eq = 0, sub = 0;
   for (const c of apu.comps ?? []) {
     if (c.tipo === 'insumo') {
       const o = f.costos.get(c.ref);
       if (!o) continue;
       const precio = o.precio / 100;
       if (o.tipo === 'material') mat += num(c.cant) * (1 + num(c.desp) / 100) * precio;
+      else if (o.tipo === 'comprado') art += num(c.cant) * precio;
       else if (o.tipo === 'mo') mo += num(c.cant) * precio;
       else eq += num(c.cant) * precio;
     } else if (c.tipo === 'cuadrilla') {
@@ -82,10 +89,10 @@ function crudo(apu: Apu, f: Fuentes, nivel: number): Crudo {
     }
   }
   const herr = mo * num(apu.herr) / 100;
-  const cd = mat + mo + eq + herr + sub;
+  const cd = mat + art + mo + eq + herr + sub;
   const ind = cd * num(apu.ind) / 100;
   const util = (cd + ind) * num(apu.util) / 100;
-  return { mat, mo, eq, herr, sub, cd, ind, util, pu: cd + ind + util };
+  return { mat, art, mo, eq, herr, sub, cd, ind, util, pu: cd + ind + util };
 }
 
 const centavos = (pesos: number): number => Math.round(pesos * 100 + Number.EPSILON);
@@ -95,7 +102,7 @@ export function calcular(apu: Apu, f: Fuentes): Desglose {
   const pu = centavos(c.pu);
   const precio = centavos(c.pu / (1 + IVA));
   return {
-    mat: centavos(c.mat), mo: centavos(c.mo), eq: centavos(c.eq), herr: centavos(c.herr), sub: centavos(c.sub),
+    mat: centavos(c.mat), art: centavos(c.art), mo: centavos(c.mo), eq: centavos(c.eq), herr: centavos(c.herr), sub: centavos(c.sub),
     cd: centavos(c.cd), ind: centavos(c.ind), util: centavos(c.util), pu, iva: pu - precio, precio,
   };
 }
