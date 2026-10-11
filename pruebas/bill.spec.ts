@@ -705,3 +705,68 @@ describe('la migración 0044 sobre una base que ya tenía facturas', () => {
     expect(r.cols.filter((c: string) => c === 'origen')).toHaveLength(1);
   });
 });
+
+/* 0.94.0 · Mike, 11-oct: «esta factura me la pagaron en 2 transferencias, el
+ * mismo día (…) poder seleccionar 2 o más pagos que son parte del monto de la
+ * factura para ligarlos». Va en 2023 para no mover los números de arriba. */
+describe('una factura cobrada en varios pagos', () => {
+  let f = '', a = '', b = '', chico = '', grande = '', otroLado = '', lejos = '';
+  it('los pagos que pueden ser parte de ella, y los que juntos suman lo que falta', async () => {
+    const r = await subir('mike', [xmlCfdi({ uuid: uuidDe(950), emisor: EMP, receptor: CLI, fecha: '2023-08-14', subtotal: '61980.00' })]);
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    f = r.data.resultados[0].id;
+    a = await movimiento('ingreso', P(40_000), '2023-08-14');
+    b = await movimiento('ingreso', P(31_896.80), '2023-08-14');
+    chico = await movimiento('ingreso', P(5_000), '2023-08-16');
+    grande = await movimiento('ingreso', P(80_000), '2023-08-14');      // más que la factura
+    otroLado = await movimiento('egreso', P(31_896.80), '2023-08-14');  // un pago, no un cobro
+    lejos = await movimiento('ingreso', P(31_896.80), '2023-10-30');    // a 77 días
+
+    const p = await o('mike', `/fiscal/cfdi/${f}/pagos-posibles`);
+    expect(p.estado, JSON.stringify(p)).toBe(200);
+    expect(p.data.restante).toBe(P(71_896.80));
+    const ids = (p.data.movimientos as any[]).map((m) => m.id);
+    expect(ids).toEqual(expect.arrayContaining([a, b, chico]));
+    for (const x of [grande, otroLado, lejos]) expect(ids, 'ni el que no cabe, ni el del otro lado, ni el lejano').not.toContain(x);
+    expect([...p.data.combinaciones[0].ids].sort(), 'los dos del mismo día suman justo lo que falta').toEqual([a, b].sort());
+    expect(p.data.combinaciones[0].suma).toBe(P(71_896.80));
+  });
+
+  it('ligar varios es todo o nada, y se explica lo que no cabe', async () => {
+    const pide = (movimientos: unknown) => o('mike', `/fiscal/cfdi/${f}/componer`, { method: 'POST', json: { movimientos } });
+    expect((await pide([a])).estado, 'uno solo va por «Es éste»').toBe(400);
+    const sobra = await pide([a, b, chico]);
+    expect(sobra.estado).toBe(409);
+    expect(sobra.error).toBe('excede_la_factura');
+    expect(sobra.detalle.sobra).toBe(P(5_000));
+    const mal = await pide([a, otroLado]);
+    expect(mal.estado).toBe(409);
+    expect(mal.detalle.malos).toEqual([{ movimiento_id: otroLado, motivo: 'no es un cobro' }]);
+    expect((await o('mike', `/fiscal/cfdi/${f}`)).data.movimientos, 'nada quedó ligado a medias').toHaveLength(0);
+    expect((await mov(a)).facturado).toBe(false);
+  });
+
+  it('los dos pagos quedan ligados, la factura cubierta y los dos facturados', async () => {
+    const r = await o('mike', `/fiscal/cfdi/${f}/componer`, { method: 'POST', json: { movimientos: [a, b] } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.ligados).toEqual([a, b]);
+    expect(r.data.aplicado_total).toBe(P(71_896.80));
+    const d = (await o('mike', `/fiscal/cfdi/${f}`)).data;
+    expect(d.movimientos.map((m: any) => [m.movimiento_id, m.monto_aplicado])).toEqual(expect.arrayContaining([[a, P(40_000)], [b, P(31_896.80)]]));
+    expect(d.aplicado).toBe(d.total);
+    expect(await mov(a)).toMatchObject({ facturado: true });
+    expect(await mov(b)).toMatchObject({ facturado: true });
+    expect((await o('mike', `/fiscal/cfdi/${f}/pagos-posibles`)).data.movimientos, 'cubierta: ya no hay qué proponer').toEqual([]);
+  });
+
+  it('un pago que ya respalda esta factura no se le vuelve a ofrecer a otra', async () => {
+    const r = await subir('mike', [xmlCfdi({ uuid: uuidDe(951), emisor: EMP, receptor: CLI, fecha: '2023-08-15', subtotal: '61980.00' })]);
+    const otra = r.data.resultados[0].id;
+    const p = await o('mike', `/fiscal/cfdi/${otra}/pagos-posibles`);
+    expect((p.data.movimientos as any[]).map((m) => m.id)).not.toContain(a);
+    const x = await o('mike', `/fiscal/cfdi/${otra}/componer`, { method: 'POST', json: { movimientos: [a, chico] } });
+    expect(x.estado).toBe(409);
+    expect(x.detalle.malos).toEqual([{ movimiento_id: a, motivo: 'ya respalda otra factura' }]);
+  });
+
+});
