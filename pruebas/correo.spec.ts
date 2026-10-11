@@ -190,14 +190,14 @@ describe('la bienvenida trae la lista de plataformas con su dirección', () => {
   const apps = { dash: true, quell: true, cotizador: true, roster: true, bill: true, investor: true, nest: true, peek: false, supply: false, cost: false };
 
   it('sin dominio propio: las direcciones generales, sólo de lo que tiene prendido', () => {
-    const l = plataformasDe({ apps, dominio: null }, 'https://workshop101.taller101.com');
+    const l = plataformasDe({ apps, dominio: null }, 'https://workshop.suite101.app');
     const por = Object.fromEntries(l.map((p) => [p.nombre, p]));
     expect(l.map((p) => p.nombre)).toEqual(['suite101', 'workshop101', 'dash101', 'quell101', 'quote101', 'patron101', 'bill101', 'roster101', 'nest101']);
-    expect(por.quell101.url).toBe('https://quell101.taller101.com');
-    expect(por.quote101.url, 'cotizador101 se llama quote101').toBe('https://quote101.taller101.com');
-    expect(por.patron101.url, 'investor101 se llama patron101').toBe('https://patron101.taller101.com');
-    expect(por.roster101.url, 'roster101 abre el panel').toBe('https://roster101.taller101.com/admin');
-    expect(por.nest101.url).toBe('https://suite101.taller101.com/descargar/nest101');
+    expect(por.quell101.url).toBe('https://quell.suite101.app');
+    expect(por.quote101.url, 'cotizador101 se llama quote101').toBe('https://quote.suite101.app');
+    expect(por.patron101.url, 'investor101 se llama patron101').toBe('https://patron.suite101.app');
+    expect(por.roster101.url, 'roster101 abre el panel').toBe('https://roster.suite101.app/admin');
+    expect(por.nest101.url).toBe('https://app.suite101.app/descargar/nest101');
     expect(l.every((p) => p.general === null), 'sin dominio no hay «otra» dirección').toBe(true);
     expect(por.peek101, 'lo apagado no sale').toBeUndefined();
   });
@@ -207,25 +207,25 @@ describe('la bienvenida trae la lista de plataformas con su dirección', () => {
     const por = Object.fromEntries(l.map((p) => [p.nombre, p]));
     expect(por.suite101.url).toBe('https://suite101.acme.com');
     expect(por.workshop101.url).toBe('https://workshop.acme.com');
-    expect(por.quell101).toEqual(expect.objectContaining({ url: 'https://quell.acme.com', general: 'https://quell101.taller101.com' }));
+    expect(por.quell101).toEqual(expect.objectContaining({ url: 'https://quell.acme.com', general: 'https://quell.suite101.app' }));
     expect(por.quote101.url).toBe('https://quote.acme.com');
-    expect(por.roster101).toEqual(expect.objectContaining({ url: 'https://roster.acme.com/admin', general: 'https://roster101.taller101.com/admin' }));
+    expect(por.roster101).toEqual(expect.objectContaining({ url: 'https://roster.acme.com/admin', general: 'https://roster.suite101.app/admin' }));
     // 10-oct · todas las apps tienen puerta en el dominio de la empresa.
-    expect(por.bill101).toEqual(expect.objectContaining({ url: 'https://bill.acme.com', general: 'https://bill101.taller101.com' }));
+    expect(por.bill101).toEqual(expect.objectContaining({ url: 'https://bill.acme.com', general: 'https://bill.suite101.app' }));
     expect(por.patron101.url).toBe('https://patron.acme.com');
     expect(por.nest101.url, 'la descarga sale de la puerta de la suite de la empresa').toBe('https://suite101.acme.com/descargar/nest101');
   });
 
   it('el correo trae cada plataforma con su dirección, en texto y en HTML', () => {
     const plataformas = plataformasDe({ apps, dominio: 'acme.com' });
-    const m = correoBienvenida({ empresa: 'Acme', director: 'Ana', correo: 'ana@acme.com', urlPanel: 'https://workshop101.taller101.com', plataformas });
+    const m = correoBienvenida({ empresa: 'Acme', director: 'Ana', correo: 'ana@acme.com', urlPanel: 'https://workshop.suite101.app', plataformas });
     for (const p of plataformas) {
       expect(m.texto, `${p.nombre} en el texto`).toContain(p.url);
       expect(m.html, `${p.nombre} en el HTML`).toContain(`href="${p.url}"`);
     }
     expect(m.texto).toContain('Tus plataformas');
     expect(m.html).toContain('Tus plataformas');
-    expect(m.texto, 'y la general como respaldo').toContain('si todavía no abre: https://quell101.taller101.com');
+    expect(m.texto, 'y la general como respaldo').toContain('si todavía no abre: https://quell.suite101.app');
     expect(m.html).toContain('abren en cuanto tu gente de sistemas termine de configurarlo');
     const sin = correoBienvenida({ empresa: 'Acme', director: 'Ana', correo: 'ana@acme.com', urlPanel: 'https://x.mx', plataformas: plataformasDe({ apps, dominio: null }) });
     expect(sin.texto, 'sin dominio no se habla de configurarlo').not.toContain('sistemas termine');

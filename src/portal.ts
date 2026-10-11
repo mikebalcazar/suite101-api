@@ -12,7 +12,7 @@
  * `/salud` contesta en los dos, para que un verificador pueda medir cualquiera. */
 import type { Next } from 'hono';
 import type { Ctx } from './http';
-import { APPS_DOMINIO, PREFIJO, type AppDominio } from './dominios';
+import { APPS_DOMINIO, PREFIJO } from './dominios';
 import pagina from './paginas/suite.html';
 import cifras400 from './paginas/fuentes/fira-cifras-400.woff2';
 import cifras600 from './paginas/fuentes/fira-cifras-600.woff2';
@@ -29,6 +29,8 @@ import iconoCelular from './paginas/icono/apple-touch-icon.png';
  * mudanza. */
 export const DOMINIO_SUITE = 'app.suite101.app';
 export const DOMINIOS_SUITE = [DOMINIO_SUITE, 'suite101.taller101.com'];
+/** Los nombres de las apps (sin «101») que la hoja liga en suite101.app. */
+const NOMBRES_APP: string[] = APPS_DOMINIO.filter((a) => a !== 'suite101').map((a) => PREFIJO[a]);
 
 /* 8-oct-2026 · las letras de la puerta viajan con ella: nada se le pide a
  * Google. Sólo estas seis, por nombre exacto. */
@@ -64,8 +66,10 @@ const icono = (ruta: string) => ICONOS[ruta]
 export function paginaDeEmpresa(nombre: string, dominio: string): string {
   const esc = (t: string) => t.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
   return pagina
-    .replace(/https:\/\/([a-z]+101)\.taller101\.com/g, (todo, sitio: string) =>
-      (APPS_DOMINIO as readonly string[]).includes(sitio) ? `https://${PREFIJO[sitio as AppDominio]}.${dominio}` : todo)
+    // 11-oct-2026 · la hoja liga a <app>.suite101.app; en el dominio de la
+    // empresa es el mismo nombre (sin el «101») sobre SU dominio.
+    .replace(/https:\/\/([a-z]+)\.suite101\.app/g, (todo, pre: string) =>
+      NOMBRES_APP.includes(pre) ? `https://${pre}.${dominio}` : todo)
     .replace('</style>', '.empresa{margin:4px 0 0;font-size:1.05rem;font-weight:700;color:#86c9ec;letter-spacing:.01em}\n</style>')
     .replace('</header>', `  <p class="empresa">${esc(nombre)}</p>\n  </header>`);
 }
@@ -81,8 +85,8 @@ export function paginaDeEmpresa(nombre: string, dominio: string): string {
  *    Si ese archivo no contesta, se manda a la página fija «<app>-ultima»,
  *    que siempre trae la última: más lento, nunca roto. */
 const QUELL: Record<string, string> = {
-  'quell101-android': 'https://quell101.taller101.com/descargas/android.apk',
-  'quell101-windows': 'https://quell101.taller101.com/descargas/windows.exe',
+  'quell101-android': 'https://quell.suite101.app/descargas/android.apk',
+  'quell101-windows': 'https://quell.suite101.app/descargas/windows.exe',
 };
 const DE_ESCRITORIO = ['draw101', 'nest101', 'shape101'];
 const RELEASES = 'https://github.com/mikebalcazar/descargas/releases/';

@@ -163,7 +163,7 @@ export function sitioPeek(sitioQuell) {
   // En el dominio de una empresa los nombres van sin el «101» (10-oct-2026).
   if (h.startsWith('quell.')) return `https://peek.${h.slice('quell.'.length)}`;
   if (h.endsWith('.workers.dev') || h === 'localhost' || h === '127.0.0.1') return 'https://peek101-staging.mike-929.workers.dev';
-  return 'https://peek101.taller101.com';
+  return 'https://peek.suite101.app';
 }
 
 // El correo al cliente invitado. Entra por la misma puerta que todos —la de la

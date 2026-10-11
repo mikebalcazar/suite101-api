@@ -25,11 +25,15 @@ export interface Plataforma {
   lema: string;
   /** La dirección para entrar: la de la empresa si tiene dominio. */
   url: string;
-  /** La general en taller101.com, sólo si `url` es la del dominio propio. */
+  /** La general en suite101.app, sólo si `url` es la del dominio propio. */
   general: string | null;
 }
 
-const BASE = 'taller101.com';
+/* 11-oct-2026 · la suite vive en suite101.app (Mike: «taller101 será una
+ * marca de FORESPOT»): ahí cada app va sin el «101», igual que en el dominio
+ * de una empresa, y la puerta es app.suite101.app. */
+const BASE = 'suite101.app';
+const enBase = (sub: string) => (sub === 'suite101' ? 'app' : PREFIJO[sub as AppDominio]);
 
 /** Lo que sale en la lista, en el orden de la puerta de la suite. `sub` es el
  *  nombre del sitio; `ruta`, lo que va después (el panel de roster101). */
@@ -49,7 +53,7 @@ const CATALOGO: Array<{ app: App; nombre: string; lema: string; sub: string; rut
 /** La dirección de un sitio: en el dominio de la empresa si ese sitio tiene
  *  puerta ahí, y si no la general. */
 function direccion(sub: string, ruta: string, dominio: string | null): { url: string; general: string | null } {
-  const general = `https://${sub}.${BASE}${ruta}`;
+  const general = `https://${enBase(sub)}.${BASE}${ruta}`;
   if (dominio && (APPS_DOMINIO as readonly string[]).includes(sub)) return { url: `https://${PREFIJO[sub as AppDominio]}.${dominio}${ruta}`, general };
   return { url: general, general: null };
 }
@@ -57,7 +61,7 @@ function direccion(sub: string, ruta: string, dominio: string | null): { url: st
 /** Las plataformas de la empresa: la puerta de la suite, el panel del
  *  director y una por cada app prendida. `urlPanel` es el panel general del
  *  director (env URL_PANEL_DIRECTOR), que se respeta cuando no hay dominio. */
-export function plataformasDe(o: Pick<Org, 'apps' | 'dominio'>, urlPanel = `https://workshop101.${BASE}`): Plataforma[] {
+export function plataformasDe(o: Pick<Org, 'apps' | 'dominio'>, urlPanel = `https://workshop.${BASE}`): Plataforma[] {
   const dominio = o.dominio || null;
   const lista: Plataforma[] = [];
   lista.push({ nombre: 'suite101', lema: 'La puerta: todas tus apps en un lugar', ...direccion('suite101', '', dominio) });

@@ -32,7 +32,7 @@ describe('la puerta de la suite', () => {
     const html = await r.text();
     for (const app of APPS) {
       // roster101 manda al panel de la empresa, no al portal del trabajador.
-      const liga = app === 'roster101' ? 'https://roster101.taller101.com/admin' : `https://${app}.taller101.com`;
+      const liga = app === 'roster101' ? 'https://roster.suite101.app/admin' : `https://${app.replace(/101$/, '')}.suite101.app`;
       expect(html, app).toContain(`href="${liga}"`);
       expect(html, app).toContain(`data-app="${app}"`);
     }
@@ -45,8 +45,8 @@ describe('la puerta de la suite', () => {
     const html = await (await SELF.fetch(`${SUITE}/`)).text();
     expect(html).toContain('data-app="portal-trabajadores"');
     expect(html).toContain('Portal de trabajadores');
-    expect(html).toContain('href="https://roster101.taller101.com"');
-    expect(html).toContain('data-compartir="https://roster101.taller101.com"');
+    expect(html).toContain('href="https://roster.suite101.app"');
+    expect(html).toContain('data-compartir="https://roster.suite101.app"');
     expect(html).toContain('Compartir portal');
     // En el celular, la hoja de compartir del sistema; si no, al portapapeles.
     expect(html).toContain('navigator.share(');
@@ -137,7 +137,7 @@ describe('la puerta de la suite', () => {
    * emite, no las timbra ni las baja del SAT. La tarjeta no lo promete. */
   it('la tarjeta de bill101 sólo dice lo que hace hoy', async () => {
     const html = await (await SELF.fetch(`${SUITE}/`)).text();
-    const tarjeta = html.match(/<a class="app"[^>]*href="https:\/\/bill101\.taller101\.com"[^]*?<\/a>/)?.[0] ?? '';
+    const tarjeta = html.match(/<a class="app"[^>]*href="https:\/\/bill\.suite101\.app"[^]*?<\/a>/)?.[0] ?? '';
     expect(tarjeta).toContain('estimados');
     expect(tarjeta).not.toMatch(/timbr|descarga|declaraci/i);
   });
@@ -172,8 +172,8 @@ describe('las descargas de la puerta', () => {
   });
 
   it('quell101 manda a su .apk y a su .exe, que «Armar apps» sustituye siempre en la misma dirección', async () => {
-    for (const [d, destino] of [['quell101-android', 'https://quell101.taller101.com/descargas/android.apk'],
-                                ['quell101-windows', 'https://quell101.taller101.com/descargas/windows.exe']]) {
+    for (const [d, destino] of [['quell101-android', 'https://quell.suite101.app/descargas/android.apk'],
+                                ['quell101-windows', 'https://quell.suite101.app/descargas/windows.exe']]) {
       const r = await SELF.fetch(`${SUITE}/descargar/${d}`, { redirect: 'manual' });
       expect(r.status, d).toBe(302);
       expect(r.headers.get('Location'), d).toBe(destino);
