@@ -1,3 +1,5 @@
+> **11-oct-2026 · cost y quote: tipo de precio base editable, «Artículos comprados» (API 0.95.0 #342 #343, org 0051; cost101 #12; quote #93), «agregar desde catálogo» en el renglón de quote (#92) y el producto de cost entra a quote con su PU con IVA (#94).** Ver `muro/…-jr-cost-quote-tipos-y-catalogo.md`.
+
 > **11-oct-2026 · cost101: «Todas» en la biblioteca del generador (cost101 #11).** Junta las cinco categorías y cada renglón dice de cuál es.
 
 > **11-oct-2026 · draw, nest y shape .suite101.app (API #339).** Llevan a su ficha del sitio (decisión de Mike); shape101 no tiene ficha y va a la portada hasta que la tenga.
