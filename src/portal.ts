@@ -24,7 +24,11 @@ import iconoSvg from './paginas/icono/icono.svg';
 import iconoIco from './paginas/icono/favicon.ico';
 import iconoCelular from './paginas/icono/apple-touch-icon.png';
 
-export const DOMINIO_SUITE = 'suite101.taller101.com';
+/* 11-oct-2026 · la puerta se muda a app.suite101.app (suite101.app es la
+ * marca; taller101 es de Forespot). La vieja sigue sirviendo mientras dura la
+ * mudanza. */
+export const DOMINIO_SUITE = 'app.suite101.app';
+export const DOMINIOS_SUITE = [DOMINIO_SUITE, 'suite101.taller101.com'];
 
 /* 8-oct-2026 · las letras de la puerta viajan con ella: nada se le pide a
  * Google. Sólo estas seis, por nombre exacto. */
@@ -127,7 +131,7 @@ export async function puertaDeLaSuite(c: Ctx, next: Next): Promise<Response | vo
     if (letra) return letra;
     return c.json({ ok: false, error: 'no_encontrado', detalle: { aqui_solo: ['/'] } }, 404);
   }
-  if (u.hostname !== DOMINIO_SUITE) return next();
+  if (!DOMINIOS_SUITE.includes(u.hostname)) return next();
   if (u.pathname === '/salud') return next();
   if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
     return c.json({ ok: false, error: 'no_encontrado' }, 404);

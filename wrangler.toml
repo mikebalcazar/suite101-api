@@ -25,7 +25,12 @@ routes = [
   # La puerta de la suite (2-oct-2026): la misma API sirve en este dominio la
   # página con las ligas a cada programa (src/portal.ts). Cloudflare pone el
   # registro y el certificado igual que para api.
-  { pattern = "suite101.taller101.com", custom_domain = true }
+  { pattern = "suite101.taller101.com", custom_domain = true },
+  # 11-oct-2026 · suite101.app es la marca del producto (Mike: «taller101 será
+  # una marca de FORESPOT»). Las dos de arriba siguen vivas mientras todo se
+  # muda; éstas son las que se quedan.
+  { pattern = "api.suite101.app", custom_domain = true },
+  { pattern = "app.suite101.app", custom_domain = true }
 ]
 
 [observability]
@@ -93,7 +98,9 @@ CORREO_BAJA = "info@forespot.com"
 # —workers.dev y taller101.com— siguen vivas. quell101 es el Worker
 # bitacora-obra y roster101 el Worker t101-portal: el dominio lleva el
 # nombre de la app, no el del Worker.
-ORIGENES = "https://t101-portal.mike-929.workers.dev,https://bitacora-obra.mike-929.workers.dev,https://dash101.mike-929.workers.dev,https://peek101.mike-929.workers.dev,https://master101.mike-929.workers.dev,https://quote101.mike-929.workers.dev,https://workshop101.mike-929.workers.dev,https://supply101.mike-929.workers.dev,https://quote101.taller101.com,https://dash101.taller101.com,https://peek101.taller101.com,https://quell101.taller101.com,https://roster101.taller101.com,https://master101.taller101.com,https://workshop101.taller101.com,https://supply101.taller101.com,https://cost101.taller101.com,https://cost101.mike-929.workers.dev,https://patron101.taller101.com,https://investor101.taller101.com,https://investor101.mike-929.workers.dev,https://bill101.taller101.com,https://bill101.mike-929.workers.dev,http://localhost:5173,https://taller101.com"
+# 11-oct-2026 · y en suite101.app, sin el «101» (quell.suite101.app): ahí se
+# muda toda la suite. Las de taller101.com se quitan cuando ya manden aquí.
+ORIGENES = "https://t101-portal.mike-929.workers.dev,https://bitacora-obra.mike-929.workers.dev,https://dash101.mike-929.workers.dev,https://peek101.mike-929.workers.dev,https://master101.mike-929.workers.dev,https://quote101.mike-929.workers.dev,https://workshop101.mike-929.workers.dev,https://supply101.mike-929.workers.dev,https://quote101.taller101.com,https://dash101.taller101.com,https://peek101.taller101.com,https://quell101.taller101.com,https://roster101.taller101.com,https://master101.taller101.com,https://workshop101.taller101.com,https://supply101.taller101.com,https://cost101.taller101.com,https://cost101.mike-929.workers.dev,https://patron101.taller101.com,https://investor101.taller101.com,https://investor101.mike-929.workers.dev,https://bill101.taller101.com,https://bill101.mike-929.workers.dev,https://dash.suite101.app,https://quell.suite101.app,https://quote.suite101.app,https://cost.suite101.app,https://patron.suite101.app,https://bill.suite101.app,https://supply.suite101.app,https://roster.suite101.app,https://peek.suite101.app,https://workshop.suite101.app,https://master.suite101.app,https://app.suite101.app,https://suite101.app,http://localhost:5173,https://taller101.com"
 # El origen público de esta API: es a donde Google devuelve (ver auth.ts).
 URL_PUBLICA = "https://suite101-api.mike-929.workers.dev"
 # Desde el 25-sep-2026 workshop101 vive en su dominio propio; la de
