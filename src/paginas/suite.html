@@ -58,7 +58,7 @@
   .app .logo { height:20px; display:block; opacity:.85; transition:opacity .2s, transform .28s; }
   .app .lema { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
   .app:hover .boton, .app:focus-visible .boton { transform:scale(1.32); border-color:#C6FF3D;
-           animation:neonStrobe .55s linear, neonPulse 1.8s ease-in-out infinite .55s; }
+           animation:neonPulse 1.8s ease-in-out infinite; }
   .app:hover .logo, .app:focus-visible .logo { opacity:1; transform:translateY(14px); }
   .app:hover, .app:focus-visible { z-index:2; }
   .escenario { min-height:132px; margin:34px auto 0; max-width:620px; display:flex; flex-direction:column; align-items:center;
@@ -68,11 +68,10 @@
               text-shadow:0 0 12px rgba(198,255,61,.55); }
   .esc-desc { font-size:17px; line-height:1.45; color:var(--tinta); }
   .escenario.cambia { opacity:.25; }
-  @keyframes neonStrobe {
-    0%   { box-shadow:0 0 0 rgba(198,255,61,0); border-color:#C6FF3D; }
-    15%  { box-shadow:0 0 22px 6px rgba(255,255,255,1), 0 0 50px 16px rgba(198,255,61,1), inset 0 0 16px rgba(255,255,255,.95); border-color:#fff; }
-    100% { box-shadow:0 0 4px rgba(198,255,61,.9), 0 0 10px rgba(198,255,61,.7), 0 0 18px rgba(198,255,61,.5), 0 0 28px rgba(198,255,61,.3), inset 0 0 6px rgba(198,255,61,.5); border-color:#C6FF3D; }
-  }
+  /* Mike, 11-oct-2026: «cuando pongo el mouse over, al principio hace como un
+     flash pero se ve mal. Quítale. Que sólo comience el glow palpitante».
+     Se fue el destello blanco (neonStrobe): al pasar el mouse empieza el
+     pulso directo. */
   @keyframes neonPulse {
     0%, 100% { box-shadow:0 0 3px rgba(198,255,61,.7), 0 0 8px rgba(198,255,61,.5), 0 0 14px rgba(198,255,61,.35), 0 0 22px rgba(198,255,61,.2), inset 0 0 4px rgba(198,255,61,.4); }
     50%      { box-shadow:0 0 8px rgba(198,255,61,1), 0 0 18px rgba(198,255,61,.95), 0 0 32px rgba(198,255,61,.75), 0 0 48px rgba(198,255,61,.5), inset 0 0 10px rgba(198,255,61,.75); }
@@ -101,7 +100,7 @@
   .baja-nombre { font-size:13px; font-weight:700; }
   .baja-plat { margin-top:-5px; font-size:11px; color:var(--suave); }
   .baja:hover .boton, .baja:focus-visible .boton { transform:scale(1.15); border-color:#C6FF3D;
-           animation:neonStrobe .55s linear, neonPulse 1.8s ease-in-out infinite .55s; }
+           animation:neonPulse 1.8s ease-in-out infinite; }
   @media (prefers-reduced-motion: reduce) { .baja .boton { animation:none !important; transition:none; } }
   .portal .icono { width:64px; height:64px; flex:none; border-radius:16px; box-shadow:0 10px 24px rgba(0,0,0,.35); }
   .portal { margin-top:28px; padding:18px 20px; display:flex; flex-wrap:wrap; align-items:center; gap:14px 20px; }
