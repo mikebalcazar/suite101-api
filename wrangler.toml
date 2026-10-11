@@ -30,7 +30,12 @@ routes = [
   # una marca de FORESPOT»). Las dos de arriba siguen vivas mientras todo se
   # muda; éstas son las que se quedan.
   { pattern = "api.suite101.app", custom_domain = true },
-  { pattern = "app.suite101.app", custom_domain = true }
+  { pattern = "app.suite101.app", custom_domain = true },
+  # Los programas de escritorio no tienen pantalla web: su dirección lleva a
+  # su ficha en el sitio (Mike, 11-oct, con botones). Ver src/portal.ts.
+  { pattern = "draw.suite101.app", custom_domain = true },
+  { pattern = "nest.suite101.app", custom_domain = true },
+  { pattern = "shape.suite101.app", custom_domain = true }
 ]
 
 [observability]

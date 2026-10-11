@@ -29,6 +29,17 @@ import iconoCelular from './paginas/icono/apple-touch-icon.png';
  * mudanza. */
 export const DOMINIO_SUITE = 'app.suite101.app';
 export const DOMINIOS_SUITE = [DOMINIO_SUITE, 'suite101.taller101.com'];
+/* 11-oct-2026 · Los programas de escritorio no tienen pantalla web. Mike
+ * escogió con botones que su dirección abra SU FICHA en el sitio (qué hace y
+ * el botón de descargar la última versión). shape101 todavía no tiene ficha:
+ * va a la portada del sitio hasta que la tenga. Es 302: el destino puede
+ * cambiar. */
+export const FICHAS_ESCRITORIO: Record<string, string> = {
+  'draw.suite101.app': 'https://suite101.app/app/draw101',
+  'nest.suite101.app': 'https://suite101.app/app/nest101',
+  'shape.suite101.app': 'https://suite101.app/',
+};
+
 /** Los nombres de las apps (sin «101») que la hoja liga en suite101.app. */
 const NOMBRES_APP: string[] = APPS_DOMINIO.filter((a) => a !== 'suite101').map((a) => PREFIJO[a]);
 
@@ -135,6 +146,8 @@ export async function puertaDeLaSuite(c: Ctx, next: Next): Promise<Response | vo
     if (letra) return letra;
     return c.json({ ok: false, error: 'no_encontrado', detalle: { aqui_solo: ['/'] } }, 404);
   }
+  const ficha = FICHAS_ESCRITORIO[u.hostname];
+  if (ficha) return new Response(null, { status: 302, headers: { Location: ficha, 'Cache-Control': 'public, max-age=300' } });
   if (!DOMINIOS_SUITE.includes(u.hostname)) return next();
   if (u.pathname === '/salud') return next();
   if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
