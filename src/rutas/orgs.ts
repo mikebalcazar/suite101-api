@@ -1640,13 +1640,18 @@ async function revisarCostos(c: Ctx, tabla: Tabla, datos: Record<string, unknown
   if (tabla === 'costos_base') {
     for (const k of ['clave', 'nombre', 'unidad', 'categoria', 'tipo']) texto(k);
     if (datos.nombre !== undefined && !datos.nombre) errores.nombre = 'Escribe la descripción del insumo.';
-    if (datos.tipo !== undefined && !(TIPOS_COSTO as readonly string[]).includes(String(datos.tipo))) errores.tipo = 'El tipo es material, mo (mano de obra) o equipo.';
+    if (datos.tipo !== undefined && !(TIPOS_COSTO as readonly string[]).includes(String(datos.tipo))) errores.tipo = 'El tipo es material, mo (mano de obra), equipo o comprado (artículo comprado).';
     if (datos.precio !== undefined && (typeof datos.precio !== 'number' || datos.precio < 0)) errores.precio = 'El precio va en centavos, cero o más.';
-    /* El tipo no se cambia a uno que ya se usa: un material con 8% de
-     * desperdicio vuelto oficio dejaría la receta sumando mal sin avisar. */
+    /* 0.95.0 · El tipo se corrige (Mike, 11-oct: «me equivoqué en el tipo
+     * (…) no hay manera de editarlo»). Las partidas que lo usan se recalculan
+     * solas con el tipo nuevo. Lo único que no se puede: sacar de la mano de
+     * obra a un oficio que está en una cuadrilla, porque una cuadrilla se arma
+     * con oficios. */
     if (id && datos.tipo !== undefined) {
       const antes = await stub(c).obtener('costos_base', id);
-      if (antes && antes.tipo !== datos.tipo && (await stub(c).usosEnCostos('costos_base', id)).length) errores.tipo = 'Ya se usa en cuadrillas o productos: no se le cambia el tipo.';
+      if (antes && antes.tipo === 'mo' && datos.tipo !== 'mo' && (await stub(c).usosEnCostos('costos_base', id)).some((u) => u.que === 'cuadrilla')) {
+        errores.tipo = 'Está en una cuadrilla: sácalo de la cuadrilla antes de cambiarlo de tipo.';
+      }
     }
     /* 8-oct-2026 · el equipo va por hora; un oficio que está en una cuadrilla
      * no deja de ser por hora (su jornada es precio × horas). */

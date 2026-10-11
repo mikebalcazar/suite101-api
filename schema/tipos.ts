@@ -17,7 +17,21 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.94.0 (UNA FACTURA COBRADA EN VARIOS PAGOS. Mike,
+ * Versión del contrato: 0.95.0 (ARTÍCULOS COMPRADOS Y CAMBIAR DE TIPO. Mike,
+ * 11-oct: «me equivoqué en el tipo de precio base de un insumo (…) no hay
+ * manera de editarlo» y «aparte de materiales, mano de obra y
+ * herramienta/equipo, uno que sea de artículos comprados (…) cosas que se
+ * compran ya hechas en el mercado, que tienen ya marca y precio».
+ *   · org 0051: `costos_base.tipo` acepta 'comprado' (clave ART-, por pieza).
+ *   · `Desglose` trae `art`: los comprados, que suman al costo directo como
+ *     los materiales, sin desperdicio ni herramienta menor.
+ *   · PATCH /costos_base/:id con otro `tipo` ya se puede aunque lo usen
+ *     productos (se recalculan). Sólo no: sacar de 'mo' a un oficio que está
+ *     en una cuadrilla (400, errores.tipo). Si su clave era la automática del
+ *     tipo viejo, estrena la del nuevo; lo que era por hora pasa a 'pza'
+ *     (salvo a equipo, que es por hora).)
+ * Antes:
+ * 0.94.0 (UNA FACTURA COBRADA EN VARIOS PAGOS. Mike,
  * 11-oct: «esta factura me la pagaron en 2 transferencias, el mismo día (…)
  * poder seleccionar 2 o más pagos que son parte del monto de la factura para
  * ligarlos».
@@ -1557,7 +1571,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.94.0';
+export const VERSION_CONTRATO = '0.95.0';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
