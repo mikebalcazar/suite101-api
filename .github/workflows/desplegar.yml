@@ -35,6 +35,8 @@ on:
       # `CLAUDE.md` lo agregó Jr. el 12-sep en los once repositorios y se colaba
       # por esta lista, que nombra archivos uno por uno en vez de usar `**.md`.
       - 'CLAUDE.md'
+      # La medición de permisos sólo lee; no publica nada (11-oct-2026).
+      - '.github/workflows/permisos.yml'
   workflow_dispatch:
 
 concurrency:

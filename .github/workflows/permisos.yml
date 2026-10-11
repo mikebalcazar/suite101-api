@@ -1,0 +1,95 @@
+# Mide qué alcanzan hoy las llaves sobre suite101.app, sin escribir nada y sin
+# enseñar ninguna llave (Mike, 11-oct-2026: «los correos e informes de todo
+# deben salir desde suite101.app, los dominios deben ser controlados por
+# suite101.app»). Sólo lee: la zona y sus registros (nombre y tipo, nunca el
+# contenido), los dominios de empresa de la zona y los dominios de envío de
+# Resend (nombre y estado). Lo medido se deja como comentario del commit.
+
+name: Medir permisos sobre suite101.app
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/permisos.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  medir:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Medir
+        env:
+          CF: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          SAAS: ${{ secrets.CLOUDFLARE_SAAS_TOKEN }}
+          RESEND: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          set -u
+          exec > >(tee /tmp/salida.txt) 2>&1
+          API=https://api.cloudflare.com/client/v4
+          bien() { jq -e '.success' >/dev/null 2>&1; }
+          echo "== 1. La llave de publicar (CLOUDFLARE_API_TOKEN) =="
+          for z in suite101.app taller101.com; do
+            r=$(curl -sS -H "Authorization: Bearer $CF" "$API/zones?name=$z")
+            id=$(echo "$r" | jq -r '.result[0].id // empty')
+            echo "zona $z: ${id:+la ve}${id:-NO la ve} $(echo "$r" | jq -c '.errors // []')"
+            [ "$z" = suite101.app ] && ZONA="$id"
+          done
+          if [ -n "${ZONA:-}" ]; then
+            r=$(curl -sS -H "Authorization: Bearer $CF" "$API/zones/$ZONA/dns_records?per_page=100")
+            if echo "$r" | bien; then
+              echo "registros de suite101.app: SÍ los lee"
+              echo "$r" | jq -r '.result[] | "  \(.type)\t\(.name)\t\(if .proxied then "proxy" else "directo" end)"'
+            else
+              echo "registros de suite101.app: NO los lee $(echo "$r" | jq -c '.errors')"
+            fi
+            r=$(curl -sS -H "Authorization: Bearer $CF" "$API/zones/$ZONA/workers/routes")
+            echo "rutas de Workers en suite101.app: $(echo "$r" | bien && echo 'SÍ las lee' || echo "NO $(echo "$r" | jq -c '.errors')")"
+            r=$(curl -sS -H "Authorization: Bearer $CF" "$API/zones/$ZONA/custom_hostnames/fallback_origin")
+            echo "respaldo de dominios de empresa (con esta llave): $(echo "$r" | jq -c '{ok: .success, origen: .result.origin, estado: .result.status, errores: .errors}')"
+          fi
+          echo
+          echo "== 2. La llave de los dominios de empresa (CLOUDFLARE_SAAS_TOKEN) =="
+          if [ -z "$SAAS" ]; then echo "no está puesta"; else
+            for z in suite101.app taller101.com; do
+              r=$(curl -sS -H "Authorization: Bearer $SAAS" "$API/zones?name=$z")
+              id=$(echo "$r" | jq -r '.result[0].id // empty')
+              [ -z "$id" ] && id=$( [ "$z" = suite101.app ] && echo "${ZONA:-}" )
+              if [ -z "$id" ]; then echo "zona $z: no se pudo saber su id"; continue; fi
+              r=$(curl -sS -H "Authorization: Bearer $SAAS" "$API/zones/$id/custom_hostnames?per_page=50")
+              if echo "$r" | bien; then
+                echo "zona $z: SÍ maneja dominios de empresa ($(echo "$r" | jq '.result_info.total_count') dados de alta)"
+                echo "$r" | jq -r '.result[] | "  \(.hostname)\t\(.status)\t\(.ssl.status // "-")"'
+              else
+                echo "zona $z: NO maneja dominios de empresa $(echo "$r" | jq -c '.errors')"
+              fi
+              r=$(curl -sS -H "Authorization: Bearer $SAAS" "$API/zones/$id/custom_hostnames/fallback_origin")
+              echo "  respaldo: $(echo "$r" | jq -c '{ok: .success, origen: .result.origin, estado: .result.status, errores: .errors}')"
+            done
+          fi
+          echo
+          echo "== 3. El correo (RESEND_API_KEY) =="
+          if [ -z "$RESEND" ]; then echo "no está puesta"; else
+            r=$(curl -sS -H "Authorization: Bearer $RESEND" https://api.resend.com/domains)
+            if echo "$r" | jq -e '.data' >/dev/null 2>&1; then
+              echo "la llave SÍ lista los dominios de envío:"
+              echo "$r" | jq -r '.data[] | "  \(.name)\t\(.status)\t\(.region // "-")"'
+            else
+              echo "la llave NO lista dominios (sólo envía): $(echo "$r" | jq -c '{name, message}')"
+            fi
+          fi
+
+      - name: Dejar lo medido en el commit
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          [ -f /tmp/salida.txt ] || echo "No hubo salida." > /tmp/salida.txt
+          jq -Rs '{body: ("**Permisos sobre suite101.app**\n\n```\n" + .[-60000:] + "\n```")}' /tmp/salida.txt > /tmp/comentario.json
+          curl -sS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/commits/$SHA/comments" -d @/tmp/comentario.json -o /dev/null -w 'comentario: %{http_code}\n'
