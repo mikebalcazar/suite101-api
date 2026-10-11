@@ -17,7 +17,15 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.95.0 (ARTÍCULOS COMPRADOS Y CAMBIAR DE TIPO. Mike,
+ * Versión del contrato: 0.96.0 (EL GENERADOR DE UNA PARTIDA EN EXCEL. Mike,
+ * 11-oct: «exportar el generador del producto del catálogo en cost101 en
+ * formato PDF y excel». GET /orgs/:o/productos/:id/xlsx (cost101 o quote101,
+ * miembros): una hoja «Generador» con los componentes por sección y el
+ * resumen (CD, indirectos, utilidad, PU con IVA, sin IVA), con la cuenta de
+ * la base (src/generador-xlsx.ts). 404 si no existe; 409 `sin_receta` si no
+ * se arma en cost101. El PDF lo arma la pantalla.)
+ * Antes:
+ * 0.95.0 (ARTÍCULOS COMPRADOS Y CAMBIAR DE TIPO. Mike,
  * 11-oct: «me equivoqué en el tipo de precio base de un insumo (…) no hay
  * manera de editarlo» y «aparte de materiales, mano de obra y
  * herramienta/equipo, uno que sea de artículos comprados (…) cosas que se
@@ -1571,7 +1579,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.95.0';
+export const VERSION_CONTRATO = '0.96.0';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {

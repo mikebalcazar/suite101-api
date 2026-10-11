@@ -13,6 +13,7 @@
  */
 import { SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { unzipSync, strFromU8 } from 'fflate';
 import semilla from './datos/cost101-semilla.json';
 import esperado from './datos/cost101-esperado.json';
 
@@ -395,6 +396,43 @@ describe('el generador: armar un producto', () => {
     await o('ana', `/productos/${nuevo}`, { method: 'PATCH', json: { estado: 'aprobado' } });
     expect((await o('tin', `/productos/${nuevo}`, { method: 'DELETE' })).estado).toBe(403);
     expect((await o('ana', `/productos/${nuevo}`, { method: 'DELETE' })).estado).toBe(200);
+  });
+});
+
+/* Mike, 11-oct-2026: «exportar el generador del producto del catálogo en
+ * cost101 en formato PDF y excel». El Excel sale de la API, con su cuenta. */
+describe('el generador de una partida, en Excel', () => {
+  const bajar = (quien: string, id: string, app = 'cost101') => {
+    const cabeceras: Record<string, string> = { 'X-App': app };
+    if (galletas[quien]) cabeceras.Cookie = galletas[quien];
+    return SELF.fetch(`https://api.local/orgs/${ORG}/productos/${id}/xlsx`, { headers: cabeceras });
+  };
+  it('baja un .xlsx con los componentes por sección y el resumen de la cuenta de la base', async () => {
+    await releer();
+    const p = prod('PAR-302');
+    const r = await bajar('mike', p.id);
+    expect(r.status).toBe(200);
+    expect(r.headers.get('content-type')).toContain('spreadsheetml.sheet');
+    expect(r.headers.get('content-disposition')).toMatch(/attachment; filename="generador-PAR-302-\d{4}-\d{2}-\d{2}\.xlsx"/);
+    const partes = unzipSync(new Uint8Array(await r.arrayBuffer()));
+    expect(strFromU8(partes['xl/workbook.xml'])).toContain('name="Generador"');
+    const hoja = strFromU8(partes['xl/worksheets/sheet1.xml']);
+    expect(hoja).toContain('PAR-302');
+    expect(hoja).toContain('Materiales');
+    expect(hoja).toContain('Mano de obra');
+    expect(hoja).toContain('Costo directo');
+    // Los números de la base, en pesos y como número.
+    expect(hoja, 'el precio unitario con IVA').toContain(`<v>${p.desglose.pu / 100}</v>`);
+    expect(hoja, 'el costo directo').toContain(`<v>${p.desglose.cd / 100}</v>`);
+    expect(hoja, 'el precio sin IVA').toContain(`<v>${p.precio / 100}</v>`);
+    // Y el panel de yeso, uno de sus materiales, con su clave.
+    expect(hoja).toContain('MAT-001');
+  });
+  it('quote101 también lo baja; dash101 no, y un producto que no existe es 404', async () => {
+    const p = prod('PAR-302');
+    expect((await bajar('mike', p.id, 'cotizador101')).status).toBe(200);
+    expect((await bajar('mike', p.id, 'dash101')).status).toBe(403);
+    expect((await bajar('mike', 'no-existe')).status).toBe(404);
   });
 });
 
