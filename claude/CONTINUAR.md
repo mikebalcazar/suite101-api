@@ -1,3 +1,5 @@
+> **11-oct-2026 · cost101: «Todas» en la biblioteca del generador (cost101 #11).** Junta las cinco categorías y cada renglón dice de cuál es.
+
 > **11-oct-2026 · draw, nest y shape .suite101.app (API #339).** Llevan a su ficha del sitio (decisión de Mike); shape101 no tiene ficha y va a la portada hasta que la tenga.
 
 > **11-oct-2026 · una factura cobrada en varios pagos (API 0.94.0 #337, bill101 #14).** `pagos-posibles` y `componer` (todos o ninguno) en `/fiscal/cfdi/:id`; en bill101, «Componer con varios pagos» con casillas y la combinación que suma lo que falta. Ver `muro/…-jr-factura-con-varios-pagos.md`.
