@@ -8,7 +8,7 @@
  */
 import { SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { DOMINIO_SUITE, destinoDeDescarga } from '../src/portal';
+import { DOMINIO_SUITE, DOMINIOS_SUITE, destinoDeDescarga } from '../src/portal';
 
 const SUITE = `https://${DOMINIO_SUITE}`;
 /* Siete programas de la empresa. master101 NO va: es el panel del dueño de la
@@ -16,6 +16,15 @@ const SUITE = `https://${DOMINIO_SUITE}`;
 const APPS = ['dash101', 'quell101', 'quote101', 'cost101', 'patron101', 'bill101', 'supply101', 'roster101', 'peek101', 'workshop101'];
 
 describe('la puerta de la suite', () => {
+  it('vive en app.suite101.app y, mientras dura la mudanza, también en la vieja', async () => {
+    expect(DOMINIO_SUITE).toBe('app.suite101.app');
+    for (const h of DOMINIOS_SUITE) {
+      const r = await SELF.fetch(`https://${h}/`);
+      expect(r.status, h).toBe(200);
+      expect(await r.text(), h).toContain('data-app="dash101"');
+    }
+  });
+
   it('la raíz es una página con una liga a cada uno de los programas', async () => {
     const r = await SELF.fetch(`${SUITE}/`);
     expect(r.status).toBe(200);
