@@ -1,3 +1,5 @@
+> **11-oct-2026 · draw, nest y shape .suite101.app (API #339).** Llevan a su ficha del sitio (decisión de Mike); shape101 no tiene ficha y va a la portada hasta que la tenga.
+
 > **11-oct-2026 · una factura cobrada en varios pagos (API 0.94.0 #337, bill101 #14).** `pagos-posibles` y `componer` (todos o ninguno) en `/fiscal/cfdi/:id`; en bill101, «Componer con varios pagos» con casillas y la combinación que suma lo que falta. Ver `muro/…-jr-factura-con-varios-pagos.md`.
 
 > **11-oct-2026 · la suite se muda a suite101.app (API #333 #335; master101 #47 #48; quell #132; dash #156; quote #91; cost #9 #10; patron #5; bill #13; roster #38; peek #28; workshop #21; descargas #34).** Mike: taller101 es una marca de Forespot. Todas las apps en `<app>.suite101.app` sin «101», la puerta en `app.suite101.app`, la API en `api.suite101.app`; las de taller101.com mandan con 301 (`DOMINIO_ANTERIOR`). Falta (de Mike): el respaldo de dominios de empresa en suite101.app y el dominio de correo. Ver `muro/2026-10-11-0401-…`.
