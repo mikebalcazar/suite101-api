@@ -1155,8 +1155,14 @@ export class OrgDB extends DurableObject<Env> {
           datos.clave = this.siguienteClave('costos_base', 'clave', PREFIJO_COSTO[nuevo] ?? 'MAT-', 3);
         }
         if (nuevo === 'equipo') datos.unidad = 'h';
-        // Lo que era por hora y deja de ser oficio o equipo pasa a pieza.
-        else if (nuevo !== 'mo' && datos.unidad === undefined && antes.unidad === 'h') datos.unidad = 'pza';
+        /* La unidad de la mano de obra (hora o unidad, destajo) no es de un
+         * material ni de un artículo: pasa a pieza. Y a la mano de obra se
+         * llega por hora. Si la pantalla manda su unidad, ésa manda. */
+        else if (datos.unidad === undefined) {
+          const u = String(antes.unidad ?? '');
+          if (nuevo === 'mo' && u !== 'h' && u !== 'unidad') datos.unidad = 'h';
+          else if (nuevo !== 'mo' && (u === 'h' || u === 'unidad')) datos.unidad = 'pza';
+        }
       }
     }
     const cols = Object.keys(datos).filter((c) => c in def.cols && c !== 'id');
