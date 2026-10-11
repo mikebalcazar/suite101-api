@@ -8,7 +8,7 @@
  */
 import { SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { DOMINIO_SUITE, DOMINIOS_SUITE, destinoDeDescarga } from '../src/portal';
+import { DOMINIO_SUITE, DOMINIOS_SUITE, FICHAS_ESCRITORIO, destinoDeDescarga } from '../src/portal';
 
 const SUITE = `https://${DOMINIO_SUITE}`;
 /* Siete programas de la empresa. master101 NO va: es el panel del dueño de la
@@ -16,6 +16,15 @@ const SUITE = `https://${DOMINIO_SUITE}`;
 const APPS = ['dash101', 'quell101', 'quote101', 'cost101', 'patron101', 'bill101', 'supply101', 'roster101', 'peek101', 'workshop101'];
 
 describe('la puerta de la suite', () => {
+  it('draw, nest y shape (escritorio) llevan a su ficha en el sitio', async () => {
+    for (const [h, destino] of [['draw.suite101.app', 'https://suite101.app/app/draw101'], ['nest.suite101.app', 'https://suite101.app/app/nest101'], ['shape.suite101.app', 'https://suite101.app/']]) {
+      const r = await SELF.fetch(`https://${h}/cualquier/cosa`, { redirect: 'manual' });
+      expect(r.status, h).toBe(302);
+      expect(r.headers.get('Location'), h).toBe(destino);
+      expect(FICHAS_ESCRITORIO[h]).toBe(destino);
+    }
+  });
+
   it('vive en app.suite101.app y, mientras dura la mudanza, también en la vieja', async () => {
     expect(DOMINIO_SUITE).toBe('app.suite101.app');
     for (const h of DOMINIOS_SUITE) {
