@@ -8,6 +8,9 @@
 #      empresas: las apps de taller101.com no pasan nunca por la puerta.
 #   2. Sólo entonces se publica la puerta.
 #   3. Se mide que lo nuestro sigue contestando igual.
+# 12-oct-2026 · también en suite101.app: ahí la ruta sin Worker va por cada
+# dirección nuestra (la raíz, www y cada dominio propio de un Worker, leídos
+# de Cloudflare), porque empresa.suite101.app SÍ va a la puerta.
 # Si el token no alcanza la zona, se detiene en el paso 1 y no publica nada.
 # Lo medido se deja como comentario del commit (OPERAR.md §6).
 
@@ -34,7 +37,6 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      ZONA: taller101.com
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,39 +50,35 @@ jobs:
         run: |
           set -uo pipefail
           exec > >(tee -a /tmp/salida.txt) 2>&1
-          echo "== 1. Ruta sin Worker para lo nuestro =="
+          echo "== 1. Rutas sin Worker para lo nuestro =="
           API=https://api.cloudflare.com/client/v4
           AUT="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          zonas=$(curl -sS -H "$AUT" "$API/zones?name=$ZONA")
-          zona=$(echo "$zonas" | jq -r '.result[0].id // empty')
-          if [ -z "$zona" ]; then
-            echo "SIN PERMISO: el token no puede leer la zona $ZONA. Le faltan, en la zona: Zone · Zone · Read y Zone · Workers Routes · Edit."
-            echo "$zonas" | jq -c '.errors' || true
-            echo "La puerta NO se publico."
-            exit 1
-          fi
-          rutas=$(curl -sS -H "$AUT" "$API/zones/$zona/workers/routes")
-          if ! echo "$rutas" | jq -e '.success' >/dev/null; then
-            echo "SIN PERMISO para leer las rutas de Workers de $ZONA (Zone · Workers Routes · Edit)."
-            echo "$rutas" | jq -c '.errors' || true
-            echo "La puerta NO se publico."
-            exit 1
-          fi
-          echo "rutas que ya habia:"
-          echo "$rutas" | jq -r '.result[] | "  \(.pattern)  ->  \(.script // "(sin Worker)")"'
-          patron="*$ZONA/*"
-          if echo "$rutas" | jq -e --arg p "$patron" '.result[] | select(.pattern == $p)' >/dev/null; then
-            echo "ya estaba: $patron"
-          else
-            r=$(curl -sS -X POST -H "$AUT" -H 'Content-Type: application/json' "$API/zones/$zona/workers/routes" -d "$(jq -nc --arg p "$patron" '{pattern: $p}')")
-            if ! echo "$r" | jq -e '.success' >/dev/null; then
-              echo "No se pudo crear $patron: $(echo "$r" | jq -c '.errors')"
-              echo "La puerta NO se publico."
-              exit 1
+          # Una ruta corre ANTES que el dominio propio de un Worker: cada
+          # direccion nuestra lleva su ruta sin Worker para no pasar por la puerta.
+          poner() { # zona_id patron
+            if echo "$RUTAS" | jq -e --arg p "$2" '.result[] | select(.pattern == $p)' >/dev/null; then echo "  ya estaba: $2"; return 0; fi
+            r=$(curl -sS -X POST -H "$AUT" -H 'Content-Type: application/json' "$API/zones/$1/workers/routes" -d "$(jq -nc --arg p "$2" '{pattern: $p}')")
+            if ! echo "$r" | jq -e '.success' >/dev/null; then echo "  No se pudo crear $2: $(echo "$r" | jq -c '.errors')"; return 1; fi
+            echo "  creada (sin Worker): $2"
+          }
+          for ZONA in taller101.com suite101.app; do
+            echo "-- $ZONA"
+            zona=$(curl -sS -H "$AUT" "$API/zones?name=$ZONA" | jq -r '.result[0].id // empty')
+            if [ -z "$zona" ]; then echo "SIN PERMISO: el token no puede leer la zona $ZONA. La puerta NO se publico."; exit 1; fi
+            RUTAS=$(curl -sS -H "$AUT" "$API/zones/$zona/workers/routes")
+            if ! echo "$RUTAS" | jq -e '.success' >/dev/null; then echo "SIN PERMISO para las rutas de Workers de $ZONA. La puerta NO se publico."; exit 1; fi
+            if [ "$ZONA" = taller101.com ]; then
+              poner "$zona" "*taller101.com/*" || exit 1
+            else
+              # suite101.app: la raiz, www y cada dominio propio de un Worker.
+              # Lo demas (empresa.suite101.app) si va a la puerta.
+              doms=$(curl -sS -H "$AUT" "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/domains?zone_name=$ZONA")
+              if ! echo "$doms" | jq -e '.success' >/dev/null; then echo "SIN PERMISO para leer los dominios de Workers: $(echo "$doms" | jq -c '.errors'). La puerta NO se publico."; exit 1; fi
+              for h in "$ZONA" "www.$ZONA" $(echo "$doms" | jq -r '.result[].hostname' | sort -u); do
+                poner "$zona" "$h/*" || exit 1
+              done
             fi
-            echo "creada (sin Worker): $patron"
-          fi
-          echo "zona=$zona" >> "$GITHUB_OUTPUT"
+          done
 
       - name: Publicar la puerta
         run: |
@@ -95,13 +93,16 @@ jobs:
           exec > >(tee -a /tmp/salida.txt) 2>&1
           echo "== 3. Lo nuestro, despues de publicar =="
           mal=0
-          for u in https://api.taller101.com/salud https://suite101.taller101.com/ https://quell101.taller101.com/ https://dash101.taller101.com/ https://quote101.taller101.com/ https://roster101.taller101.com/ https://workshop101.taller101.com/ https://peek101.taller101.com/ https://supply101.taller101.com/ https://cost101.taller101.com/ https://bill101.taller101.com/ https://patron101.taller101.com/; do
+          for u in https://api.suite101.app/salud https://app.suite101.app/ https://quell.suite101.app/ https://dash.suite101.app/ https://quote.suite101.app/ https://cost.suite101.app/ https://bill.suite101.app/ https://patron.suite101.app/ https://roster.suite101.app/ https://workshop.suite101.app/ https://peek.suite101.app/ https://supply.suite101.app/ https://suite101.app/ https://api.taller101.com/salud https://suite101.taller101.com/ https://quell101.taller101.com/ https://dash101.taller101.com/ https://quote101.taller101.com/ https://roster101.taller101.com/ https://workshop101.taller101.com/ https://peek101.taller101.com/ https://supply101.taller101.com/ https://cost101.taller101.com/ https://bill101.taller101.com/ https://patron101.taller101.com/; do
             c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$u")
             echo "  $c  $u"
             case "$c" in 5*|000) mal=1 ;; esac
           done
-          echo "rutas de la zona ahora:"
-          curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/zones/${{ steps.fuera.outputs.zona }}/workers/routes" | jq -r '.result[] | "  \(.pattern)  ->  \(.script // "(sin Worker)")"'
+          for ZONA in taller101.com suite101.app; do
+            zona=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/zones?name=$ZONA" | jq -r '.result[0].id // empty')
+            echo "rutas de $ZONA ahora:"
+            curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/zones/$zona/workers/routes" | jq -r '.result[] | "  \(.pattern)  ->  \(.script // "(sin Worker)")"'
+          done
           if [ "$mal" = 1 ]; then echo "RESULTADO: algo nuestro contesta 5xx"; exit 1; fi
           echo "RESULTADO: lo nuestro contesta igual"
 

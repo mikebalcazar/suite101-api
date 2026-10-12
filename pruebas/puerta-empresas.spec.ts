@@ -7,14 +7,28 @@
  * abre la app equivocada.
  */
 import { describe, expect, it } from 'vitest';
-import { BINDINGS, cabecerasDeEmpresa, destinoDe, esValidacionDeCertificado, paginaDeNadie } from '../puerta/destino';
-import { APPS_DOMINIO, PREFIJO } from '../src/dominios';
+import { BINDINGS, RESERVADOS_SUITE, cabecerasDeEmpresa, destinoDe, esValidacionDeCertificado, paginaDeNadie } from '../puerta/destino';
+import { APPS_DOMINIO, PREFIJO, RESERVADOS_SUITE as RESERVADOS_API } from '../src/dominios';
 
 describe('lo nuestro pasa tal cual', () => {
   it('taller101.com y cualquier subdominio son propios', () => {
     for (const h of ['taller101.com', 'api.taller101.com', 'dash101.taller101.com', 'suite101.taller101.com', 'wall101.taller101.com', 'API.Taller101.com:443']) {
       expect(destinoDe(h), h).toEqual({ tipo: 'propio' });
     }
+  });
+});
+
+describe('12-oct · suite101.app', () => {
+  it('lo nuestro en suite101.app pasa tal cual', () => {
+    for (const h of ['suite101.app', 'api.suite101.app', 'app.suite101.app', 'quell.suite101.app', 'www.suite101.app', 'empresas.suite101.app', 'draw.suite101.app']) {
+      expect(destinoDe(h), h).toEqual({ tipo: 'propio' });
+    }
+  });
+  it('empresa.suite101.app va a la puerta de la suite (la API), con el host como dominio', () => {
+    expect(destinoDe('base-arquitectura.suite101.app')).toEqual({ tipo: 'empresa', app: 'suite101', binding: 'API', dominio: 'base-arquitectura.suite101.app', host: 'base-arquitectura.suite101.app' });
+  });
+  it('las primeras palabras reservadas son las mismas que en la API', () => {
+    expect([...RESERVADOS_SUITE].sort()).toEqual([...RESERVADOS_API].sort());
   });
 });
 

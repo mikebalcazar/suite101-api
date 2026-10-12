@@ -123,8 +123,11 @@ CORREO_ROSTER = "roster101 <expedientes@envios.taller101.mx>"
 # El dominio propio de cada empresa (DOMINIOS.md): la zona de Cloudflare for
 # SaaS y el registro de respaldo al que cada empresa apunta sus CNAME. El token
 # (CLOUDFLARE_SAAS_TOKEN) es secreto y lo pone el despliegue.
-ZONA_SAAS = "taller101.com"
-RESPALDO_SAAS = "empresas.taller101.com"
+# 12-oct-2026 · se mudan a suite101.app (Mike: «los dominios deben ser
+# controlados por suite101.app»). Los nombres que nacieron en taller101.com
+# los muda .github/workflows/mudar-dominios.yml.
+ZONA_SAAS = "suite101.app"
+RESPALDO_SAAS = "empresas.suite101.app"
 
 # ─────────────── staging ───────────────
 # Mismo codigo, otra base y otro bucket. Aqui ENTORNO no es "produccion", asi
@@ -187,5 +190,8 @@ CORREO_ROSTER = "roster101 <expedientes@envios.taller101.mx>"
 # El dominio propio de cada empresa (DOMINIOS.md): la zona de Cloudflare for
 # SaaS y el registro de respaldo al que cada empresa apunta sus CNAME. El token
 # (CLOUDFLARE_SAAS_TOKEN) es secreto y lo pone el despliegue.
-ZONA_SAAS = "taller101.com"
-RESPALDO_SAAS = "empresas.taller101.com"
+# 12-oct-2026 · se mudan a suite101.app (Mike: «los dominios deben ser
+# controlados por suite101.app»). Los nombres que nacieron en taller101.com
+# los muda .github/workflows/mudar-dominios.yml.
+ZONA_SAAS = "suite101.app"
+RESPALDO_SAAS = "empresas.suite101.app"
