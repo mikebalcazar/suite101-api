@@ -1517,3 +1517,33 @@ describe('el avance de obra por ítem, para la lista de dash101 (0.76.0)', () =>
     expect((await q('mike', `/avance-items`)).estado).toBe(400);
   });
 });
+
+/* 12-oct-2026 · Mike (Android, HOLCIM PLANTA CARP, 69 ítems): «me marca
+ * "falla interna" al intentar generar reporte de punchlist de este plano».
+ * El reporte pide las fotos de TODAS las entradas de bitácora y de todos los
+ * pendientes en una sola consulta `IN (?, ?, …)`, y el SQLite de la empresa
+ * no acepta más de 100 parámetros por consulta: una obra con más de 99
+ * entradas tronaba. Ahora va en tandas. */
+describe('el reporte de una obra grande (más de 100 entradas)', () => {
+  it('sale completo, con sus fotos, aunque la bitácora y el punchlist pasen de 100', async () => {
+    const obra = (await q('mike', '/projects', { method: 'POST', json: { name: 'Obra grande', client: 'Cliente inventado' } })).id;
+    const fd = new FormData();
+    fd.append('name', 'Planta'); fd.append('file_name', 'plano.pdf'); fd.append('width', '1000'); fd.append('height', '800');
+    fd.append('image', new File([PNG], 'plan.png', { type: 'image/png' }));
+    const plano = (await q('mike', `/projects/${obra}/plans`, { method: 'POST', body: fd })).id;
+    const el = await q('mike', `/plans/${plano}/elements`, { method: 'POST', json: { op_id: crypto.randomUUID(), name: 'Muro', type: 'Mueble', x: 0.5, y: 0.5 } });
+    expect(el.estado, JSON.stringify(el)).toBe(200);
+    // La última entrada lleva foto: que la foto de la entrada 150 llegue al reporte.
+    for (let i = 1; i <= 150; i++) {
+      const campos: Record<string, string | Blob> = { text: `Avance ${i}`, kind: 'trabajo' };
+      if (i === 150) campos.photos = new File([PNG], 'foto.png', { type: 'image/png' });
+      const r = await q('mike', `/elements/${el.id}/log`, { method: 'POST', body: forma(campos) });
+      expect(r.estado, `entrada ${i}: ${JSON.stringify(r)}`).toBe(200);
+    }
+    const rep = await q('mike', `/projects/${obra}/report`);
+    expect(rep.estado, JSON.stringify(rep).slice(0, 300)).toBe(200);
+    expect(rep.logs).toHaveLength(150);
+    expect(rep.logs.find((l: any) => l.text === 'Avance 150').photos).toHaveLength(1);
+    expect(rep.logs.find((l: any) => l.text === 'Avance 1').photos).toEqual([]);
+  }, 120000);
+});

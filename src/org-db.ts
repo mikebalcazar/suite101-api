@@ -2369,7 +2369,8 @@ export class OrgDB extends DurableObject<Env> {
    *  aguanta SQLite, y porque un día habrá más de dos proyectos. */
   private sumarDineroDe(filas: Record<string, Fila[]>): Record<string, number> {
     const out: Record<string, number> = {};
-    const TANDA = 200;
+    // 12-oct-2026 · el SQLite de la empresa acepta hasta 100 parámetros por consulta.
+    const TANDA = 90;
     for (const tabla of TABLAS) {
       const ids = (filas[tabla] ?? []).map((f) => String(f.id ?? '')).filter(Boolean);
       if (!ids.length) continue;
@@ -3359,20 +3360,23 @@ export class OrgDB extends DurableObject<Env> {
       proyectos = [p];
     }
     const pids = proyectos.map((p) => String(p.id));
-    const lista = (ids: string[]) => (ids.length ? `(${ids.map(() => '?').join(',')})` : '(NULL)');
+    /* 12-oct-2026 · la lista va como UN parámetro (JSON) y no uno por id: el
+     * SQLite de la empresa acepta hasta 100 parámetros por consulta, y un
+     * cliente o proyecto con más de 100 ítems no se podía revisar ni borrar. */
+    const lista = () => `(SELECT value FROM json_each(?))`;
 
     const items = (que.cliente_id
       ? this.sql.exec(`SELECT id, clave, nombre FROM items WHERE cliente_id = ?`, que.cliente_id).toArray()
-      : this.sql.exec(`SELECT id, clave, nombre FROM items WHERE proyecto_id IN ${lista(pids)}`, ...pids).toArray()) as Fila[];
+      : this.sql.exec(`SELECT id, clave, nombre FROM items WHERE proyecto_id IN ${lista()}`, JSON.stringify(pids)).toArray()) as Fila[];
     const iids = items.map((i) => String(i.id));
     const cuantos = (sql: string, ...args: SqlStorageValue[]) => Number((this.sql.exec(sql, ...args).one() as Fila).n);
 
     /* Dinero: lo detiene todo. */
-    let movimientos = cuantos(`SELECT COUNT(*) AS n FROM movimientos WHERE proyecto_id IN ${lista(pids)} OR item_id IN ${lista(iids)}`, ...pids, ...iids);
+    let movimientos = cuantos(`SELECT COUNT(*) AS n FROM movimientos WHERE proyecto_id IN ${lista()} OR item_id IN ${lista()}`, JSON.stringify(pids), JSON.stringify(iids));
     if (que.cliente_id) {
       movimientos += cuantos(
-        `SELECT COUNT(*) AS n FROM movimientos WHERE contraparte_tipo = 'cliente' AND contraparte_id = ? AND (proyecto_id IS NULL OR proyecto_id NOT IN ${lista(pids)}) AND (item_id IS NULL OR item_id NOT IN ${lista(iids)})`,
-        que.cliente_id, ...pids, ...iids,
+        `SELECT COUNT(*) AS n FROM movimientos WHERE contraparte_tipo = 'cliente' AND contraparte_id = ? AND (proyecto_id IS NULL OR proyecto_id NOT IN ${lista()}) AND (item_id IS NULL OR item_id NOT IN ${lista()})`,
+        que.cliente_id, JSON.stringify(pids), JSON.stringify(iids),
       );
     }
     if (movimientos > 0) {
@@ -3386,15 +3390,15 @@ export class OrgDB extends DurableObject<Env> {
       const c = {
         cobros: 0,
         avances: cuantos(`SELECT COUNT(*) AS n FROM avances WHERE item_id = ?`, id),
-        compromisos: cuantos(`SELECT COUNT(*) AS n FROM partidas WHERE item_id = ? AND proyecto_id NOT IN ${lista(pids)}`, id, ...pids),
+        compromisos: cuantos(`SELECT COUNT(*) AS n FROM partidas WHERE item_id = ? AND proyecto_id NOT IN ${lista()}`, id, JSON.stringify(pids)),
         archivos: cuantos(`SELECT COUNT(*) AS n FROM archivos WHERE de_tabla = 'items' AND de_id = ?`, id),
       };
       const porque = this.loQueDetiene(c);
       if (porque.length) detenidos.push({ id, clave: (it.clave as string | null) ?? null, nombre: String(it.nombre ?? ''), porque });
     }
     const archivosDeArriba = cuantos(
-      `SELECT COUNT(*) AS n FROM archivos WHERE (de_tabla = 'proyectos' AND de_id IN ${lista(pids)}) OR (de_tabla = 'clientes' AND de_id = ?)`,
-      ...pids, que.cliente_id ?? '',
+      `SELECT COUNT(*) AS n FROM archivos WHERE (de_tabla = 'proyectos' AND de_id IN ${lista()}) OR (de_tabla = 'clientes' AND de_id = ?)`,
+      JSON.stringify(pids), que.cliente_id ?? '',
     );
     if (detenidos.length || archivosDeArriba) {
       return { error: 'tiene_historia', detalle: { items: detenidos, archivos: archivosDeArriba, motivo: 'traen avances de obra, archivos o compromisos con proveedor: eso no se borra solo' } };
@@ -3404,20 +3408,20 @@ export class OrgDB extends DurableObject<Env> {
       ok: true, modo, cliente,
       proyectos: pids.length, items: iids.length,
       cotizaciones: que.cliente_id ? cuantos(`SELECT COUNT(*) AS n FROM cotizaciones WHERE cliente_id = ?`, que.cliente_id) : 0,
-      partidas: cuantos(`SELECT COUNT(*) AS n FROM partidas WHERE proyecto_id IN ${lista(pids)}`, ...pids),
-      ordenes_sueltas: cuantos(`SELECT COUNT(*) AS n FROM ordenes WHERE proyecto_id IN ${lista(pids)}`, ...pids),
-      piezas_sin_item: cuantos(`SELECT COUNT(*) AS n FROM quell_elements WHERE item_id IN ${lista(iids)}`, ...iids),
-      obras_sueltas: cuantos(`SELECT COUNT(*) AS n FROM quell_projects WHERE proyecto_id IN ${lista(pids)}`, ...pids),
+      partidas: cuantos(`SELECT COUNT(*) AS n FROM partidas WHERE proyecto_id IN ${lista()}`, JSON.stringify(pids)),
+      ordenes_sueltas: cuantos(`SELECT COUNT(*) AS n FROM ordenes WHERE proyecto_id IN ${lista()}`, JSON.stringify(pids)),
+      piezas_sin_item: cuantos(`SELECT COUNT(*) AS n FROM quell_elements WHERE item_id IN ${lista()}`, JSON.stringify(iids)),
+      obras_sueltas: cuantos(`SELECT COUNT(*) AS n FROM quell_projects WHERE proyecto_id IN ${lista()}`, JSON.stringify(pids)),
     };
     if (modo === 'seco') return cuenta;
 
     this.ctx.storage.transactionSync(() => {
-      this.sql.exec(`UPDATE ordenes SET proyecto_id = NULL WHERE proyecto_id IN ${lista(pids)}`, ...pids);
-      this.sql.exec(`DELETE FROM partidas WHERE proyecto_id IN ${lista(pids)}`, ...pids);
-      this.sql.exec(`UPDATE quell_elements SET item_id = NULL WHERE item_id IN ${lista(iids)}`, ...iids);
-      this.sql.exec(`DELETE FROM items WHERE id IN ${lista(iids)}`, ...iids);
-      this.sql.exec(`UPDATE quell_projects SET proyecto_id = NULL WHERE proyecto_id IN ${lista(pids)}`, ...pids);
-      this.sql.exec(`DELETE FROM proyectos WHERE id IN ${lista(pids)}`, ...pids);
+      this.sql.exec(`UPDATE ordenes SET proyecto_id = NULL WHERE proyecto_id IN ${lista()}`, JSON.stringify(pids));
+      this.sql.exec(`DELETE FROM partidas WHERE proyecto_id IN ${lista()}`, JSON.stringify(pids));
+      this.sql.exec(`UPDATE quell_elements SET item_id = NULL WHERE item_id IN ${lista()}`, JSON.stringify(iids));
+      this.sql.exec(`DELETE FROM items WHERE id IN ${lista()}`, JSON.stringify(iids));
+      this.sql.exec(`UPDATE quell_projects SET proyecto_id = NULL WHERE proyecto_id IN ${lista()}`, JSON.stringify(pids));
+      this.sql.exec(`DELETE FROM proyectos WHERE id IN ${lista()}`, JSON.stringify(pids));
       if (que.cliente_id) {
         this.sql.exec(`DELETE FROM cotizaciones WHERE cliente_id = ?`, que.cliente_id);
         this.sql.exec(`DELETE FROM clientes WHERE id = ?`, que.cliente_id);
