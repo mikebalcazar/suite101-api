@@ -17,7 +17,15 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.96.0 (EL GENERADOR DE UNA PARTIDA EN EXCEL. Mike,
+ * Versión del contrato: 0.97.0 (LOS DOMINIOS EN SUITE101.APP Y LA DIRECCIÓN EN
+ * LA SUITE. Mike, 12-oct: «los dominios deben ser controlados por
+ * suite101.app» y, para la empresa sin dominio, «su dirección en suite101»:
+ * empresa.suite101.app es la puerta de la suite con su nombre (lo resuelve
+ * GET /dominios/resolver, app `suite101`, dominio = el host). GET
+ * /admin/orgs/:o/dominio suma `direccion_suite`; el respaldo de los CNAME es
+ * empresas.suite101.app. Ver DOMINIOS.md.)
+ * Antes:
+ * 0.96.0 (EL GENERADOR DE UNA PARTIDA EN EXCEL. Mike,
  * 11-oct: «exportar el generador del producto del catálogo en cost101 en
  * formato PDF y excel». GET /orgs/:o/productos/:id/xlsx (cost101 o quote101,
  * miembros): una hoja «Generador» con los componentes por sección y el
@@ -1579,7 +1587,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.96.0';
+export const VERSION_CONTRATO = '0.97.0';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {

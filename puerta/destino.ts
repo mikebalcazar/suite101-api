@@ -46,7 +46,19 @@ export const BINDINGS: Record<string, string> = {
 export const esValidacionDeCertificado = (ruta: string): boolean =>
   ruta.startsWith('/.well-known/acme-challenge/') || ruta.startsWith('/.well-known/pki-validation/');
 
-export const ZONAS_PROPIAS = ['taller101.com'];
+/* 12-oct-2026 · la puerta también vive en suite101.app (Mike: «los dominios
+ * deben ser controlados por suite101.app»). Ahí, además de los dominios de las
+ * empresas, recibe la dirección en la suite de una empresa sin dominio:
+ * base-arquitectura.suite101.app → la puerta de la suite con su nombre (API).
+ * Las primeras palabras nuestras pasan tal cual; tienen que cuadrar con
+ * RESERVADOS_SUITE de src/dominios.ts (lo revisa la prueba). */
+export const ZONAS_PROPIAS = ['taller101.com', 'suite101.app'];
+export const RESERVADOS_SUITE: string[] = [
+  'dash', 'quell', 'quote', 'cost', 'patron', 'bill', 'supply', 'roster', 'peek', 'workshop', 'suite101',
+  'api', 'app', 'www', 'empresas', 'master', 'draw', 'nest', 'shape',
+  'staging', 'correo', 'envios', 'mail', 'admin', 'ayuda', 'docs', 'status',
+];
+const EN_SUITE = /^([a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?)\.suite101\.app$/;
 
 export type Destino =
   | { tipo: 'propio' }
@@ -55,6 +67,8 @@ export type Destino =
 
 export function destinoDe(hostCrudo: string, zonas: string[] = ZONAS_PROPIAS): Destino {
   const host = String(hostCrudo ?? '').trim().toLowerCase().split(':')[0];
+  const enSuite = EN_SUITE.exec(host);
+  if (enSuite && !RESERVADOS_SUITE.includes(enSuite[1])) return { tipo: 'empresa', app: 'suite101', binding: 'API', dominio: host, host };
   if (zonas.some((z) => host === z || host.endsWith('.' + z))) return { tipo: 'propio' };
   const i = host.indexOf('.');
   if (i <= 0 || i === host.length - 1) return { tipo: 'nadie', host, motivo: 'sin_dominio' };

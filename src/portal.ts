@@ -76,11 +76,14 @@ const icono = (ruta: string) => ICONOS[ruta]
  *  ligas cambiadas: una sola página que mantener. */
 export function paginaDeEmpresa(nombre: string, dominio: string): string {
   const esc = (t: string) => t.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
+  /* 12-oct · la dirección en la suite (base-arquitectura.suite101.app) no
+   * tiene un nombre por app: sus ligas son las de siempre, en suite101.app. */
+  const enSuite = dominio.endsWith('.suite101.app');
   return pagina
     // 11-oct-2026 · la hoja liga a <app>.suite101.app; en el dominio de la
     // empresa es el mismo nombre (sin el «101») sobre SU dominio.
     .replace(/https:\/\/([a-z]+)\.suite101\.app/g, (todo, pre: string) =>
-      NOMBRES_APP.includes(pre) ? `https://${pre}.${dominio}` : todo)
+      NOMBRES_APP.includes(pre) && !enSuite ? `https://${pre}.${dominio}` : todo)
     .replace('</style>', '.empresa{margin:4px 0 0;font-size:1.05rem;font-weight:700;color:#86c9ec;letter-spacing:.01em}\n</style>')
     .replace('</header>', `  <p class="empresa">${esc(nombre)}</p>\n  </header>`);
 }

@@ -1,0 +1,97 @@
+# Muda los nombres de las empresas de la zona taller101.com a suite101.app
+# (12-oct-2026; Mike: «los dominios deben ser controlados por suite101.app»).
+#
+# Por cada nombre del directorio (dominios_nombres, base de producción):
+#   · si ya está en suite101.app, se queda y sólo se apunta su id;
+#   · si no, se borra de taller101.com (un nombre vive en una sola zona) y se
+#     da de alta en suite101.app, y el directorio queda con el id nuevo y
+#     «pendiente» hasta que la empresa ponga su CNAME a empresas.suite101.app.
+# Antes de tocar nada se mide que suite101.app ya tenga Cloudflare for SaaS
+# con su respaldo activo y que la llave la alcance: si no, no hace nada.
+# Se puede correr las veces que sea: lo que ya está mudado se queda igual.
+# Sólo a mano (workflow_dispatch). Lo medido queda en el commit.
+
+name: Mudar los dominios de las empresas a suite101.app
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mudar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mudar
+        env:
+          CF: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          SAAS: ${{ secrets.CLOUDFLARE_SAAS_TOKEN }}
+          CUENTA: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -uo pipefail
+          exec > >(tee /tmp/salida.txt) 2>&1
+          API=https://api.cloudflare.com/client/v4
+          zona() { curl -sS -H "Authorization: Bearer $CF" "$API/zones?name=$1" | jq -r '.result[0].id // empty'; }
+          VIEJA=$(zona taller101.com); NUEVA=$(zona suite101.app)
+          [ -n "$VIEJA" ] && [ -n "$NUEVA" ] || { echo "No se pudieron leer las zonas. No se hizo nada."; exit 1; }
+
+          echo "== 1. suite101.app lista para dominios de empresa =="
+          r=$(curl -sS -H "Authorization: Bearer $SAAS" "$API/zones/$NUEVA/custom_hostnames/fallback_origin")
+          echo "respaldo: $(echo "$r" | jq -c '{ok: .success, origen: .result.origin, estado: .result.status, errores: .errors}')"
+          if [ "$(echo "$r" | jq -r '.result.status // empty')" != active ]; then
+            echo "RESULTADO: suite101.app todavia no tiene el respaldo activo, o la llave no la alcanza. No se mudo nada."
+            exit 1
+          fi
+
+          echo "== 2. El directorio =="
+          DB=$(curl -sS -H "Authorization: Bearer $CF" "$API/accounts/$CUENTA/d1/database?name=suite101-master" | jq -r '.result[] | select(.name=="suite101-master") | .uuid')
+          [ -n "$DB" ] || { echo "No se encontro la base suite101-master. No se hizo nada."; exit 1; }
+          sql() { # sql params-json
+            curl -sS -X POST -H "Authorization: Bearer $CF" -H 'Content-Type: application/json' "$API/accounts/$CUENTA/d1/database/$DB/query" \
+              -d "$(jq -nc --arg s "$1" --argjson p "$2" '{sql: $s, params: $p}')"
+          }
+          filas=$(sql "SELECT hostname, cf_id FROM dominios_nombres ORDER BY org_id, app" '[]')
+          echo "$filas" | jq -e '.success' >/dev/null || { echo "No se pudo leer el directorio: $(echo "$filas" | jq -c '.errors')"; exit 1; }
+          echo "$filas" | jq -r '.result[0].results[] | "  \(.hostname)"'
+
+          echo "== 3. Mudar =="
+          mal=0
+          for h in $(echo "$filas" | jq -r '.result[0].results[].hostname'); do
+            ya=$(curl -sS -H "Authorization: Bearer $SAAS" "$API/zones/$NUEVA/custom_hostnames?hostname=$h" | jq -r '.result[0].id // empty')
+            if [ -z "$ya" ]; then
+              viejo=$(curl -sS -H "Authorization: Bearer $SAAS" "$API/zones/$VIEJA/custom_hostnames?hostname=$h" | jq -r '.result[0].id // empty')
+              if [ -n "$viejo" ]; then
+                d=$(curl -sS -X DELETE -H "Authorization: Bearer $SAAS" "$API/zones/$VIEJA/custom_hostnames/$viejo")
+                echo "$d" | jq -e '.success' >/dev/null || { echo "  $h: no se pudo quitar de taller101.com: $(echo "$d" | jq -c '.errors')"; mal=1; continue; }
+              fi
+              n=$(curl -sS -X POST -H "Authorization: Bearer $SAAS" -H 'Content-Type: application/json' "$API/zones/$NUEVA/custom_hostnames" \
+                -d "$(jq -nc --arg h "$h" '{hostname: $h, ssl: {method: "http", type: "dv", settings: {min_tls_version: "1.2"}}}')")
+              ya=$(echo "$n" | jq -r '.result.id // empty')
+              [ -n "$ya" ] || { echo "  $h: no se pudo dar de alta en suite101.app: $(echo "$n" | jq -c '.errors')"; mal=1; continue; }
+              echo "  $h: mudado (estaba en taller101.com: ${viejo:+si}${viejo:-no})"
+            else
+              echo "  $h: ya estaba en suite101.app"
+            fi
+            u=$(sql "UPDATE dominios_nombres SET cf_id = ?, estado = 'pendiente', ssl = NULL, detalle = NULL, actualizado_at = ? WHERE hostname = ? AND (cf_id IS NULL OR cf_id <> ?)" \
+              "$(jq -nc --arg id "$ya" --arg t "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" --arg h "$h" '[$id, $t, $h, $id]')")
+            echo "$u" | jq -e '.success' >/dev/null || { echo "  $h: no se pudo apuntar en el directorio: $(echo "$u" | jq -c '.errors')"; mal=1; }
+          done
+
+          echo "== 4. Como quedaron en suite101.app =="
+          curl -sS -H "Authorization: Bearer $SAAS" "$API/zones/$NUEVA/custom_hostnames?per_page=100" | jq -r '.result[] | "  \(.hostname)\t\(.status)\t\(.ssl.status // "-")"'
+          echo "en taller101.com quedan: $(curl -sS -H "Authorization: Bearer $SAAS" "$API/zones/$VIEJA/custom_hostnames?per_page=100" | jq '.result | length')"
+          if [ "$mal" = 1 ]; then echo "RESULTADO: algo no se mudo (arriba dice que)"; exit 1; fi
+          echo "RESULTADO: todo mudado a suite101.app; cada empresa apunta sus CNAME a empresas.suite101.app"
+
+      - name: Dejar lo medido en el commit
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          [ -f /tmp/salida.txt ] || echo "No hubo salida." > /tmp/salida.txt
+          jq -Rs '{body: ("**Mudar los dominios a suite101.app**\n\n```\n" + .[-60000:] + "\n```")}' /tmp/salida.txt > /tmp/comentario.json
+          curl -sS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/commits/$SHA/comments" -d @/tmp/comentario.json -o /dev/null -w 'comentario: %{http_code}\n'

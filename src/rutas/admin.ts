@@ -18,7 +18,7 @@ import {
   superadmins, ultimasEntradasDe, usuarioPorId,
 } from '../maestro';
 import { correoValido, normalizaCorreo } from '../lib';
-import { cloudflareDe, darDeAltaNombres, dominioLimpio, olvidarDominio, quitarNombres, refrescarNombres, nombresDeLaOrg } from '../dominios';
+import { cloudflareDe, darDeAltaNombres, direccionEnSuite, dominioLimpio, olvidarDominio, quitarNombres, refrescarNombres, nombresDeLaOrg } from '../dominios';
 import { correoBienvenida, enviarCorreo } from '../auth/correo';
 import { plataformasDe } from '../plataformas';
 import type { Org } from '../../schema/tipos';
@@ -214,9 +214,11 @@ rutas.get('/orgs/:o/dominio', async (c) => {
   if (!o) return err(c, 'org_desconocida', 404);
   const cf = cloudflareDe(c.env);
   const nombres = o.dominio && cf ? await refrescarNombres(c.env, cf, o.id) : await nombresDeLaOrg(c.env, o.id);
-  const respaldo = c.env.RESPALDO_SAAS || 'empresas.taller101.com';
+  const respaldo = c.env.RESPALDO_SAAS || 'empresas.suite101.app';
   return ok(c, {
     dominio: o.dominio,
+    // 12-oct · la dirección en la suite, tenga o no dominio propio.
+    direccion_suite: direccionEnSuite(o.id),
     configurado: !!cf,
     respaldo,
     nombres,

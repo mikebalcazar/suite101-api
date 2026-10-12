@@ -26,7 +26,7 @@
 
 import { SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { APPS_DOMINIO, PREFIJO, dominioLimpio, nombresDe, partirHost } from '../src/dominios';
+import { APPS_DOMINIO, PREFIJO, RESERVADOS_SUITE, direccionEnSuite, dominioLimpio, empresaDeSubdominio, nombresDe, partirHost } from '../src/dominios';
 
 const CORREO = 'mike@forespot.com';
 const ACME = 'dom-acme';
@@ -197,6 +197,61 @@ describe('la puerta por dominio', () => {
     const cab = { 'X-Host-Original': 'suite101.acme.com', 'X-Dominio-Empresa': 'acme.com' };
     expect((await SELF.fetch('https://suite101.acme.com/salud', { headers: cab })).status).toBe(200);
     expect((await SELF.fetch('https://suite101.acme.com/orgs', { headers: cab })).status).toBe(404);
+  });
+});
+
+/* 12-oct-2026 · Mike: «cómo podemos manejar la alternativa a cuando la
+ * empresa no nos entrega un dominio o no le interesa?» → con botones, «su
+ * dirección en suite101»: empresa.suite101.app, sacada de su id. */
+describe('la dirección en la suite de una empresa sin dominio', () => {
+  it('sale del id; lo nuestro (quell, api, app, www, empresas…) nunca es de una empresa', () => {
+    expect(empresaDeSubdominio('base-arquitectura.suite101.app')).toBe('base-arquitectura');
+    expect(empresaDeSubdominio('Base-Arquitectura.SUITE101.app:443')).toBe('base-arquitectura');
+    for (const nuestro of ['quell', 'suite101', 'api', 'app', 'www', 'empresas', 'master', 'draw', 'nest', 'shape']) {
+      expect(empresaDeSubdominio(`${nuestro}.suite101.app`), nuestro).toBeNull();
+      expect(RESERVADOS_SUITE).toContain(nuestro);
+    }
+    for (const a of APPS_DOMINIO) expect(RESERVADOS_SUITE).toContain(PREFIJO[a]);
+    expect(empresaDeSubdominio('suite101.app')).toBeNull();
+    expect(empresaDeSubdominio('a.b.suite101.app')).toBeNull();
+    expect(empresaDeSubdominio('-mal.suite101.app')).toBeNull();
+    expect(empresaDeSubdominio('base.suite101.app.otro.com')).toBeNull();
+    expect(direccionEnSuite('base-arquitectura')).toBe('https://base-arquitectura.suite101.app');
+    expect(direccionEnSuite('quell')).toBeNull();
+  });
+
+  it('el resolvedor la reconoce: la empresa, su nombre y la puerta de la suite', async () => {
+    const r = await pedir('nadie', `/dominios/resolver?host=${OTRA}.suite101.app`, { app: '' });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data).toEqual({ org_id: OTRA, nombre: 'La otra', dominio: `${OTRA}.suite101.app`, app: 'suite101' });
+    expect((await pedir('nadie', '/dominios/resolver?host=no-existe.suite101.app', { app: '' })).estado).toBe(404);
+    expect((await pedir('nadie', '/dominios/resolver?host=quell.suite101.app', { app: '' })).estado).toBe(404);
+  });
+
+  it('es la puerta de la suite con el nombre de la empresa, y sus ligas son las de suite101.app', async () => {
+    const host = `${OTRA}.suite101.app`;
+    const r = await SELF.fetch(`https://${host}/`, { headers: { 'X-Host-Original': host, 'X-Dominio-Empresa': host } });
+    expect(r.status).toBe(200);
+    const html = await r.text();
+    expect(html).toContain('<p class="empresa">La otra</p>');
+    expect(html).toContain('https://dash.suite101.app');
+    expect(html).toContain('https://roster.suite101.app/admin');
+    expect(html).not.toContain(`.${host}`);
+  });
+
+  it('por ahí sólo está la puerta: /salud contesta y lo demás (la API) es 404', async () => {
+    const host = `${OTRA}.suite101.app`;
+    const cab = { 'X-Host-Original': host, 'X-Dominio-Empresa': host };
+    expect((await SELF.fetch(`https://${host}/salud`, { headers: cab })).status).toBe(200);
+    expect((await SELF.fetch(`https://${host}/yo`, { headers: cab })).status).toBe(404);
+    expect((await SELF.fetch(`https://${host}/orgs`, { headers: cab })).status).toBe(404);
+  });
+
+  it('master101 la ve en la ficha del dominio, tenga o no dominio propio', async () => {
+    const d = await pedir('mike', `/admin/orgs/${OTRA}/dominio`, { app: '' });
+    expect(d.estado).toBe(200);
+    expect(d.data.direccion_suite).toBe(`https://${OTRA}.suite101.app`);
+    expect(d.data.respaldo).toBe('empresas.suite101.app');
   });
 });
 

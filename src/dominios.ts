@@ -38,6 +38,34 @@ export const PREFIJO: Record<AppDominio, string> = {
 };
 const APP_DE_PREFIJO: Record<string, AppDominio> = Object.fromEntries(APPS_DOMINIO.map((a) => [PREFIJO[a], a]));
 
+/* 12-oct-2026 · la dirección en la suite de una empresa sin dominio. Mike:
+ * «cómo podemos manejar la alternativa a cuando la empresa no nos entrega un
+ * dominio o no le interesa?», y escogió con botones «su dirección en
+ * suite101»: base-arquitectura.suite101.app es la puerta de la suite con el
+ * nombre de la empresa. Sale sola del id de la empresa, que ya es un slug
+ * (a-z, 0-9 y guiones). El certificado de suite101.app cubre un nivel
+ * (*.suite101.app), por eso es UNA dirección —la puerta— y no once: sus ligas
+ * van a las apps de siempre (quell.suite101.app…). */
+export const SUITE_APP = 'suite101.app';
+/** Las primeras palabras de suite101.app que son nuestras: nunca son la
+ *  dirección de una empresa, aunque alguna se llame así. La puerta las repite
+ *  en puerta/destino.ts (una prueba revisa que cuadren). */
+export const RESERVADOS_SUITE: string[] = [
+  ...Object.values(PREFIJO), 'api', 'app', 'www', 'empresas', 'master', 'draw', 'nest', 'shape',
+  'staging', 'correo', 'envios', 'mail', 'admin', 'ayuda', 'docs', 'status',
+];
+/** base-arquitectura.suite101.app → base-arquitectura. Null si no es una
+ *  dirección de empresa en suite101.app. */
+export function empresaDeSubdominio(host: string): string | null {
+  const h = String(host ?? '').trim().toLowerCase().split(':')[0];
+  const m = /^([a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?)\.suite101\.app$/.exec(h);
+  if (!m || RESERVADOS_SUITE.includes(m[1])) return null;
+  return m[1];
+}
+/** La dirección en la suite de una empresa, o null si su id no la permite. */
+export const direccionEnSuite = (org_id: string): string | null =>
+  empresaDeSubdominio(`${org_id}.${SUITE_APP}`) ? `https://${org_id}.${SUITE_APP}` : null;
+
 /** Dominios que son nuestros y no de una empresa: nunca se dan de alta.
  *  taller101.mx NO está: Mike lo escogió como el dominio de prueba de la
  *  puerta (9-oct), y se da de alta como el de una empresa más. */
@@ -170,7 +198,7 @@ class CloudflareDoble implements ClienteCloudflare {
 export function cloudflareDe(env: Env): ClienteCloudflare | null {
   if (env.ENTORNO === 'prueba') return new CloudflareDoble();
   if (!env.CLOUDFLARE_SAAS_TOKEN) return null;
-  return new CloudflareReal(env.CLOUDFLARE_SAAS_TOKEN, env.ZONA_SAAS || 'taller101.com');
+  return new CloudflareReal(env.CLOUDFLARE_SAAS_TOKEN, env.ZONA_SAAS || 'suite101.app');
 }
 
 /* ─────────────── el directorio ─────────────── */
@@ -252,6 +280,22 @@ const VIDA_CACHE_MS = 60_000;
  *  hay. Se guarda un minuto por isolate: la puerta pregunta en cada
  *  petición. */
 export async function resolverHost(env: Env, host: string): Promise<DominioResuelto | null> {
+  /* 12-oct · base-arquitectura.suite101.app: la empresa sale de su id. Su
+   * «dominio» es el host completo: es lo que la puerta manda en
+   * X-Dominio-Empresa y lo que aquí se compara. */
+  const id = empresaDeSubdominio(host);
+  if (id) {
+    const h = `${id}.${SUITE_APP}`;
+    const c = CACHE.get(h);
+    let valor: DominioResuelto | null;
+    if (c && c.hasta > Date.now()) valor = c.valor;
+    else {
+      const o = await env.MASTER.prepare(`SELECT id, nombre, activa FROM orgs WHERE id = ?`).bind(id).first<{ id: string; nombre: string; activa: number }>();
+      valor = o ? { org_id: o.id, nombre: o.nombre, dominio: h, app: 'suite101', activa: !!o.activa } : null;
+      CACHE.set(h, { hasta: Date.now() + VIDA_CACHE_MS, valor });
+    }
+    return valor;
+  }
   const parte = partirHost(host);
   if (!parte) return null;
   const llave = parte.dominio;

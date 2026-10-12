@@ -1,6 +1,6 @@
 /* La puerta de las empresas (2-oct-2026). Ver puerta/destino.ts y DOMINIOS.md.
  *
- * Corre en la ruta comodín de la zona taller101.com. Lo nuestro pasa tal cual;
+ * Corre en la ruta comodín de las zonas taller101.com y suite101.app (12-oct). Lo nuestro pasa tal cual;
  * un dominio de empresa se resuelve en la API (service binding, con caché de
  * un minuto en el isolate) y se reenvía al Worker de la app que dice la
  * primera palabra del host. No toca sesiones ni cuerpos: es un cartero.
@@ -43,6 +43,16 @@ export default {
     if (d.tipo === 'nadie') return html(paginaDeNadie(d.host, d.motivo), 404);
 
     const { valor, estado } = await resolver(env, d.host);
+    /* 12-oct · algo.suite101.app que no es de ninguna empresa puede ser algo
+     * nuestro sin ruta de exclusión (una página de Pages): pasa tal cual. Sólo
+     * si ahí no contesta nadie (el registro comodín «*» no tiene servidor),
+     * es la página de nadie. */
+    if (!valor && d.host.endsWith('.suite101.app')) {
+      try {
+        const r = await fetch(req);
+        if (r.status < 520) return r;
+      } catch { /* sin origen: página de nadie */ }
+    }
     if (!valor) return html(paginaDeNadie(d.host, estado === 403 ? 'org_inactiva' : 'sin_dominio'), estado === 403 ? 403 : 404);
 
     const servicio = env[d.binding];
