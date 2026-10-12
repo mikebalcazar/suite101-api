@@ -1,3 +1,5 @@
+> **12-oct-2026 · los dominios de empresa en suite101.app y la dirección en la suite (API 0.97.0 #349; master101 #49).** Empresa sin dominio: `empresa.suite101.app`. Falta de Mike: 5 pasos de Cloudflare en suite101.app y los 11 CNAME de forespot.com en GoDaddy; luego correr `mudar-dominios.yml`. Ver `muro/…-jr-dominios-en-suite101-app.md`.
+
 > **11-oct-2026 · menú de la suite sin destello al pasar el mouse (API #347).** Sólo el pulso neón; fuera `neonStrobe` en `src/paginas/suite.html`.
 
 > **11-oct-2026 · el generador de una partida en PDF y Excel (API 0.96.0 #345; cost101 #13) y «Otros documentos» legible en quote (#95).** `GET /orgs/:o/productos/:id/xlsx`; en cost101, «PDF» y «Excel» en la ficha de la partida. Ver `muro/…-jr-generador-pdf-excel.md`.
