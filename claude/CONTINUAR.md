@@ -1,3 +1,5 @@
+> **12-oct-2026 · el reporte de quell de una obra grande daba «falla interna» (API #351).** Límite de 100 parámetros por consulta del SQLite de la empresa; ahora en tandas. Ninguna lista `IN` que crezca con los datos va con un parámetro por elemento.
+
 > **12-oct-2026 · los dominios de empresa en suite101.app y la dirección en la suite (API 0.97.0 #349; master101 #49).** Empresa sin dominio: `empresa.suite101.app`. Falta de Mike: 5 pasos de Cloudflare en suite101.app y los 11 CNAME de forespot.com en GoDaddy; luego correr `mudar-dominios.yml`. Ver `muro/…-jr-dominios-en-suite101-app.md`.
 
 > **11-oct-2026 · menú de la suite sin destello al pasar el mouse (API #347).** Sólo el pulso neón; fuera `neonStrobe` en `src/paginas/suite.html`.
