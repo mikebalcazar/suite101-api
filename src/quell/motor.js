@@ -413,12 +413,12 @@ async function marcaEtapa(env, user, eid, clave, hecha) {
 // Las etapas cumplidas de un puñado de ítems, en una sola consulta.
 async function etapasDe(env, ids) {
   if (!ids.length) return {};
-  const marcas = ids.map(() => '?').join(',');
-  const { results } = await env.DB.prepare(
+  // En tandas (TANDA_SQL): una obra puede pasar de 100 ítems.
+  const results = await enTandas(ids, (tanda) => env.DB.prepare(
     `SELECT ee.element_id, ee.etapa, ee.hecha_en, u.name AS hecha_por_nombre
        FROM quell_element_etapas ee JOIN quell_etapas t ON t.clave = ee.etapa AND t.activa = 1
        LEFT JOIN quell_users u ON u.id = ee.hecha_por
-      WHERE ee.element_id IN (${marcas}) ORDER BY t.orden`).bind(...ids).all();
+      WHERE ee.element_id IN (${tanda.map(() => '?').join(',')}) ORDER BY t.orden`).bind(...tanda).all());
   const out = {};
   for (const r of results) (out[r.element_id] = out[r.element_id] || []).push(r);
   return out;
@@ -548,12 +548,28 @@ async function savePhotos(env, user, ownerType, ownerId, files) {
   }
   return out;
 }
+/* 12-oct-2026 · el SQLite de la empresa no acepta más de 100 parámetros por
+ * consulta (los mismos límites que D1). Una lista `IN (?, ?, …)` que crece con
+ * la obra —las fotos de toda la bitácora en el reporte— tronaba con «too many
+ * SQL variables» en cuanto pasaba de 99 («falla interna» al sacar el reporte de
+ * HOLCIM, Mike). Se pregunta en tandas y se juntan los renglones. */
+const TANDA_SQL = 90;
+async function enTandas(ids, consulta) {
+  const out = [];
+  for (let i = 0; i < ids.length; i += TANDA_SQL) {
+    const { results } = await consulta(ids.slice(i, i + TANDA_SQL));
+    out.push(...results);
+  }
+  return out;
+}
+
 async function photosFor(env, ownerType, ids) {
   if (!ids.length) return {};
-  const q = ids.map(() => '?').join(',');
-  const { results } = await env.DB.prepare(
-    `SELECT p.*, u.name AS user_name FROM quell_photos p LEFT JOIN quell_users u ON u.id = p.user_id WHERE p.owner_type = ? AND p.owner_id IN (${q}) ORDER BY p.created_at`
-  ).bind(ownerType, ...ids).all();
+  const results = (await enTandas(ids, (tanda) => env.DB.prepare(
+    `SELECT p.*, u.name AS user_name FROM quell_photos p LEFT JOIN quell_users u ON u.id = p.user_id WHERE p.owner_type = ? AND p.owner_id IN (${tanda.map(() => '?').join(',')})`
+  ).bind(ownerType, ...tanda).all()))
+    // El orden lo daba la consulta; con tandas se ordena aquí.
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   const map = {};
   for (const p of results) (map[p.owner_id] ||= []).push(p);
   return map;
@@ -565,9 +581,10 @@ async function armaDudas(env, dudas) {
   const ids = dudas.map((d) => d.id);
   const porDuda = {};
   if (ids.length) {
-    const { results } = await env.DB.prepare(
+    const results = (await enTandas(ids, (tanda) => env.DB.prepare(
       `SELECT r.*, u.name AS quien, u.role AS quien_rol FROM quell_duda_respuestas r JOIN quell_users u ON u.id = r.user_id
-        WHERE r.duda_id IN (${ids.map(() => '?').join(',')}) ORDER BY r.created_at`).bind(...ids).all();
+        WHERE r.duda_id IN (${tanda.map(() => '?').join(',')})`).bind(...tanda).all()))
+      .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
     for (const r of results) (porDuda[r.duda_id] = porDuda[r.duda_id] || []).push(r);
   }
   dudas.forEach((d) => (d.respuestas = porDuda[d.id] || []));
