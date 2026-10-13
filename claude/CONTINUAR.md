@@ -1,3 +1,5 @@
+> **13-oct-2026 · quell: las fotos entran al PDF del reporte y sin hojas en blanco (bitacora-obra #133; APK nuevo).** Cada foto se baja una vez, se reduce y entra dibujada; cada hoja mide una A4. Ver `muro/…-jr-fotos-en-el-pdf-de-quell.md`.
+
 > **12-oct-2026 · el reporte de quell de una obra grande daba «falla interna» (API #351).** Límite de 100 parámetros por consulta del SQLite de la empresa; ahora en tandas. Ninguna lista `IN` que crezca con los datos va con un parámetro por elemento.
 
 > **12-oct-2026 · los dominios de empresa en suite101.app y la dirección en la suite (API 0.97.0 #349; master101 #49).** Empresa sin dominio: `empresa.suite101.app`. Falta de Mike: 5 pasos de Cloudflare en suite101.app y los 11 CNAME de forespot.com en GoDaddy; luego correr `mudar-dominios.yml`. Ver `muro/…-jr-dominios-en-suite101-app.md`.
