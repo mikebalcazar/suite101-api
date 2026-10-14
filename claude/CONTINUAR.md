@@ -1,3 +1,5 @@
+> **14-oct-2026 · la cuenta de reembolso se firma en supply y vive sólo en roster (API 0.99.0 #357; dash101 #158).** Sin cuenta en roster, supply la pide con firma y la deja en el expediente («Datos bancarios firmados»); la carátula queda pendiente. Ver `muro/…-jr-cuenta-firmada-en-roster.md`.
+
 > **14-oct-2026 · la cuenta del reembolso sale de roster (API 0.98.0 #355; dash101 #157).** Si el expediente de roster trae CLABE, supply no la pide y dash la enseña. Pendiente que Mike decida qué pasa con quien no tiene cuenta en roster (hoy: la da en supply). Ver `muro/…-jr-cuenta-del-reembolso-de-roster.md`.
 
 > **14-oct-2026 · quell: el PDF del reporte sale en Android aunque la obra sea grande (bitacora-obra #134; APK nuevo).** Escala por hoja con tope de 8 MP, reintento y el porqué a la vista. Ver `muro/…-jr-pdf-de-quell-en-el-telefono.md`.
