@@ -116,11 +116,11 @@ describe('la migración 0050 sobre una base con compras y reembolsos', () => {
         mias: db.misOrdenes('u-ana').length,
       };
     });
-    expect(r.viejo).toEqual({ nombre: 'Ana', correo: 'ana@ejemplo.mx', clabe: null, banco: null, beneficiario: null });
+    expect(r.viejo).toEqual({ nombre: 'Ana', correo: 'ana@ejemplo.mx', clabe: null, banco: null, beneficiario: null, origen: 'orden' });
     expect(r.compra).toBeNull();
     expect(r.sinCuenta.error, 'sin cuenta guardada, el reembolso no entra').toBe('falta_cuenta_reembolso');
     expect(r.guardada.beneficiario, 'un beneficiario en blanco es nulo').toBeNull();
-    expect(r.nuevo, 'la cuenta guardada sin beneficiario se copia a nombre de quien pide').toEqual({ nombre: 'Ana', correo: 'ana@ejemplo.mx', clabe: '012180015621788594', banco: 'BBVA', beneficiario: 'Ana' });
+    expect(r.nuevo, 'la cuenta guardada sin beneficiario se copia a nombre de quien pide').toEqual({ nombre: 'Ana', correo: 'ana@ejemplo.mx', clabe: '012180015621788594', banco: 'BBVA', beneficiario: 'Ana', origen: 'orden' });
     expect(r.unaPorUsuario).toBe(1);
     expect(r.mias).toBe(4);
   });

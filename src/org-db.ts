@@ -361,7 +361,8 @@ export interface ApiOrgDB {
   pac(op: string, args?: unknown[]): Promise<any>;
   crearOrden(args: Record<string, unknown>): Promise<Fila | { error: string; detalle?: unknown }>;
   /** 0.92.0 · La cuenta a la que se le reembolsa a este usuario (0050), o null si nunca la dio. */
-  cuentaDeReembolsoDe(usuario_id: string): Promise<CuentaDeReembolso | null>;
+  cuentaDeReembolsoDe(usuario_id: string, correo?: string | null): Promise<CuentaDeReembolso | null>;
+  cuentaDeRoster(correo: string | null | undefined): Promise<CuentaDeReembolso | null>;
   /** 0.92.0 · Guardar (o cambiar) esa cuenta. La CLABE ya viene revisada por el Worker. */
   guardarCuentaDeReembolso(args: { usuario_id: string; clabe: string; banco?: string | null; beneficiario?: string | null }): Promise<CuentaDeReembolso>;
   misOrdenes(usuario_id: string): Promise<Fila[]>;
@@ -2624,9 +2625,14 @@ export class OrgDB extends DurableObject<Env> {
      * de Mike (10-oct), y se cierra aquí, no en la pantalla. */
     let cuenta: CuentaDeReembolso | null = null;
     if (tipo === 'reembolso') {
-      cuenta = args.cuenta?.clabe
-        ? this.guardarCuentaDeReembolso({ usuario_id: args.solicitante_usuario_id, ...args.cuenta, beneficiario: args.cuenta.beneficiario || args.solicitante_nombre || null })
-        : this.cuentaDeReembolsoDe(args.solicitante_usuario_id);
+      /* 0.98.0 · Mike, 14-oct: «no debería pedir número de cuenta, debería en
+       * automático ligar el número de cuenta del trabajador (…) los datos los
+       * debería jalar desde roster». Si roster tiene su cuenta, ésa manda y no
+       * se acepta otra; si no, lo de la 0.92.0. */
+      cuenta = this.cuentaDeRoster(args.solicitante_correo)
+        ?? (args.cuenta?.clabe
+          ? this.guardarCuentaDeReembolso({ usuario_id: args.solicitante_usuario_id, ...args.cuenta, beneficiario: args.cuenta.beneficiario || args.solicitante_nombre || null })
+          : this.cuentaDeReembolsoDe(args.solicitante_usuario_id));
       if (!cuenta) return { error: 'falta_cuenta_reembolso', detalle: { mensaje: 'Para pedir un reembolso hace falta la cuenta a la que se te paga: la CLABE, el banco y a nombre de quién está.' } };
     }
 
@@ -2664,9 +2670,31 @@ export class OrgDB extends DurableObject<Env> {
    * Mike, 10-oct-2026: un reembolso se le paga SÓLO a quien lo pidió. Una
    * cuenta por usuario (0050), por `usuario_id` y no por `personal`, porque
    * quien pide puede no tener fila ahí. Se pide la primera vez y se reusa. */
-  cuentaDeReembolsoDe(usuario_id: string): CuentaDeReembolso | null {
+  cuentaDeReembolsoDe(usuario_id: string, correo?: string | null): CuentaDeReembolso | null {
+    const deRoster = this.cuentaDeRoster(correo);
+    if (deRoster) return deRoster;
     const f = this.sql.exec(`SELECT * FROM reembolso_cuentas WHERE usuario_id = ?`, usuario_id).toArray()[0] as Fila | undefined;
     return f ? OrgDB.cuentaDeReembolso_(f) : null;
+  }
+
+  /** 0.98.0 · La cuenta del trabajador en roster, por su correo (el mismo con
+   *  el que entra a la suite). Sólo un expediente vivo (fuera de la papelera)
+   *  y con CLABE. El beneficiario, si roster no lo trae, es su nombre. */
+  cuentaDeRoster(correo: string | null | undefined): CuentaDeReembolso | null {
+    const c = String(correo ?? '').trim().toLowerCase();
+    if (!c) return null;
+    const f = this.sql.exec(
+      `SELECT banco, clabe, beneficiario, nombre, apellido_paterno, apellido_materno, actualizado_en FROM roster_trabajadores
+        WHERE lower(email) = ? AND trim(COALESCE(clabe, '')) <> '' AND id NOT IN (SELECT trabajador_id FROM roster_papelera)
+        ORDER BY actualizado_en DESC LIMIT 1`, c,
+    ).toArray()[0] as Fila | undefined;
+    if (!f) return null;
+    const texto = (v: unknown) => (v == null || String(v).trim() === '' ? null : String(v).trim());
+    const nombre = [f.nombre, f.apellido_paterno, f.apellido_materno].map(texto).filter(Boolean).join(' ') || null;
+    return {
+      clabe: String(f.clabe).replace(/[\s-]/g, ''), banco: texto(f.banco), beneficiario: texto(f.beneficiario) ?? nombre,
+      actualizado_at: String(f.actualizado_en ?? ''), origen: 'roster',
+    };
   }
 
   guardarCuentaDeReembolso(args: { usuario_id: string; clabe: string; banco?: string | null; beneficiario?: string | null }): CuentaDeReembolso {
@@ -2681,7 +2709,7 @@ export class OrgDB extends DurableObject<Env> {
 
   private static cuentaDeReembolso_(f: Fila): CuentaDeReembolso {
     const texto = (v: unknown) => (v == null || String(v).trim() === '' ? null : String(v));
-    return { clabe: String(f.clabe), banco: texto(f.banco), beneficiario: texto(f.beneficiario), actualizado_at: String(f.actualizado_at) };
+    return { clabe: String(f.clabe), banco: texto(f.banco), beneficiario: texto(f.beneficiario), actualizado_at: String(f.actualizado_at), origen: 'propia' };
   }
 
   /** Lo que ve quien pidió: SÓLO lo suyo. El filtro va aquí y no en la
@@ -2794,12 +2822,21 @@ export class OrgDB extends DurableObject<Env> {
      * no trae cuenta; sale con `clabe: null` y la pantalla lo dice. En una
      * compra es null: ahí se le paga al proveedor. */
     const texto = (v: unknown) => (v == null || String(v).trim() === '' ? null : String(v));
-    const reembolso_a: ReembolsoA | null = orden.tipo === 'reembolso'
+    let reembolso_a: ReembolsoA | null = orden.tipo === 'reembolso'
       ? {
           nombre: texto(orden.solicitante_nombre), correo: texto(orden.solicitante_correo),
           clabe: texto(orden.reembolso_clabe), banco: texto(orden.reembolso_banco), beneficiario: texto(orden.reembolso_beneficiario),
+          origen: 'orden',
         }
       : null;
+    /* 0.98.0 · Un reembolso que se pidió sin cuenta (antes de la 0.92.0): para
+     * pagarlo, la de roster del trabajador (Mike, 14-oct: «cuando el
+     * administrador abre el reembolso, ahí debería aparecer ya el número de
+     * cuenta»). Sólo para verla: la orden no se toca. */
+    if (reembolso_a && !reembolso_a.clabe) {
+      const r = this.cuentaDeRoster(reembolso_a.correo);
+      if (r) reembolso_a = { ...reembolso_a, clabe: r.clabe, banco: r.banco, beneficiario: r.beneficiario, origen: 'roster' };
+    }
     /* 0.67.0 · Con la orden viene lo que hace falta para pagarle (Mike,
      * 5-oct: «ahí mismo en la orden (desde dash) aparezcan los datos
      * bancarios o de pago del proveedor»). Las cuentas son las filas de
@@ -2978,9 +3015,11 @@ export class OrgDB extends DurableObject<Env> {
       if (c[k] !== undefined) campos[k] = k === 'urgente' ? (c[k] ? 1 : 0) : (c[k] as string | null);
     }
     if (orden.tipo === 'reembolso') {
-      const cuenta = args.cuenta?.clabe
-        ? this.guardarCuentaDeReembolso({ usuario_id: String(orden.solicitante_usuario_id), ...args.cuenta, beneficiario: args.cuenta.beneficiario || (orden.solicitante_nombre as string | null) })
-        : orden.reembolso_clabe ? null : this.cuentaDeReembolsoDe(String(orden.solicitante_usuario_id));
+      // 0.98.0 · Si roster tiene su cuenta, ésa manda (también al corregir).
+      const cuenta = this.cuentaDeRoster(orden.solicitante_correo as string | null)
+        ?? (args.cuenta?.clabe
+          ? this.guardarCuentaDeReembolso({ usuario_id: String(orden.solicitante_usuario_id), ...args.cuenta, beneficiario: args.cuenta.beneficiario || (orden.solicitante_nombre as string | null) })
+          : orden.reembolso_clabe ? null : this.cuentaDeReembolsoDe(String(orden.solicitante_usuario_id)));
       if (cuenta) { campos.reembolso_clabe = cuenta.clabe; campos.reembolso_banco = cuenta.banco; campos.reembolso_beneficiario = cuenta.beneficiario; }
       else if (!orden.reembolso_clabe) return { error: 'falta_cuenta_reembolso', detalle: { mensaje: 'Para volver a mandar el reembolso hace falta la cuenta a la que se te paga.' } };
     }

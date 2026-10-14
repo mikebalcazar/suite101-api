@@ -17,7 +17,17 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.97.0 (LOS DOMINIOS EN SUITE101.APP Y LA DIRECCIÓN EN
+ * Versión del contrato: 0.98.0 (LA CUENTA DEL REEMBOLSO SALE DE ROSTER. Mike,
+ * 14-oct: «no debería pedir número de cuenta, debería de en automático ligar
+ * el número de cuenta del trabajador (…) los datos los debería de jalar desde
+ * roster». Si el expediente vivo de roster con el correo de quien pide trae
+ * CLABE, ésa manda: /ordenes/permisos la da con `origen: 'roster'`, el
+ * reembolso la copia sin pedirla, no se acepta otra y PUT cuenta-reembolso
+ * contesta 409 `cuenta_en_roster`. Sin roster, lo de la 0.92.0 (`origen:
+ * 'propia'`). `reembolso_a.origen`: `orden`, o `roster` si la orden no
+ * traía cuenta y se toma de roster para poder pagarla.)
+ * Antes:
+ * 0.97.0 (LOS DOMINIOS EN SUITE101.APP Y LA DIRECCIÓN EN
  * LA SUITE. Mike, 12-oct: «los dominios deben ser controlados por
  * suite101.app» y, para la empresa sin dominio, «su dirección en suite101»:
  * empresa.suite101.app es la puerta de la suite con su nombre (lo resuelve
@@ -1587,7 +1597,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.97.0';
+export const VERSION_CONTRATO = '0.98.0';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
@@ -2056,6 +2066,10 @@ export interface CuentaDeReembolso {
   banco: string | null;
   beneficiario: string | null;
   actualizado_at: string;
+  /** 0.98.0 · De dónde sale: `roster` (el expediente del trabajador, que
+   *  manda) o `propia` (la que la persona dio en supply101 porque roster no
+   *  la tiene). */
+  origen: 'roster' | 'propia';
 }
 
 /** 0.92.0 · A quién y a qué cuenta se le paga un reembolso, tal como quedó
@@ -2069,6 +2083,10 @@ export interface ReembolsoA {
   clabe: string | null;
   banco: string | null;
   beneficiario: string | null;
+  /** 0.98.0 · `orden` si es la cuenta copiada al pedirla; `roster` si la orden
+   *  no traía cuenta (un reembolso de antes de la 0.92.0) y se toma del
+   *  expediente del trabajador en roster para poder pagarlo. */
+  origen?: 'orden' | 'roster';
 }
 
 /** Un accionista de la empresa (0025, contrato 0.57.0). Mike, 30-sep-2026:
