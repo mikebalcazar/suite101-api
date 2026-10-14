@@ -15,7 +15,7 @@
  *     dos contabilidades.
  */
 
-import { SELF } from 'cloudflare:test';
+import { SELF, env, runInDurableObject } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 const CORREO = 'mike@forespot.com';
@@ -984,7 +984,7 @@ describe('0.92.0 · la cuenta a la que se reembolsa', () => {
     const v = await o('beto', `/ordenes/${reBeto}`);
     expect(v.data.orden.reembolso_clabe).toBe(CLABE_BETO_1);
     expect(v.data.reembolso_a, 'con la orden viene a quién y a qué cuenta').toEqual({
-      nombre: GENTE.beto.nombre, correo: GENTE.beto.correo, clabe: CLABE_BETO_1, banco: 'Santander', beneficiario: GENTE.beto.nombre,
+      nombre: GENTE.beto.nombre, correo: GENTE.beto.correo, clabe: CLABE_BETO_1, banco: 'Santander', beneficiario: GENTE.beto.nombre, origen: 'orden',
     });
     // Y la siguiente ya sale con la nueva.
     const otra = await o('beto', '/ordenes', { method: 'POST', json: { tipo: 'reembolso', concepto: 'Estacionamiento', monto: 80_00, con_factura: false } });
@@ -1036,3 +1036,82 @@ describe('0.92.0 · la cuenta a la que se reembolsa', () => {
     expect(pago.data.movimiento.contraparte_nombre).toBe(GENTE.beto.nombre);
   });
 });
+
+/* 0.98.0 · Mike, 14-oct-2026: «no debería pedir número de cuenta, debería de
+ * en automático ligar el número de cuenta del trabajador que está pidiendo el
+ * reembolso (…) los datos del trabajador los debería de jalar desde roster.
+ * Roster tiene los datos de cuenta del trabajador (…) cuando el administrador
+ * se mete a Dash y abre el reembolso, ahí debería aparecer ya el número de
+ * cuenta». */
+describe('0.98.0 · la cuenta del reembolso sale de roster', () => {
+  const CLABE_ROSTER = '072180001234567896';
+  const dentro = runInDurableObject as unknown as <T>(s: unknown, f: (o: any) => T | Promise<T>) => Promise<T>;
+  const elDO = () => (env as any).ORG.get((env as any).ORG.idFromName(ORG)) as unknown as DurableObjectStub;
+  /** El expediente de Dora en roster, como lo deja roster101 (mismo correo con el que entra). */
+  const ponerEnRoster = (campos: Record<string, string>) => dentro(elDO(), (o: any) => {
+    const t = new Date().toISOString();
+    o.sql.exec(
+      `INSERT INTO roster_trabajadores (id, email, nombre, apellido_paterno, banco, clabe, beneficiario, estado, creado_en, actualizado_en)
+       VALUES ('trab-dora', ?, 'Dora', 'Reembolsa', ?, ?, ?, 'completo', ?, ?)
+       ON CONFLICT(id) DO UPDATE SET banco = excluded.banco, clabe = excluded.clabe, beneficiario = excluded.beneficiario, actualizado_en = excluded.actualizado_en`,
+      GENTE.dora.correo.toUpperCase(), campos.banco ?? '', campos.clabe ?? '', campos.beneficiario ?? '', t, t);
+  });
+  let reViejo = '';
+
+  it('un reembolso de antes, sin cuenta, se abre en dash con la cuenta de roster (sin tocar la orden)', async () => {
+    // Uno pedido antes de la 0.92.0: sin cuenta copiada.
+    reViejo = await dentro(elDO(), (o: any) => {
+      const r = o.crearOrden({ tipo: 'compra', concepto: 'Gasolina de antes', monto: 450_00, solicitante_usuario_id: 'u-dora-vieja', solicitante_correo: GENTE.dora.correo, solicitante_nombre: GENTE.dora.nombre });
+      o.sql.exec(`UPDATE ordenes SET tipo = 'reembolso' WHERE id = ?`, r.id);
+      return r.id;
+    });
+    await ponerEnRoster({ banco: 'Banorte', clabe: CLABE_ROSTER, beneficiario: '' });
+    const v = await o('beto', `/ordenes/${reViejo}`);
+    expect(v.estado, JSON.stringify(v)).toBe(200);
+    expect(v.data.reembolso_a).toMatchObject({ clabe: CLABE_ROSTER, banco: 'Banorte', beneficiario: 'Dora Reembolsa', origen: 'roster' });
+    expect(v.data.orden.reembolso_clabe, 'la orden no se tocó').toBeNull();
+  });
+
+  it('quien está en roster con su CLABE: /permisos ya la trae, y el reembolso entra SIN mandarla', async () => {
+    const p = await o('dora', '/ordenes/permisos');
+    expect(p.estado).toBe(200);
+    expect(p.data.cuenta_reembolso).toMatchObject({ clabe: CLABE_ROSTER, banco: 'Banorte', beneficiario: 'Dora Reembolsa', origen: 'roster' });
+    const r = await o('dora', '/ordenes', { method: 'POST', json: { tipo: 'reembolso', concepto: 'Comida de obra', monto: 210_00, con_factura: false } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    expect(r.data.reembolso_clabe).toBe(CLABE_ROSTER);
+    expect(r.data.reembolso_banco).toBe('Banorte');
+    // Y quien paga la ve al abrirla en dash.
+    const v = await o('beto', `/ordenes/${r.data.id}`);
+    expect(v.data.reembolso_a).toMatchObject({ clabe: CLABE_ROSTER, banco: 'Banorte', origen: 'orden' });
+  });
+
+  it('con roster no se acepta otra cuenta: ni con la orden ni guardándola aparte', async () => {
+    const otra = await o('dora', '/ordenes', { method: 'POST', json: { tipo: 'reembolso', concepto: 'Taxi', monto: 90_00, con_factura: false, cuenta: { clabe: CLABE_ANA, banco: 'Otro' } } });
+    expect(otra.estado).toBe(201);
+    expect(otra.data.reembolso_clabe, 'se le paga a SU cuenta de roster').toBe(CLABE_ROSTER);
+    const put = await o('dora', '/ordenes/cuenta-reembolso', { method: 'PUT', json: { clabe: CLABE_ANA } });
+    expect(put.estado).toBe(409);
+    expect(put.error).toBe('cuenta_en_roster');
+  });
+
+  it('si roster cambia la cuenta, el siguiente reembolso sale con la nueva; el de antes conserva su copia', async () => {
+    const primero = await o('dora', '/ordenes', { method: 'POST', json: { tipo: 'reembolso', concepto: 'Peaje', monto: 60_00, con_factura: false } });
+    await ponerEnRoster({ banco: 'BBVA', clabe: CLABE_DORA, beneficiario: 'Dora R.' });
+    const segundo = await o('dora', '/ordenes', { method: 'POST', json: { tipo: 'reembolso', concepto: 'Peaje 2', monto: 60_00, con_factura: false } });
+    expect(segundo.data.reembolso_clabe).toBe(CLABE_DORA);
+    expect(segundo.data.reembolso_beneficiario).toBe('Dora R.');
+    expect((await o('dora', `/ordenes/${primero.data.id}`)).data.orden.reembolso_clabe).toBe(CLABE_ROSTER);
+  });
+
+  it('quien NO está en roster sigue como antes: su cuenta propia (origen «propia»)', async () => {
+    const p = await o('beto', '/ordenes/permisos');
+    expect(p.data.cuenta_reembolso).toMatchObject({ origen: 'propia' });
+  });
+
+  it('un expediente en la papelera de roster ya no da cuenta', async () => {
+    await dentro(elDO(), (o: any) => o.sql.exec(`INSERT INTO roster_papelera (trabajador_id, borrado_en, borra_el) VALUES ('trab-dora', ?, ?)`, new Date().toISOString(), Math.floor(Date.now() / 1000) + 86400));
+    const p = await o('dora', '/ordenes/permisos');
+    expect(p.data.cuenta_reembolso?.origen ?? null).not.toBe('roster');
+  });
+});
+

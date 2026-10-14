@@ -128,7 +128,7 @@ export function montarOrdenes(rutas: App): void {
     if (!puedePedir(c)) return err(c, 'sin_permiso', 403);
     const q = c.get('quien');
     // 0.92.0 · Y su cuenta de reembolso, para que supply101 la pida sólo si falta.
-    return ok(c, { puede_comprar: !q.sin_compras, puede_pagar: await esContador(c), cuenta_reembolso: await stub(c).cuentaDeReembolsoDe(q.usuario_id) });
+    return ok(c, { puede_comprar: !q.sin_compras, puede_pagar: await esContador(c), cuenta_reembolso: await stub(c).cuentaDeReembolsoDe(q.usuario_id, c.get('sesion').correo) });
   });
 
   /** 0.92.0 · Guardar o cambiar la cuenta a la que se me reembolsa. Es MI
@@ -136,6 +136,10 @@ export function montarOrdenes(rutas: App): void {
    *  Mike, 10-oct-2026: un reembolso se le paga sólo a quien lo pidió. */
   rutas.put('/:o/ordenes/cuenta-reembolso', async (c) => {
     if (!puedePedir(c)) return err(c, 'sin_permiso', 403);
+    // 0.98.0 · Si roster tiene su cuenta, ésa es la que vale: aquí no se cambia.
+    if (await stub(c).cuentaDeRoster(c.get('sesion').correo)) {
+      return err(c, 'cuenta_en_roster', 409, { mensaje: 'Tu cuenta es la de tu expediente en roster. Si cambió, pídele a quien administra roster que la actualice.' });
+    }
     const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
     const r = revisarCuentaDeReembolso(b);
     if (!r || 'errores' in r) return err(c, 'datos_invalidos', 400, { errores: r?.errores ?? { clabe: 'Falta la CLABE: son 18 dígitos.' } });
