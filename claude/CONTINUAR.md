@@ -1,3 +1,5 @@
+> **14-oct-2026 · la cuenta del reembolso sale de roster (API 0.98.0 #355; dash101 #157).** Si el expediente de roster trae CLABE, supply no la pide y dash la enseña. Pendiente que Mike decida qué pasa con quien no tiene cuenta en roster (hoy: la da en supply). Ver `muro/…-jr-cuenta-del-reembolso-de-roster.md`.
+
 > **14-oct-2026 · quell: el PDF del reporte sale en Android aunque la obra sea grande (bitacora-obra #134; APK nuevo).** Escala por hoja con tope de 8 MP, reintento y el porqué a la vista. Ver `muro/…-jr-pdf-de-quell-en-el-telefono.md`.
 
 > **13-oct-2026 · quell: las fotos entran al PDF del reporte y sin hojas en blanco (bitacora-obra #133; APK nuevo).** Cada foto se baja una vez, se reduce y entra dibujada; cada hoja mide una A4. Ver `muro/…-jr-fotos-en-el-pdf-de-quell.md`.
