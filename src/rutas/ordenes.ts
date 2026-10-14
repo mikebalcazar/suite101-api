@@ -131,24 +131,44 @@ export function montarOrdenes(rutas: App): void {
     return ok(c, { puede_comprar: !q.sin_compras, puede_pagar: await esContador(c), cuenta_reembolso: await stub(c).cuentaDeReembolsoDe(q.usuario_id, c.get('sesion').correo) });
   });
 
-  /** 0.92.0 · Guardar o cambiar la cuenta a la que se me reembolsa. Es MI
-   *  cuenta: la de quien pregunta, nunca la de otro —por eso no lleva id—.
-   *  Mike, 10-oct-2026: un reembolso se le paga sólo a quien lo pidió. */
+  /** 0.99.0 · Registrar MI cuenta de reembolso, firmada (Mike, 14-oct: «ahí
+   *  mismo ingresa los datos de la cuenta, el beneficiario (…) sí firma de que
+   *  son sus datos y su cuenta bancaria. Y entonces ya solo vive en roster»).
+   *  Multipart: `clabe`, `banco`, `beneficiario` y `firma` (la imagen de los
+   *  datos con su firma trazada, PNG o JPG, hasta 2 MB). Va a SU expediente de
+   *  roster —el de su correo—, nunca al de otro: por eso no lleva id. Si roster
+   *  ya tiene su cuenta, se reemplaza: es él quien la firma. */
+  rutas.post('/:o/ordenes/cuenta-reembolso', async (c) => {
+    if (!puedePedir(c)) return err(c, 'sin_permiso', 403);
+    const f = await c.req.formData().catch(() => null);
+    if (!f) return err(c, 'datos_invalidos', 400, { errores: { firma: 'Manda los datos de la cuenta y la firma.' } });
+    const r = revisarCuentaDeReembolso({ clabe: f.get('clabe'), banco: f.get('banco'), beneficiario: f.get('beneficiario') });
+    const errores: Record<string, string> = r && 'errores' in r ? { ...r.errores } : {};
+    if (!r) errores.clabe = 'Falta la CLABE: son 18 dígitos.';
+    const cuenta = r && 'cuenta' in r ? r.cuenta : null;
+    if (cuenta && !cuenta.banco) errores.banco = 'Falta el banco.';
+    if (cuenta && !cuenta.beneficiario) errores.beneficiario = 'Falta a nombre de quién está la cuenta.';
+    const firma = f.get('firma');
+    if (!firma || typeof firma === 'string') errores.firma = 'Falta tu firma: firma que son tus datos y tu cuenta.';
+    else if (!['image/png', 'image/jpeg'].includes(firma.type)) errores.firma = 'La firma va como imagen PNG o JPG.';
+    else if (firma.size > 2 * 1024 * 1024) errores.firma = 'La firma pesa más de 2 MB.';
+    if (Object.keys(errores).length || !cuenta || !firma || typeof firma === 'string') return err(c, 'datos_invalidos', 400, { errores });
+    const persona = (await stub(c).personalDeUsuario(c.get('quien').usuario_id)) as Record<string, unknown> | null;
+    const g = await stub(c).guardarCuentaFirmada({
+      org: c.get('org_id'), usuario_id: c.get('quien').usuario_id, correo: c.get('sesion').correo,
+      nombre: persona ? String(persona.nombre) : null,
+      clabe: cuenta.clabe, banco: cuenta.banco!, beneficiario: cuenta.beneficiario!,
+      firma: await firma.arrayBuffer(), mime: firma.type,
+    });
+    if (esFalla(g)) return err(c, g.error, g.error === 'expediente_en_papelera' ? 409 : 400, g.detalle);
+    return ok(c, g);
+  });
+
+  /** 0.92.0 guardaba aquí una cuenta sin firma, aparte de roster. Desde la
+   *  0.99.0 la cuenta vive sólo en roster y va firmada: POST de arriba. */
   rutas.put('/:o/ordenes/cuenta-reembolso', async (c) => {
     if (!puedePedir(c)) return err(c, 'sin_permiso', 403);
-    // 0.98.0 · Si roster tiene su cuenta, ésa es la que vale: aquí no se cambia.
-    if (await stub(c).cuentaDeRoster(c.get('sesion').correo)) {
-      return err(c, 'cuenta_en_roster', 409, { mensaje: 'Tu cuenta es la de tu expediente en roster. Si cambió, pídele a quien administra roster que la actualice.' });
-    }
-    const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
-    const r = revisarCuentaDeReembolso(b);
-    if (!r || 'errores' in r) return err(c, 'datos_invalidos', 400, { errores: r?.errores ?? { clabe: 'Falta la CLABE: son 18 dígitos.' } });
-    const persona = (await stub(c).personalDeUsuario(c.get('quien').usuario_id)) as Record<string, unknown> | null;
-    const cuenta = await stub(c).guardarCuentaDeReembolso({
-      usuario_id: c.get('quien').usuario_id, ...r.cuenta,
-      beneficiario: r.cuenta.beneficiario ?? (persona ? String(persona.nombre) : c.get('sesion').correo),
-    });
-    return ok(c, { cuenta });
+    return err(c, 'firma_requerida', 409, { mensaje: 'La cuenta se registra firmada y queda en tu expediente de roster. Actualiza supply101.' });
   });
 
   /** Lo pendiente en el buzón, en dos cifras: compras y reembolsos
@@ -261,13 +281,11 @@ export function montarOrdenes(rutas: App): void {
     }
     const s = c.get('sesion');
     const persona = (await stub(c).personalDeUsuario(q.usuario_id)) as Record<string, unknown> | null;
-    // 0.92.0 · La cuenta a la que se reembolsa, si la mandan: se revisa aquí
-    // y el DO la guarda como la suya. Una compra no trae cuenta: se ignora.
-    const cuenta = tipo === 'reembolso' ? revisarCuentaDeReembolso(b.cuenta) : undefined;
-    if (cuenta && 'errores' in cuenta) return err(c, 'datos_invalidos', 400, { errores: cuenta.errores });
+    // 0.99.0 · La cuenta del reembolso es la de su expediente en roster: la
+    // pone el DO. Una `cuenta` que venga en el cuerpo no se usa.
     const r = await stub(c).crearOrden({
       ...b,
-      cuenta: cuenta ? cuenta.cuenta : null,
+      cuenta: null,
       // 0.62.1 rellenaba aquí `negocio_id`; desde 0.63.0 no hay negocios ni
       // columna: si una pantalla vieja lo manda, `crearOrden` no lo usa.
       // Estos cuatro NO los manda la pantalla: los pone la API. Si los
@@ -353,13 +371,11 @@ export function montarOrdenes(rutas: App): void {
       return err(c, 'sin_permiso', 403, { motivo: 'solo_quien_la_pidio' });
     }
     const cambios = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
-    // 0.92.0 · Al corregir un reembolso se puede cambiar la cuenta; `cuenta`
-    // no es una columna, así que sale de `cambios` y va aparte.
-    const cuenta = actual.orden.tipo === 'reembolso' ? revisarCuentaDeReembolso(cambios.cuenta) : undefined;
-    if (cuenta && 'errores' in cuenta) return err(c, 'datos_invalidos', 400, { errores: cuenta.errores });
+    // 0.99.0 · La cuenta no se cambia al corregir: la pone roster. `cuenta`
+    // no es una columna; si viene, se tira.
     delete cambios.cuenta;
     const r = await stub(c).corregirOrden({
-      id, cambios, cuenta: cuenta ? cuenta.cuenta : null, quien_usuario_id: c.get('quien').usuario_id, quien_nombre: c.get('sesion').correo,
+      id, cambios, cuenta: null, quien_usuario_id: c.get('quien').usuario_id, quien_nombre: c.get('sesion').correo,
     });
     if (esFalla(r)) return err(c, r.error, r.error === 'orden_no_esta_devuelta' ? 409 : 400, r.detalle);
     return ok(c, r);

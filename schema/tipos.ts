@@ -17,7 +17,18 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.98.0 (LA CUENTA DEL REEMBOLSO SALE DE ROSTER. Mike,
+ * Versión del contrato: 0.99.0 (LA CUENTA DE REEMBOLSO SE REGISTRA FIRMADA Y VIVE
+ * EN ROSTER. Mike, 14-oct: «ahí mismo ingresa los datos de la cuenta, el
+ * beneficiario, y queda como pendiente que suba la carátula bancaria, pero sí
+ * firma (…) Y entonces ya solo vive en roster». POST /ordenes/cuenta-reembolso
+ * (multipart: clabe, banco, beneficiario, firma PNG/JPG ≤2 MB) la guarda en SU
+ * expediente de roster (se abre uno si no tenía) con el documento
+ * `firma_bancaria`; la carátula queda en sus faltantes. La cuenta que vale es
+ * SÓLO la de roster (`firmada`, `caratula`); `reembolso_cuentas` ya no cuenta;
+ * el pedido y la corrección no aceptan `cuenta`; PUT contesta 409
+ * `firma_requerida`.)
+ * Antes:
+ * 0.98.0 (LA CUENTA DEL REEMBOLSO SALE DE ROSTER. Mike,
  * 14-oct: «no debería pedir número de cuenta, debería de en automático ligar
  * el número de cuenta del trabajador (…) los datos los debería de jalar desde
  * roster». Si el expediente vivo de roster con el correo de quien pide trae
@@ -1597,7 +1608,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.98.0';
+export const VERSION_CONTRATO = '0.99.0';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
@@ -2070,6 +2081,10 @@ export interface CuentaDeReembolso {
    *  manda) o `propia` (la que la persona dio en supply101 porque roster no
    *  la tiene). */
   origen: 'roster' | 'propia';
+  /** 0.99.0 · Sólo de roster: si sus datos bancarios están firmados (el
+   *  documento `firma_bancaria`) y si ya subió la carátula (`caratula`). */
+  firmada?: boolean;
+  caratula?: boolean;
 }
 
 /** 0.92.0 · A quién y a qué cuenta se le paga un reembolso, tal como quedó
@@ -2087,6 +2102,10 @@ export interface ReembolsoA {
    *  no traía cuenta (un reembolso de antes de la 0.92.0) y se toma del
    *  expediente del trabajador en roster para poder pagarlo. */
   origen?: 'orden' | 'roster';
+  /** 0.99.0 · Si su expediente de roster tiene sus datos bancarios firmados y
+   *  la carátula. Sólo si tiene cuenta en roster. */
+  firmada?: boolean;
+  caratula?: boolean;
 }
 
 /** Un accionista de la empresa (0025, contrato 0.57.0). Mike, 30-sep-2026:
