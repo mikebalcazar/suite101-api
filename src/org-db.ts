@@ -363,6 +363,7 @@ export interface ApiOrgDB {
   /** 0.92.0 · La cuenta a la que se le reembolsa a este usuario (0050), o null si nunca la dio. */
   cuentaDeReembolsoDe(usuario_id: string, correo?: string | null): Promise<CuentaDeReembolso | null>;
   cuentaDeRoster(correo: string | null | undefined): Promise<CuentaDeReembolso | null>;
+  guardarCuentaFirmada(args: { org: string; usuario_id: string; correo: string; nombre?: string | null; clabe: string; banco: string; beneficiario: string; firma: ArrayBuffer; mime: string }): Promise<{ cuenta: CuentaDeReembolso; nuevo: boolean } | { error: string; detalle?: unknown }>;
   /** 0.92.0 · Guardar (o cambiar) esa cuenta. La CLABE ya viene revisada por el Worker. */
   guardarCuentaDeReembolso(args: { usuario_id: string; clabe: string; banco?: string | null; beneficiario?: string | null }): Promise<CuentaDeReembolso>;
   misOrdenes(usuario_id: string): Promise<Fila[]>;
@@ -2627,13 +2628,11 @@ export class OrgDB extends DurableObject<Env> {
     if (tipo === 'reembolso') {
       /* 0.98.0 · Mike, 14-oct: «no debería pedir número de cuenta, debería en
        * automático ligar el número de cuenta del trabajador (…) los datos los
-       * debería jalar desde roster». Si roster tiene su cuenta, ésa manda y no
-       * se acepta otra; si no, lo de la 0.92.0. */
-      cuenta = this.cuentaDeRoster(args.solicitante_correo)
-        ?? (args.cuenta?.clabe
-          ? this.guardarCuentaDeReembolso({ usuario_id: args.solicitante_usuario_id, ...args.cuenta, beneficiario: args.cuenta.beneficiario || args.solicitante_nombre || null })
-          : this.cuentaDeReembolsoDe(args.solicitante_usuario_id));
-      if (!cuenta) return { error: 'falta_cuenta_reembolso', detalle: { mensaje: 'Para pedir un reembolso hace falta la cuenta a la que se te paga: la CLABE, el banco y a nombre de quién está.' } };
+       * debería jalar desde roster». 0.99.0 · Y la cuenta «ya solo vive en
+       * roster (…) también con la firma»: sin cuenta en roster no se pide; se
+       * registra antes, firmada (POST /ordenes/cuenta-reembolso). */
+      cuenta = this.cuentaDeRoster(args.solicitante_correo);
+      if (!cuenta) return { error: 'falta_cuenta_reembolso', detalle: { mensaje: 'Para pedir un reembolso registra primero tu cuenta y fírmala: queda en tu expediente de roster.' } };
     }
 
     const id = ulid();
@@ -2670,11 +2669,12 @@ export class OrgDB extends DurableObject<Env> {
    * Mike, 10-oct-2026: un reembolso se le paga SÓLO a quien lo pidió. Una
    * cuenta por usuario (0050), por `usuario_id` y no por `personal`, porque
    * quien pide puede no tener fila ahí. Se pide la primera vez y se reusa. */
-  cuentaDeReembolsoDe(usuario_id: string, correo?: string | null): CuentaDeReembolso | null {
-    const deRoster = this.cuentaDeRoster(correo);
-    if (deRoster) return deRoster;
-    const f = this.sql.exec(`SELECT * FROM reembolso_cuentas WHERE usuario_id = ?`, usuario_id).toArray()[0] as Fila | undefined;
-    return f ? OrgDB.cuentaDeReembolso_(f) : null;
+  /** 0.99.0 · La cuenta a la que se le reembolsa a quien pregunta: SÓLO la de
+   *  su expediente en roster (Mike, 14-oct: «ya solo vive en roster»). La de
+   *  `reembolso_cuentas` (0.92.0) ya no cuenta. `usuario_id` se queda en la
+   *  firma por compatibilidad. */
+  cuentaDeReembolsoDe(_usuario_id: string, correo?: string | null): CuentaDeReembolso | null {
+    return this.cuentaDeRoster(correo);
   }
 
   /** 0.98.0 · La cuenta del trabajador en roster, por su correo (el mismo con
@@ -2684,17 +2684,75 @@ export class OrgDB extends DurableObject<Env> {
     const c = String(correo ?? '').trim().toLowerCase();
     if (!c) return null;
     const f = this.sql.exec(
-      `SELECT banco, clabe, beneficiario, nombre, apellido_paterno, apellido_materno, actualizado_en FROM roster_trabajadores
+      `SELECT id, banco, clabe, beneficiario, nombre, apellido_paterno, apellido_materno, actualizado_en FROM roster_trabajadores
         WHERE lower(email) = ? AND trim(COALESCE(clabe, '')) <> '' AND id NOT IN (SELECT trabajador_id FROM roster_papelera)
         ORDER BY actualizado_en DESC LIMIT 1`, c,
     ).toArray()[0] as Fila | undefined;
     if (!f) return null;
     const texto = (v: unknown) => (v == null || String(v).trim() === '' ? null : String(v).trim());
     const nombre = [f.nombre, f.apellido_paterno, f.apellido_materno].map(texto).filter(Boolean).join(' ') || null;
+    // 0.99.0 · Si sus datos bancarios están firmados y si ya subió la carátula.
+    const docs = new Set((this.sql.exec(`SELECT tipo FROM roster_documentos WHERE trabajador_id = ? AND tipo IN ('firma_bancaria', 'caratula')`, f.id)
+      .toArray() as Fila[]).map((d) => String(d.tipo)));
     return {
       clabe: String(f.clabe).replace(/[\s-]/g, ''), banco: texto(f.banco), beneficiario: texto(f.beneficiario) ?? nombre,
       actualizado_at: String(f.actualizado_en ?? ''), origen: 'roster',
+      firmada: docs.has('firma_bancaria'), caratula: docs.has('caratula'),
     };
+  }
+
+  /** 0.99.0 · Mike, 14-oct: «en Supply le pide que ingrese su cuenta y ahí
+   *  mismo ingresa los datos de la cuenta, el beneficiario, y queda como
+   *  pendiente que suba la carátula bancaria, pero sí firma de que son sus
+   *  datos y su cuenta bancaria. Y entonces ya solo vive en roster la cuenta
+   *  bancaria ligada al usuario y también con la firma».
+   *
+   *  Lo mismo que hace el portal de roster cuando el trabajador firma sus
+   *  datos bancarios: los datos van a SU expediente (por su correo; si no
+   *  tiene, se le abre uno en borrador) y la firma, como el documento
+   *  «Datos bancarios firmados» (`firma_bancaria`, uno por expediente: el de
+   *  antes se reemplaza). La carátula no se pide aquí: queda en sus
+   *  faltantes de roster. La CLABE llega ya revisada por el Worker. */
+  async guardarCuentaFirmada(args: {
+    org: string; usuario_id: string; correo: string; nombre?: string | null;
+    clabe: string; banco: string; beneficiario: string;
+    firma: ArrayBuffer; mime: string;
+  }): Promise<{ cuenta: CuentaDeReembolso; nuevo: boolean } | { error: string; detalle?: unknown }> {
+    const correo = String(args.correo ?? '').trim().toLowerCase();
+    if (!correo) return { error: 'sin_correo' };
+    const t = ahora();
+    let f = this.sql.exec(`SELECT id FROM roster_trabajadores WHERE lower(email) = ?`, correo).toArray()[0] as Fila | undefined;
+    if (f && this.sql.exec(`SELECT 1 FROM roster_papelera WHERE trabajador_id = ?`, f.id).toArray().length) {
+      return { error: 'expediente_en_papelera', detalle: { mensaje: 'Tu expediente de roster está en la papelera. Pídele a quien administra roster que lo recupere.' } };
+    }
+    let nuevo = false;
+    if (!f) {
+      // Como lo abre el portal de roster la primera vez que alguien entra.
+      const id = crypto.randomUUID();
+      const nombre = String(args.nombre ?? '').trim();
+      this.sql.exec(`INSERT INTO roster_trabajadores (id, email, nombre, creado_en, actualizado_en) VALUES (?,?,?,?,?)`, id, correo, nombre, t, t);
+      this.sql.exec(`UPDATE roster_trabajadores SET folio = (SELECT COUNT(*) FROM roster_trabajadores) WHERE id = ?`, id);
+      this.sql.exec(`INSERT INTO roster_bitacora (cuando, quien, accion, detalle) VALUES (?,?,?,?)`, t, correo, 'alta', 'desde supply101, al registrar su cuenta de reembolso');
+      f = { id };
+      nuevo = true;
+    }
+    const tid = String(f.id);
+    // La firma va al mismo lugar que las del portal: orgs/{org}/roster/trabajadores/{id}/…
+    const ext = args.mime === 'image/jpeg' ? 'jpg' : 'png';
+    const llave = `trabajadores/${tid}/firma_bancaria-${Date.now()}.${ext}`;
+    await this.env.ARCHIVOS.put(`orgs/${args.org}/roster/${llave}`, args.firma, { httpMetadata: { contentType: args.mime } });
+    const viejos = this.sql.exec(`SELECT id, llave FROM roster_documentos WHERE trabajador_id = ? AND tipo = 'firma_bancaria'`, tid).toArray() as Fila[];
+    this.sql.exec(`DELETE FROM roster_documentos WHERE trabajador_id = ? AND tipo = 'firma_bancaria'`, tid);
+    this.sql.exec(
+      `INSERT INTO roster_documentos (id, trabajador_id, tipo, etiqueta, nombre_archivo, llave, mime, tamano, subido_en) VALUES (?,?,?,?,?,?,?,?,?)`,
+      crypto.randomUUID(), tid, 'firma_bancaria', 'Firmado en supply101', `datos-bancarios-firmados.${ext}`, llave, args.mime, args.firma.byteLength, t,
+    );
+    this.sql.exec(`UPDATE roster_trabajadores SET banco = ?, clabe = ?, beneficiario = ?, actualizado_en = ? WHERE id = ?`, args.banco, args.clabe, args.beneficiario, t, tid);
+    this.sql.exec(`INSERT INTO roster_bitacora (cuando, quien, accion, detalle) VALUES (?,?,?,?)`, t, correo, 'datos_bancarios_firmados', 'desde supply101');
+    // La de supply101 (0.92.0) ya no vale: la cuenta vive en roster.
+    this.sql.exec(`DELETE FROM reembolso_cuentas WHERE usuario_id = ?`, args.usuario_id);
+    for (const v of viejos) await this.env.ARCHIVOS.delete(`orgs/${args.org}/roster/${v.llave}`).catch(() => {});
+    return { cuenta: this.cuentaDeRoster(correo)!, nuevo };
   }
 
   guardarCuentaDeReembolso(args: { usuario_id: string; clabe: string; banco?: string | null; beneficiario?: string | null }): CuentaDeReembolso {
@@ -2704,7 +2762,8 @@ export class OrgDB extends DurableObject<Env> {
        ON CONFLICT(usuario_id) DO UPDATE SET clabe = excluded.clabe, banco = excluded.banco, beneficiario = excluded.beneficiario, actualizado_at = excluded.actualizado_at`,
       args.usuario_id, String(args.clabe), limpio(args.banco), limpio(args.beneficiario), ahora(),
     );
-    return this.cuentaDeReembolsoDe(args.usuario_id)!;
+    // La fila recién guardada (desde la 0.99.0 ya no es la que se usa para pagar).
+    return OrgDB.cuentaDeReembolso_(this.sql.exec(`SELECT * FROM reembolso_cuentas WHERE usuario_id = ?`, args.usuario_id).toArray()[0] as Fila);
   }
 
   private static cuentaDeReembolso_(f: Fila): CuentaDeReembolso {
@@ -2833,9 +2892,12 @@ export class OrgDB extends DurableObject<Env> {
      * pagarlo, la de roster del trabajador (Mike, 14-oct: «cuando el
      * administrador abre el reembolso, ahí debería aparecer ya el número de
      * cuenta»). Sólo para verla: la orden no se toca. */
-    if (reembolso_a && !reembolso_a.clabe) {
+    if (reembolso_a) {
       const r = this.cuentaDeRoster(reembolso_a.correo);
-      if (r) reembolso_a = { ...reembolso_a, clabe: r.clabe, banco: r.banco, beneficiario: r.beneficiario, origen: 'roster' };
+      if (r && !reembolso_a.clabe) reembolso_a = { ...reembolso_a, clabe: r.clabe, banco: r.banco, beneficiario: r.beneficiario, origen: 'roster' };
+      // 0.99.0 · Cómo va su expediente: si firmó sus datos bancarios y si ya
+      // subió la carátula (Mike: «queda como pendiente que suba la carátula»).
+      if (r) reembolso_a = { ...reembolso_a, firmada: !!r.firmada, caratula: !!r.caratula };
     }
     /* 0.67.0 · Con la orden viene lo que hace falta para pagarle (Mike,
      * 5-oct: «ahí mismo en la orden (desde dash) aparezcan los datos
@@ -3016,12 +3078,10 @@ export class OrgDB extends DurableObject<Env> {
     }
     if (orden.tipo === 'reembolso') {
       // 0.98.0 · Si roster tiene su cuenta, ésa manda (también al corregir).
-      const cuenta = this.cuentaDeRoster(orden.solicitante_correo as string | null)
-        ?? (args.cuenta?.clabe
-          ? this.guardarCuentaDeReembolso({ usuario_id: String(orden.solicitante_usuario_id), ...args.cuenta, beneficiario: args.cuenta.beneficiario || (orden.solicitante_nombre as string | null) })
-          : orden.reembolso_clabe ? null : this.cuentaDeReembolsoDe(String(orden.solicitante_usuario_id)));
+      // 0.99.0 · Y sólo ésa: sin roster, se queda la que la orden ya traía.
+      const cuenta = this.cuentaDeRoster(orden.solicitante_correo as string | null);
       if (cuenta) { campos.reembolso_clabe = cuenta.clabe; campos.reembolso_banco = cuenta.banco; campos.reembolso_beneficiario = cuenta.beneficiario; }
-      else if (!orden.reembolso_clabe) return { error: 'falta_cuenta_reembolso', detalle: { mensaje: 'Para volver a mandar el reembolso hace falta la cuenta a la que se te paga.' } };
+      else if (!orden.reembolso_clabe) return { error: 'falta_cuenta_reembolso', detalle: { mensaje: 'Para volver a mandar el reembolso registra tu cuenta y fírmala: queda en tu expediente de roster.' } };
     }
     const llaves = Object.keys(campos);
     this.sql.exec(

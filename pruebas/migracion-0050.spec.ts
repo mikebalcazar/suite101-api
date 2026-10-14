@@ -108,6 +108,8 @@ describe('la migración 0050 sobre una base con compras y reembolsos', () => {
       const compra = db.verOrden('o1');
       const sinCuenta = db.crearOrden({ solicitante_usuario_id: 'u-ana', solicitante_id: 'pe-ana', solicitante_correo: 'ana@ejemplo.mx', solicitante_nombre: 'Ana', tipo: 'reembolso', concepto: 'Casetas', monto: 30000 });
       const guardada = db.guardarCuentaDeReembolso({ usuario_id: 'u-ana', clabe: '012180015621788594', banco: 'BBVA', beneficiario: ' ' });
+      // 0.99.0 · La cuenta que vale es la de su expediente en roster.
+      db.sql.exec(`INSERT INTO roster_trabajadores (id, email, nombre, banco, clabe, beneficiario, estado, creado_en, actualizado_en) VALUES ('t-ana', 'ana@ejemplo.mx', 'Ana', 'BBVA', '012180015621788594', '', 'completo', ?, ?)`, T, T);
       const nuevo = db.crearOrden({ solicitante_usuario_id: 'u-ana', solicitante_id: 'pe-ana', solicitante_correo: 'ana@ejemplo.mx', solicitante_nombre: 'Ana', tipo: 'reembolso', concepto: 'Casetas', monto: 30000 });
       return {
         viejo: viejo.reembolso_a, compra: compra.reembolso_a, sinCuenta,
@@ -120,7 +122,7 @@ describe('la migración 0050 sobre una base con compras y reembolsos', () => {
     expect(r.compra).toBeNull();
     expect(r.sinCuenta.error, 'sin cuenta guardada, el reembolso no entra').toBe('falta_cuenta_reembolso');
     expect(r.guardada.beneficiario, 'un beneficiario en blanco es nulo').toBeNull();
-    expect(r.nuevo, 'la cuenta guardada sin beneficiario se copia a nombre de quien pide').toEqual({ nombre: 'Ana', correo: 'ana@ejemplo.mx', clabe: '012180015621788594', banco: 'BBVA', beneficiario: 'Ana', origen: 'orden' });
+    expect(r.nuevo, 'la cuenta de roster sin beneficiario se copia a nombre de quien pide').toEqual({ nombre: 'Ana', correo: 'ana@ejemplo.mx', clabe: '012180015621788594', banco: 'BBVA', beneficiario: 'Ana', origen: 'orden', firmada: false, caratula: false });
     expect(r.unaPorUsuario).toBe(1);
     expect(r.mias).toBe(4);
   });
