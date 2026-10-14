@@ -1,3 +1,5 @@
+> **14-oct-2026 · quell: el PDF del reporte sale en Android aunque la obra sea grande (bitacora-obra #134; APK nuevo).** Escala por hoja con tope de 8 MP, reintento y el porqué a la vista. Ver `muro/…-jr-pdf-de-quell-en-el-telefono.md`.
+
 > **13-oct-2026 · quell: las fotos entran al PDF del reporte y sin hojas en blanco (bitacora-obra #133; APK nuevo).** Cada foto se baja una vez, se reduce y entra dibujada; cada hoja mide una A4. Ver `muro/…-jr-fotos-en-el-pdf-de-quell.md`.
 
 > **12-oct-2026 · el reporte de quell de una obra grande daba «falla interna» (API #351).** Límite de 100 parámetros por consulta del SQLite de la empresa; ahora en tandas. Ninguna lista `IN` que crezca con los datos va con un parámetro por elemento.
