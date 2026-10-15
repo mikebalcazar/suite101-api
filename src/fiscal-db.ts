@@ -241,6 +241,8 @@ export class MotorFiscal {
       lado: f.tipo === 'ingreso' ? 'emitida' : (f.tipo_comprobante === 'N' ? 'emitida' : 'recibida'),
       aplicado,
       tiene_xml: !!f.xml_llave,
+      // 0052: timbrada con la cuenta de pruebas de Facturama (se puede borrar); null si no se timbró desde aquí.
+      pruebas: f.pruebas === null || f.pruebas === undefined ? null : !!f.pruebas,
     };
   }
 
@@ -548,7 +550,7 @@ export class MotorFiscal {
         serie: f.serie ?? null, folio: f.folio ?? null, rfc: f.rfc ?? null, razon_social: f.razon_social ?? null,
         metodo_pago: f.metodo_pago ?? null, subtotal, iva, retenciones, total,
         aplicado: Number(f.aplicado), origen: f.origen ?? 'manual', trato: f.trato ?? 'normal',
-        estado_sat: f.estado_sat ?? null, tiene_xml: !!f.xml_llave, saldo,
+        estado_sat: f.estado_sat ?? null, tiene_xml: !!f.xml_llave, saldo, pruebas: !!f.pruebas,
       };
     });
     const cuenta = (sql: string, ...a: SqlStorageValue[]) => Number((this.una(sql, ...a) as Fila).n);

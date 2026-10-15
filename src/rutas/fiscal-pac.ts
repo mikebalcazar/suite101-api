@@ -12,6 +12,7 @@
  *   POST   /fiscal/emisiones/:id/resolver   una que se quedó «timbrando»: se busca en Facturama por su folio;
  *                                       si existe se recupera (XML, PDF, entra a cfdi); si no, queda fallida
  *   POST   /fiscal/cfdi/:id/cancelar   { motivo: '01'..'04', uuid_sustituto? }
+ *   DELETE /fiscal/cfdi/:id            sólo una timbrada con la cuenta de pruebas (0052): se borra con todo lo suyo
  *   GET    /fiscal/cfdi/:id/pdf        el PDF de una emitida (Facturama lo arma; se guarda la primera vez)
  *
  * QUIÉN PUEDE. Poner o quitar la cuenta de Facturama: sólo quien dirige
@@ -418,6 +419,21 @@ export function montarFiscalPac(rutas: App, p: PermisosFiscales): void {
     await c.env.ARCHIVOS.put(llave, pdf.bytes, { httpMetadata: { contentType: 'application/pdf' } });
     await stub(c).fiscal('ponerArchivo', [id, { pdf_llave: llave }]);
     return entregar(pdf.bytes);
+  });
+
+  /* Mike, 15-oct: una factura timbrada en el sandbox no es una factura, pero
+   * contaba en el IVA y salía en el estado de cuenta. Se borra con todo lo
+   * suyo. La base decide si es de pruebas; aquí sólo se tiran sus archivos. */
+  rutas.delete('/:o/fiscal/cfdi/:id', async (c) => {
+    if (!(await p.administra(c))) return err(c, 'sin_permiso', 403, { motivo: 'borra una de pruebas quien dirige o quien lleva la contabilidad' });
+    const id = c.req.param('id')!;
+    const r = await stub(c).pac('borrarPrueba', [id, p.actor(c)]);
+    if (esFalla(r)) return err(c, r.error, r.error === 'cfdi_desconocido' ? 404 : 409, r.detalle);
+    let archivos = 0;
+    for (const llave of r.llaves as string[]) {
+      try { await c.env.ARCHIVOS.delete(llave); archivos += 1; } catch { /* la fila ya no está; un archivo huérfano no estorba */ }
+    }
+    return ok(c, { borrada: true, cfdi_id: id, folio: r.folio, uuid: r.uuid, archivos });
   });
 
   rutas.post('/:o/fiscal/cfdi/:id/cancelar', async (c) => {

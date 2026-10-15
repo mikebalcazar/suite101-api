@@ -64,6 +64,7 @@ import facturaV2 from '../migrations/org/0048_factura_v2.sql';
 import disenoDelItem from '../migrations/org/0049_diseno_del_item.sql';
 import cuentaDeReembolso from '../migrations/org/0050_cuenta_de_reembolso.sql';
 import articulosComprados from '../migrations/org/0051_articulos_comprados.sql';
+import cfdiDePruebas from '../migrations/org/0052_cfdi_de_pruebas.sql';
 import { MotorInversion } from './inversion-db';
 import { MotorFiscal } from './fiscal-db';
 import { MotorSat, type MemoriaSat } from './sat-db';
@@ -95,12 +96,12 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso, articulosComprados];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso, articulosComprados, cfdiDePruebas];
 
 /** La 0027, la 0030, la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
  *  en la lista; el archivo .sql es sólo la nota que lo dice. */
-const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar' | 'facturaV2' | 'disenoDelItem' | 'cuentaDeReembolso'> = {
+const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar' | 'facturaV2' | 'disenoDelItem' | 'cuentaDeReembolso' | 'cfdiDePruebas'> = {
   [MIGRACIONES.indexOf(sinNegocios)]: 'quitarNegocios',
   [MIGRACIONES.indexOf(requerimientosHuerfanos)]: 'migrarRequerimientosHuerfanos',
   [MIGRACIONES.indexOf(obrasALaSuite)]: 'migrarObrasSueltas',
@@ -112,6 +113,7 @@ const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfano
   [MIGRACIONES.indexOf(facturaV2)]: 'facturaV2',
   [MIGRACIONES.indexOf(disenoDelItem)]: 'disenoDelItem',
   [MIGRACIONES.indexOf(cuentaDeReembolso)]: 'cuentaDeReembolso',
+  [MIGRACIONES.indexOf(cfdiDePruebas)]: 'cfdiDePruebas',
 };
 
 /** La tabla `empresa` (0027): UN renglón, con id fijo, que es lo que antes
@@ -3823,6 +3825,24 @@ export class OrgDB extends DurableObject<Env> {
     }
   }
 
+  /** 0052, en código: `cfdi.pruebas` y `emisiones.pruebas`, y marcar lo ya
+   *  timbrado. Si la cuenta de Facturama de hoy es sandbox, todo lo que se
+   *  timbró hasta ahora se timbró ahí (nunca hubo cuenta de verdad): se marca
+   *  de pruebas. Si la cuenta es de verdad, o no hay, no se adivina nada.
+   *  Sólo se tocan las filas sin marca, así repetirla no cambia nada. */
+  private cfdiDePruebas(): void {
+    // El .sql sólo trae ALTER y comentarios; un texto sin sentencia no se ejecuta.
+    const resto = cfdiDePruebas.replace(/^ALTER TABLE .*$/gm, '');
+    if (resto.replace(/--[^\n]*/g, '').trim()) this.sql.exec(resto);
+    for (const m of cfdiDePruebas.matchAll(/^ALTER TABLE (\w+) ADD COLUMN (\w+) (\w+);$/gm)) {
+      const [, tabla, columna, tipo] = m;
+      if (!this.tieneColumna(tabla, columna)) this.sql.exec(`ALTER TABLE ${tabla} ADD COLUMN ${columna} ${tipo}`);
+    }
+    const enSandbox = `EXISTS (SELECT 1 FROM pac_config WHERE id = 'pac' AND sandbox = 1)`;
+    this.sql.exec(`UPDATE cfdi SET pruebas = 1 WHERE pruebas IS NULL AND pac_id IS NOT NULL AND ${enSandbox}`);
+    this.sql.exec(`UPDATE emisiones SET pruebas = 1 WHERE pruebas IS NULL AND ${enSandbox}`);
+  }
+
   /** 0048, en código: la factura nueva, segunda vuelta. Misma forma que la 0047. */
   private facturaV2(): void {
     this.sql.exec(facturaV2.replace(/^ALTER TABLE .*$/gm, ''));
@@ -6009,7 +6029,7 @@ export class OrgDB extends DurableObject<Env> {
   /* ─────────────── bill101 fase C: timbrar (0.88.0) ─────────────── */
   private static readonly OPS_PAC: ReadonlySet<string> = new Set([
     'config', 'cuenta', 'guardarCuenta', 'quitarCuenta', 'ajustar', 'anotarPerfil', 'prellenar',
-    'abrirEmision', 'timbrada', 'fallida', 'darPorFallida', 'emision', 'emisiones', 'paraCancelar', 'cancelacion',
+    'abrirEmision', 'timbrada', 'fallida', 'darPorFallida', 'emision', 'emisiones', 'paraCancelar', 'cancelacion', 'borrarPrueba',
     'conceptos', 'clientes', 'correosDe', 'ponerCorreos', 'pdfConfig', 'ponerPdfConfig',
   ]);
 

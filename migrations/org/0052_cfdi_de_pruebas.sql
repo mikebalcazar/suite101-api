@@ -1,0 +1,22 @@
+-- 0052: las facturas timbradas con la cuenta de pruebas se saben de pruebas (15-oct-2026).
+--
+-- Mike, 15-oct: timbró A-2 desde bill101 con el sandbox de Facturama y
+-- preguntó si se podía borrar. No se podía: una timbrada en sandbox entraba
+-- a `cfdi` como una de verdad, sin marca, contaba en el IVA del mes y
+-- salía en el estado de cuenta fiscal; y en sandbox Facturama no cancela
+-- con el RFC real. Con botones eligió: cada factura timbrada queda marcada
+-- con su ambiente, y las de pruebas se pueden borrar desde la pantalla; una
+-- de verdad, jamás (ésa se cancela ante el SAT).
+--
+-- `pruebas`: 1 si se timbró con la cuenta sandbox, 0 si con la de verdad,
+-- NULL en lo que no se timbró desde aquí (subidas a mano, bajadas del SAT).
+-- Lo mismo en `emisiones`, para saber con qué cuenta se apartó cada folio.
+--
+-- ALTER va en UN renglón, con esta forma exacta: src/org-db.ts los lee de
+-- aquí y los salta si la columna ya está (la migración corre en código).
+-- Después, EN CÓDIGO, lo ya timbrado se marca según la cuenta que haya hoy:
+-- si la cuenta es sandbox, todo lo timbrado hasta ahora fue de pruebas (una
+-- cuenta de verdad no ha existido). Si la cuenta es de verdad o no hay, no
+-- se marca nada: no se adivina.
+ALTER TABLE cfdi ADD COLUMN pruebas INTEGER;
+ALTER TABLE emisiones ADD COLUMN pruebas INTEGER;
