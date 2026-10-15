@@ -1,3 +1,5 @@
+> **15-oct-2026 · la cuenta firmada también en la pantalla de reembolso de dash (dash101 #159).** La publicación de #158 se había caído porque dash `/ordenes/nueva` seguía mandando la cuenta en la orden; ahora firma y registra en roster igual que supply. Supply y dash ya publicados con la firma. Ver `muro/…-jr-cuenta-firmada-tambien-en-dash.md`.
+
 > **14-oct-2026 · la cuenta de reembolso se firma en supply y vive sólo en roster (API 0.99.0 #357; dash101 #158).** Sin cuenta en roster, supply la pide con firma y la deja en el expediente («Datos bancarios firmados»); la carátula queda pendiente. Ver `muro/…-jr-cuenta-firmada-en-roster.md`.
 
 > **14-oct-2026 · la cuenta del reembolso sale de roster (API 0.98.0 #355; dash101 #157).** Si el expediente de roster trae CLABE, supply no la pide y dash la enseña. Pendiente que Mike decida qué pasa con quien no tiene cuenta en roster (hoy: la da en supply). Ver `muro/…-jr-cuenta-del-reembolso-de-roster.md`.
