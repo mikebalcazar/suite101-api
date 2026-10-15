@@ -20,6 +20,7 @@
  */
 
 import { Buffer } from 'node:buffer';
+import { deMx } from './sat-db';
 
 export const FACTURAMA_SANDBOX = 'https://apisandbox.facturama.mx';
 export const FACTURAMA_PRODUCCION = 'https://api.facturama.mx';
@@ -59,6 +60,9 @@ export interface Borrador {
   condiciones?: string | null;
   observaciones?: string | null;
   orden?: string | null;
+  /** 0.100.0 · la fecha de expedición que se quiere, «AAAA-MM-DDTHH:mm:ss» hora
+   *  del centro; null = la del momento de timbrar. El SAT admite hasta 72 h atrás. */
+  fecha?: string | null;
 }
 
 /** Las cuentas del borrador, en centavos. Una por renglón y el total. */
@@ -147,10 +151,23 @@ export function revisarBorrador(b: unknown): Borrador | FallaPac {
   const c = cuentas(renglones);
   if (c.total <= 0) return mal('renglones', 'el total de la factura tiene que ser mayor que cero');
   const texto = (v: unknown, tope: number) => (v === undefined || v === null ? null : String(v).trim().slice(0, tope) || null);
+  // Mike, 15-oct-2026: «el campo de fecha de expedición, hasta 72 horas
+  // previas como lo permite el SAT; el default es la fecha real del momento».
+  let fecha: string | null = null;
+  if (d.fecha !== undefined && d.fecha !== null && String(d.fecha).trim()) {
+    const f = String(d.fecha).trim().replace(' ', 'T').slice(0, 19);
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(f)) return mal('fecha', 'la fecha de expedición va como AAAA-MM-DD HH:mm');
+    fecha = f.length === 16 ? `${f}:00` : f;
+    const ms = deMx(fecha);
+    if (!Number.isFinite(ms)) return mal('fecha', 'esa fecha no existe');
+    if (ms > Date.now() + 5 * 60_000) return mal('fecha', 'la fecha de expedición no puede estar en el futuro');
+    if (ms < Date.now() - 72 * 3600_000) return mal('fecha', 'el SAT sólo admite hasta 72 horas atrás');
+  }
   return {
     receptor: { rfc, razon_social: razon, regimen_fiscal: regimen, cp_fiscal: cp, uso_cfdi: uso },
     forma_pago: forma, renglones,
     condiciones: texto(d.condiciones, 100), observaciones: texto(d.observaciones, 1000), orden: texto(d.orden, 50),
+    fecha,
   };
 }
 

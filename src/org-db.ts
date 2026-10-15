@@ -64,6 +64,7 @@ import facturaV2 from '../migrations/org/0048_factura_v2.sql';
 import disenoDelItem from '../migrations/org/0049_diseno_del_item.sql';
 import cuentaDeReembolso from '../migrations/org/0050_cuenta_de_reembolso.sql';
 import articulosComprados from '../migrations/org/0051_articulos_comprados.sql';
+import prefacturas from '../migrations/org/0052_prefacturas.sql';
 import { MotorInversion } from './inversion-db';
 import { MotorFiscal } from './fiscal-db';
 import { MotorSat, type MemoriaSat } from './sat-db';
@@ -95,7 +96,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso, articulosComprados];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso, articulosComprados, prefacturas];
 
 /** La 0027, la 0030, la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
@@ -6011,6 +6012,7 @@ export class OrgDB extends DurableObject<Env> {
     'config', 'cuenta', 'guardarCuenta', 'quitarCuenta', 'ajustar', 'anotarPerfil', 'prellenar',
     'abrirEmision', 'timbrada', 'fallida', 'darPorFallida', 'emision', 'emisiones', 'paraCancelar', 'cancelacion',
     'conceptos', 'clientes', 'correosDe', 'ponerCorreos', 'pdfConfig', 'ponerPdfConfig',
+    'prefacturas', 'prefactura', 'guardarPrefactura', 'quitarPrefactura', 'prefacturaTimbrada', 'actualizarCliente',
   ]);
 
   pac(op: string, args: unknown[] = []): unknown {
