@@ -65,7 +65,7 @@ describe('de un XML y de un borrador sale un PDF', () => {
     expect(imp.receptor).toMatchObject({ rfc: 'XAXX010101000', nombre: 'PUBLICO EN GENERAL', regimen: '616', uso: 'S01', cp: '10900' });
     expect(imp).toMatchObject({ subtotal: P(86_500), descuento: P(5_000), iva: P(12_800), total: P(94_300) });
     expect(imp.renglones[1]).toMatchObject({ tasa_iva: null, objeto_imp: '01', iva: 0 });
-    const pdf = await armarPdf({ impresa: imp, empresa, config, vista_previa: true });
+    const pdf = await armarPdf({ impresa: imp, empresa: { ...empresa, telefono: '55 2951 7900', correo: 'info@taller101.com', sitio_web: 'www.taller101.com' }, config, vista_previa: true });
     expect(new TextDecoder().decode(pdf.slice(0, 5))).toBe('%PDF-');
     // Un renglón con cien renglones de descripción y un emoji no truena: se parte y se limpia.
     const largo: Borrador = { ...b, renglones: Array.from({ length: 60 }, (_, i) => ({ ...b.renglones[0], descripcion: `Renglón ${i} 🙂 ${'palabra '.repeat(40)}` })) };

@@ -29,8 +29,8 @@
  * FORESPOT y del SVG maestro de taller101) y viajan dentro del Worker
  * (src/marca/, regla Data en wrangler.toml); FORESPOT es la razón social que
  * factura y taller101 su marca, por eso van fijos y no dependen del logo que
- * la empresa suba en Ajustes (ese, si existe, sustituye al de FORESPOT en la
- * columna, sobre un recuadro blanco para que cualquier logo se vea).
+ * la empresa suba en Ajustes (15-oct-2026: ni siquiera si lo sube; Mike: «las facturas
+ * solo deberían salir con los datos de Forespot»).
  */
 import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument, PDFFont, PDFImage, PDFPage, degrees, rgb, type RGB } from 'pdf-lib';
@@ -229,7 +229,7 @@ export function cadenaOriginal(t: NonNullable<Impresa['timbre']>): string {
 const ANCHO = 612, ALTO = 792;
 /** La columna negra: ancho, margen interior; el cuerpo empieza en X0 y termina en XR. */
 const COL = 168, MC = 24, X0 = COL + 28, XR = ANCHO - 36, PIE_COL = 72, PIE_CUERPO = 44;
-const NEGRO = rgb(0.137, 0.122, 0.125), LIMA = rgb(0.839, 0.878, 0.243), BLANCO = rgb(1, 1, 1), GRIS_CLARO = rgb(0.725, 0.725, 0.725);
+const NEGRO = rgb(0.137, 0.122, 0.125), LIMA = rgb(0.839, 0.878, 0.243), BLANCO = rgb(1, 1, 1), GRIS_CLARO = rgb(0.725, 0.725, 0.725), GRIS_10 = rgb(0.9, 0.9, 0.9);
 const TINTA = rgb(0.071, 0.153, 0.2), GRIS = rgb(0.357, 0.42, 0.463), LINEA = rgb(0.875, 0.902, 0.918), NUBE = rgb(0.957, 0.969, 0.976), AZUL = rgb(0, 0.5, 0.757);
 
 const pesosTxt = (centavos: number): string => {
@@ -331,33 +331,34 @@ class Lienzo {
 }
 
 /** Los datos que van en la columna negra de cada página. */
-interface Columna { f: Impresa; e: Empresa; k: PdfConfig; logoEmisor: PDFImage; logoMarca: PDFImage; logoEmpresa: PDFImage | null }
+interface Columna { f: Impresa; e: Empresa; k: PdfConfig; logoEmisor: PDFImage; logoMarca: PDFImage }
 
 function columna(L: Lienzo, c: Columna): void {
   const { f, e, k } = c;
   const cw = COL - 2 * MC;
   L.caja(0, 0, COL, ALTO, NEGRO); L.caja(COL, 0, 2, ALTO, LIMA);
-  // El logo: el de la empresa (sobre blanco, para que cualquiera se vea) o el de FORESPOT en blanco.
+  // Siempre el logo de FORESPOT (Mike, 15-oct-2026: «las facturas solo
+  // deberían salir con los datos de Forespot, al final es quien timbra»).
   let y = ALTO - 36;
-  if (c.logoEmpresa) {
-    const alto = Math.min(80, cw / (c.logoEmpresa.width / c.logoEmpresa.height));
-    L.caja(MC - 6, y - alto - 6, cw + 12, alto + 12, BLANCO);
-    L.imagen(c.logoEmpresa, MC, y - alto, alto, cw); y -= alto + 34;
-  } else {
-    const { h } = L.imagen(c.logoEmisor, MC, y - 96, 96, cw); y -= h + 28;
-  }
+  { const { h } = L.imagen(c.logoEmisor, MC, y - 96, 96, cw); y -= h + 28; }
   const seccion = (t: string) => { L.texto(t, MC, y, { tam: 6.5, peso: 'negra', color: LIMA }); L.caja(MC, y - 3, 18, 1.2, LIMA); y -= 13; };
   const renglon = (t: string, o: { peso?: Peso; tam?: number; color?: RGB } = {}) => {
     for (const l of L.partir(t, cw, o.tam ?? 6.5, o.peso)) { L.texto(l, MC, y, { tam: o.tam ?? 6.5, peso: o.peso, color: o.color ?? BLANCO }); y -= 8.5; }
   };
   seccion('EMISOR');
-  renglon(e.nombre || f.emisor.nombre, { peso: 'semi' });
+  renglon(f.emisor.nombre || e.nombre, { peso: 'semi' });
   renglon(`RFC ${f.emisor.rfc}`);
   if (f.emisor.regimen) renglon(`${f.emisor.regimen} · ${REGIMEN_NOMBRE[f.emisor.regimen] ?? ''}`, { color: GRIS_CLARO });
   if (e.direccion) renglon(e.direccion, { color: GRIS_CLARO });
-  const contacto = [e.telefono, e.correo, e.sitio_web].filter(Boolean).join(' · ');
-  if (contacto) renglon(contacto, { color: GRIS_CLARO });
   y -= 8;
+  // El contacto comercial (teléfono, sitio, correo), aparte de lo fiscal (Mike, 15-oct-2026).
+  if (e.telefono || e.sitio_web || e.correo) {
+    seccion('CONTACTO');
+    if (e.telefono) renglon(e.telefono);
+    if (e.sitio_web) renglon(e.sitio_web);
+    if (e.correo) renglon(e.correo);
+    y -= 8;
+  }
   if (k.clabe || k.cuenta || k.banco) {
     seccion('DATOS BANCARIOS');
     if (k.banco) renglon(k.banco);
@@ -393,13 +394,7 @@ export async function armarPdf(d: { impresa: Impresa; empresa: Empresa; config: 
   await L.abrir();
   const anchoC = XR - X0;
 
-  let logoEmpresa: PDFImage | null = null;
-  if (e.logo) {
-    try {
-      logoEmpresa = /png/i.test(e.logo.tipo) ? await L.doc.embedPng(e.logo.bytes) : /jpe?g/i.test(e.logo.tipo) ? await L.doc.embedJpg(e.logo.bytes) : null;
-    } catch { logoEmpresa = null; }
-  }
-  const col: Columna = { f, e, k, logoEmisor: await L.doc.embedPng(logoEmisorBlanco), logoMarca: await L.doc.embedPng(logoMarcaTinta), logoEmpresa };
+  const col: Columna = { f, e, k, logoEmisor: await L.doc.embedPng(logoEmisorBlanco), logoMarca: await L.doc.embedPng(logoMarcaTinta) };
 
   const folio = `${f.serie ?? ''}${f.serie && f.folio ? ' ' : ''}${f.folio ?? ''}`;
   const nuevaPagina = () => {
@@ -463,9 +458,11 @@ export async function armarPdf(d: { impresa: Impresa; empresa: Empresa; config: 
   fila('Subtotal', pesosTxt(f.subtotal));
   if (f.descuento) fila('Descuento', `-${pesosTxt(f.descuento)}`);
   fila('IVA 16 %', pesosTxt(f.iva));
-  L.caja(XR - 170, L.y - 6, 170, 18, NEGRO);
-  L.texto('Total', XR - 170, L.y, { tam: 9, peso: 'negra', color: LIMA, ancho: 84, derecha: true });
-  L.texto(pesosTxt(f.total), XR - 80, L.y, { tam: 9.5, peso: 'negra', color: LIMA, ancho: 76, derecha: true });
+  // Caja gris al 10 % de negro, separada de los renglones de arriba, cifra en negro (Mike, 15-oct-2026).
+  L.y -= 6;
+  L.caja(XR - 170, L.y - 6, 170, 18, GRIS_10);
+  L.texto('Total', XR - 170, L.y, { tam: 9, peso: 'negra', color: NEGRO, ancho: 84, derecha: true });
+  L.texto(pesosTxt(f.total), XR - 80, L.y, { tam: 9.5, peso: 'negra', color: NEGRO, ancho: 76, derecha: true });
   const yDespTot = L.y - 8;
   L.y = yTot;
   const anchoIzq = XR - 180 - X0;
