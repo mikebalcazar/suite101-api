@@ -17,7 +17,16 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.101.0 (LAS FACTURAS TIMBRADAS EN PRUEBAS SE SABEN Y SE
+ * Versión del contrato: 0.102.0 (UNA PIEZA QUE CAMBIA A REQUERIMIENTO EN
+ * QUELL APARECE EN QUOTE. Mike, 15-oct: «agregué items y después los convertí
+ * en requerimientos porque apenas los vamos a cotizar, pero cuando voy a
+ * quote, no aparecen». PATCH /quell/elements/:id con `type` requerimiento, a
+ * una pieza sin ítem en una obra ligada, hace lo mismo que levantarla: nace
+ * su ítem cotizado (fuera de alcance) y su renglón en el borrador
+ * «Requerimientos»; la respuesta trae `item_id` y `cotizacion_id`. Una pieza
+ * que ya tiene ítem no se toca. La 0054 levanta las que se quedaron así).
+ *
+ * Antes, 0.101.0 (LAS FACTURAS TIMBRADAS EN PRUEBAS SE SABEN Y SE
  * BORRAN. Mike, 15-oct: timbró A-2 en el sandbox de Facturama y preguntó si se
  * podía borrar; una timbrada en sandbox entraba como real, contaba en el IVA
  * y salía en el estado de cuenta, y en sandbox Facturama no cancela con el
@@ -1626,7 +1635,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.101.0';
+export const VERSION_CONTRATO = '0.102.0';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {

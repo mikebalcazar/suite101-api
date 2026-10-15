@@ -523,10 +523,12 @@ describe('0.49.0 · el requerimiento nace como ítem y cae en el borrador de quo
     expect((await borradorDe(proyecto2))[0].datos.versiones[0].muebles.length).toBe(1);
   });
 
-  it('0.64.2 · «traer del plano» levanta un requerimiento como requerimiento, no como pieza suelta', async () => {
+  it('0.64.2 · una pieza que se vuelve requerimiento cae en quote101 (desde 0.102.0, al cambiarle el tipo)', async () => {
     /* Una pieza que se volvió requerimiento después de nacer (se le cambió el
-     * tipo) es un pin sin ítem en una obra ligada: el único camino que le
-     * queda es «traer del plano». Por ahí también tiene que caer en quote101. */
+     * tipo) era un pin sin ítem en una obra ligada, y el único camino que le
+     * quedaba era «traer del plano». Desde 0.102.0 el cambio de tipo la
+     * levanta solo (Mike, 15-oct: «los convertí en requerimientos (…) cuando
+     * voy a quote, no aparecen»), y «traer del plano» ya no tiene qué traer. */
     const r = await q('mike', `/plans/${plano2}/elements`, {
       method: 'POST', json: { op_id: crypto.randomUUID(), name: 'Nació mueble', type: 'Mueble', x: 0.2, y: 0.2 },
     });
@@ -534,11 +536,13 @@ describe('0.49.0 · el requerimiento nace como ítem y cae en el borrador de quo
     expect(r.item_id).toBeNull();
     const p = await q('mike', `/elements/${r.id}`, { method: 'PATCH', json: { op_id: crypto.randomUUID(), type: 'Requerimiento' } });
     expect(p.estado, JSON.stringify(p)).toBe(200);
+    expect(p.item_id, 'el cambio de tipo ya le dio su ítem').toBeTruthy();
     const t = await o('mike', `/obras/${obra2}/items`, { method: 'POST', json: { crear: [r.id] } });
     expect(t.estado, JSON.stringify(t)).toBe(200);
-    expect(t.data.creados).toBe(1);
+    expect(t.data.creados, '«traer del plano» no la duplica').toBe(0);
     const it = (await pendientesDe(proyecto2)).find((i) => i.nombre === 'Nació mueble');
-    expect(it).toMatchObject({ tipo: 'requerimiento', estado: 'cotizado', alcance: 'fuera' });
+    expect(it).toMatchObject({ id: p.item_id, tipo: 'requerimiento', estado: 'cotizado', alcance: 'fuera' });
+    expect((await pendientesDe(proyecto2)).filter((i) => i.nombre === 'Nació mueble').length).toBe(1);
     expect((await borradorDe(proyecto2))[0].datos.versiones[0].muebles.map((m: any) => m.item_id)).toContain(it.id);
   });
 });
@@ -576,5 +580,56 @@ describe('0.49.0 · las piezas de una cotización aprobada nacen en su partida',
     expect(r.estado).toBe(404);
     expect(((await o('mike', `/items?proyecto_id=${proyecto}`)).data.filas as any[]).some((i) => i.nombre === 'Buena')).toBe(false);
     expect((await o('mike', `/cotizaciones/${c}`, C)).data.estado).not.toBe('aceptada');
+  });
+});
+
+/* ─────────────── 0.102.0 · una pieza que CAMBIA a requerimiento ───────────────
+ *
+ * Mike, 15-oct-2026: «agregué items y después los convertí en requerimientos
+ * porque apenas los vamos a cotizar, pero cuando voy a quote, no aparecen
+ * items sin cotizar en el proyecto, y necesito agregarlos a una cotización
+ * nueva». Cambiar el tipo a requerimiento debe dejar lo mismo que levantarlo
+ * así: el ítem cotizado del proyecto (lo que quote101 enseña en «ítems
+ * pendientes») y su renglón en el borrador «Requerimientos».
+ */
+describe('0.102.0 · la pieza que se cambia a requerimiento aparece en quote101', () => {
+  const C = { app: 'cotizador101' } as const;
+  const pendientesEnQuote = async () =>
+    ((await o('mike', `/items?proyecto_id=${proyecto}&estado=cotizado&limite=5000`, C)).data.filas as any[]).map((i) => i.id);
+
+  it('un mueble sin ítem que se cambia a requerimiento nace como ítem cotizado y cae en el borrador', async () => {
+    const r = await q('mike', `/plans/${plano}/elements`, {
+      method: 'POST', json: { op_id: crypto.randomUUID(), name: 'Closet del estudio', type: 'Mueble', x: 0.7, y: 0.2 },
+    });
+    expect(r.item_id, 'un mueble levantado en el plano no trae ítem').toBeFalsy();
+    const v = await venta();
+    const c = await q('mike', `/elements/${r.id}`, { method: 'PATCH', json: { op_id: crypto.randomUUID(), type: 'Requerimiento' } });
+    expect(c.estado, JSON.stringify(c)).toBe(200);
+    expect(c.item_id, 'la respuesta trae el ítem que nació').toBeTruthy();
+    expect(c.cotizacion_id, 'y el borrador donde cayó').toBeTruthy();
+    const it = (await o('mike', `/items/${c.item_id}`)).data;
+    expect(it).toMatchObject({ proyecto_id: proyecto, estado: 'cotizado', tipo: 'requerimiento', nombre: 'Closet del estudio', monto: 0 });
+    expect(await pendientesEnQuote(), 'quote101 lo ve en «ítems pendientes»').toContain(c.item_id);
+    const borrador = (await o('mike', `/cotizaciones/${c.cotizacion_id}`, C)).data;
+    expect(borrador.datos.de_requerimientos).toBe(true);
+    expect(borrador.datos.versiones[0].muebles.map((m: any) => m.item_id)).toContain(c.item_id);
+    expect(await venta(), 'un cotizado no mueve la venta').toBe(v);
+    expect((await enPlano())['Closet del estudio'], 'y en el plano va fuera').toBe('fuera');
+
+    // Volver a guardar la pieza como requerimiento no hace otro ítem.
+    const otra = await q('mike', `/elements/${r.id}`, { method: 'PATCH', json: { op_id: crypto.randomUUID(), type: 'Requerimiento', name: 'Closet del estudio (2)' } });
+    expect(otra.item_id, 'ya tenía ítem: no nace otro').toBeFalsy();
+    expect((await pendientesEnQuote()).filter((id) => id === c.item_id).length).toBe(1);
+  });
+
+  it('una pieza con un ítem ya vendido que se cambia a requerimiento no se des-vende', async () => {
+    const vendido = await item('Puerta principal', 25_000);
+    const pz = await pieza('Puerta principal', vendido);
+    const v = await venta();
+    const c = await q('mike', `/elements/${pz}`, { method: 'PATCH', json: { op_id: crypto.randomUUID(), type: 'Requerimiento' } });
+    expect(c.estado).toBe(200);
+    expect(c.item_id, 'no nace otro ítem').toBeFalsy();
+    expect((await o('mike', `/items/${vendido}`)).data.estado).toBe('vendido');
+    expect(await venta()).toBe(v);
   });
 });
