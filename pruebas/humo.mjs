@@ -820,6 +820,15 @@ async function timbrar() {
   else rev([200, 502].includes(can.estado), 'cancelar: en sandbox con RFC real Facturama no cancela (sólo con EKU9003173C9); la ruta contesta y dice el motivo', `${can.estado} ${can.error ?? ''} ${JSON.stringify(can.detalle?.motivos ?? '').slice(0, 90)}`);
   const em = await pedir(STAGING, `/orgs/${ORG}/fiscal/emisiones`, { app });
   rev(em.estado === 200 && em.data?.filas?.[0]?.estado === 'timbrada' && em.data.filas[0].serie === 'HUMO', 'la emisión quedó registrada con su folio', JSON.stringify(em.data?.filas?.[0] ?? {}).slice(0, 120));
+  // 0053 (Mike, 15-oct): una timbrada en sandbox se sabe de pruebas y se
+  // borra con todo lo suyo; el folio se queda explicado en la emisión.
+  const det = await pedir(STAGING, `/orgs/${ORG}/fiscal/cfdi/${id}`, { app });
+  rev(det.estado === 200 && det.data?.pruebas === true, 'la factura timbrada en sandbox sale marcada de pruebas', `${det.estado} · pruebas ${det.data?.pruebas}`);
+  const borrada = await pedir(STAGING, `/orgs/${ORG}/fiscal/cfdi/${id}`, { app, method: 'DELETE' });
+  const ya = await pedir(STAGING, `/orgs/${ORG}/fiscal/cfdi/${id}`, { app });
+  rev(borrada.estado === 200 && borrada.data?.borrada === true && ya.estado === 404, 'y se borra con sus archivos: ya no está', `${borrada.estado} ${borrada.error ?? ''} · archivos ${borrada.data?.archivos ?? '?'} · después ${ya.estado} · ${borrada.ms} ms`);
+  const em2 = await pedir(STAGING, `/orgs/${ORG}/fiscal/emisiones`, { app });
+  rev(em2.data?.filas?.[0]?.cfdi_id === null && /pruebas borrada/.test(em2.data?.filas?.[0]?.error ?? ''), 'el folio gastado se queda explicado en la emisión', JSON.stringify(em2.data?.filas?.[0]?.error ?? ''));
 }
 
 async function entrarComoMike() {

@@ -212,8 +212,8 @@ export class MotorPac {
     this.e.tx(() => {
       this.sql.exec(`UPDATE pac_config SET folio_siguiente = folio_siguiente + 1 WHERE id = 'pac'`);
       this.sql.exec(
-        `INSERT INTO emisiones (id, serie, folio, estado, borrador, proyecto_id, cliente_id, creada_por, creada_at) VALUES (?,?,?,'timbrando',?,?,?,?,?)`,
-        id, String(f.serie), folio, JSON.stringify(b), a.proyecto_id ?? null, a.cliente_id ?? null, actor.usuario_id, ahora(),
+        `INSERT INTO emisiones (id, serie, folio, estado, borrador, proyecto_id, cliente_id, creada_por, creada_at, pruebas) VALUES (?,?,?,'timbrando',?,?,?,?,?,?)`,
+        id, String(f.serie), folio, JSON.stringify(b), a.proyecto_id ?? null, a.cliente_id ?? null, actor.usuario_id, ahora(), f.sandbox ? 1 : 0,
       );
     });
     return { id, serie: String(f.serie), folio };
@@ -240,7 +240,8 @@ export class MotorPac {
     const correos = limpiarCorreos(extra.correos);
     let cliente_id: string | null = em.cliente_id ? String(em.cliente_id) : null;
     this.e.tx(() => {
-      this.sql.exec(`UPDATE cfdi SET pac_id = ?, proyecto_id = COALESCE(?, proyecto_id), actualizado_at = ? WHERE id = ?`, pac_id, em.proyecto_id, ahora(), x.id!);
+      // 0053: con qué cuenta se timbró. Una de pruebas se puede borrar después; una de verdad, nunca.
+      this.sql.exec(`UPDATE cfdi SET pac_id = ?, pruebas = ?, proyecto_id = COALESCE(?, proyecto_id), actualizado_at = ? WHERE id = ?`, pac_id, sandbox ? 1 : 0, em.proyecto_id, ahora(), x.id!);
       this.sql.exec(`UPDATE emisiones SET estado = 'timbrada', pac_id = ?, uuid = ?, cfdi_id = ?, error = NULL, terminada_at = ? WHERE id = ?`, pac_id, leida.uuid, x.id!, ahora(), emision_id);
       /* Mike, 9-oct: «si se genera una factura con un RFC nuevo, guardar ese
        * RFC como cliente nuevo para futuras facturas». Sin cliente dicho, se
@@ -379,6 +380,49 @@ export class MotorPac {
          FROM emisiones e LEFT JOIN cfdi c ON c.id = e.cfdi_id ORDER BY e.creada_at DESC LIMIT ?`,
       Math.min(200, Math.max(1, limite)),
     );
+  }
+
+  /* ─────────────── borrar una de pruebas (0053) ─────────────── */
+
+  /** Mike, 15-oct: una factura timbrada con la cuenta sandbox no es una
+   *  factura: no existe ante el SAT, pero aquí contaba en el IVA y salía en
+   *  el estado de cuenta. Se borra con todo lo que arrastró: sus conceptos,
+   *  sus pagos, su liga al dinero (los movimientos vuelven a «sin factura»,
+   *  como al cancelar), y su lugar en el catálogo de facturación. La
+   *  emisión se queda —el folio se gastó y el hueco se explica— apuntando a
+   *  nada y diciendo por qué. Los archivos (XML, PDF, acuse) los borra la
+   *  ruta de R2 con las llaves que esto devuelve.
+   *
+   *  Una de verdad (`pruebas` = 0) o una que no se timbró desde aquí
+   *  (NULL) NO se borra por aquí, diga lo que diga quien lo pide. */
+  borrarPrueba(cfdi_id: string, actor: Actor): { cfdi_id: string; folio: string; uuid: string; llaves: string[] } | Falla {
+    const f = this.una(`SELECT id, uuid, serie, folio, estado, pruebas, pac_id, xml_llave, pdf_llave, acuse_llave FROM cfdi WHERE id = ?`, cfdi_id);
+    if (!f) return { error: 'cfdi_desconocido' };
+    if (f.pruebas !== 1) {
+      return { error: 'no_es_de_pruebas', detalle: { motivo: f.pac_id ? 'esta factura se timbró con la cuenta de verdad: no se borra, se cancela ante el SAT' : 'esta factura no se timbró desde aquí: no se borra' } };
+    }
+    const llaves = [f.xml_llave, f.pdf_llave, f.acuse_llave].filter((x): x is string => typeof x === 'string' && !!x);
+    const em = this.una(`SELECT id, borrador FROM emisiones WHERE cfdi_id = ?`, cfdi_id);
+    this.e.tx(() => {
+      // Primero como una cancelación: suelta los movimientos que sólo ella respaldaba.
+      if (f.estado === 'vigente') this.e.cancelar(cfdi_id);
+      if (em) {
+        let b: Partial<Borrador> = {};
+        try { b = JSON.parse(String(em.borrador)) as Borrador; } catch { /* un borrador ilegible no detiene el borrado */ }
+        for (const r of Array.isArray(b.renglones) ? b.renglones : []) {
+          const norm = normalizar(r.descripcion);
+          if (!norm) continue;
+          this.sql.exec(`UPDATE conceptos_fact SET veces = veces - 1 WHERE clave_prod_serv = ? AND descripcion_norm = ?`, r.clave_prod_serv, norm);
+        }
+        this.sql.exec(`DELETE FROM conceptos_fact WHERE veces <= 0`);
+        this.sql.exec(`UPDATE emisiones SET cfdi_id = NULL, error = ? WHERE id = ?`, `factura de pruebas borrada el ${ahora().slice(0, 10)} por ${actor.usuario_id}`, String(em.id));
+      }
+      this.sql.exec(`DELETE FROM cfdi_movimientos WHERE cfdi_id = ?`, cfdi_id);
+      this.sql.exec(`DELETE FROM cfdi_conceptos WHERE cfdi_id = ?`, cfdi_id);
+      this.sql.exec(`DELETE FROM cfdi_pagos WHERE cfdi_id = ?`, cfdi_id);
+      this.sql.exec(`DELETE FROM cfdi WHERE id = ?`, cfdi_id);
+    });
+    return { cfdi_id, folio: `${f.serie ?? ''}${f.serie && f.folio ? '-' : ''}${f.folio ?? ''}`, uuid: String(f.uuid), llaves };
   }
 
   /* ─────────────── prefacturas (0.100.0) ───────────────

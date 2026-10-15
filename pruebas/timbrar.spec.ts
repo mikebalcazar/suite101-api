@@ -565,3 +565,72 @@ describe('el PDF y la cancelación', () => {
     expect(f2).toMatchObject({ estado: 'cancelada', cancelacion: 'cancelada', estado_sat: 'cancelado' });
   });
 });
+
+/* Mike, 15-oct: timbró A-2 en el sandbox y preguntó si se podía borrar. Una
+ * timbrada con la cuenta de pruebas no es una factura: no existe ante el SAT,
+ * pero contaba en el IVA y salía en el estado de cuenta. Ahora se sabe con
+ * qué cuenta se timbró cada una (0053) y las de pruebas se borran con todo lo
+ * suyo; una de verdad, jamás. */
+describe('borrar una factura timbrada en pruebas (0053)', () => {
+  let id = '', ivaAntes = 0;
+  const ivaDelAnio = async () => ((await o('mike', '/fiscal/impuestos?anio=2026')).data.meses as any[]).reduce((s: number, m: any) => s + m.iva.trasladado, 0);
+
+  it('toda timbrada en sandbox sale marcada de pruebas; una subida a mano, no', async () => {
+    const filas = (await o('mike', '/fiscal/cfdi')).data.filas as any[];
+    const timbradas = filas.filter((f) => f.origen === 'timbrado');
+    expect(timbradas.length).toBeGreaterThan(1);
+    for (const f of timbradas) expect(f.pruebas, `${f.serie}-${f.folio}`).toBe(1);
+    const manual = filas.find((f) => f.origen !== 'timbrado');
+    expect(manual.pruebas).toBeNull();
+    const viva = timbradas.find((f) => f.estado === 'vigente' && f.rfc === 'MAR990101AB1')!;
+    id = viva.id;
+    expect((await o('mike', `/fiscal/cfdi/${id}`)).data).toMatchObject({ pruebas: true, estado: 'vigente', tiene_xml: true });
+    expect((await o('mike', `/fiscal/cfdi/${manual.id}`)).data.pruebas).toBeNull();
+    ivaAntes = await ivaDelAnio();
+  });
+
+  it('quien no dirige ni lleva la contabilidad no borra', async () => {
+    expect((await o('ana', `/fiscal/cfdi/${id}`, { method: 'DELETE' })).estado).toBe(403);
+    expect((await o('mike', `/fiscal/cfdi/${id}`)).estado).toBe(200);
+  });
+
+  it('se borra con todo lo suyo: ya no está, no cuenta en el IVA, el folio queda explicado y el catálogo descuenta', async () => {
+    const antes = (await o('mike', `/fiscal/cfdi/${id}`)).data;
+    const librero = ((await o('mike', '/fiscal/conceptos?q=librero')).data.filas as any[])[0];
+    expect(librero.veces).toBe(2);
+    const r = await o('beto', `/fiscal/cfdi/${id}`, { method: 'DELETE' });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data).toMatchObject({ borrada: true, cfdi_id: id, folio: `${antes.serie}-${antes.folio}`, uuid: antes.uuid });
+    expect(r.data.archivos, 'su XML se fue de R2').toBeGreaterThanOrEqual(1);
+    expect(await entorno.ARCHIVOS.get(`orgs/${ORG}/cfdi/${id}.xml`)).toBeNull();
+    expect((await o('mike', `/fiscal/cfdi/${id}`)).estado).toBe(404);
+    expect(((await o('mike', '/fiscal/cfdi')).data.filas as any[]).some((f) => f.id === id)).toBe(false);
+    expect(await ivaDelAnio(), 'ya no cuenta en el IVA').toBe(ivaAntes - antes.iva);
+    // El folio se gastó y se explica: la emisión sigue, apuntando a nada.
+    const em = ((await o('mike', '/fiscal/emisiones')).data.filas as any[]).find((e) => e.serie === antes.serie && String(e.folio) === String(antes.folio));
+    expect(em).toMatchObject({ estado: 'timbrada', cfdi_id: null, cfdi_estado: null });
+    expect(em.error).toMatch(/factura de pruebas borrada/);
+    expect(((await o('mike', '/fiscal/conceptos?q=librero')).data.filas as any[])[0].veces).toBe(1);
+    // Borrarla otra vez: ya no existe.
+    expect((await o('mike', `/fiscal/cfdi/${id}`, { method: 'DELETE' })).estado).toBe(404);
+  });
+
+  it('una subida a mano no se borra por aquí', async () => {
+    const manual = ((await o('mike', '/fiscal/cfdi')).data.filas as any[]).find((f) => f.origen !== 'timbrado');
+    expect(await o('mike', `/fiscal/cfdi/${manual.id}`, { method: 'DELETE' })).toMatchObject({ estado: 409, error: 'no_es_de_pruebas' });
+    expect((await o('mike', `/fiscal/cfdi/${manual.id}`)).estado).toBe(200);
+  });
+
+  it('una timbrada con la cuenta de verdad nace sin la marca y NO se borra: se cancela', async () => {
+    expect((await o('mike', '/fiscal/pac', { method: 'PUT', json: { usuario: 'mike-sandbox', clave: 'clave-sandbox', sandbox: false, serie: 'REAL' } })).estado).toBe(200);
+    const r = await o('mike', '/fiscal/emitir', { method: 'POST', json: { borrador: { ...BORRADOR, renglones: [{ ...RENGLON, descripcion: 'Banca de verdad' }] } } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    expect(r.data.cfdi).toMatchObject({ pruebas: false, serie: 'REAL' });
+    expect(((await o('mike', '/fiscal/cfdi')).data.filas as any[]).find((f) => f.id === r.data.cfdi_id).pruebas).toBe(0);
+    const b = await o('mike', `/fiscal/cfdi/${r.data.cfdi_id}`, { method: 'DELETE' });
+    expect(b).toMatchObject({ estado: 409, error: 'no_es_de_pruebas' });
+    expect(b.detalle.motivo).toMatch(/se cancela ante el SAT/);
+    expect((await o('mike', `/fiscal/cfdi/${r.data.cfdi_id}`)).data.estado).toBe('vigente');
+    expect((await o('mike', '/fiscal/pac', { method: 'PUT', json: { usuario: 'mike-sandbox', clave: 'clave-sandbox', sandbox: true, serie: 'FAC' } })).estado).toBe(200);
+  });
+});

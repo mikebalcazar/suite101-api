@@ -17,7 +17,18 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.100.0 (LA FACTURA NUEVA, TERCERA VUELTA. Mike, 15-oct:
+ * Versión del contrato: 0.101.0 (LAS FACTURAS TIMBRADAS EN PRUEBAS SE SABEN Y SE
+ * BORRAN. Mike, 15-oct: timbró A-2 en el sandbox de Facturama y preguntó si se
+ * podía borrar; una timbrada en sandbox entraba como real, contaba en el IVA
+ * y salía en el estado de cuenta, y en sandbox Facturama no cancela con el
+ * RFC real. Cada `cfdi` y cada emisión llevan `pruebas` (1 sandbox, 0 cuenta
+ * de verdad, null si no se timbró desde aquí; en el detalle, true/false/null);
+ * lo ya timbrado se marca según la cuenta que haya (0053). DELETE
+ * /fiscal/cfdi/:id borra SÓLO una de pruebas, con conceptos, pagos, liga al
+ * dinero, archivos y su lugar en el catálogo; la emisión se queda con el folio
+ * gastado y el motivo. Una de verdad contesta 409 `no_es_de_pruebas`.)
+ * Antes:
+ * 0.100.0 (LA FACTURA NUEVA, TERCERA VUELTA. Mike, 15-oct:
  * prefacturas —POST/GET /fiscal/prefacturas, GET/PUT/DELETE
  * /fiscal/prefacturas/:id, GET /fiscal/prefacturas/:id/pdf (marca PREFACTURA,
  * sin folio, sin correo); POST /fiscal/emitir acepta `prefactura_id` (la liga al
@@ -25,7 +36,6 @@
  * la del momento) y `enviar_a` (a cuáles de `correos` mandarla; todos se guardan
  * en el cliente); GET /fiscal/emisiones/:id trae una emisión con su borrador
  * para «nueva igual». Tabla interna `prefacturas` (org 0052).)
- * Antes:
  * 0.99.0 (LA CUENTA DE REEMBOLSO SE REGISTRA FIRMADA Y VIVE
  * EN ROSTER. Mike, 14-oct: «ahí mismo ingresa los datos de la cuenta, el
  * beneficiario, y queda como pendiente que suba la carátula bancaria, pero sí
@@ -1616,7 +1626,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.100.0';
+export const VERSION_CONTRATO = '0.101.0';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
