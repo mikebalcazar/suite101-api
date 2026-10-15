@@ -104,3 +104,62 @@ describe('la migración 0030 sobre una obra ligada con un requerimiento sin íte
     expect(otraVez).toEqual({ items: 1, renglones: 1 });
   });
 });
+
+/* La 0054 (15-oct-2026): lo mismo, para las piezas que se CAMBIARON a
+ * requerimiento. Mike: «agregué items y después los convertí en
+ * requerimientos (…) cuando voy a quote, no aparecen». Antes de 0.102.0
+ * cambiarle el tipo a una pieza sólo la cambiaba en el plano. Se siembra
+ * una base en la 0053 con una obra ligada (como queda una obra nueva de
+ * quell desde 0.77.0) y una pieza que nació mueble y ya dice requerimiento,
+ * sin ítem, y se mide que `migrar()` le dé su ítem y su renglón. */
+describe('la migración 0054 sobre una pieza que se cambió a requerimiento', () => {
+  const dentro = runInDurableObject as unknown as <T>(s: unknown, f: (o: any) => T | Promise<T>) => Promise<T>;
+  const entorno = env as unknown as { ORG: DurableObjectNamespace };
+  const elDO = () => entorno.ORG.get(entorno.ORG.idFromName('migracion-0054')) as unknown as DurableObjectStub;
+  const HASTA = MIGRACIONES.findIndex((m) => m.includes('se CAMBIARON a requerimiento'));
+  const T = '2026-10-15T12:00:00.000Z';
+  let proyecto = '';
+
+  beforeAll(async () => {
+    proyecto = await dentro(elDO(), async (db: any) => {
+      await db.ctx.storage.deleteAll();
+      db.migrar(HASTA);
+      const ctx = { app: 'dash101', usuario_id: 'u-mike' };
+      const cliente = db.crear('clientes', { nombre: 'Depto Lomas' }, ctx);
+      const p = db.crear('proyectos', { nombre: 'Lomas', cliente_id: cliente.id, estado: 'activo' }, ctx);
+      const x = (q: string, ...a: unknown[]) => db.sql.exec(q, ...a);
+      x(`INSERT INTO quell_projects (id, name, client, proyecto_id, created_at) VALUES ('o1','Lomas','Depto Lomas',?,?)`, p.id, T);
+      x(`INSERT INTO quell_plans (id, project_id, name, image_key, width, height, created_at) VALUES ('pl1','o1','Planta','k1',1000,800,?)`, T);
+      // Nació mueble (con su código MW-) y después se le cambió el tipo.
+      x(`INSERT INTO quell_elements (id, plan_id, project_id, code, type, name, x, y, created_at, descripcion) VALUES ('e-cambiada','pl1','o1','MW-01','Requerimiento','Closet de la recámara',0.5,0.5,?,'Melamina blanca')`, T);
+      x(`INSERT INTO quell_elements (id, plan_id, project_id, code, type, name, x, y, created_at) VALUES ('e-mueble','pl1','o1','MW-02','Mueble','Cocina',0.4,0.4,?)`, T);
+      return String(p.id);
+    });
+  });
+
+  it('la 0054 es la última y la base está justo antes', async () => {
+    expect(HASTA).toBe(MIGRACIONES.length - 1);
+    const r = await dentro(elDO(), (db: any) => ({ version: db.version(), items: Number(db.sql.exec(`SELECT COUNT(*) AS n FROM items`).one().n) }));
+    expect(r).toEqual({ version: HASTA, items: 0 });
+  });
+
+  it('migrar() le da su ítem cotizado y su renglón en el borrador; el mueble no se toca', async () => {
+    const r = await dentro(elDO(), (db: any) => {
+      db.migrar();
+      return {
+        version: db.version(),
+        items: db.sql.exec(`SELECT id, proyecto_id, nombre, tipo, estado, monto, clave, descripcion, creado_por FROM items`).toArray(),
+        piezas: db.sql.exec(`SELECT id, item_id FROM quell_elements ORDER BY id`).toArray(),
+        borrador: db.sql.exec(`SELECT estado, datos FROM cotizaciones`).toArray().map((c: any) => ({ estado: c.estado, datos: JSON.parse(c.datos) })),
+      };
+    });
+    expect(r.version).toBe(VERSION_ORG_DB);
+    expect(r.items.length).toBe(1);
+    const it = r.items[0];
+    expect(it).toMatchObject({ proyecto_id: proyecto, nombre: 'Closet de la recámara', tipo: 'requerimiento', estado: 'cotizado', monto: 0, clave: 'MW-01', descripcion: 'Melamina blanca', creado_por: 'migracion-0054' });
+    expect(r.piezas).toEqual([{ id: 'e-cambiada', item_id: it.id }, { id: 'e-mueble', item_id: null }]);
+    expect(r.borrador.length).toBe(1);
+    expect(r.borrador[0]).toMatchObject({ estado: 'borrador', datos: { nombre: 'Requerimientos', proyecto_id: proyecto, de_requerimientos: true } });
+    expect(r.borrador[0].datos.versiones[0].muebles.map((m: any) => m.item_id)).toEqual([it.id]);
+  });
+});

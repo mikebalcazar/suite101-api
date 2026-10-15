@@ -66,6 +66,7 @@ import cuentaDeReembolso from '../migrations/org/0050_cuenta_de_reembolso.sql';
 import articulosComprados from '../migrations/org/0051_articulos_comprados.sql';
 import prefacturas from '../migrations/org/0052_prefacturas.sql';
 import cfdiDePruebas from '../migrations/org/0053_cfdi_de_pruebas.sql';
+import requerimientosPorTipo from '../migrations/org/0054_requerimientos_por_cambio_de_tipo.sql';
 import { MotorInversion } from './inversion-db';
 import { MotorFiscal } from './fiscal-db';
 import { MotorSat, type MemoriaSat } from './sat-db';
@@ -97,12 +98,12 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso, articulosComprados, prefacturas, cfdiDePruebas];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso, articulosComprados, prefacturas, cfdiDePruebas, requerimientosPorTipo];
 
-/** La 0027, la 0030, la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
+/** La 0027, la 0030 (y la 0054, que la repite), la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
  *  en la lista; el archivo .sql es sólo la nota que lo dice. */
-const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar' | 'facturaV2' | 'disenoDelItem' | 'cuentaDeReembolso' | 'cfdiDePruebas'> = {
+const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar' | 'facturaV2' | 'disenoDelItem' | 'cuentaDeReembolso' | 'cfdiDePruebas' | 'migrarRequerimientosPorTipo'> = {
   [MIGRACIONES.indexOf(sinNegocios)]: 'quitarNegocios',
   [MIGRACIONES.indexOf(requerimientosHuerfanos)]: 'migrarRequerimientosHuerfanos',
   [MIGRACIONES.indexOf(obrasALaSuite)]: 'migrarObrasSueltas',
@@ -115,6 +116,7 @@ const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfano
   [MIGRACIONES.indexOf(disenoDelItem)]: 'disenoDelItem',
   [MIGRACIONES.indexOf(cuentaDeReembolso)]: 'cuentaDeReembolso',
   [MIGRACIONES.indexOf(cfdiDePruebas)]: 'cfdiDePruebas',
+  [MIGRACIONES.indexOf(requerimientosPorTipo)]: 'migrarRequerimientosPorTipo',
 };
 
 /** La tabla `empresa` (0027): UN renglón, con id fijo, que es lo que antes
@@ -3884,6 +3886,12 @@ export class OrgDB extends DurableObject<Env> {
   /** 0030, en código: repara las obras ya ligadas de la empresa. */
   private migrarRequerimientosHuerfanos(): void {
     this.levantarRequerimientosHuerfanos(null, 'migracion-0030');
+  }
+
+  /** 0054: lo mismo, para las piezas que se cambiaron a requerimiento
+   *  antes de 0.102.0 y se quedaron sin ítem. */
+  private migrarRequerimientosPorTipo(): void {
+    this.levantarRequerimientosHuerfanos(null, 'migracion-0054');
   }
 
   /* ─────────────── la obra de quell101 nace también en la suite (0.77.0) ───────────────

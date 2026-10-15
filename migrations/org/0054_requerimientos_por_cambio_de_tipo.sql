@@ -1,0 +1,18 @@
+-- OrgDB v54 — las piezas que se CAMBIARON a requerimiento y se quedaron sin ítem.
+--
+-- Mike, 15-oct-2026: «acabo de crear un nuevo proyecto en quell… agregué
+-- items y después los convertí en requerimientos porque apenas los vamos a
+-- cotizar, pero cuando voy a quote, no aparecen items sin cotizar en el
+-- proyecto».
+--
+-- Un requerimiento nace como ítem cotizado al LEVANTARSE en una obra ligada
+-- (0.49.0) o al ligar la obra (0030). Pero una pieza que nació como mueble,
+-- puerta, etc. y después se le cambió el tipo a requerimiento sólo cambiaba
+-- en el plano: sin ítem, quote101 no tenía nada que enseñar. Desde 0.102.0
+-- el cambio de tipo hace lo mismo que levantarlo (src/quell/motor.js).
+--
+-- ESTA MIGRACIÓN CORRE EN CÓDIGO, igual que la 0030:
+-- OrgDB.levantarRequerimientosHuerfanos() (src/org-db.ts). Por cada pieza de
+-- tipo requerimiento sin `item_id` en una obra ligada nace su ítem cotizado
+-- y su renglón en el borrador «Requerimientos» de quote101. Es idempotente:
+-- una pieza con ítem no se toca.

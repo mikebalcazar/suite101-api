@@ -1843,7 +1843,24 @@ export async function atender(req, env, url, path) {
             .bind(uid(), eid, user.id, 'trabajo', 'Reubicado en el plano.').run();
         }
         await apunta(env, b.op_id);
-        return json({ ok: true });
+        /* 0.102.0 · Mike, 15-oct-2026: «agregué items y después los convertí
+         * en requerimientos porque apenas los vamos a cotizar, pero cuando voy
+         * a quote, no aparecen». Una pieza que CAMBIA a requerimiento y no
+         * tiene ítem queda igual que una que nace así: si la obra está ligada,
+         * nace su ítem cotizado y cae en el borrador de requerimientos de
+         * quote101. Una pieza que ya tiene ítem no se toca: si ya se vendió,
+         * cambiarle el tipo en el plano no la des-vende. */
+        let item_id = null, cotizacion_id = null;
+        if (b.type != null && esRequerimiento(b.type) && typeof env.LEVANTAR_REQUERIMIENTO === 'function') {
+          const pz = await env.DB.prepare(`SELECT e.id, e.project_id, e.code, e.name, e.item_id, e.descripcion, p.item_id AS padre_item_id
+              FROM quell_elements e LEFT JOIN quell_elements p ON p.id = e.padre_id WHERE e.id = ?`).bind(eid).first();
+          if (pz && !pz.item_id) {
+            const r = await env.LEVANTAR_REQUERIMIENTO({ element_id: pz.id, obra_id: pz.project_id, code: pz.code || '', name: pz.name || '', padre_item_id: pz.padre_item_id || null, descripcion: pz.descripcion || null });
+            item_id = r?.item_id || null;
+            cotizacion_id = r?.cotizacion_id || null;
+          }
+        }
+        return json({ ok: true, ...(item_id ? { item_id, cotizacion_id } : {}) });
       }, codigo);
     }
     if (!seg[2] && m === 'DELETE') {
