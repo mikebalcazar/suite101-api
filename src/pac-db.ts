@@ -240,7 +240,7 @@ export class MotorPac {
     const correos = limpiarCorreos(extra.correos);
     let cliente_id: string | null = em.cliente_id ? String(em.cliente_id) : null;
     this.e.tx(() => {
-      // 0052: con qué cuenta se timbró. Una de pruebas se puede borrar después; una de verdad, nunca.
+      // 0053: con qué cuenta se timbró. Una de pruebas se puede borrar después; una de verdad, nunca.
       this.sql.exec(`UPDATE cfdi SET pac_id = ?, pruebas = ?, proyecto_id = COALESCE(?, proyecto_id), actualizado_at = ? WHERE id = ?`, pac_id, sandbox ? 1 : 0, em.proyecto_id, ahora(), x.id!);
       this.sql.exec(`UPDATE emisiones SET estado = 'timbrada', pac_id = ?, uuid = ?, cfdi_id = ?, error = NULL, terminada_at = ? WHERE id = ?`, pac_id, leida.uuid, x.id!, ahora(), emision_id);
       /* Mike, 9-oct: «si se genera una factura con un RFC nuevo, guardar ese
@@ -382,7 +382,7 @@ export class MotorPac {
     );
   }
 
-  /* ─────────────── borrar una de pruebas (0052) ─────────────── */
+  /* ─────────────── borrar una de pruebas (0053) ─────────────── */
 
   /** Mike, 15-oct: una factura timbrada con la cuenta sandbox no es una
    *  factura: no existe ante el SAT, pero aquí contaba en el IVA y salía en
@@ -423,6 +423,97 @@ export class MotorPac {
       this.sql.exec(`DELETE FROM cfdi WHERE id = ?`, cfdi_id);
     });
     return { cfdi_id, folio: `${f.serie ?? ''}${f.serie && f.folio ? '-' : ''}${f.folio ?? ''}`, uuid: String(f.uuid), llaves };
+  }
+
+  /* ─────────────── prefacturas (0.100.0) ───────────────
+   *
+   * Mike, 15-oct-2026: «guardar una prefactura para enviar de muestra y si me
+   * la aceptan regresar a la prefactura y ya timbrar». Con botones: se ve en
+   * la lista de facturas como «prefactura», sólo para bajar su PDF (sin
+   * correo), y al timbrarla se vuelve factura real con la fecha de ese
+   * momento. Es el borrador guardado, sin folio: el folio se aparta al timbrar. */
+
+  prefacturas(limite = 100): Fila[] {
+    return this.todas(
+      `SELECT p.id, p.total, p.cliente_id, p.proyecto_id, p.creada_por, p.creada_at, p.actualizada_at, p.emision_id, p.cfdi_id, p.timbrada_at,
+              json_extract(p.borrador, '$.receptor.rfc') AS rfc, json_extract(p.borrador, '$.receptor.razon_social') AS razon_social,
+              json_array_length(p.borrador, '$.renglones') AS renglones
+         FROM prefacturas p ORDER BY (p.cfdi_id IS NOT NULL), p.actualizada_at DESC LIMIT ?`,
+      Math.min(500, Math.max(1, limite)),
+    );
+  }
+
+  prefactura(id: string): Fila | null {
+    const p = this.una(`SELECT * FROM prefacturas WHERE id = ?`, id);
+    if (!p) return null;
+    return { ...p, borrador: JSON.parse(String(p.borrador)) };
+  }
+
+  /** Crea o actualiza (con `id`). Lo que se cambió del cliente se guarda en el cliente. */
+  guardarPrefactura(b: Borrador, a: { id?: string | null; proyecto_id?: string | null; cliente_id?: string | null; correos?: unknown; total: number }, actor: Actor): Fila | Falla {
+    if (a.proyecto_id && !this.una(`SELECT 1 AS x FROM proyectos WHERE id = ?`, a.proyecto_id)) return { error: 'proyecto_desconocido' };
+    if (a.cliente_id && !this.una(`SELECT 1 AS x FROM clientes WHERE id = ?`, a.cliente_id)) return { error: 'cliente_desconocido' };
+    // Una prefactura se guarda sin fecha fija: la fecha es la del momento de timbrar.
+    const guardado: Borrador = { ...b, fecha: null };
+    let id = a.id ?? null;
+    if (id) {
+      const ya = this.una(`SELECT id, cfdi_id FROM prefacturas WHERE id = ?`, id);
+      if (!ya) return { error: 'prefactura_desconocida' };
+      if (ya.cfdi_id) return { error: 'prefactura_timbrada', detalle: { cfdi_id: ya.cfdi_id, motivo: 'esa prefactura ya se timbró: no se cambia' } };
+    }
+    const cliente_id = this.actualizarCliente(a.cliente_id ?? null, guardado, a.correos);
+    this.e.tx(() => {
+      if (id) {
+        this.sql.exec(`UPDATE prefacturas SET borrador = ?, cliente_id = ?, proyecto_id = COALESCE(?, proyecto_id), total = ?, actualizada_at = ? WHERE id = ?`, JSON.stringify(guardado), cliente_id, a.proyecto_id ?? null, a.total, ahora(), id);
+      } else {
+        id = ulid();
+        this.sql.exec(
+          `INSERT INTO prefacturas (id, borrador, cliente_id, proyecto_id, total, creada_por, creada_at, actualizada_at) VALUES (?,?,?,?,?,?,?,?)`,
+          id, JSON.stringify(guardado), cliente_id, a.proyecto_id ?? null, a.total, actor.usuario_id, ahora(), ahora(),
+        );
+      }
+    });
+    return { id, cliente_id } as unknown as Fila;
+  }
+
+  quitarPrefactura(id: string): Fila | Falla {
+    const ya = this.una(`SELECT id, cfdi_id FROM prefacturas WHERE id = ?`, id);
+    if (!ya) return { error: 'prefactura_desconocida' };
+    if (ya.cfdi_id) return { error: 'prefactura_timbrada', detalle: { cfdi_id: ya.cfdi_id, motivo: 'esa prefactura ya se timbró: queda como historia' } };
+    this.sql.exec(`DELETE FROM prefacturas WHERE id = ?`, id);
+    return { id, borrada: true } as unknown as Fila;
+  }
+
+  /** Al timbrar desde una prefactura: queda ligada a su emisión y su factura. */
+  prefacturaTimbrada(id: string, emision_id: string, cfdi_id: string): Fila | Falla {
+    const ya = this.una(`SELECT id FROM prefacturas WHERE id = ?`, id);
+    if (!ya) return { error: 'prefactura_desconocida' };
+    this.sql.exec(`UPDATE prefacturas SET emision_id = ?, cfdi_id = ?, timbrada_at = ? WHERE id = ?`, emision_id, cfdi_id, ahora(), id);
+    return { id, emision_id, cfdi_id } as unknown as Fila;
+  }
+
+  /** Mike, 15-oct: «si hago cambios, tiene que guardarse la información en el
+   *  cliente; es el mismo cliente de dash, quell, quote…». Con cliente dicho se
+   *  le pone lo fiscal y los correos del borrador; sin cliente, se busca por
+   *  RFC y si no está se da de alta (al público en general no). Devuelve el id. */
+  actualizarCliente(cliente_id: string | null, b: Borrador, correos: unknown): string | null {
+    const lista = limpiarCorreos(correos);
+    let id = cliente_id;
+    if (!id && b.receptor.rfc !== RFC_PUBLICO) {
+      const ya = this.una(`SELECT id FROM clientes WHERE upper(replace(replace(replace(rfc,' ',''),'-',''),'.','')) = ? ORDER BY creado_at LIMIT 1`, b.receptor.rfc);
+      if (ya) id = String(ya.id);
+      else {
+        id = ulid();
+        this.sql.exec(`INSERT INTO clientes (id, nombre, nombre_norm, rfc, creado_en_app, creado_at) VALUES (?,?,?,?,?,?)`, id, b.receptor.razon_social, normalizar(b.receptor.razon_social), b.receptor.rfc, 'bill101', ahora());
+      }
+    }
+    if (id) {
+      this.sql.exec(
+        `UPDATE clientes SET rfc = ?, razon_social = ?, regimen_fiscal = ?, cp_fiscal = ?, uso_cfdi = ?${correos !== undefined ? ', correos_factura = ?' : ''} WHERE id = ?`,
+        b.receptor.rfc, b.receptor.razon_social, b.receptor.regimen_fiscal, b.receptor.cp_fiscal, b.receptor.uso_cfdi, ...(correos !== undefined ? [lista.length ? JSON.stringify(lista) : null] : []), id,
+      );
+    }
+    return id;
   }
 
   /* ─────────────── cancelar ─────────────── */

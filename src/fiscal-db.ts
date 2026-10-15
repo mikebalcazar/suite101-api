@@ -241,7 +241,7 @@ export class MotorFiscal {
       lado: f.tipo === 'ingreso' ? 'emitida' : (f.tipo_comprobante === 'N' ? 'emitida' : 'recibida'),
       aplicado,
       tiene_xml: !!f.xml_llave,
-      // 0052: timbrada con la cuenta de pruebas de Facturama (se puede borrar); null si no se timbró desde aquí.
+      // 0053: timbrada con la cuenta de pruebas de Facturama (se puede borrar); null si no se timbró desde aquí.
       pruebas: f.pruebas === null || f.pruebas === undefined ? null : !!f.pruebas,
     };
   }

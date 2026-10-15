@@ -326,7 +326,7 @@ class Lienzo {
     for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) this.pagina.drawRectangle({ x: x + c * celda, y: y + tam - (r + 1) * celda, width: celda + 0.2, height: celda + 0.2, color });
   }
   marcaDeAgua(): void {
-    if (this.marca) this.pagina.drawText(this.marca, { x: 250, y: 230, size: 64, font: this.L.texto.negra, color: rgb(0.92, 0.92, 0.92), rotate: degrees(35) });
+    if (this.marca) this.pagina.drawText(this.marca, { x: 250, y: 230, size: this.marca.length > 11 ? 56 : 64, font: this.L.texto.negra, color: rgb(0.92, 0.92, 0.92), rotate: degrees(35) });
   }
 }
 
@@ -388,9 +388,11 @@ function columna(L: Lienzo, c: Columna): void {
   L.texto('marca de FORESPOT', MC, 30, { tam: 5.5, color: NEGRO });
 }
 
-export async function armarPdf(d: { impresa: Impresa; empresa: Empresa; config: PdfConfig; vista_previa?: boolean }): Promise<Uint8Array> {
+export async function armarPdf(d: { impresa: Impresa; empresa: Empresa; config: PdfConfig; vista_previa?: boolean; marca?: string }): Promise<Uint8Array> {
   const { impresa: f, empresa: e, config: k } = d;
-  const L = new Lienzo(d.vista_previa ? 'VISTA PREVIA' : null);
+  // La marca de agua: «VISTA PREVIA» antes de timbrar, «PREFACTURA» en una guardada de muestra (15-oct-2026).
+  const marca = d.marca ?? (d.vista_previa ? 'VISTA PREVIA' : null);
+  const L = new Lienzo(marca);
   await L.abrir();
   const anchoC = XR - X0;
 
@@ -406,7 +408,7 @@ export async function armarPdf(d: { impresa: Impresa; empresa: Empresa; config: 
 
   /* ── Cabecera del cuerpo: FACTURA, folio, fecha; receptor; cómo se paga ── */
   nuevaPagina();
-  L.texto(d.vista_previa ? 'VISTA PREVIA' : 'FACTURA', X0, L.y, { tam: 22, peso: 'negra', color: NEGRO });
+  L.texto(marca ?? 'FACTURA', X0, L.y, { tam: 22, peso: 'negra', color: NEGRO });
   L.texto(folio || (d.vista_previa ? 'sin folio' : ''), XR - 200, L.y + 2, { tam: 16, peso: 'negra', color: NEGRO, ancho: 200, derecha: true });
   L.y -= 14;
   L.texto(`Emitida ${fechaTxt(f.fecha_hora)}   ·   Lugar de expedición C.P. ${f.lugar_expedicion ?? '—'}   ·   Tipo I · Ingreso`, X0, L.y, { tam: 7, color: GRIS, ancho: anchoC });
@@ -491,7 +493,7 @@ export async function armarPdf(d: { impresa: Impresa; empresa: Empresa; config: 
     bloque('CADENA ORIGINAL DEL COMPLEMENTO DE CERTIFICACIÓN DIGITAL DEL SAT', cadenaOriginal(f.timbre));
   } else {
     asegurar(20);
-    L.texto('Vista previa: esta factura todavía no está timbrada ante el SAT. Sin folio fiscal no tiene valor.', X0, L.y, { tam: 7, peso: 'semi', color: AZUL, ancho: anchoC });
+    L.texto(`${marca === 'PREFACTURA' ? 'Prefactura: documento de muestra, sin valor fiscal' : 'Vista previa: esta factura todavía no está timbrada ante el SAT'}. Sin folio fiscal no tiene valor.`, X0, L.y, { tam: 7, peso: 'semi', color: AZUL, ancho: anchoC });
   }
 
   /* ── pie del cuerpo: representación impresa · página n de m ── */

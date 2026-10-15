@@ -1,4 +1,4 @@
--- 0052: las facturas timbradas con la cuenta de pruebas se saben de pruebas (15-oct-2026).
+-- 0053: las facturas timbradas con la cuenta de pruebas se saben de pruebas (15-oct-2026).
 --
 -- Mike, 15-oct: timbró A-2 desde bill101 con el sandbox de Facturama y
 -- preguntó si se podía borrar. No se podía: una timbrada en sandbox entraba

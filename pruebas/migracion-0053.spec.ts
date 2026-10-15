@@ -1,6 +1,6 @@
-/* La migración 0052 sobre una base que ya timbró (15-oct-2026).
+/* La migración 0053 sobre una base que ya timbró (15-oct-2026).
  *
- * La 0052 agrega `cfdi.pruebas` y `emisiones.pruebas` y marca lo ya timbrado
+ * La 0053 agrega `cfdi.pruebas` y `emisiones.pruebas` y marca lo ya timbrado
  * según la cuenta de Facturama que haya: si es sandbox, todo lo timbrado
  * hasta hoy fue de pruebas (nunca hubo cuenta de verdad); si es de verdad o
  * no hay, no se adivina nada. Se mide DENTRO del Durable Object, con el
@@ -15,9 +15,9 @@ import { MIGRACIONES, VERSION_ORG_DB } from '../src/org-db';
 
 const dentro = runInDurableObject as unknown as <T>(s: unknown, f: (o: any) => T | Promise<T>) => Promise<T>;
 const entorno = env as unknown as { ORG: DurableObjectNamespace };
-const elDO = (n: string) => entorno.ORG.get(entorno.ORG.idFromName(`migracion-0052-${n}`)) as unknown as DurableObjectStub;
+const elDO = (n: string) => entorno.ORG.get(entorno.ORG.idFromName(`migracion-0053-${n}`)) as unknown as DurableObjectStub;
 
-/** La 0052 se busca por su contenido, no por un número escrito a mano. */
+/** La 0053 se busca por su contenido, no por un número escrito a mano. */
 const HASTA = MIGRACIONES.findIndex((m) => m.includes('ALTER TABLE cfdi ADD COLUMN pruebas'));
 const T = '2026-10-15T12:00:00.000Z';
 
@@ -45,13 +45,13 @@ async function sembrar(n: string, sandbox: boolean | null): Promise<void> {
     x(`INSERT INTO emisiones (id, serie, folio, estado, borrador, pac_id, uuid, cfdi_id, creada_por, creada_at) VALUES ('e1','A',1,'timbrada','{}','fac-1','UUID-c1','c1','u-mike',?)`, T);
     x(`INSERT INTO emisiones (id, serie, folio, estado, borrador, error, creada_por, creada_at) VALUES ('e2','A',2,'fallida','{}','305','u-mike',?)`, T);
     if (sandbox !== null) {
-      x(`INSERT INTO pac_config (id, proveedor, org_id, usuario, clave_iv, clave_dato, sandbox, serie, folio_siguiente, puesta_por, puesta_at) VALUES ('pac','facturama',?,'mike','iv','dato',?,'A',3,'u-mike',?)`, `migracion-0052-${n}`, sandbox ? 1 : 0, T);
+      x(`INSERT INTO pac_config (id, proveedor, org_id, usuario, clave_iv, clave_dato, sandbox, serie, folio_siguiente, puesta_por, puesta_at) VALUES ('pac','facturama',?,'mike','iv','dato',?,'A',3,'u-mike',?)`, `migracion-0053-${n}`, sandbox ? 1 : 0, T);
     }
     return true;
   });
 }
 
-describe('la migración 0052 sobre una base que ya timbró', () => {
+describe('la migración 0053 sobre una base que ya timbró', () => {
   const antes: Record<string, string> = {};
 
   beforeAll(async () => {
@@ -61,9 +61,9 @@ describe('la migración 0052 sobre una base que ya timbró', () => {
     for (const n of ['sandbox', 'verdad', 'sin-cuenta']) antes[n] = await dentro(elDO(n), (db: any) => foto(db));
   });
 
-  it('la base vieja está en la 0051: sin la columna', async () => {
+  it('la base vieja está en la 0052: sin la columna', async () => {
     const r = await dentro(elDO('sandbox'), (db: any) => ({ version: db.version(), cols: columnas(db, 'cfdi'), colsEm: columnas(db, 'emisiones') }));
-    expect(HASTA).toBe(51);
+    expect(HASTA).toBe(52);
     expect(r.version).toBe(HASTA);
     expect(r.cols).not.toContain('pruebas');
     expect(r.colsEm).not.toContain('pruebas');

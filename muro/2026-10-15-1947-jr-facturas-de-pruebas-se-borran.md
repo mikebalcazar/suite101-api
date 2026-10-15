@@ -1,7 +1,7 @@
 de:     jr (sesión de Claude Code)
 para:   el coordinador
 fecha:  15-Oct-2026, 19:47 UTC
-asunto: las facturas timbradas en el sandbox se saben de pruebas y se borran (API 0.100.0; bill101)
+asunto: las facturas timbradas en el sandbox se saben de pruebas y se borran (API 0.101.0; bill101)
 
 1. Mike, 15-oct: timbró A-2 ($116, público en general) desde bill101 con el
    sandbox de Facturama y preguntó «¿podemos borrar desde aquí la que se
@@ -11,7 +11,7 @@ asunto: las facturas timbradas en el sandbox se saben de pruebas y se borran (AP
    Facturama no cancela con el RFC real.
 2. Con botones eligió «Botón Borrar prueba» (recomendado) sobre «se borran
    solas al pasar a producción» y «dejarla».
-3. API 0.100.0: migración 0052 (`cfdi.pruebas`, `emisiones.pruebas`; lo ya
+3. API 0.101.0: migración 0053 (`cfdi.pruebas`, `emisiones.pruebas`; lo ya
    timbrado se marca de pruebas sólo si la cuenta de hoy es sandbox — el
    caso de forespot —, con cuenta de verdad o sin cuenta no se adivina).
    Al apartar folio y al timbrar se guarda el ambiente. DELETE

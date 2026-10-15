@@ -408,6 +408,88 @@ describe('la factura nueva, segunda vuelta (0.89.0)', () => {
   });
 });
 
+describe('prefactura, fecha de expedición y «nueva igual» (0.100.0)', () => {
+  const hMx = (ms: number) => new Date(ms - 6 * 3600_000).toISOString().slice(0, 19);
+  let prefactura = '';
+
+  it('la fecha de expedición: hasta 72 h atrás, nunca en el futuro; sin fecha, la del momento', () => {
+    expect(esFallaPac(revisarBorrador({ ...BORRADOR, fecha: hMx(Date.now() - 70 * 3600_000) }))).toBe(false);
+    expect(esFallaPac(revisarBorrador({ ...BORRADOR, fecha: hMx(Date.now() - 2 * 3600_000).slice(0, 16) })), 'sin segundos también').toBe(false);
+    expect(revisarBorrador({ ...BORRADOR, fecha: hMx(Date.now() - 73 * 3600_000) })).toMatchObject({ error: 'borrador_invalido', detalle: { campo: 'fecha' } });
+    expect(revisarBorrador({ ...BORRADOR, fecha: hMx(Date.now() + 3600_000) })).toMatchObject({ error: 'borrador_invalido', detalle: { campo: 'fecha' } });
+    expect(revisarBorrador({ ...BORRADOR, fecha: 'ayer' })).toMatchObject({ error: 'borrador_invalido', detalle: { campo: 'fecha' } });
+    const sin = revisarBorrador({ ...BORRADOR, fecha: '' });
+    expect(!esFallaPac(sin) && sin.fecha).toBeNull();
+  });
+
+  it('se timbra con la fecha pedida: Facturama la recibe tal cual', async () => {
+    const fecha = hMx(Date.now() - 24 * 3600_000);
+    const r = await o('mike', '/fiscal/emitir', { method: 'POST', json: { borrador: { ...BORRADOR, fecha, renglones: [{ ...RENGLON, descripcion: 'Con fecha de ayer' }] } } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    const l = fac.st.llamadas.find((x) => x.paso === 'timbrar' && (x.cuerpo as any).Items[0].Description === 'Con fecha de ayer');
+    expect((l!.cuerpo as any).Date).toBe(fecha);
+  });
+
+  it('una prefactura se guarda sin apartar folio, lo del cliente se guarda en el cliente, y su PDF dice PREFACTURA', async () => {
+    const folioAntes = (await o('mike', '/fiscal/pac')).data.cuenta.folio_siguiente;
+    const b = { ...BORRADOR, receptor: { ...RECEPTOR, uso_cfdi: 'I02', cp_fiscal: '65100' }, renglones: [{ ...RENGLON, descripcion: 'Muestra: comedor de nogal' }] };
+    expect((await o('ana', '/fiscal/prefacturas', { method: 'POST', json: { borrador: b } })).estado, 'quien no administra no guarda').toBe(403);
+    const r = await o('mike', '/fiscal/prefacturas', { method: 'POST', json: { borrador: b, cliente_id: cliente, correos: ['muestra@robotica.mx'] } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    prefactura = r.data.id;
+    expect(r.data.cliente_id).toBe(cliente);
+    expect((await o('mike', '/fiscal/pac')).data.cuenta.folio_siguiente, 'el folio no se mueve').toBe(folioAntes);
+    const cli = (await o('mike', `/clientes/${cliente}`, { app: 'dash101' })).data;
+    expect(cli, 'el cliente de la suite cambió con lo de la prefactura').toMatchObject({ uso_cfdi: 'I02', cp_fiscal: '65100' });
+    expect(JSON.parse(cli.correos_factura)).toEqual(['muestra@robotica.mx']);
+    const lista = (await o('ana', '/fiscal/prefacturas')).data.filas as any[];
+    expect(lista.find((x) => x.id === prefactura)).toMatchObject({ rfc: RFC_CLIENTE, total: cuentas((revisarBorrador(b) as any).renglones).total, renglones: 1, cfdi_id: null });
+    const una = (await o('ana', `/fiscal/prefacturas/${prefactura}`)).data;
+    expect(una.borrador.renglones[0].descripcion).toBe('Muestra: comedor de nogal');
+    expect(una.borrador.fecha, 'la prefactura no fija fecha').toBeNull();
+    const pdf = await SELF.fetch(`https://api.local/orgs/${ORG}/fiscal/prefacturas/${prefactura}/pdf`, { headers: { Cookie: galletas.ana, 'X-App': 'bill101' } });
+    expect(pdf.status).toBe(200);
+    expect(pdf.headers.get('Content-Type')).toBe('application/pdf');
+    expect(pdf.headers.get('Content-Disposition')).toContain('prefactura.pdf');
+    // Se cambia: otro renglón, y queda.
+    const r2 = await o('mike', `/fiscal/prefacturas/${prefactura}`, { method: 'PUT', json: { borrador: { ...b, renglones: [...b.renglones, { ...RENGLON, descripcion: 'Sillas', cantidad: 6, precio_unitario: P(2_000) }] }, cliente_id: cliente } });
+    expect(r2.estado, JSON.stringify(r2)).toBe(200);
+    expect((await o('ana', `/fiscal/prefacturas/${prefactura}`)).data.borrador.renglones).toHaveLength(2);
+    expect((await o('mike', '/fiscal/prefacturas/no-existe')).estado).toBe(404);
+  });
+
+  it('se timbra desde la prefactura: queda ligada a su factura y ya no se cambia ni se borra', async () => {
+    const una = (await o('mike', `/fiscal/prefacturas/${prefactura}`)).data;
+    const r = await o('mike', '/fiscal/emitir', { method: 'POST', json: { borrador: una.borrador, cliente_id: cliente, prefactura_id: prefactura } });
+    expect(r.estado, JSON.stringify(r)).toBe(201);
+    const pf = (await o('mike', `/fiscal/prefacturas/${prefactura}`)).data;
+    expect(pf).toMatchObject({ cfdi_id: r.data.cfdi_id, emision_id: r.data.emision_id });
+    expect(pf.timbrada_at).toBeTruthy();
+    expect(await o('mike', `/fiscal/prefacturas/${prefactura}`, { method: 'PUT', json: { borrador: una.borrador } })).toMatchObject({ estado: 409, error: 'prefactura_timbrada' });
+    expect(await o('mike', `/fiscal/prefacturas/${prefactura}`, { method: 'DELETE' })).toMatchObject({ estado: 409, error: 'prefactura_timbrada' });
+    expect(await o('mike', '/fiscal/emitir', { method: 'POST', json: { borrador: una.borrador, prefactura_id: prefactura } }), 'dos veces no').toMatchObject({ estado: 409, error: 'prefactura_timbrada' });
+    // Una que no se timbró sí se borra.
+    const otra = await o('mike', '/fiscal/prefacturas', { method: 'POST', json: { borrador: BORRADOR } });
+    expect((await o('mike', `/fiscal/prefacturas/${otra.data.id}`, { method: 'DELETE' })).estado).toBe(200);
+    expect((await o('mike', `/fiscal/prefacturas/${otra.data.id}`)).estado).toBe(404);
+  });
+
+  it('«nueva igual»: una emisión se lee con su borrador; y enviar_a escoge a quiénes', async () => {
+    const em = ((await o('mike', '/fiscal/emisiones')).data.filas as any[]).find((e) => e.estado === 'timbrada');
+    const r = await o('ana', `/fiscal/emisiones/${em.id}`);
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.borrador.receptor.rfc).toBe(em.rfc);
+    expect(r.data.borrador.renglones.length).toBeGreaterThan(0);
+    expect((await o('ana', '/fiscal/emisiones/no-existe')).estado).toBe(404);
+    const r2 = await o('mike', '/fiscal/emitir', { method: 'POST', json: { borrador: { ...BORRADOR, renglones: [{ ...RENGLON, descripcion: 'A uno de dos' }] }, correos: ['uno@robotica.mx', 'dos@robotica.mx'], enviar: true, enviar_a: ['dos@robotica.mx'] } });
+    expect(r2.estado, JSON.stringify(r2)).toBe(201);
+    expect(r2.data.correo.a, 'sólo al marcado').toEqual(['dos@robotica.mx']);
+    const cli = (await o('mike', `/clientes/${r2.data.cliente_id}`, { app: 'dash101' })).data;
+    expect(JSON.parse(cli.correos_factura), 'pero los dos se guardan en el cliente').toEqual(['uno@robotica.mx', 'dos@robotica.mx']);
+    expect(await o('mike', '/fiscal/emitir', { method: 'POST', json: { borrador: BORRADOR, correos: ['uno@robotica.mx'], enviar: true, enviar_a: [] } })).toMatchObject({ estado: 400, detalle: { campo: 'correos' } });
+  });
+});
+
 describe('el PDF y la cancelación', () => {
   let id = '';
   beforeAll(async () => {
@@ -487,9 +569,9 @@ describe('el PDF y la cancelación', () => {
 /* Mike, 15-oct: timbró A-2 en el sandbox y preguntó si se podía borrar. Una
  * timbrada con la cuenta de pruebas no es una factura: no existe ante el SAT,
  * pero contaba en el IVA y salía en el estado de cuenta. Ahora se sabe con
- * qué cuenta se timbró cada una (0052) y las de pruebas se borran con todo lo
+ * qué cuenta se timbró cada una (0053) y las de pruebas se borran con todo lo
  * suyo; una de verdad, jamás. */
-describe('borrar una factura timbrada en pruebas (0052)', () => {
+describe('borrar una factura timbrada en pruebas (0053)', () => {
   let id = '', ivaAntes = 0;
   const ivaDelAnio = async () => ((await o('mike', '/fiscal/impuestos?anio=2026')).data.meses as any[]).reduce((s: number, m: any) => s + m.iva.trasladado, 0);
 

@@ -9,10 +9,14 @@
  *   POST   /fiscal/emitir/revisar      el borrador → sus cuentas, o la primera falla (sin timbrar)
  *   POST   /fiscal/emitir              el borrador → timbrada (201) o por qué no
  *   GET    /fiscal/emisiones           los intentos, con su folio y en qué quedaron
+ *   GET    /fiscal/emisiones/:id       una, con su borrador (para «nueva igual», 0.100.0)
+ *   GET/POST /fiscal/prefacturas, GET/PUT/DELETE /fiscal/prefacturas/:id, GET /fiscal/prefacturas/:id/pdf
+ *                                      0.100.0 · la prefactura: el borrador guardado de muestra, sin folio;
+ *                                      POST /fiscal/emitir con prefactura_id la vuelve factura
  *   POST   /fiscal/emisiones/:id/resolver   una que se quedó «timbrando»: se busca en Facturama por su folio;
  *                                       si existe se recupera (XML, PDF, entra a cfdi); si no, queda fallida
  *   POST   /fiscal/cfdi/:id/cancelar   { motivo: '01'..'04', uuid_sustituto? }
- *   DELETE /fiscal/cfdi/:id            sólo una timbrada con la cuenta de pruebas (0052): se borra con todo lo suyo
+ *   DELETE /fiscal/cfdi/:id            sólo una timbrada con la cuenta de pruebas (0053): se borra con todo lo suyo
  *   GET    /fiscal/cfdi/:id/pdf        el PDF de una emitida (Facturama lo arma; se guarda la primera vez)
  *
  * QUIÉN PUEDE. Poner o quitar la cuenta de Facturama: sólo quien dirige
@@ -37,7 +41,7 @@ import { limpiarCorreos } from '../pac-db';
 import { armarPdf, impresaDeBorrador, impresaDeXml, type Empresa as EmpresaPdf, type PdfConfig } from '../pdf-cfdi';
 import {
   asegurarSerie, bajar, buscarPorFolio, cancelar, cuentas, cuerpoFacturama, esFallaPac, MOTIVOS_CANCELACION, perfil, revisarBorrador, timbrar,
-  type Cuenta_, type Ventanilla,
+  type Borrador, type Cuenta_, type Ventanilla,
 } from '../pac';
 import type { PermisosFiscales } from './fiscal-sat';
 
@@ -167,7 +171,16 @@ export function montarFiscalPac(rutas: App, p: PermisosFiscales): void {
       return err(c, 'borrador_invalido', 400, { campo: 'correos', motivo: 'ningún correo de la lista tiene forma de correo' });
     }
     const enviar = b.enviar === true;
-    if (enviar && !correos.length) return err(c, 'borrador_invalido', 400, { campo: 'correos', motivo: 'para mandarla hace falta al menos un correo' });
+    // 0.100.0 · `enviar_a`: a cuáles de esos correos mandarla (Mike, 15-oct: una
+    // casilla por contacto); todos se guardan en el cliente. Sin `enviar_a`, a todos.
+    const enviarA = b.enviar_a === undefined ? correos : limpiarCorreos(b.enviar_a).filter((x) => correos.includes(x));
+    if (enviar && !enviarA.length) return err(c, 'borrador_invalido', 400, { campo: 'correos', motivo: 'para mandarla hace falta al menos un correo marcado' });
+    const prefacturaId = typeof b.prefactura_id === 'string' && b.prefactura_id ? b.prefactura_id : null;
+    if (prefacturaId) {
+      const pf = (await stub(c).pac('prefactura', [prefacturaId])) as Record<string, unknown> | null;
+      if (!pf) return err(c, 'prefactura_desconocida', 404);
+      if (pf.cfdi_id) return err(c, 'prefactura_timbrada', 409, { cfdi_id: pf.cfdi_id, motivo: 'esa prefactura ya se timbró' });
+    }
     const k = await abrirCuenta(c);
     if ('error' in k) return err(c, k.error, codigoDe(k.error), k.detalle);
     const cfg = await stub(c).pac('config');
@@ -187,7 +200,8 @@ export function montarFiscalPac(rutas: App, p: PermisosFiscales): void {
     const em = await stub(c).pac('abrirEmision', [borrador, { proyecto_id: typeof b.proyecto_id === 'string' ? b.proyecto_id : null, cliente_id: typeof b.cliente_id === 'string' ? b.cliente_id : null }, p.actor(c)]);
     if (esFalla(em)) return err(c, em.error, em.error === 'emision_repetida' || em.error === 'emision_en_camino' ? 409 : codigoDe(em.error), em.detalle);
     const org = c.get('org_id');
-    const cuerpo = cuerpoFacturama(borrador, { serie: em.serie, folio: em.folio, fecha: horaMx(Date.now() - 60_000), lugar_expedicion: lugar });
+    // La fecha: la que se pidió (hasta 72 h atrás, ya revisada) o la del momento, un minuto atrás por el reloj del PAC.
+    const cuerpo = cuerpoFacturama(borrador, { serie: em.serie, folio: em.folio, fecha: borrador.fecha ?? horaMx(Date.now() - 60_000), lugar_expedicion: lugar });
     const t = await timbrar(k, ventanilla(c), cuerpo);
     if (esFallaPac(t)) {
       const sinRespuesta = t.error === 'pac_no_responde';
@@ -199,7 +213,8 @@ export function montarFiscalPac(rutas: App, p: PermisosFiscales): void {
     const fin = await recuperar(c, k, { id: em.id, serie: em.serie, folio: em.folio }, t.pac_id, t.uuid, { correos });
     if ('error' in fin) return err(c, fin.error, fin.estado, fin.detalle);
     // Mandarla es cortesía: si el correo no sale, la factura ya está timbrada y se dice.
-    const correo = enviar ? await mandarFactura(c, String(fin.data.cfdi_id), correos) : null;
+    if (prefacturaId) await stub(c).pac('prefacturaTimbrada', [prefacturaId, em.id, String(fin.data.cfdi_id)]);
+    const correo = enviar ? await mandarFactura(c, String(fin.data.cfdi_id), enviarA) : null;
     return ok(c, { ...fin.data, correo }, 201);
   });
 
@@ -218,11 +233,77 @@ export function montarFiscalPac(rutas: App, p: PermisosFiscales): void {
     const lugar = String(cta?.lugar_expedicion ?? '') || '—';
     const { empresa, config } = await paraPdf(c);
     const impresa = impresaDeBorrador(borrador, {
-      serie, folio: Number.isFinite(Number(cfg.cuenta?.folio_siguiente)) ? Number(cfg.cuenta.folio_siguiente) : null, fecha: horaMx(Date.now()), lugar_expedicion: lugar,
+      serie, folio: Number.isFinite(Number(cfg.cuenta?.folio_siguiente)) ? Number(cfg.cuenta.folio_siguiente) : null, fecha: borrador.fecha ?? horaMx(Date.now()), lugar_expedicion: lugar,
       emisor: { rfc: String(cfg.rfc_empresa ?? cfg.cuenta?.perfil?.rfc ?? ''), nombre: empresa.nombre, regimen: cfg.cuenta?.perfil?.regimen ?? null },
     });
     const pdf = await armarPdf({ impresa, empresa, config, vista_previa: true });
     return new Response(pdf, { headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="vista-previa.pdf"', 'Cache-Control': 'private, no-store' } });
+  });
+
+  /* ─────────────── 0.100.0 · prefacturas y «nueva igual» ─────────────── */
+
+  /** El PDF de un borrador con la marca que se pida; lo comparten la vista previa y la prefactura. */
+  async function pdfDeBorrador(c: Ctx, borrador: Borrador, marca: string): Promise<Response> {
+    const cfg = await stub(c).pac('config');
+    const cta = await stub(c).pac('cuenta');
+    const serie = String(cfg.cuenta?.serie ?? 'A');
+    const lugar = String(cta?.lugar_expedicion ?? '') || '—';
+    const { empresa, config } = await paraPdf(c);
+    const impresa = impresaDeBorrador(borrador, {
+      serie, folio: marca === 'PREFACTURA' ? null : Number.isFinite(Number(cfg.cuenta?.folio_siguiente)) ? Number(cfg.cuenta.folio_siguiente) : null, fecha: borrador.fecha ?? horaMx(Date.now()), lugar_expedicion: lugar,
+      emisor: { rfc: String(cfg.rfc_empresa ?? cfg.cuenta?.perfil?.rfc ?? ''), nombre: empresa.nombre, regimen: cfg.cuenta?.perfil?.regimen ?? null },
+    });
+    const pdf = await armarPdf({ impresa, empresa, config, marca });
+    return new Response(pdf, { headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${marca.toLowerCase().replace(' ', '-')}.pdf"`, 'Cache-Control': 'private, no-store' } });
+  }
+
+  rutas.get('/:o/fiscal/prefacturas', async (c) => {
+    if (!p.puedeLeer(c)) return err(c, 'sin_permiso', 403);
+    return ok(c, { filas: await stub(c).pac('prefacturas', [Number(c.req.query('limite') || 100)]) });
+  });
+
+  rutas.get('/:o/fiscal/prefacturas/:id', async (c) => {
+    if (!p.puedeLeer(c)) return err(c, 'sin_permiso', 403);
+    const r = await stub(c).pac('prefactura', [c.req.param('id')!]);
+    if (!r) return err(c, 'prefactura_desconocida', 404);
+    return ok(c, r);
+  });
+
+  /** Guardar (POST) o cambiar (PUT con id) una prefactura: el borrador se
+   *  revisa igual que al timbrar; lo del cliente se guarda en el cliente. */
+  const guardarPrefactura = async (c: Ctx, id: string | null) => {
+    if (!(await p.administra(c))) return err(c, 'sin_permiso', 403);
+    const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+    const borrador = revisarBorrador(b.borrador ?? b);
+    if (esFallaPac(borrador)) return err(c, borrador.error, 400, borrador.detalle);
+    const correos = b.correos === undefined ? undefined : limpiarCorreos(b.correos);
+    const r = await stub(c).pac('guardarPrefactura', [borrador, { id, proyecto_id: typeof b.proyecto_id === 'string' ? b.proyecto_id : null, cliente_id: typeof b.cliente_id === 'string' ? b.cliente_id : null, correos, total: cuentas(borrador.renglones).total }, p.actor(c)]);
+    if (esFalla(r)) return err(c, r.error, r.error === 'prefactura_desconocida' ? 404 : 409, r.detalle);
+    return ok(c, r, id ? 200 : 201);
+  };
+  rutas.post('/:o/fiscal/prefacturas', (c) => guardarPrefactura(c, null));
+  rutas.put('/:o/fiscal/prefacturas/:id', (c) => guardarPrefactura(c, c.req.param('id')!));
+
+  rutas.delete('/:o/fiscal/prefacturas/:id', async (c) => {
+    if (!(await p.administra(c))) return err(c, 'sin_permiso', 403);
+    const r = await stub(c).pac('quitarPrefactura', [c.req.param('id')!]);
+    if (esFalla(r)) return err(c, r.error, r.error === 'prefactura_desconocida' ? 404 : 409, r.detalle);
+    return ok(c, r);
+  });
+
+  rutas.get('/:o/fiscal/prefacturas/:id/pdf', async (c) => {
+    if (!p.puedeLeer(c)) return err(c, 'sin_permiso', 403);
+    const pf = (await stub(c).pac('prefactura', [c.req.param('id')!])) as { borrador: Borrador } | null;
+    if (!pf) return err(c, 'prefactura_desconocida', 404);
+    return pdfDeBorrador(c, pf.borrador, 'PREFACTURA');
+  });
+
+  /** Una emisión con su borrador: para «reconstruir» una factura ya hecha como una nueva (Mike, 15-oct). */
+  rutas.get('/:o/fiscal/emisiones/:id', async (c) => {
+    if (!p.puedeLeer(c)) return err(c, 'sin_permiso', 403);
+    const r = await stub(c).pac('emision', [c.req.param('id')!]);
+    if (!r) return err(c, 'emision_desconocida', 404);
+    return ok(c, r);
   });
 
   rutas.get('/:o/fiscal/conceptos', async (c) => {
