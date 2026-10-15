@@ -1,3 +1,5 @@
+> **15-oct-2026 · una pieza que se cambia a requerimiento en quell ya aparece en quote (API 0.102.0 #363; org 0054).** El PATCH de la pieza levanta su ítem cotizado y su renglón en el borrador «Requerimientos»; la 0054 levanta las que ya estaban así. Ver `muro/…-jr-requerimiento-por-cambio-de-tipo.md`.
+
 > **15-oct-2026 · las facturas timbradas en el sandbox se saben de pruebas y se borran (API 0.101.0; bill101).** Mike timbró A-2 en sandbox y preguntó si se borraba: entraba como real y contaba en el IVA. Migración 0052 (`pruebas`), DELETE /fiscal/cfdi/:id sólo para las de pruebas, botón «Borrar prueba» en bill101. Decisión 31: pasar a producción de Facturama; falta que Mike active el módulo API y cambie la cuenta en Ajustes. Ver `muro/…-jr-facturas-de-pruebas-se-borran.md`.
 
 > **15-oct-2026 · la cuenta firmada también en la pantalla de reembolso de dash (dash101 #159).** La publicación de #158 se había caído porque dash `/ordenes/nueva` seguía mandando la cuenta en la orden; ahora firma y registra en roster igual que supply. Supply y dash ya publicados con la firma. Ver `muro/…-jr-cuenta-firmada-tambien-en-dash.md`.
