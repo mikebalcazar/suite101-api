@@ -131,6 +131,44 @@ export async function orgYMiembro(env: Env, org_id: string, usuario_id: string):
   };
 }
 
+/* 16-oct-2026 · Todo lo que contesta /yo, en UN viaje (`batch`). Antes eran
+ * seis consultas en fila (usuario, acceso, superadmin, empresas, secretos,
+ * inversión): medido en staging, /yo tardaba ~650–700 ms y cada app lo pide al
+ * arrancar. Con `superadmin` (que ya viene en la sesión) se escoge qué lista de
+ * empresas leer; la consulta del usuario lo vuelve a decir, por si acaso. */
+export async function datosDeYo(env: Env, usuario_id: string, superadmin: boolean) {
+  const db = env.MASTER;
+  const [u, a, lista, suyas, inv] = await db.batch([
+    db.prepare(
+      `SELECT u.id, u.correo, u.nombre, u.creado_at,
+              u.pin_hash IS NOT NULL AS tiene_pin, u.clave_hash IS NOT NULL AS tiene_clave, u.google_sub IS NOT NULL AS tiene_google,
+              EXISTS (SELECT 1 FROM superadmins s WHERE s.usuario_id = u.id) AS superadmin
+         FROM usuarios u WHERE u.id = ?`,
+    ).bind(usuario_id),
+    db.prepare(`SELECT * FROM accesos WHERE usuario_id = ? AND activo = 1`).bind(usuario_id),
+    superadmin
+      ? db.prepare(`SELECT * FROM orgs ORDER BY nombre`)
+      : db.prepare(`SELECT m.org_id, m.rol, m.apps, o.nombre FROM miembros m JOIN orgs o ON o.id = m.org_id WHERE m.usuario_id = ?`).bind(usuario_id),
+    db.prepare(`SELECT org_id FROM miembros WHERE usuario_id = ?`).bind(usuario_id),
+    db.prepare(
+      `SELECT a.org_id, a.ref_id, o.nombre FROM accesos_inversion a JOIN orgs o ON o.id = a.org_id
+        WHERE a.usuario_id = ? AND a.activo = 1 AND o.activa = 1 AND json_extract(o.apps, '$.investor') = 1 ORDER BY o.nombre`,
+    ).bind(usuario_id),
+  ]);
+  const fu = (u.results?.[0] ?? null) as { id: string; correo: string; nombre: string | null; creado_at: string; tiene_pin: number; tiene_clave: number; tiene_google: number; superadmin: number } | null;
+  const fa = (a.results?.[0] ?? null) as { usuario_id: string; org_id: string; tipo: TipoAcceso; ref_id: string; activo: number } | null;
+  return {
+    usuario: fu ? { id: fu.id, correo: fu.correo, nombre: fu.nombre, creado_at: fu.creado_at } as Usuario : null,
+    secretos: { tiene_pin: !!fu?.tiene_pin, tiene_clave: !!fu?.tiene_clave, tiene_google: !!fu?.tiene_google },
+    superadmin: !!fu?.superadmin,
+    acceso: fa ? { ...fa, activo: !!fa.activo } as Acceso : null,
+    orgs: superadmin ? ((lista.results ?? []) as unknown as FilaOrg[]).map(armaOrg) : [],
+    miembroDe: superadmin ? [] : ((lista.results ?? []) as unknown as Array<{ org_id: string; rol: string; apps: string; nombre: string }>),
+    suyas: new Set(((suyas.results ?? []) as Array<{ org_id: string }>).map((f) => f.org_id)),
+    inversion: (inv.results ?? []) as Array<{ org_id: string; nombre: string; ref_id: string }>,
+  };
+}
+
 export async function leerSesion(env: Env, id: string): Promise<{ usuario_id: string; app: string; como: Como } | null> {
   const s = await env.MASTER.prepare(`SELECT usuario_id, app, expira_at, como FROM sesiones WHERE id = ?`)
     .bind(id)
