@@ -101,6 +101,36 @@ export async function abrirSesion(env: Env, usuario_id: string, app: App, vida: 
   return { cookie: await firmarId(id, await secretoDe(env)), id };
 }
 
+/* 16-oct-2026 · La sesión, la persona y si es superadmin, en UNA consulta.
+ * Antes eran tres seguidas en cada pedido, y cada una viaja hasta la región
+ * del D1: medido en staging, revisar la sesión costaba ~0.3 s por consulta
+ * desde fuera de esa región. Mismo resultado, un solo viaje. */
+export async function sesionCompleta(env: Env, id: string): Promise<{ usuario_id: string; como: Como; correo: string; nombre: string | null; superadmin: boolean } | null> {
+  const f = await env.MASTER.prepare(
+    `SELECT s.usuario_id, s.expira_at, s.como, u.correo, u.nombre,
+            EXISTS (SELECT 1 FROM superadmins a WHERE a.usuario_id = s.usuario_id) AS superadmin
+       FROM sesiones s JOIN usuarios u ON u.id = s.usuario_id
+      WHERE s.id = ?`,
+  ).bind(id).first<{ usuario_id: string; expira_at: string; como: string | null; correo: string; nombre: string | null; superadmin: number }>();
+  if (!f || f.expira_at < ahora()) return null;
+  return { usuario_id: f.usuario_id, como: (f.como as Como) || 'codigo', correo: f.correo, nombre: f.nombre ?? null, superadmin: !!f.superadmin };
+}
+
+/* La empresa y si la persona es miembro, en un solo viaje (`batch`): la
+ * puerta de /orgs/:o/* necesita las dos en cada pedido (16-oct-2026). */
+export async function orgYMiembro(env: Env, org_id: string, usuario_id: string): Promise<{ empresa: Org | null; m: Miembro | null }> {
+  const [o, m] = await env.MASTER.batch([
+    env.MASTER.prepare(`SELECT * FROM orgs WHERE id = ?`).bind(org_id),
+    env.MASTER.prepare(`SELECT * FROM miembros WHERE org_id = ? AND usuario_id = ?`).bind(org_id, usuario_id),
+  ]);
+  const fo = (o.results?.[0] ?? null) as FilaOrg | null;
+  const fm = (m.results?.[0] ?? null) as { org_id: string; usuario_id: string; rol: Rol; apps: string; negocios: string } | null;
+  return {
+    empresa: fo ? armaOrg(fo) : null,
+    m: fm ? { ...fm, apps: JSON.parse(fm.apps || '[]'), negocios: [] } : null,
+  };
+}
+
 export async function leerSesion(env: Env, id: string): Promise<{ usuario_id: string; app: string; como: Como } | null> {
   const s = await env.MASTER.prepare(`SELECT usuario_id, app, expira_at, como FROM sesiones WHERE id = ?`)
     .bind(id)

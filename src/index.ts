@@ -102,18 +102,25 @@ app.use('*', conSesion);
 
 app.get('/salud', async (c) => {
   let d1 = 'no';
+  // 16-oct-2026 · Cuánto tarda una consulta al D1 desde donde corrió este
+  // pedido, y en qué centro de datos: así se mide la colocación de la API.
+  const t0 = Date.now();
   try {
     const r = await c.env.MASTER.prepare(`SELECT COUNT(*) AS n FROM orgs`).first<{ n: number }>();
     d1 = `si (${r?.n ?? 0} orgs)`;
   } catch (e) {
     d1 = `error: ${(e as Error).message}`;
   }
+  const d1_ms = Date.now() - t0;
+  const colo = (c.req.raw as Request & { cf?: { colo?: string } }).cf?.colo ?? null;
   return ok(c, {
     servicio: 'suite101-api',
     version: c.env.API_VERSION ?? '0.0.0',
     contrato: VERSION_CONTRATO,
     entorno: c.env.ENTORNO,
     d1,
+    d1_ms,
+    colo,
     at: new Date().toISOString(),
   });
 });

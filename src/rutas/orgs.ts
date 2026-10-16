@@ -13,7 +13,7 @@ import { Hono } from 'hono';
 import { DEFS, columnasDinero, esTabla } from '../tablas';
 import type { ApiOrgDB, LineaAprobada } from '../org-db';
 import { APPEND_ONLY, POR_SU_RUTA, revisarEscritura } from '../permisos';
-import { acceso, accesoDe, accesoInversion, miembro, org, ponerAcceso, quitarAcceso, usuarioPorCorreo, usuarioPorId } from '../maestro';
+import { acceso, accesoDe, accesoInversion, miembro, org, orgYMiembro, ponerAcceso, quitarAcceso, usuarioPorCorreo, usuarioPorId } from '../maestro';
 import { invitarClienteEnSuite } from '../clientes';
 import { crearUsuario } from '../maestro';
 import { guardarPin, normalizaCorreo, pinAceptable, ulid } from '../lib';
@@ -82,7 +82,8 @@ rutas.use('/:o/*', async (c, next) => {
    * acota, aunque la cuenta sea miembro de otra empresa también. */
   const dom = c.get('dominio');
   if (dom && dom.org_id !== org_id) return err(c, 'otra_empresa', 403, { dominio: dom.dominio, empresa_del_dominio: dom.org_id, pedida: org_id });
-  const empresa = await org(c.env, org_id);
+  // La empresa y el miembro en un solo viaje al D1 (16-oct-2026).
+  const { empresa, m } = await orgYMiembro(c.env, org_id, s.usuario_id);
   if (!empresa) return err(c, 'org_desconocida', 404, { org: org_id });
   if (!empresa.activa) return err(c, 'org_inactiva', 403);
 
@@ -100,7 +101,6 @@ rutas.use('/:o/*', async (c, next) => {
   }
 
   let quien: Quien | null = null;
-  const m = await miembro(c.env, org_id, s.usuario_id);
   if (m) {
     quien = {
       clase: 'miembro',
@@ -1173,11 +1173,12 @@ rutas.all('/:o/quell/*', async (c) => {
   }
   cabeceras.set('x-org', org_id);
   cabeceras.set('x-sitio', c.req.header('X-Sitio') || '');
-  const usuario = await usuarioPorId(c.env, s.usuario_id);
+  // El nombre ya viene con la sesión (16-oct-2026); sólo si no, se busca.
+  const nombre = s.nombre !== undefined ? s.nombre : (await usuarioPorId(c.env, s.usuario_id))?.nombre ?? null;
   // Codificada: una cabecera sólo lleva ASCII, y un nombre con ñ o acento la
   // rompe en el navegador y saca un aviso en workerd. El objeto la decodifica.
   cabeceras.set('x-sesion', encodeURIComponent(JSON.stringify({
-    correo: s.correo, nombre: usuario?.nombre ?? null, superadmin: s.superadmin,
+    correo: s.correo, nombre, superadmin: s.superadmin,
     // 0.66.0 · `ref_id`: el cliente de la suite, para que el motor le abra la
     // obra ligada a su proyecto sin invitación aparte.
     quien: { clase: quien.clase, rol: quien.rol, usuario_id: quien.usuario_id, ref_id: quien.ref_id ?? null },
