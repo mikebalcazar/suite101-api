@@ -37,6 +37,13 @@ const json = (data, status = 200, extra = {}) => new Response(JSON.stringify(dat
 const err = (msg, status = 400) => json({ error: msg }, status);
 const now = () => new Date().toISOString();
 const uid = () => crypto.randomUUID();
+/* 0.103.0 · El id de lo que se crea lo pone el teléfono: es el `op_id` de la
+ * operación, si es un UUID. Así quell pinta el pendiente (o la nota, o la
+ * duda) al instante con su id de verdad, y el siguiente toque —palomearlo,
+ * borrarlo— ya va contra ese id aunque la fila todavía no haya subido nada.
+ * Sin `op_id` válido, como siempre: lo pone el servidor. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const idDeOp = (op) => (UUID.test(String(op || '')) ? String(op).toLowerCase() : uid());
 
 /* ─────────────── quién es en obra ───────────────
  *
@@ -1337,7 +1344,7 @@ export async function atender(req, env, url, path) {
       let eid = fd.get('element_id') || null;
       if (eid && (await projectOfElement(env, eid)) !== pid) eid = null;
       const para = esCli(user) ? 'cliente' : isStaff(user) && fd.get('para') === 'cliente' ? 'cliente' : 'taller';
-      const id = uid();
+      const id = idDeOp(op);
       await env.DB.prepare(`INSERT INTO quell_dudas (id, project_id, element_id, user_id, texto, para) VALUES (?,?,?,?,?,?)`)
         .bind(id, pid, eid, user.id, texto, para).run();
       const photos = await savePhotos(env, user, 'duda', id, files);
@@ -1991,7 +1998,7 @@ export async function atender(req, env, url, path) {
       const text = String(fd.get('text') || '').trim();
       const files = fd.getAll('photos');
       if (!text && !files.length) return err('texto o foto requerido');
-      const id = uid();
+      const id = idDeOp(op);
       const kind = ['trabajo', 'arreglo', 'acuerdo'].includes(fd.get('kind')) ? fd.get('kind') : 'trabajo';
       await env.DB.prepare(`INSERT INTO quell_log_entries (id, element_id, user_id, kind, text) VALUES (?,?,?,?,?)`).bind(id, eid, user.id, kind, text).run();
       const photos = await savePhotos(env, user, 'log', id, files);
@@ -2016,7 +2023,7 @@ export async function atender(req, env, url, path) {
         const ok = await env.DB.prepare(`SELECT 1 FROM quell_project_members WHERE project_id = ? AND user_id = ?`).bind(pid, asignado).first();
         if (!ok) return err('Esa persona no está dada de alta en esta obra.', 400);
       }
-      const id = uid();
+      const id = idDeOp(op);
       await env.DB.prepare(`INSERT INTO quell_punch_items (id, element_id, title, description, resp, due_date, created_by, assignee_id) VALUES (?,?,?,?,?,?,?,?)`)
         .bind(id, eid, title, fd.get('description') || '', fd.get('resp') || '', fd.get('due_date') || null, user.id, asignado).run();
       const photos = await savePhotos(env, user, 'punch', id, fd.getAll('photos'));
@@ -2042,7 +2049,7 @@ export async function atender(req, env, url, path) {
       const texto = String(fd.get('texto') || '').trim();
       const files = fd.getAll('photos');
       if (!texto && !files.length) return err('Escribe la respuesta o manda una foto.');
-      const id = uid();
+      const id = idDeOp(op);
       await env.DB.prepare(`INSERT INTO quell_duda_respuestas (id, duda_id, user_id, texto) VALUES (?,?,?,?)`).bind(id, seg[1], user.id, texto).run();
       const photos = await savePhotos(env, user, 'duda_resp', id, files);
       // Un punto para el cliente se cierra solo con la respuesta del otro lado
