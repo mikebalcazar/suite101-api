@@ -458,19 +458,18 @@ export async function conSesion(c: Ctx, next: () => Promise<void>) {
     const { abrirCookie } = await import('../lib');
     const id = await abrirCookie(crudo, await secretoDe(c.env));
     if (id) {
-      const { leerSesion } = await import('../maestro');
-      const s = await leerSesion(c.env, id);
+      // Una sola consulta: sesión, persona y superadmin (16-oct-2026).
+      const { sesionCompleta } = await import('../maestro');
+      const s = await sesionCompleta(c.env, id);
       if (s) {
-        const u = await usuarioPorId(c.env, s.usuario_id);
-        if (u) {
-          c.set('sesion', {
-            id,
-            usuario_id: s.usuario_id,
-            correo: u.correo,
-            superadmin: await esSuperadmin(c.env, s.usuario_id),
-            como: s.como,
-          });
-        }
+        c.set('sesion', {
+          id,
+          usuario_id: s.usuario_id,
+          correo: s.correo,
+          nombre: s.nombre,
+          superadmin: s.superadmin,
+          como: s.como,
+        });
       }
     }
   }

@@ -141,6 +141,13 @@ routes = []
 [env.staging.observability]
 enabled = true
 
+# 16-oct-2026 · El D1 vive en el oeste de Norteamérica (WNAM) y cada pedido le
+# hace varias consultas seguidas: corriendo junto a quien pregunta, cada una
+# cruza el continente. Aquí la API corre junto al D1. Primero sólo en staging,
+# para medirlo (/salud dice `d1_ms` y `colo`); producción, cuando se vea.
+[env.staging.placement]
+region = "aws:us-west-2"
+
 [[env.staging.d1_databases]]
 binding = "MASTER"
 database_name = "suite101-master-staging"

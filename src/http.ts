@@ -16,6 +16,8 @@ export interface Sesion {
   superadmin: boolean;
   /** Con qué se abrió: 'codigo' | 'pin' | 'clave' | 'google' (contrato 0.7.0). */
   como: string;
+  /** El nombre de la persona, leído junto con la sesión (16-oct-2026). */
+  nombre?: string | null;
 }
 
 export interface Quien {
