@@ -1,3 +1,5 @@
+> **16-oct-2026 · videos de portafolio de suite101 para Forespot (v01).** Desktop: dash → quote → nest → draw → cost. Móvil: quell, de la obra a sincronizar sin señal. Grabados en la org demo `vitrina` de STAGING. Mike sube los 7 archivos a Drive. Ojo: el MP4 móvil mide 1180 de ancho por yuv420p. Quedaron sin arreglar el tooltip del flujo de dash y el «Por subir» de quell tras sincronizar. Ver `muro/…-jr-videos-portafolio-forespot.md`.
+
 > **16-oct-2026 · quote: el catálogo dentro del armador de componentes (cotizador-t101 #96, G112).** Módulo «Del catálogo» con Productos y Precios base y la cantidad a mano en la unidad del catálogo. El componente guarda su origen, lleva los cargos de la hoja y se pone al día con cost101 mientras la cotización no esté aprobada. Ver `muro/…-jr-catalogo-dentro-del-armador.md`.
 
 > **15-oct-2026 · una pieza que se cambia a requerimiento en quell ya aparece en quote (API 0.102.0 #363; org 0054).** El PATCH de la pieza levanta su ítem cotizado y su renglón en el borrador «Requerimientos»; la 0054 levanta las que ya estaban así. Ver `muro/…-jr-requerimiento-por-cambio-de-tipo.md`.
