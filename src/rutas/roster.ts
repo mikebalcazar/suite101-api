@@ -23,7 +23,7 @@
  * documento o el panel), no la dirección. */
 
 import { Hono } from 'hono';
-import { miembro, org, usuarioPorId } from '../maestro';
+import { org, orgYMiembro, usuarioPorId } from '../maestro';
 import { err, type Ctx, type Vars } from '../http';
 import type { Env } from '../entorno';
 
@@ -34,7 +34,10 @@ rutas.all('/:o/*', async (c: Ctx) => {
   if (nombreApp !== 'roster101') return err(c, 'sin_app', 400, { manda: 'X-App: roster101' });
 
   const org_id = c.req.param('o')!;
-  const empresa = await org(c.env, org_id);
+  // Con sesión, la empresa y el miembro en un solo viaje al D1; sin sesión
+  // (el trabajador con su propia entrada), sólo la empresa (16-oct-2026).
+  const s = c.get('sesion');
+  const { empresa, m } = s ? await orgYMiembro(c.env, org_id, s.usuario_id) : { empresa: await org(c.env, org_id), m: null };
   if (!empresa) return err(c, 'org_desconocida', 404, { org: org_id });
   if (!empresa.activa) return err(c, 'org_inactiva', 403);
   if (!empresa.vigente) {
@@ -46,9 +49,7 @@ rutas.all('/:o/*', async (c: Ctx) => {
 
   // La sesión de la suite, si viene y le toca en esta empresa.
   let sesionRoster: { correo: string; nombre: string | null; superadmin: boolean; quien: { clase: 'miembro'; rol?: string; usuario_id: string } } | null = null;
-  const s = c.get('sesion');
   if (s) {
-    const m = await miembro(c.env, org_id, s.usuario_id);
     let quien: { clase: 'miembro'; rol?: string; usuario_id: string } | null = null;
     if (m) {
       if (m.apps.length === 0 || m.apps.includes('roster')) quien = { clase: 'miembro', rol: m.rol, usuario_id: s.usuario_id };
@@ -56,8 +57,9 @@ rutas.all('/:o/*', async (c: Ctx) => {
       quien = { clase: 'miembro', rol: 'owner', usuario_id: s.usuario_id };
     }
     if (quien) {
-      const u = await usuarioPorId(c.env, s.usuario_id);
-      sesionRoster = { correo: s.correo, nombre: u?.nombre ?? null, superadmin: s.superadmin, quien };
+      // El nombre ya viene con la sesión (0.103.1); sólo si no, se busca.
+      const nombre = s.nombre !== undefined ? s.nombre : (await usuarioPorId(c.env, s.usuario_id))?.nombre ?? null;
+      sesionRoster = { correo: s.correo, nombre, superadmin: s.superadmin, quien };
     }
   }
 

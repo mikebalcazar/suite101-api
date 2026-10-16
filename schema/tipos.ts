@@ -17,7 +17,17 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.103.0 (QUELL PINTA SIN ESPERAR: EL ID LO PONE EL
+ * Versión del contrato: 0.103.2 (LA SESIÓN Y /yo EN MENOS VIAJES AL D1.
+ * Mike, 16-oct: «haz esto mismo en todas las apps de suite101». Nada cambia
+ * en lo que contesta la API; cambia cuánto tarda. `conSesion` lee sesión,
+ * persona, nombre y superadmin en una consulta (0.103.1, #369, que no subió
+ * este número); la puerta de `/orgs/:o/*` lee empresa y miembro en un batch;
+ * `/yo` junta usuario, secretos, superadmin, accesos, empresas e inversión en
+ * un batch (antes seis consultas en fila, ~650–700 ms en staging); `/admin` y
+ * la puerta de roster ya no vuelven a preguntar lo que la sesión trae.
+ * `/salud` dice `d1_ms` y `colo`.)
+ *
+ * Antes, 0.103.0 (QUELL PINTA SIN ESPERAR: EL ID LO PONE EL
  * TELÉFONO. Mike, 16-oct: «que en pantalla sea suuuuper snappy y que en el
  * background se vayan subiendo esos cambios». En el motor de quell, POST
  * /elements/:id/punch, /elements/:id/log, /projects/:id/dudas y
@@ -1644,7 +1654,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.103.0';
+export const VERSION_CONTRATO = '0.103.2';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {

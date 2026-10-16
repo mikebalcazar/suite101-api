@@ -400,11 +400,17 @@ export default rutas;
 export async function yo(c: Ctx) {
   const s = c.get('sesion');
   if (!s) return err(c, 'sin_sesion', 401);
-  const usuario = await usuarioPorId(c.env, s.usuario_id);
-  const acc = await acceso(c.env, s.usuario_id);
-  const soySuper = await esSuperadmin(c.env, s.usuario_id);
+  // Todo en un viaje al D1 (16-oct-2026). Si la consulta y la sesión no
+  // coincidieran en superadmin (no debería: la sesión se lee en la misma
+  // base), se vuelve a leer con lo que dice la consulta.
+  const { datosDeYo } = await import('../maestro');
+  let d = await datosDeYo(c.env, s.usuario_id, s.superadmin);
+  if (d.superadmin !== s.superadmin) d = await datosDeYo(c.env, s.usuario_id, d.superadmin);
+  const usuario = d.usuario;
+  const acc = d.acceso;
+  const soySuper = d.superadmin;
 
-  const lista = soySuper ? await orgs(c.env) : [];
+  const lista = d.orgs;
   const mias: Array<{ id: string; nombre: string; rol: string; apps: string[]; negocios: string[]; miembro: boolean }> = [];
   if (soySuper) {
     /* 0.45.1 · Primero las empresas donde el dueño de la suite DE VERDAD es
@@ -414,16 +420,11 @@ export async function yo(c: Ctx) {
      * abrió quote101 al día siguiente y lo encontró vacío, porque estaba
      * mirando la empresa recién dada de alta. `miembro` dice cuál es cuál,
      * porque `rol` sale 'owner' en todas para él. */
-    const suyas = await c.env.MASTER.prepare(`SELECT org_id FROM miembros WHERE usuario_id = ?`)
-      .bind(s.usuario_id).all<{ org_id: string }>();
-    const soyDe = new Set((suyas.results ?? []).map((f) => f.org_id));
+    const soyDe = d.suyas;
     for (const o of lista) mias.push({ id: o.id, nombre: o.nombre, rol: 'owner', apps: [], negocios: [], miembro: soyDe.has(o.id) });
     mias.sort((a, b) => Number(b.miembro) - Number(a.miembro)); // estable: dentro de cada grupo sigue por nombre
   } else {
-    const r = await c.env.MASTER.prepare(
-      `SELECT m.org_id, m.rol, m.apps, o.nombre FROM miembros m JOIN orgs o ON o.id = m.org_id WHERE m.usuario_id = ?`,
-    ).bind(s.usuario_id).all<{ org_id: string; rol: string; apps: string; nombre: string }>();
-    for (const f of r.results ?? []) {
+    for (const f of d.miembroDe) {
       // `negocios: []` fijo (0.63.0): ya no hay negocios; se queda en la forma.
       mias.push({ id: f.org_id, nombre: f.nombre, rol: f.rol, apps: JSON.parse(f.apps || '[]'), negocios: [], miembro: true });
     }
@@ -431,7 +432,7 @@ export async function yo(c: Ctx) {
 
   // Qué puede ofrecer la pantalla la próxima vez (contrato 0.7.0). Nunca los
   // hashes: sólo si existen.
-  const secretos = await secretosDe(c.env, s.usuario_id);
+  const secretos = d.secretos;
   /* 2-oct · por el dominio de una empresa (dash.acme.com) sólo se ve ESA
    * empresa, también para el dueño de la suite: la pantalla abre directo la
    * de la casa, sin escoger. `empresa` es para que la app se nombre. */
@@ -440,7 +441,7 @@ export async function yo(c: Ctx) {
   const empresa = dom ? { id: dom.org_id, nombre: dom.nombre, dominio: dom.dominio, app: dom.app } : null;
   /* 0.82.0 · a qué empresas les presta (investor101). Por el dominio de una
    * empresa, sólo ésa. */
-  const presta = await accesosInversionDe(c.env, s.usuario_id);
+  const presta = d.inversion;
   const inversion = dom ? presta.filter((p) => p.org_id === dom.org_id) : presta;
   return ok(c, { usuario, superadmin: soySuper, orgs: visibles, acceso: acc, inversion, entro_con: s.como, empresa, ...secretos });
 }

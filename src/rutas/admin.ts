@@ -40,7 +40,9 @@ rutas.use('/*', async (c, next) => {
  *  servicio de la importación, que no puede tener su propia idea de esto. */
 export async function soySuper(c: Ctx): Promise<boolean> {
   const s = c.get('sesion');
-  return !!s && (s.superadmin || (await esSuperadmin(c.env, s.usuario_id)));
+  // `s.superadmin` ya se leyó con la sesión, en la misma consulta (0.103.1):
+  // preguntarlo otra vez era un viaje de más en cada /admin/* (16-oct-2026).
+  return !!s && s.superadmin;
 }
 
 const quien = (c: Ctx) => c.get('sesion').correo;
