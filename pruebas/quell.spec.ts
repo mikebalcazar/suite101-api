@@ -279,6 +279,33 @@ describe('D · contratistas por ítem', () => {
     // Como estaba, para lo que sigue.
     expect((await patch('mike', { assignee_id: ids.tema, title: 'Herraje flojo' })).estado).toBe(200);
   });
+  it('0.103.0 · lo que se crea lleva el op_id del teléfono como id: se palomea con ese id y repetirlo no duplica', async () => {
+    // Mike, 16-oct: «que en pantalla sea suuuuper snappy». quell pinta el
+    // pendiente antes de subirlo; el siguiente toque ya va contra este id.
+    const con = (op: string, campos: Record<string, string>) => { const fd = new FormData(); fd.append('op_id', op); for (const [k, v] of Object.entries(campos)) fd.append(k, v); return fd; };
+    const op = crypto.randomUUID();
+    const alta = await q('mike', `/elements/${m2}/punch`, { method: 'POST', body: con(op, { title: 'Rayón en el costado' }) });
+    expect(alta.estado, JSON.stringify(alta)).toBe(200);
+    expect(alta.id, 'el id es el op_id').toBe(op);
+    expect((await q('mike', `/punch/${op}`, { method: 'PATCH', json: { status: 'ok', op_id: crypto.randomUUID() } })).estado).toBe(200);
+    expect((await q('mike', `/elements/${m2}`)).punch.find((k: any) => k.id === op)?.status).toBe('ok');
+    const otraVez = await q('mike', `/elements/${m2}/punch`, { method: 'POST', body: con(op, { title: 'Rayón en el costado' }) });
+    expect(otraVez.repetida, 'la misma operación no se hace dos veces').toBe(true);
+    expect((await q('mike', `/elements/${m2}`)).punch.filter((k: any) => k.title === 'Rayón en el costado')).toHaveLength(1);
+    // La bitácora y las dudas, igual.
+    const opNota = crypto.randomUUID();
+    expect((await q('mike', `/elements/${m2}/log`, { method: 'POST', body: con(opNota, { text: 'Se ajustaron bisagras.' }) })).id).toBe(opNota);
+    const opDuda = crypto.randomUUID();
+    expect((await q('mike', `/projects/${obraA}/dudas`, { method: 'POST', body: con(opDuda, { texto: '¿Jaladera negra o acero?' }) })).id).toBe(opDuda);
+    const opResp = crypto.randomUUID();
+    expect((await q('mike', `/dudas/${opDuda}/respuestas`, { method: 'POST', body: con(opResp, { texto: 'Negra.' }) })).id).toBe(opResp);
+    // Un op_id que no es UUID no se vuelve id: lo pone el servidor.
+    const raro = await q('mike', `/elements/${m2}/punch`, { method: 'POST', body: con('no-es-uuid', { title: 'Con op raro' }) });
+    expect(raro.id).not.toBe('no-es-uuid');
+    expect(raro.id).toMatch(/^[0-9a-f-]{36}$/);
+    // Como estaba, para lo que sigue.
+    for (const id of [op, raro.id]) expect((await q('mike', `/punch/${id}`, { method: 'DELETE' })).estado).toBe(200);
+  });
   it('desactivar a alguien no se lleva el ítem; borrar un ítem se lleva sus asignaciones', async () => {
     expect((await q('mike', `/users/${ids.fuera}`, { method: 'PATCH', json: { active: false } })).estado).toBe(200);
     expect((await q('fuera', '/me')).estado).toBe(401);

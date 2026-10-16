@@ -17,7 +17,16 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.102.0 (UNA PIEZA QUE CAMBIA A REQUERIMIENTO EN
+ * Versión del contrato: 0.103.0 (QUELL PINTA SIN ESPERAR: EL ID LO PONE EL
+ * TELÉFONO. Mike, 16-oct: «que en pantalla sea suuuuper snappy y que en el
+ * background se vayan subiendo esos cambios». En el motor de quell, POST
+ * /elements/:id/punch, /elements/:id/log, /projects/:id/dudas y
+ * /dudas/:id/respuestas usan el `op_id` como id de lo que crean cuando es un
+ * UUID (como ya hacía /plans/:id/elements). Así lo creado sin esperar se puede
+ * palomear, editar o borrar en el siguiente toque con su id de verdad. Un
+ * `op_id` que no es UUID, o ninguno: el id lo pone el servidor, como antes.)
+ *
+ * Antes, 0.102.0 (UNA PIEZA QUE CAMBIA A REQUERIMIENTO EN
  * QUELL APARECE EN QUOTE. Mike, 15-oct: «agregué items y después los convertí
  * en requerimientos porque apenas los vamos a cotizar, pero cuando voy a
  * quote, no aparecen». PATCH /quell/elements/:id con `type` requerimiento, a
@@ -1635,7 +1644,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.102.0';
+export const VERSION_CONTRATO = '0.103.0';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
