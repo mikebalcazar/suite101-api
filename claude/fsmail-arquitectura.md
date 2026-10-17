@@ -1,5 +1,11 @@
 # FSMAIL: la plataforma de correo de Forespot. Qué se decidió y cómo se arma
 
+> **FSMAIL no tiene nada que ver con suite101** (Mike, 17-oct-2026: «es una
+> marca/app completamente independiente»). Este archivo vive aquí sólo porque
+> el repositorio `fsmail` todavía no existe; en cuanto exista, se muda allá y
+> aquí queda un renglón que diga a dónde se fue. Nada de FSMAIL entra a la
+> puerta, a `PREFIJO`, a `RESERVADOS_SUITE` ni a la zona suite101.app.
+
 Escrito el 17-oct-2026, en la sesión donde Mike pidió «una plataforma de
 correo electrónico … con un usuario pueda administrar varios correos de
 varios dominios, en automático cada dominio me separa las bandejas y dentro
@@ -123,9 +129,11 @@ texto necesario para listar y buscar (asunto, remitente, primer renglón).
 
 ## Lo que es de Mike, una sola vez (OPERAR §9)
 
-1. ~~Registrar `fsmail.com`~~ Ya no (decisión del 17-oct, «La dirección»):
-   en GoDaddy, en la zona forespot.com, un `CNAME mailing →
-   empresas.suite101.app`. Nada más. El MX de forespot.com no se toca.
+1. Mudar el DNS de forespot.com a Cloudflare (decisión del 17-oct, «La
+   dirección»): exportar la zona en GoDaddy, Add site en Cloudflare, comparar
+   los registros importados contra el inventario de arriba, agregar la
+   redirección de la raíz, y entonces cambiar los NS en GoDaddy. El chat
+   mide por DoH que todo resuelva igual después del cambio.
 2. Crear el repositorio `mikebalcazar/fsmail` en GitHub y agregarlo a la
    sesión. Con el repo vacío la sesión lo arma todo.
 3. Poner los secretos del Worker `fsmail`: `RESEND_API_KEY` (la misma
@@ -160,29 +168,70 @@ no repetirlas:
 
 **Decisión (botones): la cuenta existente.** Consecuencias dichas antes de
 decidir: sólo 2 negocios gratis; cuota y reputación compartidas con los
-códigos de acceso de la suite; la misma llave en dos Workers. El cartero va
+códigos de acceso de la suite; la misma llave en dos Workers.
+**Reconfirmada el mismo día** después de declarar FSMAIL independiente de
+suite101, con la consecuencia de que es el único lazo que queda entre los dos. El cartero va
 detrás de `cartero.ts` para poder cambiarlo después sin tocar bandejas.
 
-## La dirección: mailing.forespot.com (Mike, 17-oct-2026)
+## La dirección: mailing.forespot.com, con forespot.com en Cloudflare (Mike, 17-oct-2026)
 
 Mike aclaró su pregunta original: «si para la plataforma podemos usar una
 URL por ejemplo mailing.FORESPOT.com». Sí, y lo escogió con botones sobre
-fsmail.com y sobre «ambas». Consecuencia dicha antes: si un día se vende a
-terceros, entran por una URL de Forespot hasta que se agregue otro dominio
-como alias (el Worker admite varias entradas; la cookie no se comparte).
+fsmail.com y sobre «ambas». Primero se propuso colgarlo del mecanismo de
+dominios de empresa de la suite (CNAME a `empresas.suite101.app`, custom
+hostname, puerta). **Mike lo rechazó: FSMAIL es independiente de suite101.**
 
-Cómo se arma, con lo que ya existe (DOMINIOS.md):
+Un CNAME desde GoDaddy a `*.workers.dev` tampoco sirve: Cloudflare no
+atiende ese Host ni emite su certificado. Para que `mailing.forespot.com` sea
+dominio directo de un Worker propio, el nombre tiene que vivir en una zona de
+Cloudflare. Se le ofrecieron: forespot.com a Cloudflare / zona nueva
+fsmail.com con SaaS propio / sólo fsmail.com. **Decidió: forespot.com a
+Cloudflare.** Consecuencias dichas antes: cambio de NS en GoDaddy, copiar
+todos los registros, propagación hasta 48 h, revisar lo que GoDaddy haga por
+forespot.com (reenvíos, alojamiento) antes de cambiar.
 
-1. Mike pone en GoDaddy `mailing.forespot.com CNAME empresas.suite101.app`.
-   El MX de forespot.com sigue en Google; el DNS sigue en GoDaddy.
-2. La API da de alta `mailing.forespot.com` como custom hostname de la zona
-   suite101.app (lo mismo que hace con los dominios de empresa). Cloudflare
-   emite el certificado solo. Entra en los 100 nombres gratis.
-3. La puerta (`puerta/destino.ts`) aprende un host fijo: `mailing.forespot.com`
-   → enlace de servicio al Worker `fsmail`. Un renglón y su prueba; no es un
-   prefijo de app ni entra a `PREFIJO`.
-4. El Worker `fsmail` también tiene `fsmail.suite101.app` como dirección
-   propia para staging y pruebas (la puerta la deja pasar: es nuestra).
+### Inventario DNS de forespot.com (medido el 17-oct-2026 por DoH)
+
+Lo que tiene que existir en la zona de Cloudflare ANTES de cambiar los NS.
+Lo que no se ve desde fuera (otros subdominios, SRV) sólo lo enseña GoDaddy:
+se exporta la zona desde su panel y se compara.
+
+```
+forespot.com                    A     15.197.225.128
+forespot.com                    A     3.33.251.168
+www.forespot.com                CNAME forespot-web.pages.dev      (Cloudflare Pages: ya es de Cloudflare)
+forespot.com                    MX 1  aspmx.l.google.com
+forespot.com                    MX 5  alt1.aspmx.l.google.com
+forespot.com                    MX 5  alt2.aspmx.l.google.com
+forespot.com                    MX 10 alt3.aspmx.l.google.com
+forespot.com                    MX 10 alt4.aspmx.l.google.com
+forespot.com                    TXT   "v=spf1 include:dc-aa8e722993._spfm.forespot.com ~all"
+dc-aa8e722993._spfm.forespot.com TXT  "v=spf1 include:_spf.google.com ~all"
+_dmarc.forespot.com             TXT   "v=DMARC1; p=none; rua=mailto:mike@forespot.com;"
+google._domainkey.forespot.com  TXT   "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsKPF…QIDAQAB"  (DKIM de Google, 2 tramos)
+```
+
+Notas:
+- Los dos `A` de la raíz son del reenvío de GoDaddy (la raíz manda a www).
+  Ese reenvío muere al cambiar NS: en Cloudflare se reemplaza con un
+  registro `A @ 192.0.2.1` proxied + una Redirect Rule `forespot.com/* →
+  https://www.forespot.com/$1` (301). Sin esto, forespot.com sin «www» deja
+  de abrir.
+- El SPF de GoDaddy pasa por `dc-…_spfm`. Al mudar, se simplifica a
+  `v=spf1 include:_spf.google.com ~all` en la raíz y el `_spfm` se puede
+  borrar. Mismo efecto, un salto menos.
+- MX, DKIM y DMARC se copian tal cual, **DNS only** (nube gris). Google sigue
+  recibiendo el correo de forespot.com igual que hoy.
+- Los registros de correo nunca se proxean; el `CNAME www` sí (ya lo está en
+  Pages).
+
+### Cómo queda
+
+1. Zona `forespot.com` en el Cloudflare de Mike (Free).
+2. El Worker `fsmail` toma `mailing.forespot.com` como custom domain
+   (`routes = [{ pattern = "mailing.forespot.com", custom_domain = true }]`).
+   Cloudflare crea el registro y el certificado solos.
+3. Staging: `*.workers.dev` del Worker, sin dominio.
 
 ## Preguntas que faltan (una por una, con botones)
 
