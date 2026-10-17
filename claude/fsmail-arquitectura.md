@@ -24,6 +24,7 @@ de las bandejas cada dirección».
 ## Lo que se midió antes de preguntar (17-oct-2026)
 
 - `fsmail.com` **disponible** en GoDaddy (también `fsmail.mx`, `fsmail.app`).
+  Al final no se compra: la plataforma vive en `mailing.forespot.com`.
 - `forespot.com` y `taller101.mx`: DNS en GoDaddy, MX en Google Workspace
   (`aspmx.l.google.com`). `suite101.app`: DNS en Cloudflare, sin MX.
 - **Cloudflare Email Routing no sirve para recibir dominios de clientes**:
@@ -122,8 +123,9 @@ texto necesario para listar y buscar (asunto, remitente, primer renglón).
 
 ## Lo que es de Mike, una sola vez (OPERAR §9)
 
-1. Registrar `fsmail.com` (GoDaddy) y poner su DNS en Cloudflare (zona
-   nueva), para que el Worker tenga dominio propio y rutas como suite101.app.
+1. ~~Registrar `fsmail.com`~~ Ya no (decisión del 17-oct, «La dirección»):
+   en GoDaddy, en la zona forespot.com, un `CNAME mailing →
+   empresas.suite101.app`. Nada más. El MX de forespot.com no se toca.
 2. Crear el repositorio `mikebalcazar/fsmail` en GitHub y agregarlo a la
    sesión. Con el repo vacío la sesión lo arma todo.
 3. Poner los secretos del Worker `fsmail`: `RESEND_API_KEY` (la misma
@@ -160,6 +162,27 @@ no repetirlas:
 decidir: sólo 2 negocios gratis; cuota y reputación compartidas con los
 códigos de acceso de la suite; la misma llave en dos Workers. El cartero va
 detrás de `cartero.ts` para poder cambiarlo después sin tocar bandejas.
+
+## La dirección: mailing.forespot.com (Mike, 17-oct-2026)
+
+Mike aclaró su pregunta original: «si para la plataforma podemos usar una
+URL por ejemplo mailing.FORESPOT.com». Sí, y lo escogió con botones sobre
+fsmail.com y sobre «ambas». Consecuencia dicha antes: si un día se vende a
+terceros, entran por una URL de Forespot hasta que se agregue otro dominio
+como alias (el Worker admite varias entradas; la cookie no se comparte).
+
+Cómo se arma, con lo que ya existe (DOMINIOS.md):
+
+1. Mike pone en GoDaddy `mailing.forespot.com CNAME empresas.suite101.app`.
+   El MX de forespot.com sigue en Google; el DNS sigue en GoDaddy.
+2. La API da de alta `mailing.forespot.com` como custom hostname de la zona
+   suite101.app (lo mismo que hace con los dominios de empresa). Cloudflare
+   emite el certificado solo. Entra en los 100 nombres gratis.
+3. La puerta (`puerta/destino.ts`) aprende un host fijo: `mailing.forespot.com`
+   → enlace de servicio al Worker `fsmail`. Un renglón y su prueba; no es un
+   prefijo de app ni entra a `PREFIJO`.
+4. El Worker `fsmail` también tiene `fsmail.suite101.app` como dirección
+   propia para staging y pruebas (la puerta la deja pasar: es nuestra).
 
 ## Preguntas que faltan (una por una, con botones)
 
