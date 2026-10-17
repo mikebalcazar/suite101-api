@@ -126,16 +126,46 @@ texto necesario para listar y buscar (asunto, remitente, primer renglón).
    nueva), para que el Worker tenga dominio propio y rutas como suite101.app.
 2. Crear el repositorio `mikebalcazar/fsmail` en GitHub y agregarlo a la
    sesión. Con el repo vacío la sesión lo arma todo.
-3. Decidir el plan de Resend para FSMAIL (cuenta propia o la de la suite; el
-   tope de dominios es el que manda) y poner los secretos del Worker:
-   `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `CLOUDFLARE_API_TOKEN`,
+3. Poner los secretos del Worker `fsmail`: `RESEND_API_KEY` (la misma
+   llave de la suite: decisión del 17-oct, abajo), `RESEND_WEBHOOK_SECRET`
+   (nuevo, lo da Resend al crear el webhook), `CLOUDFLARE_API_TOKEN`,
    `CLOUDFLARE_ACCOUNT_ID`.
 
 Cada una se le pregunta por separado, con botones, cuando toque.
 
+## El cartero: Resend, con la cuenta existente (Mike, 17-oct-2026)
+
+Mike preguntó tres veces antes de decidir, y las respuestas quedan aquí para
+no repetirlas:
+
+- **«¿Para qué es Resend?»** FSMAIL es el cliente (bandejas, leer,
+  redactar); Resend es el cartero que habla SMTP con el mundo: recibe lo que
+  llega al MX del negocio y lo entrega por webhook, y manda lo que FSMAIL
+  redacta firmado con el DKIM del dominio del negocio.
+- **«¿Por qué FSMAIL no implementa el cartero SMTP?»** Workers no escuchan
+  puertos (recibir SMTP exige puerto 25 abierto 24 h) y Cloudflare bloquea el
+  25 de salida. Un servidor propio (VPS + Postfix/Stalwart) es viable pero
+  trae IP sin reputación (semanas en basura), puerto 25 por desbloquear,
+  PTR/SPF/DKIM/DMARC/TLS/colas/rebotes/listas negras/spam, operación 24/7 y el
+  riesgo de que un negocio abusivo tumbe a todos. Sería el primer servidor que
+  la suite opera. Se le ofrecieron Resend, servidor propio y Amazon SES.
+- **«¿Qué costo con la cuenta existente?»** La cuota de Resend es enviados +
+  recibidos, suite + FSMAIL juntos. Free: 3 dominios (la suite ocupa 1 con
+  `envios.taller101.mx`) y 3,000 correos/mes → 2 negocios gratis. Pro 20 USD:
+  10 dominios y 50,000/mes → 9 negocios. +100 dominios por 20 USD. Scale 90
+  USD: 1,000 dominios y 100,000/mes. El plan actual no está escrito en ningún
+  repositorio: se ve en resend.com → Settings → Billing.
+
+**Decisión (botones): la cuenta existente.** Consecuencias dichas antes de
+decidir: sólo 2 negocios gratis; cuota y reputación compartidas con los
+códigos de acceso de la suite; la misma llave en dos Workers. El cartero va
+detrás de `cartero.ts` para poder cambiarlo después sin tocar bandejas.
+
 ## Preguntas que faltan (una por una, con botones)
 
-- ¿Cuenta de Resend propia para FSMAIL o la misma de la suite?
+- ¿Desde qué dominio salen los correos propios de FSMAIL (código de acceso,
+  avisos)? `envios.fsmail.com` ocupa un dominio más de la cuota; reusar
+  `envios.taller101.mx` no ocupa ninguno pero firma como taller101.
 - ¿Cuota de almacenamiento por cuenta y qué pasa al llenarse?
 - ¿La primera prueba real con qué dominio (uno nuevo de prueba, no forespot)?
 - ¿Nombre visible del producto: «FSMAIL» tal cual, «fsmail», otro?
