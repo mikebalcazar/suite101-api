@@ -1,0 +1,279 @@
+diff --git a/pruebas/el-nombre-del-proyecto.spec.ts b/pruebas/el-nombre-del-proyecto.spec.ts
+new file mode 100644
+index 0000000..8ca0bb9
+--- /dev/null
++++ b/pruebas/el-nombre-del-proyecto.spec.ts
+@@ -0,0 +1,128 @@
++/* El nombre del proyecto es uno solo en toda la suite · 0.104.0
++ *
++ * Mike, 19-oct-2026: «necesito que se cambie el nombre en toda la suite.»
++ *
++ * La obra de quell101 y el proyecto de la suite son la misma casa contada de
++ * dos lados (migración 0010), y cada lado guarda su nombre: `quell_projects
++ * .name` y `proyectos.nombre`. Hasta hoy corregir uno dejaba el otro viejo: la
++ * misma obra se llamaba distinto en la bitácora de obra que en dash101,
++ * quote101 y peek101.
++ *
++ * LO QUE DE VERDAD APORTAN ESTAS PRUEBAS:
++ *
++ *   · que corregir el nombre en quell101 lo corrija donde lo leen las demás
++ *     —`/proyectos`— y no sólo en la obra;
++ *   · que corregir el nombre del proyecto en la suite baje a la obra, venga de
++ *     dash101 o de quote101: es por donde pasa todo cambio de la tabla;
++ *   · que una obra suelta —sin proyecto— se pueda renombrar igual, sin
++ *     tronar: la mitad de las obras viejas están así;
++ *   · que renombrar no se lleve de paso el cliente, el estado ni el archivo
++ *     (lo que el PATCH ya hacía con COALESCE);
++ *   · y que nada de esto le abra a quell101 la puerta de escribir en
++ *     `proyectos` por el cable: `ESCRITORES` sigue como estaba.
++ */
++
++import { SELF } from 'cloudflare:test';
++import { beforeAll, describe, expect, it } from 'vitest';
++import { ESCRITORES } from '../src/permisos';
++
++const CORREO = 'mike@forespot.com';
++const ORG = 'nombre-proyecto';
++const galletas: Record<string, string> = {};
++
++async function pedir(quien: string, ruta: string, o: RequestInit & { app?: string; json?: unknown } = {}) {
++  const cabeceras: Record<string, string> = {};
++  if (o.app !== '') cabeceras['X-App'] = o.app ?? 'dash101';
++  if (galletas[quien]) cabeceras.Cookie = galletas[quien];
++  let body = o.body;
++  if (o.json !== undefined) { body = JSON.stringify(o.json); cabeceras['Content-Type'] = 'application/json'; }
++  const r = await SELF.fetch(`https://api.local${ruta}`, { ...o, body, headers: { ...cabeceras, ...(o.headers as object) } });
++  const puesta = r.headers.get('Set-Cookie');
++  if (puesta) galletas[quien] = puesta.split(';')[0];
++  const texto = await r.text();
++  let cuerpo: any = {};
++  try { cuerpo = JSON.parse(texto); } catch { cuerpo = { texto }; }
++  return { estado: r.status, ...cuerpo } as { estado: number; [k: string]: any };
++}
++const o = (quien: string, ruta: string, op: Parameters<typeof pedir>[2] = {}) => pedir(quien, `/orgs/${ORG}${ruta}`, op);
++const q = (quien: string, ruta: string, op: Parameters<typeof pedir>[2] = {}) =>
++  pedir(quien, `/orgs/${ORG}/quell${ruta}`, { app: 'quell101', ...op });
++
++const proyecto = async (id: string) => (await o('mike', `/proyectos/${id}`)).data as any;
++const obra = async (id: string) => (await q('mike', `/projects/${id}`)).project as any;
++
++beforeAll(async () => {
++  const c = await pedir('mike', '/auth/codigo', { method: 'POST', json: { correo: CORREO }, app: '' });
++  await pedir('mike', '/auth/entrar', { method: 'POST', json: { correo: CORREO, codigo: c.data.codigo_prueba }, app: '' });
++  await pedir('mike', '/admin/orgs', { method: 'POST', json: { id: ORG, nombre: 'El nombre del proyecto', apps: { dash: true, quell: true, cotizador: true } }, app: '' });
++  await q('mike', '/me');
++}, 60000);
++
++describe('el nombre se corrige en los dos lados (0.104.0)', () => {
++  it('de quell101 a la suite: la obra renombrada renombra su proyecto', async () => {
++    const r = await q('mike', '/projects', { method: 'POST', json: { name: 'Casa Lomas 214', client: 'Fam. Ortega', suite: true } });
++    expect(r.estado, JSON.stringify(r)).toBe(200);
++    const pid = r.proyecto_id as string;
++    expect(pid, 'la obra nació con su proyecto').toBeTruthy();
++    expect((await proyecto(pid)).nombre).toBe('Casa Lomas 214');
++
++    const p = await q('mike', `/projects/${r.id}`, { method: 'PATCH', json: { name: 'Casa Lomas 216' } });
++    expect(p.estado, JSON.stringify(p)).toBe(200);
++    expect((await obra(r.id)).name, 'el nombre de la obra').toBe('Casa Lomas 216');
++    expect((await proyecto(pid)).nombre, 'y el del proyecto, que es lo que leen dash101 y quote101').toBe('Casa Lomas 216');
++  });
++
++  it('de la suite a quell101: el proyecto renombrado renombra su obra', async () => {
++    const r = await q('mike', '/projects', { method: 'POST', json: { name: 'Depto Reforma 9', client: 'Fam. Lara', suite: true } });
++    const pid = r.proyecto_id as string;
++
++    const p = await o('mike', `/proyectos/${pid}`, { method: 'PATCH', json: { nombre: 'Depto Reforma 90' } });
++    expect(p.estado, JSON.stringify(p)).toBe(200);
++    expect((await proyecto(pid)).nombre).toBe('Depto Reforma 90');
++    expect((await obra(r.id)).name, 'la obra de quell siguió al proyecto').toBe('Depto Reforma 90');
++  });
++
++  it('y también cuando el que renombra es quote101, no dash101', async () => {
++    const r = await q('mike', '/projects', { method: 'POST', json: { name: 'Oficina Polanco', client: 'Fam. Sosa', suite: true } });
++    const pid = r.proyecto_id as string;
++    const p = await o('mike', `/proyectos/${pid}`, { method: 'PATCH', json: { nombre: 'Oficina Polanco 2' }, app: 'cotizador101' });
++    expect(p.estado, JSON.stringify(p)).toBe(200);
++    expect((await obra(r.id)).name).toBe('Oficina Polanco 2');
++  });
++
++  it('una obra suelta, sin proyecto, se renombra igual y no truena', async () => {
++    const r = await q('mike', '/projects', { method: 'POST', json: { name: 'Bodega', client: 'Taller' } });   // sin suite: true
++    expect(r.proyecto_id, 'nació suelta').toBeFalsy();
++    const p = await q('mike', `/projects/${r.id}`, { method: 'PATCH', json: { name: 'Bodega chica' } });
++    expect(p.estado, JSON.stringify(p)).toBe(200);
++    expect((await obra(r.id)).name).toBe('Bodega chica');
++  });
++
++  it('renombrar no se lleva de paso el cliente ni el estado', async () => {
++    const r = await q('mike', '/projects', { method: 'POST', json: { name: 'Casa Pedregal', client: 'Fam. Ruiz', suite: true } });
++    await q('mike', `/projects/${r.id}`, { method: 'PATCH', json: { status: 'cerrado' } });
++    await q('mike', `/projects/${r.id}`, { method: 'PATCH', json: { name: 'Casa Pedregal 3' } });
++    const x = await obra(r.id);
++    expect(x.name).toBe('Casa Pedregal 3');
++    expect(x.client, 'el cliente sigue ahí').toBe('Fam. Ruiz');
++    expect(x.status, 'y el archivado también').toBe('cerrado');
++  });
++
++  it('un nombre en blanco no borra nada', async () => {
++    const r = await q('mike', '/projects', { method: 'POST', json: { name: 'Casa Sur', client: 'Fam. Vela', suite: true } });
++    const pid = r.proyecto_id as string;
++    await q('mike', `/projects/${r.id}`, { method: 'PATCH', json: { name: '   ' } });
++    expect((await proyecto(pid)).nombre, 'el proyecto conserva su nombre').toBe('Casa Sur');
++  });
++
++  it('quell101 sigue sin poder escribir en `proyectos` por el cable', async () => {
++    expect(Object.keys(ESCRITORES.proyectos ?? {}), 'los escritores de proyectos no cambiaron').toEqual(['dash101', 'cotizador101']);
++    const r = await q('mike', '/projects', { method: 'POST', json: { name: 'Casa Norte', client: 'Fam. Paz', suite: true } });
++    const pid = r.proyecto_id as string;
++    // La misma petición, pero hecha a la tabla con la cabecera de quell101.
++    const p = await o('mike', `/proyectos/${pid}`, { method: 'PATCH', json: { nombre: 'Por la puerta de atrás' }, app: 'quell101' });
++    expect(p.estado, 'la API no se lo permite').not.toBe(200);
++    expect((await proyecto(pid)).nombre, 'y el nombre no se movió').toBe('Casa Norte');
++  });
++
++});
+diff --git a/schema/tipos.ts b/schema/tipos.ts
+index 2c94cb0..0c0fbd3 100644
+--- a/schema/tipos.ts
++++ b/schema/tipos.ts
+@@ -17,7 +17,17 @@
+  *      catálogo; Mike lo separó el 20-sep-2026.
+  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
+  *
+- * Versión del contrato: 0.103.2 (LA SESIÓN Y /yo EN MENOS VIAJES AL D1.
++ * Versión del contrato: 0.104.0 (EL NOMBRE DEL PROYECTO, UNO SOLO EN TODA LA
++ * SUITE. Mike, 19-oct: «necesito que se cambie el nombre en toda la suite».
++ * La obra de quell101 y el proyecto de la suite son la misma casa (migración
++ * 0010) y cada lado guardaba su nombre: corregir uno dejaba el otro viejo.
++ * Ahora los dos sentidos los mantiene la API, no las apps: `PATCH
++ * /quell/projects/:id` con `name` corrige también `proyectos.nombre`, y
++ * cualquier cambio de `proyectos.nombre` —dash101, quote101, la pantalla del
++ * proyecto— baja a la obra ligada. `ESCRITORES` no cambia: quell101 sigue sin
++ * poder escribir en `proyectos` por el cable.)
++ *
++ * Antes, 0.103.2 (LA SESIÓN Y /yo EN MENOS VIAJES AL D1.
+  * Mike, 16-oct: «haz esto mismo en todas las apps de suite101». Nada cambia
+  * en lo que contesta la API; cambia cuánto tarda. `conSesion` lee sesión,
+  * persona, nombre y superadmin en una consulta (0.103.1, #369, que no subió
+@@ -1654,7 +1664,7 @@
+  * de lo de 0.4.0 cambia)
+  */
+ 
+-export const VERSION_CONTRATO = '0.103.2';
++export const VERSION_CONTRATO = '0.104.0';
+ 
+ /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
+ export interface PagosPosibles {
+diff --git a/src/org-db.ts b/src/org-db.ts
+index 4f46dde..73b88ce 100644
+--- a/src/org-db.ts
++++ b/src/org-db.ts
+@@ -1250,6 +1250,16 @@ export class OrgDB extends DurableObject<Env> {
+     const valores = cols.map((c) => this.adentro(def.cols[c], datos[c]));
+     this.sql.exec(`UPDATE ${tabla} SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`, ...valores, id);
+ 
++    /* 0.104.0 · El nombre del proyecto, igual en toda la suite (Mike,
++     * 19-oct-2026). Va aquí, en el único lugar por donde pasa cada cambio de
++     * la tabla `proyectos` —dash101, quote101, la pantalla del proyecto—, y
++     * no en una ruta: una regla que sólo cumple una puerta no es una regla.
++     * SQL directo a propósito, para no volver a entrar en
++     * `renombrarObraEnLaSuite` y quedarnos dando vueltas. */
++    if (tabla === 'proyectos' && datos.nombre !== undefined) {
++      const nombre = String(datos.nombre ?? '').trim();
++      if (nombre) this.sql.exec(`UPDATE quell_projects SET name = ? WHERE proyecto_id = ? AND name <> ?`, nombre, id, nombre);
++    }
+     this.despuesDeEscribir(tabla, id);
+     this.despuesDeCostos(tabla, id, productoAntes);
+     if (montoAntes !== undefined) this.huellaDePrecio(id, Number(montoAntes));
+@@ -3931,6 +3941,42 @@ export class OrgDB extends DurableObject<Env> {
+     return { proyecto_id: String(proyecto.id), cliente_id: String(cliente.id), cliente_nombre: String(cliente.nombre), cliente_nuevo: nuevo };
+   }
+ 
++  /* ─────────────── el nombre, uno solo en toda la suite (0.104.0) ───────────────
++   *
++   * Mike, 19-oct-2026: «necesito que se cambie el nombre en toda la suite.»
++   *
++   * La obra de quell101 y el proyecto de la suite son la misma casa contada de
++   * dos lados (migración 0010), y cada lado guarda su nombre: `quell_projects
++   * .name` y `proyectos.nombre`. Hasta hoy corregir uno dejaba el otro viejo,
++   * y la misma obra se llamaba distinto en la bitácora de obra que en dash101
++   * y quote101.
++   *
++   * Los dos sentidos pasan por la API y no por las apps: quell101 no está en
++   * `ESCRITORES.proyectos` —esa lista acota lo que una app manda por el
++   * cable— y esto no es una app escribiendo en la tabla de otra, es la API
++   * manteniendo igual un dato que está escrito dos veces. De quell a la suite,
++   * este método, que llama el motor al guardar. De la suite a quell, dentro de
++   * `actualizar`, porque por ahí pasa todo cambio de la tabla `proyectos`
++   * venga de dash101, de quote101 o de donde sea.
++   *
++   * No hay vuelta infinita: el camino de regreso escribe `quell_projects` con
++   * SQL directo, sin volver a entrar por aquí, y sólo cuando el nombre de
++   * verdad cambió.
++   */
++  renombrarObraEnLaSuite(d: { obra_id: string; nombre: string; usuario_id: string }): { proyecto_id: string; nombre: string } | null {
++    const nombre = String(d.nombre ?? '').trim();
++    if (!nombre) return null;
++    const obra = this.sql.exec(`SELECT id, proyecto_id FROM quell_projects WHERE id = ?`, d.obra_id).toArray()[0] as Fila | undefined;
++    // Obra suelta (sin proyecto en la suite): no hay a quién avisarle.
++    if (!obra?.proyecto_id) return null;
++    const proyecto_id = String(obra.proyecto_id);
++    const antes = this.obtener('proyectos', proyecto_id);
++    if (!antes) return null;
++    if (String(antes.nombre ?? '') === nombre) return { proyecto_id, nombre };
++    this.actualizar('proyectos', proyecto_id, { nombre } as Fila, { app: 'quell101', usuario_id: d.usuario_id });
++    return { proyecto_id, nombre };
++  }
++
+   /** 0039, en código: las obras que ya existían sin proyecto (decisión de
+    *  Mike, 6-oct: «darlos de alta todos»). Las que no traen cliente escrito
+    *  se quedan sueltas. */
+@@ -5891,6 +5937,9 @@ export class OrgDB extends DurableObject<Env> {
+         // 0.77.0: la obra que nace en quell nace también con su cliente y su proyecto.
+         ALTA_EN_LA_SUITE: async (d: { obra_id: string; cliente_id?: string | null; cliente_nombre?: string | null }) =>
+           this.altaDeObraEnLaSuite({ ...d, usuario_id: sesion.quien.usuario_id }),
++        // 0.104.0: el nombre corregido en la obra se corrige en toda la suite.
++        RENOMBRA_EN_LA_SUITE: async (d: { obra_id: string; nombre: string }) =>
++          this.renombrarObraEnLaSuite({ ...d, usuario_id: sesion.quien.usuario_id }),
+         // 0.73.0: las partidas que nacen de las fases del cronograma mueven el compromiso del proyecto.
+         RECALCULAR_PROYECTO: async (id: string) => { this.recalcularProyecto(id); },
+       }, url, url.pathname);
+diff --git a/src/quell/motor.d.ts b/src/quell/motor.d.ts
+index 7d76bf9..650db73 100644
+--- a/src/quell/motor.d.ts
++++ b/src/quell/motor.d.ts
+@@ -44,6 +44,9 @@ export interface EntornoQuell {
+   RECALCULAR_PROYECTO?: (proyecto_id: string) => void | Promise<void>;
+   /** 0.77.0: la obra recién creada nace con su cliente y su proyecto en la suite. */
+   ALTA_EN_LA_SUITE?: (d: { obra_id: string; cliente_id?: string | null; cliente_nombre?: string | null }) => Promise<{ proyecto_id: string; cliente_id: string; cliente_nombre: string; cliente_nuevo: boolean } | null>;
++  /** 0.104.0: el nombre corregido en la obra se corrige también en su proyecto
++   *  de la suite, que es de donde lo leen dash101, quote101 y peek101. */
++  RENOMBRA_EN_LA_SUITE?: (d: { obra_id: string; nombre: string }) => Promise<{ proyecto_id: string; nombre: string } | null>;
+ }
+ 
+ export function atender(req: Request, env: EntornoQuell, url: URL, path: string): Promise<Response>;
+diff --git a/src/quell/motor.js b/src/quell/motor.js
+index 317a1d0..1d5e92f 100644
+--- a/src/quell/motor.js
++++ b/src/quell/motor.js
+@@ -1206,6 +1206,20 @@ export async function atender(req, env, url, path) {
+       if (!isStaff(user)) return err('sin permiso', 403);
+       const b = await req.json();
+       await env.DB.prepare(`UPDATE quell_projects SET name = COALESCE(?, name), client = COALESCE(?, client), status = COALESCE(?, status) WHERE id = ?`).bind(b.name ?? null, b.client ?? null, b.status ?? null, pid).run();
++      /* 0.104.0 · Mike, 19-oct-2026: «necesito que se cambie el nombre en toda
++       * la suite.» La obra de quell101 y el proyecto de la suite son la misma
++       * casa (migración 0010): si aquí se le corrige el nombre, el de allá se
++       * corrige también, y dash101, quote101 y peek101 lo leen de ahí. Si la
++       * obra está suelta —sin proyecto— no hay nada que avisar. El viaje de
++       * vuelta (renombrar el proyecto en la suite) lo hace la API en
++       * `actualizar` (org-db.ts), para que valga desde cualquier puerta. */
++      const nombre = typeof b.name === 'string' ? b.name.trim() : '';
++      if (nombre && typeof env.RENOMBRA_EN_LA_SUITE === 'function') {
++        try { await env.RENOMBRA_EN_LA_SUITE({ obra_id: pid, nombre }); }
++        // El nombre de la obra ya se guardó: que la suite no se enterara no
++        // tumba la petición, pero sí se anota para que no pase callado.
++        catch (e) { console.error('renombrar en la suite', pid, e); }
++      }
+       return json({ ok: true });
+     }
+     // Borrar una obra es del dueño, y se lleva todo lo que cuelga de ella:
