@@ -1206,6 +1206,20 @@ export async function atender(req, env, url, path) {
       if (!isStaff(user)) return err('sin permiso', 403);
       const b = await req.json();
       await env.DB.prepare(`UPDATE quell_projects SET name = COALESCE(?, name), client = COALESCE(?, client), status = COALESCE(?, status) WHERE id = ?`).bind(b.name ?? null, b.client ?? null, b.status ?? null, pid).run();
+      /* 0.104.0 · Mike, 19-oct-2026: «necesito que se cambie el nombre en toda
+       * la suite.» La obra de quell101 y el proyecto de la suite son la misma
+       * casa (migración 0010): si aquí se le corrige el nombre, el de allá se
+       * corrige también, y dash101, quote101 y peek101 lo leen de ahí. Si la
+       * obra está suelta —sin proyecto— no hay nada que avisar. El viaje de
+       * vuelta (renombrar el proyecto en la suite) lo hace la API en
+       * `actualizar` (org-db.ts), para que valga desde cualquier puerta. */
+      const nombre = typeof b.name === 'string' ? b.name.trim() : '';
+      if (nombre && typeof env.RENOMBRA_EN_LA_SUITE === 'function') {
+        try { await env.RENOMBRA_EN_LA_SUITE({ obra_id: pid, nombre }); }
+        // El nombre de la obra ya se guardó: que la suite no se enterara no
+        // tumba la petición, pero sí se anota para que no pase callado.
+        catch (e) { console.error('renombrar en la suite', pid, e); }
+      }
       return json({ ok: true });
     }
     // Borrar una obra es del dueño, y se lleva todo lo que cuelga de ella:

@@ -44,6 +44,9 @@ export interface EntornoQuell {
   RECALCULAR_PROYECTO?: (proyecto_id: string) => void | Promise<void>;
   /** 0.77.0: la obra recién creada nace con su cliente y su proyecto en la suite. */
   ALTA_EN_LA_SUITE?: (d: { obra_id: string; cliente_id?: string | null; cliente_nombre?: string | null }) => Promise<{ proyecto_id: string; cliente_id: string; cliente_nombre: string; cliente_nuevo: boolean } | null>;
+  /** 0.104.0: el nombre corregido en la obra se corrige también en su proyecto
+   *  de la suite, que es de donde lo leen dash101, quote101 y peek101. */
+  RENOMBRA_EN_LA_SUITE?: (d: { obra_id: string; nombre: string }) => Promise<{ proyecto_id: string; nombre: string } | null>;
 }
 
 export function atender(req: Request, env: EntornoQuell, url: URL, path: string): Promise<Response>;

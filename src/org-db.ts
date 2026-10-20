@@ -1250,6 +1250,16 @@ export class OrgDB extends DurableObject<Env> {
     const valores = cols.map((c) => this.adentro(def.cols[c], datos[c]));
     this.sql.exec(`UPDATE ${tabla} SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`, ...valores, id);
 
+    /* 0.104.0 · El nombre del proyecto, igual en toda la suite (Mike,
+     * 19-oct-2026). Va aquí, en el único lugar por donde pasa cada cambio de
+     * la tabla `proyectos` —dash101, quote101, la pantalla del proyecto—, y
+     * no en una ruta: una regla que sólo cumple una puerta no es una regla.
+     * SQL directo a propósito, para no volver a entrar en
+     * `renombrarObraEnLaSuite` y quedarnos dando vueltas. */
+    if (tabla === 'proyectos' && datos.nombre !== undefined) {
+      const nombre = String(datos.nombre ?? '').trim();
+      if (nombre) this.sql.exec(`UPDATE quell_projects SET name = ? WHERE proyecto_id = ? AND name <> ?`, nombre, id, nombre);
+    }
     this.despuesDeEscribir(tabla, id);
     this.despuesDeCostos(tabla, id, productoAntes);
     if (montoAntes !== undefined) this.huellaDePrecio(id, Number(montoAntes));
@@ -3931,6 +3941,42 @@ export class OrgDB extends DurableObject<Env> {
     return { proyecto_id: String(proyecto.id), cliente_id: String(cliente.id), cliente_nombre: String(cliente.nombre), cliente_nuevo: nuevo };
   }
 
+  /* ─────────────── el nombre, uno solo en toda la suite (0.104.0) ───────────────
+   *
+   * Mike, 19-oct-2026: «necesito que se cambie el nombre en toda la suite.»
+   *
+   * La obra de quell101 y el proyecto de la suite son la misma casa contada de
+   * dos lados (migración 0010), y cada lado guarda su nombre: `quell_projects
+   * .name` y `proyectos.nombre`. Hasta hoy corregir uno dejaba el otro viejo,
+   * y la misma obra se llamaba distinto en la bitácora de obra que en dash101
+   * y quote101.
+   *
+   * Los dos sentidos pasan por la API y no por las apps: quell101 no está en
+   * `ESCRITORES.proyectos` —esa lista acota lo que una app manda por el
+   * cable— y esto no es una app escribiendo en la tabla de otra, es la API
+   * manteniendo igual un dato que está escrito dos veces. De quell a la suite,
+   * este método, que llama el motor al guardar. De la suite a quell, dentro de
+   * `actualizar`, porque por ahí pasa todo cambio de la tabla `proyectos`
+   * venga de dash101, de quote101 o de donde sea.
+   *
+   * No hay vuelta infinita: el camino de regreso escribe `quell_projects` con
+   * SQL directo, sin volver a entrar por aquí, y sólo cuando el nombre de
+   * verdad cambió.
+   */
+  renombrarObraEnLaSuite(d: { obra_id: string; nombre: string; usuario_id: string }): { proyecto_id: string; nombre: string } | null {
+    const nombre = String(d.nombre ?? '').trim();
+    if (!nombre) return null;
+    const obra = this.sql.exec(`SELECT id, proyecto_id FROM quell_projects WHERE id = ?`, d.obra_id).toArray()[0] as Fila | undefined;
+    // Obra suelta (sin proyecto en la suite): no hay a quién avisarle.
+    if (!obra?.proyecto_id) return null;
+    const proyecto_id = String(obra.proyecto_id);
+    const antes = this.obtener('proyectos', proyecto_id);
+    if (!antes) return null;
+    if (String(antes.nombre ?? '') === nombre) return { proyecto_id, nombre };
+    this.actualizar('proyectos', proyecto_id, { nombre } as Fila, { app: 'quell101', usuario_id: d.usuario_id });
+    return { proyecto_id, nombre };
+  }
+
   /** 0039, en código: las obras que ya existían sin proyecto (decisión de
    *  Mike, 6-oct: «darlos de alta todos»). Las que no traen cliente escrito
    *  se quedan sueltas. */
@@ -5891,6 +5937,9 @@ export class OrgDB extends DurableObject<Env> {
         // 0.77.0: la obra que nace en quell nace también con su cliente y su proyecto.
         ALTA_EN_LA_SUITE: async (d: { obra_id: string; cliente_id?: string | null; cliente_nombre?: string | null }) =>
           this.altaDeObraEnLaSuite({ ...d, usuario_id: sesion.quien.usuario_id }),
+        // 0.104.0: el nombre corregido en la obra se corrige en toda la suite.
+        RENOMBRA_EN_LA_SUITE: async (d: { obra_id: string; nombre: string }) =>
+          this.renombrarObraEnLaSuite({ ...d, usuario_id: sesion.quien.usuario_id }),
         // 0.73.0: las partidas que nacen de las fases del cronograma mueven el compromiso del proyecto.
         RECALCULAR_PROYECTO: async (id: string) => { this.recalcularProyecto(id); },
       }, url, url.pathname);

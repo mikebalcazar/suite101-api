@@ -17,7 +17,17 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.103.2 (LA SESIÓN Y /yo EN MENOS VIAJES AL D1.
+ * Versión del contrato: 0.104.0 (EL NOMBRE DEL PROYECTO, UNO SOLO EN TODA LA
+ * SUITE. Mike, 19-oct: «necesito que se cambie el nombre en toda la suite».
+ * La obra de quell101 y el proyecto de la suite son la misma casa (migración
+ * 0010) y cada lado guardaba su nombre: corregir uno dejaba el otro viejo.
+ * Ahora los dos sentidos los mantiene la API, no las apps: `PATCH
+ * /quell/projects/:id` con `name` corrige también `proyectos.nombre`, y
+ * cualquier cambio de `proyectos.nombre` —dash101, quote101, la pantalla del
+ * proyecto— baja a la obra ligada. `ESCRITORES` no cambia: quell101 sigue sin
+ * poder escribir en `proyectos` por el cable.)
+ *
+ * Antes, 0.103.2 (LA SESIÓN Y /yo EN MENOS VIAJES AL D1.
  * Mike, 16-oct: «haz esto mismo en todas las apps de suite101». Nada cambia
  * en lo que contesta la API; cambia cuánto tarda. `conSesion` lee sesión,
  * persona, nombre y superadmin en una consulta (0.103.1, #369, que no subió
@@ -1654,7 +1664,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.103.2';
+export const VERSION_CONTRATO = '0.104.0';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
