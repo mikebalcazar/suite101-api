@@ -17,7 +17,16 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.104.0 (EL NOMBRE DEL PROYECTO, UNO SOLO EN TODA LA
+ * Versión del contrato: 0.104.1 (LOS CORREOS SALEN DE suite101.app. Mike,
+ * 22-oct: «los correos de suite101 me están reportando que no están
+ * llegando […] cómo le hacemos para que no se vaya a correo no deseado».
+ * Escogió con botones que el remitente sea de la marca y del dominio de las
+ * apps: acceso@, bitacora@ y expedientes@correo.suite101.app en vez de
+ * envios.taller101.mx. Mientras Resend no verifica el dominio nuevo, el mismo
+ * correo se reintenta una vez con envios.taller101.mx (src/resend.js): nada
+ * deja de salir. Ninguna ruta cambia.)
+ *
+ * Antes, 0.104.0 (EL NOMBRE DEL PROYECTO, UNO SOLO EN TODA LA
  * SUITE. Mike, 19-oct: «necesito que se cambie el nombre en toda la suite».
  * La obra de quell101 y el proyecto de la suite son la misma casa (migración
  * 0010) y cada lado guardaba su nombre: corregir uno dejaba el otro viejo.
@@ -1664,7 +1673,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.104.0';
+export const VERSION_CONTRATO = '0.104.1';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {

@@ -232,3 +232,72 @@ describe('la bienvenida trae la lista de plataformas con su dirección', () => {
   });
 });
 
+
+/* 22-oct-2026 · Los correos salen de suite101.app (decisión de Mike con
+ * botones: «cómo le hacemos para que no se vaya a correo no deseado»). Mientras
+ * Resend no verifica correo.suite101.app, el remitente nuevo contesta 403; el
+ * mismo correo se reintenta una vez con envios.taller101.mx para no cortar. */
+describe('el remitente de suite101.app, con su respaldo', () => {
+  const NUEVO = 'Suite 101 <acceso@correo.suite101.app>';
+  /** Resend de mentiras: rechaza el dominio nuevo con `rechazo` y acepta el resto. */
+  function resend(rechazo: number | null) {
+    salidas = []; cuerpos = [];
+    globalThis.fetch = (async (entrada: RequestInfo | URL, init?: RequestInit) => {
+      salidas.push(String(entrada instanceof Request ? entrada.url : entrada));
+      const c = JSON.parse(String(init?.body));
+      cuerpos.push(c);
+      if (rechazo && String(c.from).includes('@correo.suite101.app')) {
+        return new Response('{"message":"The correo.suite101.app domain is not verified."}', { status: rechazo });
+      }
+      return new Response('{"id":"1"}', { status: 200 });
+    }) as typeof fetch;
+  }
+
+  it('los remitentes de producción ya son de suite101.app', async () => {
+    const toml = (await import('../wrangler.toml?raw')).default as string;
+    expect(toml).not.toMatch(/@envios\.taller101\.mx/);
+    expect(toml).toMatch(/acceso@correo\.suite101\.app/);
+  });
+
+  it('con el dominio verificado sale a la primera, desde suite101.app', async () => {
+    resend(null);
+    const r = await enviarCorreo(entorno('produccion', { CORREO_REMITENTE: NUEVO }), MSG);
+    expect(r.enviado).toBe(true);
+    expect(cuerpos.map((c) => c.from)).toEqual([NUEVO]);
+  });
+
+  it('sin verificar todavía (403), se reintenta una vez con envios.taller101.mx y sale', async () => {
+    resend(403);
+    const r = await enviarCorreo(entorno('produccion', { CORREO_REMITENTE: NUEVO }), MSG);
+    expect(r.enviado, 'el código le llega a la persona').toBe(true);
+    expect(cuerpos.map((c) => c.from)).toEqual([NUEVO, 'Suite 101 <acceso@envios.taller101.mx>']);
+    expect(cuerpos[1].subject, 'el mismo correo').toBe(cuerpos[0].subject);
+  });
+
+  it('un error que no es del dominio (500) no se reintenta', async () => {
+    salidas = []; cuerpos = [];
+    globalThis.fetch = (async (_e: RequestInfo | URL, init?: RequestInit) => {
+      cuerpos.push(JSON.parse(String(init?.body)));
+      return new Response('caído', { status: 500 });
+    }) as typeof fetch;
+    const r = await enviarCorreo(entorno('produccion', { CORREO_REMITENTE: NUEVO }), MSG);
+    expect(r.enviado).toBe(false);
+    expect(cuerpos).toHaveLength(1);
+  });
+
+  it('un remitente que ya es del dominio de respaldo no se reintenta', async () => {
+    resend(403);
+    globalThis.fetch = (async (_e: RequestInfo | URL, init?: RequestInit) => {
+      cuerpos.push(JSON.parse(String(init?.body)));
+      return new Response('no', { status: 403 });
+    }) as typeof fetch;
+    cuerpos = [];
+    const r = await enviarCorreo(entorno('produccion', { CORREO_REMITENTE: 'Suite 101 <acceso@envios.taller101.mx>' }), MSG);
+    expect(r.enviado).toBe(false);
+    expect(cuerpos).toHaveLength(1);
+  });
+
+  it('el pie del correo dice Suite 101, no Taller 101', () => {
+    expect(correoCodigo('123456').html).not.toMatch(/Taller 101/);
+  });
+});

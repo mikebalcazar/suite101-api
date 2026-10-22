@@ -22,6 +22,7 @@
  * firma que TypeScript necesita del lado del Durable Object.
  */
 
+import { mandarPorResend } from '../resend.js';
 import { PREFIJOS, REQUERIMIENTO, esRequerimiento, siguienteCodigo } from './codigos.js';
 /* La cuenta de los días la hace el CONTRATO, no la pantalla ni este archivo.
  * Viaja resuelta en el detalle del ítem para que quell101 no la repita: una
@@ -437,11 +438,7 @@ async function etapasDe(env, ids) {
 async function sendMail(env, to, subject, html) {
   if (!env.RESEND_API_KEY) return { dev: true };
   if (!env.CORREO_SALE) return { dev: true, apagado: true };
-  const r = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ from: env.MAIL_FROM || 'quell101 <onboarding@resend.dev>', to: [to], subject, html }),
-  });
+  const r = await mandarPorResend(env.RESEND_API_KEY, { from: env.MAIL_FROM || 'quell101 <onboarding@resend.dev>', to: [to], subject, html });
   if (!r.ok) throw new Error('mail: ' + (await r.text()));
   return { ok: true };
 }

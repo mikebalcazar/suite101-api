@@ -7,6 +7,7 @@
  * se acepta que un cliente de correo caiga en la de al lado; lo que no se hace
  * es pedirle una fuente que contradiga la identidad. */
 
+import { mandarPorResend } from '../resend';
 import { Buffer } from 'node:buffer';
 import type { Env } from '../entorno';
 import type { Plataforma } from '../plataformas';
@@ -79,10 +80,7 @@ export async function enviarCorreo(
   if (!env.RESEND_API_KEY) return { enviado: false, motivo: 'correo_no_configurado' };
   if (!sale(env)) return { enviado: false, motivo: 'correo_apagado_fuera_de_produccion' };
   const baja = msg.conBaja ? bajaDe(env) : null;
-  const r = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const r = await mandarPorResend(env.RESEND_API_KEY, {
       from: env.CORREO_REMITENTE || 'Suite 101 <onboarding@resend.dev>',
       to: Array.isArray(msg.para) ? msg.para : [msg.para],
       subject: msg.asunto,
@@ -98,7 +96,6 @@ export async function enviarCorreo(
         'X-Entity-Ref-ID': crypto.randomUUID(),
         ...(baja ? { 'List-Unsubscribe': baja } : {}),
       },
-    }),
   });
   if (!r.ok) {
     console.error('resend', r.status, await r.text());
@@ -124,7 +121,7 @@ export function correoCodigo(codigo: string): { asunto: string; html: string; te
       <p style="margin:18px 0 0;font-size:13px;color:#6b7a85">Si tú no lo pediste, ignora este correo.</p>
     </td></tr>
     <tr><td style="padding:16px 26px 24px;border-top:1px solid #e6ebef;font-size:12px;color:#6b7a85">
-      Mensaje automático de Taller 101. ${NO_SE_CONTESTA}
+      Mensaje automático de Suite 101. ${NO_SE_CONTESTA}
     </td></tr>
   </table>
 </td></tr></table></body></html>`,
@@ -226,7 +223,7 @@ const sobre = (titulo: string, color: string, cuerpo: string) =>
       ${cuerpo}
     </td></tr>
     <tr><td style="padding:16px 26px 24px;border-top:1px solid #e6ebef;font-size:12px;color:#6b7a85">
-      Mensaje automático de Taller 101. ${NO_SE_CONTESTA}
+      Mensaje automático de Suite 101. ${NO_SE_CONTESTA}
     </td></tr>
   </table>
 </td></tr></table></body></html>`;
