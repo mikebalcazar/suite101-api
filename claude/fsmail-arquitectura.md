@@ -194,12 +194,17 @@ forespot.com (reenvíos, alojamiento) antes de cambiar.
 
 Lo que tiene que existir en la zona de Cloudflare ANTES de cambiar los NS.
 Lo que no se ve desde fuera (otros subdominios, SRV) sólo lo enseña GoDaddy:
-se exporta la zona desde su panel y se compara.
+se exporta la zona desde su panel y se compara. **Mike mandó el export el
+22-oct-2026** (serial 2026102100): trae dos registros que la medición de
+fuera no vio, `plataforma` y la verificación de Google; están abajo. Todo lo
+demás coincide. Son 14 registros en total, sin SRV.
 
 ```
 forespot.com                    A     15.197.225.128
 forespot.com                    A     3.33.251.168
 www.forespot.com                CNAME forespot-web.pages.dev      (Cloudflare Pages: ya es de Cloudflare)
+plataforma.forespot.com         CNAME forespot-plataforma.pages.dev (Pages; sirve 200. SÓLO en el export de GoDaddy)
+forespot.com                    TXT   "google-site-verification=rS2CWjNIReYahrr1VffqVeZSzgafzPfztJmdeOEL5xI"  (SÓLO en el export)
 forespot.com                    MX 1  aspmx.l.google.com
 forespot.com                    MX 5  alt1.aspmx.l.google.com
 forespot.com                    MX 5  alt2.aspmx.l.google.com
