@@ -2,6 +2,7 @@
 //
 // Ningún texto de aquí nombra a una empresa en particular: el nombre entra por
 // parámetro, desde la configuración del cliente.
+import { mandarPorResend } from '../resend.js';
 import { empresaDe } from './lib.js';
 
 const AZUL = '#0080C1';
@@ -33,19 +34,12 @@ export async function enviarCorreo(env, { para, asunto, html, texto }) {
     console.log('[correo simulado]', para, asunto, texto || '');
     return { simulado: true };
   }
-  const r = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.RESEND_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: env.CORREO_REMITENTE || `${empresaDe(env)} <onboarding@resend.dev>`,
-      to: [para],
-      subject: asunto,
-      html,
-      text: texto,
-    }),
+  const r = await mandarPorResend(env.RESEND_API_KEY, {
+    from: env.CORREO_REMITENTE || `${empresaDe(env)} <onboarding@resend.dev>`,
+    to: [para],
+    subject: asunto,
+    html,
+    text: texto,
   });
   if (!r.ok) {
     const detalle = await r.text();

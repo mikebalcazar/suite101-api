@@ -5925,7 +5925,7 @@ export class OrgDB extends DurableObject<Env> {
         PREFIJO_R2: `orgs/${org}/quell/`,
         SITIO: req.headers.get('x-sitio') || 'https://quell.suite101.app',
         APP_NAME: 'quell101',
-        MAIL_FROM: e.CORREO_QUELL || 'quell101 <bitacora@envios.taller101.mx>',
+        MAIL_FROM: e.CORREO_QUELL || 'quell101 <bitacora@correo.suite101.app>',
         RESEND_API_KEY: e.RESEND_API_KEY,
         CORREO_SALE: e.ENTORNO === 'produccion' || e.CORREO_DE_VERDAD === '1',
         // La invitación del cliente en la suite, desde adentro: el motor la
@@ -5970,7 +5970,7 @@ export class OrgDB extends DurableObject<Env> {
         DOMICILIO: datos.domicilio || '',
         CORREO_PRIVACIDAD: datos.correo_privacidad || datos.correo_avisos || '',
         CORREO_AVISOS: datos.correo_avisos || '',
-        CORREO_REMITENTE: datos.correo_remitente || e.CORREO_ROSTER || 'roster101 <expedientes@envios.taller101.mx>',
+        CORREO_REMITENTE: datos.correo_remitente || e.CORREO_ROSTER || 'roster101 <expedientes@correo.suite101.app>',
         AVISO_VERSION: datos.aviso_version || '1',
         PORTAL_VERSION: datos.version || '',
       }, { waitUntil: (p: Promise<unknown>) => this.ctx.waitUntil(p) });
