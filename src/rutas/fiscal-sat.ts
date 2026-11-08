@@ -4,7 +4,8 @@
  *                                las solicitudes y qué dijo el SAT
  *   PUT    /fiscal/sat/fiel      subir la FIEL: multipart con `cer`, `key` y `clave`
  *   DELETE /fiscal/sat/fiel      quitarla
- *   PUT    /fiscal/sat/config    { automatico } — bajar solo cada noche, o no
+ *   PUT    /fiscal/sat/config    { automatico, desde } — bajar solo cada noche, o no;
+ *                                y desde qué fecha se quiere el historial (0.104.2)
  *   POST   /fiscal/sat/bajar     bajar ahora
  *
  * QUIÉN PUEDE. Ver: quien ve lo fiscal. Bajar ahora y prender o apagar lo
@@ -86,8 +87,13 @@ export function montarFiscalSat(rutas: App, p: PermisosFiscales): void {
   rutas.put('/:o/fiscal/sat/config', async (c) => {
     if (!(await p.administra(c))) return err(c, 'sin_permiso', 403);
     const b = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
-    // Desde cuándo se quiere el historial lo decidió Mike (1-ene-2026): no se cambia desde aquí.
-    const r = await stub(c).sat('configurar', [{ automatico: b.automatico }]);
+    /* `desde`: desde cuándo se quiere el historial. Nació fijo en 1-ene-2026
+     * (Mike, 8-oct); el 7-nov Mike pidió los impuestos de 2022 a 2025 y lo
+     * abrió. Al recorrerlo hacia atrás, la siguiente tanda pide la LISTA
+     * desde ahí y los XML que falten se piden una vez (sat-db.ts,
+     * `importarLista`); los XML ya bajados no se vuelven a pedir. El SAT no
+     * da más de seis años, y MotorSat lo cuida. */
+    const r = await stub(c).sat('configurar', [{ automatico: b.automatico, desde: b.desde }]);
     if (esFalla(r)) return err(c, r.error, 400, r.detalle);
     return ok(c, { ...r, puede_subir_fiel: dirige(c), puede_bajar: true });
   });

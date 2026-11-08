@@ -17,7 +17,12 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.104.1 (LOS CORREOS SALEN DE suite101.app. Mike,
+ * Versión del contrato: 0.104.2 (`desde` SE PUEDE RECORRER en PUT /fiscal/sat/config.
+ * Mike, 7-nov: «hagas el ejercicio desde 2022, sacar los cálculos de impuestos
+ * de 2022, 2023, 2024, y 2025». El 1-ene-2026 era fijo; ahora quien dirige o
+ * lleva la contabilidad lo recorre y la siguiente tanda trae lo que falte.)
+ *
+ * 0.104.1 (LOS CORREOS SALEN DE suite101.app. Mike,
  * 22-oct: «los correos de suite101 me están reportando que no están
  * llegando […] cómo le hacemos para que no se vaya a correo no deseado».
  * Escogió con botones que el remitente sea de la marca y del dominio de las
@@ -1673,7 +1678,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.104.1';
+export const VERSION_CONTRATO = '0.104.2';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
