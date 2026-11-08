@@ -383,6 +383,24 @@ describe('apagar y quitar', () => {
     expect(hMx === 3 || hMx === 4, `${r.data.proxima_noche_at}: entre 3 y 4:30 de México`).toBe(true);
   });
 
+  it('«desde» se recorre por la ruta; mal escrito o en el futuro, no', async () => {
+    expect((await o('ana', '/fiscal/sat/config', { method: 'PUT', json: { desde: '2022-01-01' } })).estado).toBe(403);
+    expect((await o('mike', '/fiscal/sat/config', { method: 'PUT', json: { desde: '2022-13-01' } })).estado).toBe(400);
+    expect((await o('mike', '/fiscal/sat/config', { method: 'PUT', json: { desde: '2099-01-01' } })).estado).toBe(400);
+    const r = await o('beto', '/fiscal/sat/config', { method: 'PUT', json: { desde: '2022-01-01' } });
+    expect(r.estado).toBe(200);
+    expect(r.data.desde).toBe('2022-01-01');
+    expect((await o('mike', '/fiscal/sat')).data.desde).toBe('2022-01-01');
+    // La lista de la siguiente tanda arranca desde ahí; los XML, de donde se quedó.
+    entrega = () => ({ estado: 3, vueltas: 5, paquetes: [] });
+    await o('mike', '/fiscal/sat/bajar', { method: 'POST' });
+    const s = (await o('mike', '/fiscal/sat')).data.solicitudes.filter((x: { estado: string }) => x.estado === 'por_pedir' || x.estado === 'pedida');
+    expect(s.find((x: { clase: string }) => x.clase === 'metadata').desde).toBe('2022-01-01T00:00:00');
+    expect(s.find((x: { clase: string }) => x.clase === 'cfdi').desde > '2026-01-01T00:00:00', 'los XML no se vuelven a pedir desde el principio').toBe(true);
+    await runDurableObjectAlarm(elDO());
+    expect((await o('mike', '/fiscal/sat/config', { method: 'PUT', json: { desde: '2026-01-01' } })).estado).toBe(200);
+  });
+
   it('quitar la FIEL cancela lo pendiente y deja las facturas', async () => {
     entrega = () => ({ estado: 3, vueltas: 5, paquetes: [] });
     await o('mike', '/fiscal/sat/bajar', { method: 'POST' });
