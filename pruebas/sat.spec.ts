@@ -394,9 +394,9 @@ describe('apagar y quitar', () => {
     // La lista de la siguiente tanda arranca desde ahí; los XML, de donde se quedó.
     entrega = () => ({ estado: 3, vueltas: 5, paquetes: [] });
     await o('mike', '/fiscal/sat/bajar', { method: 'POST' });
-    const s = (await o('mike', '/fiscal/sat')).data.solicitudes.filter((x) => x.estado === 'por_pedir' || x.estado === 'pedida');
-    expect(s.find((x) => x.clase === 'metadata').desde).toBe('2022-01-01T00:00:00');
-    expect(s.find((x) => x.clase === 'cfdi').desde > '2026-01-01T00:00:00', 'los XML no se vuelven a pedir desde el principio').toBe(true);
+    const s = (await o('mike', '/fiscal/sat')).data.solicitudes.filter((x: { estado: string }) => x.estado === 'por_pedir' || x.estado === 'pedida');
+    expect(s.find((x: { clase: string }) => x.clase === 'metadata').desde).toBe('2022-01-01T00:00:00');
+    expect(s.find((x: { clase: string }) => x.clase === 'cfdi').desde > '2026-01-01T00:00:00', 'los XML no se vuelven a pedir desde el principio').toBe(true);
     await runDurableObjectAlarm(elDO());
     expect((await o('mike', '/fiscal/sat/config', { method: 'PUT', json: { desde: '2026-01-01' } })).estado).toBe(200);
   });
