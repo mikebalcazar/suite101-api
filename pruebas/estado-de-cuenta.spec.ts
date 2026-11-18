@@ -85,11 +85,12 @@ describe('el estado de cuenta', () => {
     expect(r.data.cliente.nombre).toBe('HOLCIM');
     expect(r.data.cliente.rfc, 'con lo que hace falta para un reporte').toBe('HOL010101AAA');
     expect(r.data.totales.vendido).toBe(800_000_00);
-    /* El saldo es contra el TOTAL CON IVA, como en el estado de cuenta de
-     * cada proyecto: 800,000 + 16 %. */
-    expect(r.data.totales.total).toBe(928_000_00);
+    /* 0.107.0 · SIN IVA, como el estado de cuenta de cada proyecto (Mike,
+     * 18-nov-2026): el total cotizado son los conceptos tal cual. */
+    expect(r.data.totales.sin_iva).toBe(true);
+    expect(r.data.totales.total).toBe(800_000_00);
     expect(r.data.totales.cobrado).toBe(0);
-    expect(r.data.totales.saldo).toBe(928_000_00);
+    expect(r.data.totales.saldo).toBe(800_000_00);
     expect(r.data.totales.por_cargar).toBe(0);
   });
 
@@ -100,9 +101,9 @@ describe('el estado de cuenta', () => {
     const r = await o('mike', `/clientes/${holcim}/estado-de-cuenta`);
     const norte = r.data.proyectos.find((p: any) => p.nombre === 'Planta Norte');
     expect(norte.precio_venta).toBe(500_000_00);
-    expect(norte.total).toBe(580_000_00);
+    expect(norte.total).toBe(500_000_00);
     expect(norte.cobrado).toBe(200_000_00);
-    expect(norte.saldo).toBe(380_000_00);
+    expect(norte.saldo).toBe(300_000_00);
     // Lo cotizado viaja con él: sus conceptos, agrupados.
     expect(norte.grupos).toHaveLength(1);
     expect(norte.grupos[0].conceptos[0]).toMatchObject({ descripcion: 'Alcance', monto: 500_000_00 });
@@ -121,8 +122,8 @@ describe('el estado de cuenta', () => {
     expect(r.data.otros_pagos, 'sale aparte, con su renglón').toHaveLength(1);
     expect(r.data.totales.sin_proyecto).toBe(80_000_00);
     expect(r.data.totales.cobrado, '200,000 + 50,000 + 80,000').toBe(330_000_00);
-    // (580,000 − 200,000) + (348,000 − 50,000) − 80,000
-    expect(r.data.totales.saldo).toBe(598_000_00);
+    // (500,000 − 200,000) + (300,000 − 50,000) − 80,000, todo sin IVA
+    expect(r.data.totales.saldo).toBe(470_000_00);
   });
 
   it('el saldo global ES la suma de los renglones que se enseñan', async () => {
@@ -131,7 +132,7 @@ describe('el estado de cuenta', () => {
     const r = await o('mike', `/clientes/${holcim}/estado-de-cuenta`);
     const d = r.data;
     const sumaProyectos = d.proyectos.reduce((t: number, p: any) => t + p.cobrado, 0);
-    const sumaOtros = d.otros_pagos.reduce((t: number, g: any) => t + g.monto, 0);
+    const sumaOtros = d.otros_pagos.reduce((t: number, g: any) => t + g.sin_iva, 0);
     expect(sumaProyectos + sumaOtros).toBe(d.totales.cobrado);
     expect(d.proyectos.reduce((t: number, p: any) => t + p.precio_venta, 0)).toBe(d.totales.vendido);
     const conPrecio = d.proyectos.filter((p: any) => !p.precio_por_cargar);
@@ -139,7 +140,7 @@ describe('el estado de cuenta', () => {
     expect(conPrecio.reduce((t: number, p: any) => t + p.saldo, 0) - d.totales.sin_proyecto).toBe(d.totales.saldo);
     // Y renglón por renglón: el cobrado de un proyecto es la suma de SUS pagos.
     for (const p of d.proyectos) {
-      expect(p.pagos.reduce((t: number, g: any) => t + g.monto, 0), `los pagos de ${p.nombre}`).toBe(p.cobrado);
+      expect(p.pagos.reduce((t: number, g: any) => t + g.sin_iva, 0), `los pagos de ${p.nombre}`).toBe(p.cobrado);
       if (!p.precio_por_cargar) expect(p.total - p.cobrado).toBe(p.saldo);
     }
   });
@@ -175,7 +176,21 @@ describe('el estado de cuenta', () => {
     expect(sur.cobrado).toBe(10_000_00);
     expect(r.data.totales.por_cargar).toBe(1);
     expect(r.data.totales.cobrado, 'lo cobrado sí suma').toBe(340_000_00);
-    expect(r.data.totales.saldo, 'el saldo no se mueve: no hay contra qué restar').toBe(598_000_00);
+    expect(r.data.totales.saldo, 'el saldo no se mueve: no hay contra qué restar').toBe(470_000_00);
+  });
+
+  it('0.107.0 · un cobro facturado cuenta su subtotal; el IVA cobrado va aparte', async () => {
+    await o('mike', '/movimientos', { method: 'POST', json: {
+      negocio_id: negocio, tipo: 'ingreso', monto: 11_600_00, fecha: '2026-04-10', facturado: true, subtotal: 10_000_00, iva: 1_600_00,
+      cuenta_id: cuenta, proyecto_id: casaUno, contraparte_tipo: 'cliente', contraparte_id: holcim, descripcion: 'Estimación',
+    } });
+    const r = await o('mike', `/clientes/${holcim}/estado-de-cuenta`);
+    const norte = r.data.proyectos.find((p: any) => p.nombre === 'Planta Norte');
+    expect(norte.cobrado).toBe(210_000_00);
+    expect(norte.iva_cobrado).toBe(1_600_00);
+    expect(norte.saldo).toBe(290_000_00);
+    expect(r.data.totales.iva_cobrado).toBe(1_600_00);
+    expect(r.data.totales.saldo).toBe(460_000_00);
   });
 
   it('un cliente que no existe da 404, no una cuenta vacía', async () => {

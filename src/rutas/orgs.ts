@@ -618,11 +618,7 @@ rutas.get('/:o/clientes/:id/estado.xlsx', async (c) => {
       cotizado.push(['', g.cotizacion_id ? `Cotización ${g.numero}${g.folio ? ' · ' + g.folio : ''}${g.nombre ? ' · ' + g.nombre : ''}` : g.nombre]);
       for (const co of g.conceptos) cotizado.push(['', String(co.descripcion ?? ''), Number(co.cantidad ?? 1), pesos(co.precio_unitario), pesos(co.monto)]);
     }
-    if (grupos.length) {
-      cotizado.push(['', '', '', 'Subtotal', pesos(p.subtotal)]);
-      cotizado.push(['', '', '', 'IVA', pesos(p.iva)]);
-      cotizado.push(['', '', '', 'Total', pesos(p.total)]);
-    }
+    if (grupos.length) cotizado.push(['', '', '', 'Precio (sin IVA)', pesos(p.subtotal)]);
     cotizado.push([]);
   }
 
@@ -631,16 +627,18 @@ rutas.get('/:o/clientes/:id/estado.xlsx', async (c) => {
       nombre: 'Por proyecto',
       filas: [
         ...encabezado,
-        ['Proyecto', 'Estado', 'Desde', 'Total con IVA', 'Cobrado', 'Saldo'],
+        /* 0.107.0 · todo SIN IVA (Mike, 18-nov-2026); el IVA cobrado aparte. */
+        ['Proyecto', 'Estado', 'Desde', 'Precio (sin IVA)', 'Cobrado (sin IVA)', 'Saldo (sin IVA)', 'IVA cobrado'],
         ...(r.proyectos as P[]).map((p): Celda[] => [
           String(p.nombre ?? ''), String(p.estado ?? ''), String(p.fecha_inicio ?? ''),
-          p.precio_por_cargar ? 'Precio por cargar' : pesos(p.total), pesos(p.cobrado), saldoDe(p),
+          p.precio_por_cargar ? 'Precio por cargar' : pesos(p.total), pesos(p.cobrado), saldoDe(p), pesos(p.iva_cobrado),
         ]),
         ...(t.sin_proyecto ? [['Cobros sin proyecto', '', '', 0, pesos(t.sin_proyecto), -pesos(t.sin_proyecto)] as Celda[]] : []),
         [],
-        ['', '', '', 'Total cotizado', pesos(t.total)],
-        ['', '', '', 'Cobrado', pesos(t.cobrado)],
-        ['', '', '', 'Saldo', pesos(t.saldo)],
+        ['', '', '', 'Total cotizado (sin IVA)', pesos(t.total)],
+        ['', '', '', 'Cobrado (sin IVA)', pesos(t.cobrado)],
+        ['', '', '', 'Saldo (sin IVA)', pesos(t.saldo)],
+        ['', '', '', 'IVA cobrado, aparte', pesos(t.iva_cobrado)],
         ...(t.por_cargar ? [['', '', '', 'Proyectos con precio por cargar', t.por_cargar] as Celda[]] : []),
       ],
     },
@@ -656,14 +654,14 @@ rutas.get('/:o/clientes/:id/estado.xlsx', async (c) => {
       nombre: 'Cobros',
       filas: [
         ...encabezado,
-        ['Fecha', 'Proyecto', 'Concepto', 'Cuenta', 'Facturado', 'Monto'],
+        ['Fecha', 'Proyecto', 'Concepto', 'Cuenta', 'Facturado', 'Sin IVA', 'IVA', 'Monto (banco)'],
         ...cobros.map((m): Celda[] => [
           String(m.fecha ?? ''), nombres.get(String(m.proyecto_id ?? '')) ?? '', String(m.descripcion ?? ''),
-          String(m.cuenta_nombre ?? ''), m.facturado ? 'sí' : 'no', pesos(m.monto),
+          String(m.cuenta_nombre ?? ''), m.facturado ? 'sí' : 'no', pesos(m.sin_iva), pesos(m.iva), pesos(m.monto),
         ]),
         [],
-        ['', '', '', '', 'Cobrado', pesos(t.cobrado)],
-        ['', '', '', '', 'Saldo', pesos(t.saldo)],
+        ['', '', '', '', 'Cobrado', pesos(t.cobrado), pesos(t.iva_cobrado)],
+        ['', '', '', '', 'Saldo (sin IVA)', pesos(t.saldo)],
       ],
     },
   ]);
@@ -1159,24 +1157,28 @@ rutas.get('/:o/proyectos/:id/estado.xlsx', async (c) => {
         ...encabezado,
         ['Concepto', 'Cantidad', 'Precio unitario', 'Importe'],
         ...(filasConceptos.length ? filasConceptos : [['Precio por cargar'], []]),
-        ['', '', 'Subtotal', pesos(t.subtotal)],
-        ['', '', `IVA ${t.tasa_iva / 100}%`, pesos(t.iva)],
-        ['', '', 'Total', pesos(t.total)],
-        ['', '', 'Pagado', pesos(t.cobrado)],
-        ['', '', 'Saldo', saldo],
+        /* 0.107.0 · SIN IVA (Mike, 18-nov-2026): el precio son los conceptos,
+         * lo pagado son los subtotales, y el IVA cobrado va aparte. */
+        ['', '', 'Precio (sin IVA)', pesos(t.subtotal)],
+        ['', '', 'Pagado (sin IVA)', pesos(t.cobrado)],
+        ['', '', 'Saldo (sin IVA)', saldo],
+        [],
+        ['', '', 'IVA cobrado, aparte', pesos(t.iva_cobrado)],
       ],
     },
     {
       nombre: 'Pagos',
       filas: [
         ...encabezado,
-        ['Fecha', 'Concepto', 'Cuenta', 'Monto'],
+        ['Fecha', 'Concepto', 'Cuenta', 'Factura', 'Sin IVA', 'IVA', 'Monto (banco)'],
         ...r.movimientos.map((m): Celda[] => [
-          String(m.fecha ?? ''), String(m.descripcion ?? ''), String(m.cuenta_nombre ?? ''), pesos(m.monto),
+          String(m.fecha ?? ''), String(m.descripcion ?? ''), String(m.cuenta_nombre ?? ''),
+          ((m.facturas as Array<Record<string, unknown>> | undefined) ?? []).map((f) => [f.serie, f.folio].filter(Boolean).join('-') || String(f.uuid ?? '').slice(0, 8)).join(', '),
+          pesos(m.sin_iva), pesos(m.iva), pesos(m.monto),
         ]),
         [],
-        ['', '', 'Pagado', pesos(t.cobrado)],
-        ['', '', 'Saldo', saldo],
+        ['', '', '', 'Pagado', pesos(t.cobrado), pesos(t.iva_cobrado), pesos(t.cobrado_con_iva)],
+        ['', '', '', 'Saldo (sin IVA)', saldo],
       ],
     },
   ]);
@@ -1976,6 +1978,7 @@ rutas.post('/:o/:tabla', async (c) => {
   if (tabla === 'plan_pagos') { const mal = await parcialidadQueNoCuadra(c, datos, null); if (mal) return mal; }
   if (tabla === 'conceptos') { const mal = await conceptoQueNoCuadra(c, datos, true); if (mal) return mal; }
   if (tabla === 'plantillas_presupuesto') { const mal = plantillaQueNoCuadra(c, datos); if (mal) return mal; }
+  if (tabla === 'movimientos') { const mal = await desgloseQueNoCuadra(c, datos, null); if (mal) return mal; }
   { const mal = await revisarCostos(c, tabla, datos, null); if (mal) return mal; }
 
   const fila = await stub(c).crear(tabla, datos, { app: c.get('app'), usuario_id: quien.usuario_id, correo: c.get('sesion')?.correo ?? null });
@@ -1986,6 +1989,30 @@ rutas.post('/:o/:tabla', async (c) => {
  * existe, con descripción, y una cantidad que sea un número mayor que cero.
  * El precio unitario ya lo revisó `revisarDinero` (centavos, entero); puede
  * ser negativo: un descuento también es un concepto. */
+/* 0.107.0 · El desglose de un movimiento CUADRA: `subtotal + iva −
+ * retenciones = monto`. Lo pidió dash101 en el muro (18-nov-2026) después de
+ * encontrar en HOLCIM dos parcialidades que cargaban cada una el IVA completo
+ * de su factura. Sin factura no hay desglose: el subtotal es el monto y el
+ * IVA cero, y eso lo pone la API (la regla de `desglosar` desde la 0009).
+ * Sólo se revisa cuando la escritura toca el dinero: cambiar la descripción
+ * de un movimiento viejo que no cuadra no lo bloquea. */
+async function desgloseQueNoCuadra(c: Ctx, datos: Record<string, unknown>, id: string | null) {
+  if (!['monto', 'subtotal', 'iva', 'retenciones', 'facturado'].some((k) => datos[k] !== undefined)) return null;
+  const previo = id ? ((await stub(c).obtener('movimientos', id)) ?? {}) : {};
+  const m = { ...previo, ...datos } as Record<string, unknown>;
+  const facturado = m.facturado === true || m.facturado === 1;
+  if (!facturado) {
+    if (m.monto !== undefined && m.monto !== null) Object.assign(datos, { subtotal: Number(m.monto), iva: 0, retenciones: 0, tasa_iva: 0 });
+    return null;
+  }
+  if ((m.subtotal === undefined || m.subtotal === null) && (m.iva === undefined || m.iva === null)) return null;
+  const [monto, subtotal, iva, retenciones] = [m.monto, m.subtotal, m.iva, m.retenciones].map((x) => Math.round(Number(x ?? 0)));
+  if (subtotal + iva - retenciones !== monto) {
+    return err(c, 'desglose_no_cuadra', 400, { monto, subtotal, iva, retenciones, regla: 'subtotal + iva − retenciones = monto' });
+  }
+  return null;
+}
+
 async function conceptoQueNoCuadra(c: Ctx, datos: Record<string, unknown>, nuevo: boolean) {
   if (datos.cantidad !== undefined) {
     const n = Number(datos.cantidad);
@@ -2115,6 +2142,7 @@ rutas.patch('/:o/:tabla/:id', async (c) => {
   if (tabla === 'plan_pagos') { const mal = await parcialidadQueNoCuadra(c, datos, c.req.param('id')!); if (mal) return mal; }
   if (tabla === 'conceptos') { const mal = await conceptoQueNoCuadra(c, datos, false); if (mal) return mal; }
   if (tabla === 'plantillas_presupuesto') { const mal = plantillaQueNoCuadra(c, datos); if (mal) return mal; }
+  if (tabla === 'movimientos') { const mal = await desgloseQueNoCuadra(c, datos, c.req.param('id')!); if (mal) return mal; }
   { const mal = await revisarCostos(c, tabla, datos, c.req.param('id')!); if (mal) return mal; }
 
   /* 0.46.0 · Una cotización aprobada es lo que se vendió: sus piezas ya están

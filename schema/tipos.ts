@@ -17,7 +17,28 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.106.0 (LA HOJA DEL PRESUPUESTO. Mike, 18-nov, con
+ * Versión del contrato: 0.107.0 (EL ESTADO DE CUENTA DEL PROYECTO, SIN IVA.
+ * Mike, 18-nov, revisando HOLCIM (recado de dash101): «En los estados de
+ * cuenta de los proyectos, siempre haz las cuentas sin IVA y desglosa por
+ * aparte el IVA que se haya pagado o cobrado. O sea los conceptos son antes
+ * de IVA y los cobros (facturas) se contabilizan en el estado de cuenta sin
+ * IVA. El IVA es sólo para el estado de cuenta de la empresa y los
+ * movimientos.» `/estado`, `/estado-de-cuenta` del cliente, `/peek` y sus
+ * Excel: precio = Σ conceptos, cobrado = Σ subtotales, saldo = la resta; el
+ * IVA cobrado va aparte (`iva_cobrado`; `iva` dice lo mismo) y subtotal =
+ * total = precio. Cada pago trae `sin_iva`, `iva` y, en `/estado`, sus
+ * `facturas`. Cachés nuevos del proyecto (0057): cobrado_sin_iva,
+ * iva_cobrado, pagado_sin_iva, iva_pagado; `cobrado` y `pagado_prov` siguen
+ * siendo lo del banco. Importar de quote ya no le suma IVA al precio. Y el
+ * desglose de un pago es SU PARTE de cada factura, a prorrata (antes copiaba
+ * la factura entera: dos parcialidades cargaban el IVA dos veces); quitar la
+ * liga o cancelar la factura lo devuelve a «sin factura»; un movimiento
+ * facturado cuyo `subtotal + iva − retenciones` no da el monto regresa 400
+ * `desglose_no_cuadra`. Nueva: GET /fiscal/movimientos/:id/facturas, las que
+ * respaldan un pago y las que se le pueden ligar (Mike, 18-nov: «NECESITO
+ * PODER LIGAR LOS PAGOS CARGADOS NUEVOS CON LAS FACTURAS EXISTENTES»).)
+ *
+ * 0.106.0 (LA HOJA DEL PRESUPUESTO. Mike, 18-nov, con
  * botones: «Hoja dentro de dash»: el presupuesto del proyecto se edita en una
  * cuadrícula como Sheets y el total es el precio del proyecto. Y el mismo
  * día: «Sólo existirán los conceptos que se importen desde quote (…) y los
@@ -1707,7 +1728,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.106.0';
+export const VERSION_CONTRATO = '0.107.0';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
@@ -2587,6 +2608,13 @@ export interface Proyecto {
    *  POR CARGAR: `precio_venta` vale 0 pero no quiere decir $0, y no hay
    *  saldo que calcular. */
   n_conceptos: number;
+  /** 0.107.0 · cachés SIN IVA (Mike, 18-nov-2026: el estado de cuenta del
+   *  proyecto va sin IVA y el IVA aparte). `cobrado` y `pagado_prov` siguen
+   *  siendo lo que tocó el banco. Centavos. */
+  cobrado_sin_iva: number;
+  iva_cobrado: number;
+  pagado_sin_iva: number;
+  iva_pagado: number;
   creado_at: string;
   actualizado_at: string | null;
 }
@@ -2943,8 +2971,11 @@ export interface Peek {
   /** centavos */
   /** 0.105.0 · `vendido` y `saldo` sólo de los proyectos con precio;
    *  `cobrado` de todos; `por_cargar` cuántos tienen el precio por cargar. */
-  totales: { vendido: number; cobrado: number; saldo: number; avance: number; por_cargar: number };
-  pagos: Array<Pick<Movimiento, 'id' | 'fecha' | 'monto' | 'proyecto_id' | 'descripcion'>>;
+  /** 0.107.0 · SIN IVA: `cobrado` de cada proyecto y de los totales es la
+   *  suma de subtotales; `iva_cobrado` va aparte; cada pago trae `sin_iva` e
+   *  `iva` además de su `monto` (lo que tocó el banco). */
+  totales: { vendido: number; cobrado: number; saldo: number; avance: number; por_cargar: number; iva_cobrado: number; sin_iva: true };
+  pagos: Array<Pick<Movimiento, 'id' | 'fecha' | 'monto' | 'proyecto_id' | 'descripcion'> & { sin_iva: number; iva: number }>;
   /** 0.66.0 · los puntos por definir: las dudas abiertas que el taller le
    *  hizo al cliente, en todas sus obras, la más vieja primero. */
   pendientes: Array<{

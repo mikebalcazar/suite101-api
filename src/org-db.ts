@@ -69,6 +69,7 @@ import cfdiDePruebas from '../migrations/org/0053_cfdi_de_pruebas.sql';
 import requerimientosPorTipo from '../migrations/org/0054_requerimientos_por_cambio_de_tipo.sql';
 import conceptosDeCobro from '../migrations/org/0055_conceptos_de_cobro.sql';
 import plantillasDePresupuesto from '../migrations/org/0056_plantillas_de_presupuesto.sql';
+import cobradoSinIva from '../migrations/org/0057_cobrado_sin_iva.sql';
 import { MotorInversion } from './inversion-db';
 import { MotorFiscal } from './fiscal-db';
 import { MotorSat, type MemoriaSat } from './sat-db';
@@ -100,12 +101,12 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso, articulosComprados, prefacturas, cfdiDePruebas, requerimientosPorTipo, conceptosDeCobro, plantillasDePresupuesto];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso, articulosComprados, prefacturas, cfdiDePruebas, requerimientosPorTipo, conceptosDeCobro, plantillasDePresupuesto, cobradoSinIva];
 
 /** La 0027, la 0030 (y la 0054, que la repite), la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
  *  en la lista; el archivo .sql es sólo la nota que lo dice. */
-const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar' | 'facturaV2' | 'disenoDelItem' | 'cuentaDeReembolso' | 'cfdiDePruebas' | 'migrarRequerimientosPorTipo' | 'conceptosDeCobro'> = {
+const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar' | 'facturaV2' | 'disenoDelItem' | 'cuentaDeReembolso' | 'cfdiDePruebas' | 'migrarRequerimientosPorTipo' | 'conceptosDeCobro' | 'cobradoSinIva'> = {
   [MIGRACIONES.indexOf(sinNegocios)]: 'quitarNegocios',
   [MIGRACIONES.indexOf(requerimientosHuerfanos)]: 'migrarRequerimientosHuerfanos',
   [MIGRACIONES.indexOf(obrasALaSuite)]: 'migrarObrasSueltas',
@@ -120,6 +121,7 @@ const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfano
   [MIGRACIONES.indexOf(cfdiDePruebas)]: 'cfdiDePruebas',
   [MIGRACIONES.indexOf(requerimientosPorTipo)]: 'migrarRequerimientosPorTipo',
   [MIGRACIONES.indexOf(conceptosDeCobro)]: 'conceptosDeCobro',
+  [MIGRACIONES.indexOf(cobradoSinIva)]: 'cobradoSinIva',
 };
 
 /** La tabla `empresa` (0027): UN renglón, con id fijo, que es lo que antes
@@ -251,6 +253,10 @@ export interface EstadoDelProyecto {
     tasa_iva: number; iva_incluido: boolean;
     /** saldo null: el precio está por cargar y no hay contra qué restar. */
     cobrado: number; saldo: number | null; piezas: number;
+    /** 0.107.0 · El estado de cuenta del proyecto va SIN IVA: `cobrado` es la
+     *  suma de los subtotales; el IVA cobrado va aparte; lo que tocó el banco
+     *  es `cobrado_con_iva`. `sin_iva: true` lo dice para quien lo lea. */
+    iva_cobrado: number; cobrado_con_iva: number; sin_iva: true;
     precio_por_cargar: boolean;
     /** Lo que decía el proyecto antes del 18-nov-2026, mientras se carga
      *  el nuevo. null si no tenía o si ya hay conceptos. */
@@ -273,6 +279,9 @@ export interface EstadoDeCuenta {
     saldo: number;
     sin_proyecto: number;
     por_cargar: number;
+    /** 0.107.0 · Todo sin IVA: `cobrado` y `saldo` son subtotales, `iva` es
+     *  el IVA cobrado (lo mismo que `iva_cobrado`) y subtotal = total. */
+    iva_cobrado: number; sin_iva: true;
   };
 }
 /** 0.105.0 · Subtotal, IVA y total de un precio, en enteros: `tasa` en
@@ -1821,6 +1830,8 @@ export class OrgDB extends DurableObject<Env> {
 
   /** Si la base ya tiene la 0055. Se pregunta una vez: una vez que sí, ya no deja de tenerla. */
   private conceptosListos = false;
+  /** Lo mismo con la 0057 (los cachés sin IVA). */
+  private sinIvaListo = false;
 
   recalcularProyecto(proyecto_id: string): Fila | null {
     const p = this.sql.exec(`SELECT id, estado FROM proyectos WHERE id = ?`, proyecto_id).toArray()[0] as Fila | undefined;
@@ -1856,6 +1867,21 @@ export class OrgDB extends DurableObject<Env> {
       .exec(`SELECT COALESCE(SUM(monto),0) AS s FROM movimientos WHERE proyecto_id = ? AND tipo = 'egreso'`, proyecto_id)
       .one() as { s: number }).s;
     const avance = venta.n ? venta.e / 7 : 0;
+    /* 0057 · Lo mismo, sin IVA y con el IVA aparte (Mike, 18-nov-2026: «En
+     * los estados de cuenta de los proyectos, siempre haz las cuentas sin
+     * IVA y desglosa por aparte el IVA»). Sin desglose, el subtotal es el
+     * monto menos el IVA que traiga más lo retenido. */
+    if (!this.sinIvaListo) this.sinIvaListo = this.tieneColumna('proyectos', 'cobrado_sin_iva');
+    if (this.sinIvaListo) {
+      const sinIva = (tipo: string) => this.sql
+        .exec(`SELECT COALESCE(SUM(COALESCE(subtotal, monto - COALESCE(iva,0) + COALESCE(retenciones,0))),0) AS s,
+                      COALESCE(SUM(COALESCE(iva,0)),0) AS iva
+                 FROM movimientos WHERE proyecto_id = ? AND tipo = ?`, proyecto_id, tipo)
+        .one() as { s: number; iva: number };
+      const ing = sinIva('ingreso'), egr = sinIva('egreso');
+      this.sql.exec(`UPDATE proyectos SET cobrado_sin_iva = ?, iva_cobrado = ?, pagado_sin_iva = ?, iva_pagado = ? WHERE id = ?`,
+        ing.s, ing.iva, egr.s, egr.iva, proyecto_id);
+    }
 
     // Las partidas: lo pagado son los egresos del proyecto QUE SON DE LA
     // PARTIDA (0026: el egreso de una orden pagada sabe su partida), más
@@ -3404,13 +3430,15 @@ export class OrgDB extends DurableObject<Env> {
         .exec(`SELECT COUNT(*) AS n FROM cfdi_movimientos WHERE movimiento_id = ?`, args.movimiento_id)
         .one() as { n: number }).n;
       if (cuantas === 1) {
-        this.sql.exec(
-          `UPDATE movimientos SET facturado = 1, uuid_cfdi = ?, fecha_cfdi = ?, subtotal = ?, iva = ?, retenciones = ? WHERE id = ?`,
-          cfdi.uuid, cfdi.fecha, Number(cfdi.subtotal || 0), Number(cfdi.iva || 0), Number(cfdi.retenciones || 0), args.movimiento_id,
-        );
+        this.sql.exec(`UPDATE movimientos SET facturado = 1, uuid_cfdi = ?, fecha_cfdi = ? WHERE id = ?`, cfdi.uuid, cfdi.fecha, args.movimiento_id);
       } else {
         this.sql.exec(`UPDATE movimientos SET facturado = 1, uuid_cfdi = NULL WHERE id = ?`, args.movimiento_id);
       }
+      /* 0.107.0 · El desglose del pago es SU PARTE de cada factura, no la
+       * factura entera. Hasta aquí se copiaban el subtotal y el IVA completos,
+       * y dos parcialidades de un mismo CFDI cargaban el IVA dos veces (HOLCIM,
+       * 8 y 13 de agosto: $9,916.80 de más en el IVA del mes). */
+      this.repartirDesglose(args.movimiento_id);
     });
 
     const aplicado_total = (this.sql
@@ -3421,6 +3449,40 @@ export class OrgDB extends DurableObject<Env> {
 
   /** Cancelar una factura. NO se borra: sale del IVA del mes y se queda a la
    *  vista en su lista. Un renglón borrado es un hueco que nadie explica. */
+  /** 0.107.0 · El desglose de un pago sale de las facturas vigentes que lo
+   *  respaldan, A PRORRATA de lo que se le aplicó a cada una: de un CFDI de
+   *  $71,896.80 con $9,916.80 de IVA, una parcialidad de $59,914 se lleva
+   *  $8,264 de IVA y su subtotal es $51,650. Lo que el pago trae de más que
+   *  ninguna factura cubre no lleva IVA. Así `subtotal + iva − retenciones`
+   *  es el monto, siempre. Sin facturas vigentes, el pago queda sin factura:
+   *  subtotal = monto, IVA 0 (la regla de `desglosar`). Después se
+   *  recalcula el proyecto: sus cachés sin IVA salen de aquí. */
+  repartirDesglose(movimiento_id: string): void {
+    const m = this.sql.exec(`SELECT id, monto, proyecto_id FROM movimientos WHERE id = ?`, movimiento_id).toArray()[0] as Fila | undefined;
+    if (!m) return;
+    const monto = Number(m.monto || 0);
+    const ligas = this.sql.exec(
+      `SELECT lm.monto_aplicado, c.iva, c.retenciones, c.total FROM cfdi_movimientos lm JOIN cfdi c ON c.id = lm.cfdi_id
+        WHERE lm.movimiento_id = ? AND c.estado = 'vigente'`, movimiento_id,
+    ).toArray() as Fila[];
+    if (!ligas.length) {
+      this.sql.exec(`UPDATE movimientos SET subtotal = ?, iva = 0, retenciones = 0, tasa_iva = 0 WHERE id = ?`, monto, movimiento_id);
+    } else {
+      let iva = 0, ret = 0;
+      for (const l of ligas) {
+        const total = Number(l.total || 0);
+        if (total <= 0) continue;
+        const parte = Math.min(Number(l.monto_aplicado || 0), total) / total;
+        iva += Math.round(Number(l.iva || 0) * parte);
+        ret += Math.round(Number(l.retenciones || 0) * parte);
+      }
+      const subtotal = monto - iva + ret;
+      const tasa = subtotal > 0 ? Math.round((iva * 10000) / subtotal) : 0;
+      this.sql.exec(`UPDATE movimientos SET subtotal = ?, iva = ?, retenciones = ?, tasa_iva = ? WHERE id = ?`, subtotal, iva, ret, tasa, movimiento_id);
+    }
+    if (m.proyecto_id) this.recalcularProyecto(String(m.proyecto_id));
+  }
+
   cancelarCfdi(id: string): Fila | { error: string } {
     const cfdi = this.leerInterna('cfdi', id);
     if (!cfdi) return { error: 'cfdi_desconocido' };
@@ -3437,6 +3499,8 @@ export class OrgDB extends DurableObject<Env> {
         if (vivas === 0) {
           this.sql.exec(`UPDATE movimientos SET facturado = 0, uuid_cfdi = NULL, fecha_cfdi = NULL WHERE id = ?`, l.movimiento_id);
         }
+        // 0.107.0 · Su IVA era la parte de esta factura: se vuelve a repartir.
+        this.repartirDesglose(String(l.movimiento_id));
       }
     });
     return this.leerInterna('cfdi', id)!;
@@ -3451,10 +3515,14 @@ export class OrgDB extends DurableObject<Env> {
     const mov = this.obtener('movimientos', args.movimiento_id);
     if (!mov) return { error: 'movimiento_desconocido' };
     if (!args.facturado) {
+      /* 0.107.0 · Sin factura no hay desglose: el subtotal vuelve a ser el
+       * monto y el IVA cero. Antes se quedaba el IVA de la factura que ya no
+       * está, y el estado de cuenta sin IVA lo habría restado. */
       this.sql.exec(
-        `UPDATE movimientos SET facturado = 0, uuid_cfdi = NULL, fecha_cfdi = NULL WHERE id = ?`,
+        `UPDATE movimientos SET facturado = 0, uuid_cfdi = NULL, fecha_cfdi = NULL, subtotal = monto, iva = 0, retenciones = 0, tasa_iva = 0 WHERE id = ?`,
         args.movimiento_id,
       );
+      if (mov.proyecto_id) this.recalcularProyecto(String(mov.proyecto_id));
       return this.obtener('movimientos', args.movimiento_id)!;
     }
     const monto = Number(mov.monto || 0);
@@ -3466,6 +3534,7 @@ export class OrgDB extends DurableObject<Env> {
       d.subtotal, d.iva, d.tasa_iva, Math.round(Number(args.retenciones ?? 0)) || 0,
       args.uuid_cfdi ?? null, args.fecha_cfdi ?? null, args.forma_pago ?? null, args.movimiento_id,
     );
+    if (mov.proyecto_id) this.recalcularProyecto(String(mov.proyecto_id));
     return this.obtener('movimientos', args.movimiento_id)!;
   }
 
@@ -4078,6 +4147,16 @@ export class OrgDB extends DurableObject<Env> {
       if (!this.tieneColumna(tabla, columna)) this.sql.exec(`ALTER TABLE ${tabla} ADD COLUMN ${columna} ${tipo}`);
     }
     this.sql.exec(conceptosDeCobro.replace(/^ALTER TABLE .*$/gm, ''));
+  }
+
+  /** 0057, en código: los cachés sin IVA del proyecto (0.107.0). Las cuatro
+   *  columnas se agregan sólo si faltan; el llenado es repetible. */
+  private cobradoSinIva(): void {
+    for (const m of cobradoSinIva.matchAll(/^ALTER TABLE (\w+) ADD COLUMN (\w+) (.+);$/gm)) {
+      const [, tabla, columna, tipo] = m;
+      if (!this.tieneColumna(tabla, columna)) this.sql.exec(`ALTER TABLE ${tabla} ADD COLUMN ${columna} ${tipo}`);
+    }
+    this.sql.exec(cobradoSinIva.replace(/^ALTER TABLE .*$/gm, ''));
   }
 
   /** 0048, en código: la factura nueva, segunda vuelta. Misma forma que la 0047. */
@@ -5851,6 +5930,7 @@ export class OrgDB extends DurableObject<Env> {
     const pagos = this.sql
       .exec(
         `SELECT m.id, m.fecha, m.monto, m.proyecto_id, m.descripcion, m.facturado, m.uuid_cfdi,
+                COALESCE(m.subtotal, m.monto - COALESCE(m.iva,0) + COALESCE(m.retenciones,0)) AS sin_iva, COALESCE(m.iva,0) AS iva,
                 m.cuenta_id, c.nombre AS cuenta_nombre
          FROM movimientos m
          LEFT JOIN proyectos p ON p.id = m.proyecto_id
@@ -5875,18 +5955,25 @@ export class OrgDB extends DurableObject<Env> {
      * por proyecto, para que los dos documentos digan lo mismo. Un proyecto
      * con el precio por cargar enseña lo cobrado pero no tiene saldo (Mike,
      * 18-nov-2026: «Todos a cero de una vez»). */
+    /* 0.107.0 · SIN IVA, como el estado de cuenta por proyecto (Mike,
+     * 18-nov-2026: «los conceptos son antes de IVA y los cobros (facturas) se
+     * contabilizan en el estado de cuenta sin IVA»). subtotal = total =
+     * precio; `iva` es el IVA que se cobró, aparte; el saldo es precio menos
+     * lo cobrado sin IVA. */
     const conSaldo = proyectos.map((p) => {
       const suyosPagos = porProyecto.get(String(p.id)) ?? [];
-      const cobrado = suyosPagos.reduce((t, g) => t + Number(g.monto || 0), 0);
+      const cobrado = suyosPagos.reduce((t, g) => t + Number(g.sin_iva || 0), 0);
+      const iva_cobrado = suyosPagos.reduce((t, g) => t + Number(g.iva || 0), 0);
       const porCargar = Number(p.n_conceptos ?? 0) === 0;
-      const incluido = Number(p.iva_incluido ?? 0) === 1;
-      const d = desglosarIva(Number(p.precio_venta || 0), Number(p.tasa_iva ?? 1600), incluido);
+      const precio = Number(p.precio_venta || 0);
+      const d = { subtotal: precio, iva: iva_cobrado, total: precio };
       return {
         ...p,
-        iva_incluido: incluido,
+        iva_incluido: false,
         precio_por_cargar: porCargar,
         ...d,
         cobrado,
+        iva_cobrado,
         saldo: porCargar ? null : d.total - cobrado,
         grupos: this.conceptosDelProyecto(String(p.id)).grupos,
         pagos: suyosPagos,
@@ -5895,17 +5982,19 @@ export class OrgDB extends DurableObject<Env> {
 
     const conPrecio = conSaldo.filter((p) => !p.precio_por_cargar);
     const vendido = proyectos.reduce((t, p) => t + Number(p.precio_venta || 0), 0);
-    const sin_proyecto = otros_pagos.reduce((t, g) => t + Number(g.monto || 0), 0);
+    const sin_proyecto = otros_pagos.reduce((t, g) => t + Number(g.sin_iva || 0), 0);
     const cobrado = conSaldo.reduce((t, p) => t + Number(p.cobrado), 0) + sin_proyecto;
-    const suma = (k: 'subtotal' | 'iva' | 'total') => conPrecio.reduce((t, p) => t + Number(p[k] || 0), 0);
+    const iva_cobrado = conSaldo.reduce((t, p) => t + Number(p.iva_cobrado), 0) + otros_pagos.reduce((t, g) => t + Number(g.iva || 0), 0);
+    const suma = (k: 'subtotal' | 'total') => conPrecio.reduce((t, p) => t + Number(p[k] || 0), 0);
     const saldo = conPrecio.reduce((t, p) => t + Number(p.saldo || 0), 0) - sin_proyecto;
 
     return {
       generado_at: ahora(),
       cliente, proyectos: conSaldo, otros_pagos,
       totales: {
-        vendido, subtotal: suma('subtotal'), iva: suma('iva'), total: suma('total'),
+        vendido, subtotal: suma('subtotal'), iva: iva_cobrado, total: suma('total'),
         cobrado, saldo, sin_proyecto, por_cargar: conSaldo.length - conPrecio.length,
+        iva_cobrado, sin_iva: true,
       },
     };
   }
@@ -6034,8 +6123,11 @@ export class OrgDB extends DurableObject<Env> {
     if (!r || !r.lineas.length) {
       return { ok: false, error: 'sin_precios', detalle: { motivo: 'esa cotización no trae el precio de sus renglones: ábrela en quote101 y haz cualquier cambio para que lo guarde' } };
     }
+    /* 0.107.0 · Los conceptos son antes de IVA, siempre (Mike, 18-nov-2026).
+     * Hasta aquí, con «IVA incluido» se le sumaba el IVA al precio de quote;
+     * ya no: el precio del renglón entra tal cual, sin IVA. */
     const tasa = Math.max(0, Math.trunc(Number(p.tasa_iva ?? 1600)));
-    const conIva = Number(p.iva_incluido ?? 0) === 1;
+    const conIva = false;
     const folio = (cot.folio as string | null) ?? null;
     const nombreCot = String(datos.nombre ?? '') || 'Cotización';
     const creados: Fila[] = [];
@@ -6198,9 +6290,28 @@ export class OrgDB extends DurableObject<Env> {
       partida: co.cotizacion_folio ?? null, etapa: null, fecha_entrega: null, producto_id: null, producto_nombre: null,
     }));
 
-    const movimientos = this.sql
+    /* 0.107.0 · Cada pago con su cifra SIN IVA (`sin_iva`) y su IVA aparte,
+     * y las facturas vigentes que lo respaldan: el estado de cuenta las enseña
+     * y desde ahí se abre cada una (Mike, 18-nov-2026: «poder ver la factura o
+     * el movimiento en detalle si doy clic sobre él»). */
+    const facturasDe = new Map<string, Fila[]>();
+    for (const f of this.sql.exec(
+      `SELECT lm.movimiento_id, lm.monto_aplicado, k.id, k.uuid, k.serie, k.folio, k.fecha, k.total, k.subtotal, k.iva, k.estado
+         FROM cfdi_movimientos lm JOIN cfdi k ON k.id = lm.cfdi_id
+         JOIN movimientos m ON m.id = lm.movimiento_id
+        WHERE m.proyecto_id = ? AND m.tipo = 'ingreso' AND k.estado = 'vigente'
+        ORDER BY k.fecha`, proyecto_id,
+    ).toArray() as Fila[]) {
+      const { movimiento_id, ...factura } = f;
+      const lista = facturasDe.get(String(movimiento_id)) ?? [];
+      lista.push(factura);
+      facturasDe.set(String(movimiento_id), lista);
+    }
+    const movimientos = (this.sql
       .exec(
         `SELECT m.id, m.fecha, m.monto, m.descripcion, m.facturado, m.requiere_factura, m.uuid_cfdi,
+                COALESCE(m.subtotal, m.monto - COALESCE(m.iva,0) + COALESCE(m.retenciones,0)) AS sin_iva,
+                COALESCE(m.iva,0) AS iva, COALESCE(m.retenciones,0) AS retenciones,
                 c.nombre AS cuenta_nombre
          FROM movimientos m
          LEFT JOIN cuentas c ON c.id = m.cuenta_id
@@ -6208,7 +6319,7 @@ export class OrgDB extends DurableObject<Env> {
          ORDER BY m.fecha, m.creado_at`,
         proyecto_id,
       )
-      .toArray() as Fila[];
+      .toArray() as Fila[]).map((m): Fila => ({ ...m, facturas: facturasDe.get(String(m.id)) ?? [] }));
 
     /* El precio de venta es el caché que ya mantiene `recalcularProyecto`, y
      * es por construcción la suma de los conceptos. No se vuelve a sumar aquí
@@ -6218,9 +6329,21 @@ export class OrgDB extends DurableObject<Env> {
      * flotante deja centavos de diferencia entre el PDF y el Excel. */
     const venta = Number(completo.precio_venta ?? 0);
     const tasa = Math.max(0, Math.trunc(Number(completo.tasa_iva ?? 1600)));
-    const incluido = Number(completo.iva_incluido ?? 0) === 1;
-    const { subtotal, iva, total } = desglosarIva(venta, tasa, incluido);
-    const cobrado = movimientos.reduce((t, m) => t + Number(m.monto ?? 0), 0);
+    /* 0.107.0 · SIN IVA. Mike, 18-nov-2026: «En los estados de cuenta de los
+     * proyectos, siempre haz las cuentas sin IVA y desglosa por aparte el IVA
+     * que se haya pagado o cobrado. O sea los conceptos son antes de IVA y
+     * los cobros (facturas) se contabilizan en el estado de cuenta sin IVA.»
+     * El precio son los conceptos tal cual; lo cobrado es la suma de los
+     * subtotales; el saldo es la resta de esas dos. El IVA no se calcula
+     * sobre el precio: es el que de verdad se cobró, y va aparte.
+     * `subtotal`, `iva` y `total` conservan su nombre para que nadie truene,
+     * con lo que dicen ahora: subtotal = total = precio; iva = IVA cobrado. */
+    const subtotal = venta, total = venta;
+    const cobrado = movimientos.reduce((t, m) => t + Number(m.sin_iva ?? 0), 0);
+    const iva_cobrado = movimientos.reduce((t, m) => t + Number(m.iva ?? 0), 0);
+    const cobrado_con_iva = movimientos.reduce((t, m) => t + Number(m.monto ?? 0), 0);
+    const iva = iva_cobrado;
+    const incluido = false;
     const porCargar = Number(completo.n_conceptos ?? 0) === 0;
     const anterior = porCargar
       ? ((this.sql.exec(`SELECT precio_venta FROM precios_anteriores WHERE proyecto_id = ?`, proyecto_id).toArray()[0] as { precio_venta: number } | undefined)?.precio_venta ?? null)
@@ -6232,6 +6355,7 @@ export class OrgDB extends DurableObject<Env> {
       totales: {
         subtotal, iva, total, tasa_iva: tasa, iva_incluido: incluido,
         cobrado, saldo: porCargar ? null : total - cobrado,
+        iva_cobrado, cobrado_con_iva, sin_iva: true,
         piezas: conceptos.length,
         precio_por_cargar: porCargar,
         precio_anterior: anterior,
@@ -6263,7 +6387,9 @@ export class OrgDB extends DurableObject<Env> {
     const proyectos = this.sql
       .exec(
         `SELECT id, cliente_id, nombre, descripcion, estado, fecha_inicio, fecha_fin_estimada,
-                fecha_cierre, precio_venta, n_conceptos, cobrado, avance, creado_at, actualizado_at
+                fecha_cierre, precio_venta, n_conceptos,
+                /* 0.107.0 · lo que el cliente ve va SIN IVA, con el IVA aparte. */
+                cobrado_sin_iva AS cobrado, iva_cobrado, avance, creado_at, actualizado_at
          FROM proyectos WHERE cliente_id = ? ORDER BY creado_at DESC`,
         cliente_id,
       )
@@ -6330,7 +6456,8 @@ export class OrgDB extends DurableObject<Env> {
 
     const pagos = this.sql
       .exec(
-        `SELECT m.id, m.fecha, m.monto, m.proyecto_id, m.descripcion
+        `SELECT m.id, m.fecha, m.monto, m.proyecto_id, m.descripcion,
+                COALESCE(m.subtotal, m.monto - COALESCE(m.iva,0) + COALESCE(m.retenciones,0)) AS sin_iva, COALESCE(m.iva,0) AS iva
          FROM movimientos m JOIN proyectos p ON p.id = m.proyecto_id
          WHERE p.cliente_id = ? AND m.tipo = 'ingreso' ORDER BY m.fecha DESC LIMIT 200`,
         cliente_id,
@@ -6340,7 +6467,11 @@ export class OrgDB extends DurableObject<Env> {
     return {
       cliente,
       proyectos: conItems,
-      totales: { vendido, cobrado, saldo: vendido - cobradoConPrecio, avance, por_cargar: proyectos.length - conPrecio.length },
+      totales: {
+        vendido, cobrado, saldo: vendido - cobradoConPrecio, avance, por_cargar: proyectos.length - conPrecio.length,
+        /* 0.107.0 · todo sin IVA; el IVA que se cobró va aparte. */
+        iva_cobrado: proyectos.reduce((s, p) => s + Number(p.iva_cobrado || 0), 0), sin_iva: true,
+      },
       pagos,
       pendientes,
     } as unknown as Peek;
@@ -6466,7 +6597,7 @@ export class OrgDB extends DurableObject<Env> {
    * entrada por RPC y la lista de lo que se puede llamar. Ligar y cancelar
    * se le prestan: son de la 0009 y siguen viviendo aquí. */
   private static readonly OPS_FISCAL: ReadonlySet<string> = new Set([
-    'importar', 'ponerArchivo', 'ponerArchivos', 'detalle', 'sugerencias', 'pagosPosibles', 'componer', 'desligar', 'tratar',
+    'importar', 'ponerArchivo', 'ponerArchivos', 'detalle', 'sugerencias', 'pagosPosibles', 'componer', 'desligar', 'facturasDelMovimiento', 'tratar',
     'porVerificar', 'anotarSat', 'estadoDeCuenta', 'impuestos',
     'ejercicio', 'guardarEjercicio', 'pagos', 'registrarPago', 'borrarPago', 'config', 'guardarConfig',
   ]);
@@ -6479,6 +6610,7 @@ export class OrgDB extends DurableObject<Env> {
       rfcEmpresa: () => String((this.sql.exec(`SELECT rfc FROM empresa WHERE id = 'empresa'`).toArray()[0] as Fila | undefined)?.rfc ?? ''),
       ligar: (a) => this.ligarCfdi(a),
       cancelar: (id) => this.cancelarCfdi(id),
+      repartir: (id) => this.repartirDesglose(id),
     }) as unknown as Record<string, (...a: unknown[]) => unknown>;
     return motor[op](...args);
   }

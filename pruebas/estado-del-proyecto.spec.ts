@@ -173,50 +173,39 @@ describe('lo que dice el papel', () => {
   });
 });
 
-describe('el desglose de IVA', () => {
-  it('«+ IVA» es como nace: lo capturado es el subtotal', async () => {
-    const r = await estado();
-    const t = r.data.totales;
-    expect(t.iva_incluido).toBe(false);
-    expect(t.tasa_iva).toBe(1600);
+/* 0.107.0 · SIN IVA. Mike, 18-nov-2026: «En los estados de cuenta de los
+ * proyectos, siempre haz las cuentas sin IVA y desglosa por aparte el IVA que
+ * se haya pagado o cobrado. O sea los conceptos son antes de IVA y los cobros
+ * (facturas) se contabilizan en el estado de cuenta sin IVA.» Hasta 0.106 el
+ * papel le sumaba el IVA al precio y restaba lo que tocó el banco. */
+describe('sin IVA: el precio son los conceptos y el IVA va aparte', () => {
+  it('el precio no lleva IVA: subtotal = total = la suma de los conceptos', async () => {
+    const t = (await estado()).data.totales;
+    expect(t.sin_iva).toBe(true);
     expect(t.subtotal).toBe(111_250_00);
-    expect(t.iva).toBe(17_800_00);
-    expect(t.total).toBe(129_050_00);
-    expect(t.subtotal + t.iva).toBe(t.total);
+    expect(t.total).toBe(111_250_00);
+    expect(t.iva, 'sin cobros, no hay IVA cobrado').toBe(0);
   });
 
-  it('«IVA incluido» desglosa hacia atrás y cuadra al centavo', async () => {
+  it('el modo «IVA incluido» del proyecto ya no cambia el papel', async () => {
     expect((await modoIva(true)).estado).toBe(200);
     const t = (await estado()).data.totales;
-    expect(t.iva_incluido).toBe(true);
-    expect(t.total, 'el total es lo capturado').toBe(111_250_00);
-    expect(t.subtotal + t.iva).toBe(t.total);
-    expect(t.subtotal).toBe(Math.round((111_250_00 * 10000) / 11600));
+    expect(t.total).toBe(111_250_00);
+    expect(t.iva_incluido).toBe(false);
+    await modoIva(false);
   });
 
   it('cambiar el modo NO mueve un peso de lo guardado', async () => {
     const antes = Number((await o('mike', `/proyectos/${proyecto}`)).data.precio_venta);
+    await modoIva(true);
     await modoIva(false);
     expect(Number((await o('mike', `/proyectos/${proyecto}`)).data.precio_venta)).toBe(antes);
-    const items = await o('mike', `/items?proyecto_id=${proyecto}`);
-    expect(items.data.filas.reduce((t: number, i: any) => t + Number(i.monto), 0)).toBe(antes + 90_000_00);
-  });
-
-  it('al 0 % las dos lecturas dan lo mismo', async () => {
-    await modoIva(false, 0);
-    const a = (await estado()).data.totales;
-    await modoIva(true, 0);
-    const b = (await estado()).data.totales;
-    expect(a.iva).toBe(0);
-    expect(b.iva).toBe(0);
-    expect(a.total).toBe(b.total);
-    expect(a.subtotal).toBe(b.subtotal);
-    await modoIva(false, 1600);
   });
 });
 
-describe('los pagos y el saldo', () => {
+describe('los pagos y el saldo, sin IVA', () => {
   beforeAll(async () => {
+    // Sin factura: el subtotal es el monto.
     await o('mike', '/movimientos', { method: 'POST', json: {
       negocio_id: negocio, tipo: 'ingreso', monto: 50_000_00, fecha: '2026-03-01',
       cuenta_id: cuenta, proyecto_id: proyecto, contraparte_tipo: 'cliente', contraparte_id: cliente,
@@ -227,19 +216,41 @@ describe('los pagos y el saldo', () => {
       cuenta_id: cuenta, proyecto_id: proyecto, contraparte_tipo: 'proveedor',
       descripcion: 'Herrería — ESTO NO LO VE EL CLIENTE',
     } });
+    // Con factura: $11,600 son $10,000 + $1,600 de IVA.
+    await o('mike', '/movimientos', { method: 'POST', json: {
+      negocio_id: negocio, tipo: 'ingreso', monto: 11_600_00, fecha: '2026-03-10', facturado: true, subtotal: 10_000_00, iva: 1_600_00,
+      cuenta_id: cuenta, proyecto_id: proyecto, contraparte_tipo: 'cliente', contraparte_id: cliente,
+      descripcion: 'Estimación 1',
+    } });
   });
 
   it('sólo van ingresos: el egreso al proveedor no viaja', async () => {
     const r = await estado();
-    expect(r.data.movimientos).toHaveLength(1);
+    expect(r.data.movimientos).toHaveLength(2);
     expect(JSON.stringify(r.data.movimientos)).not.toContain('NO LO VE EL CLIENTE');
   });
 
-  it('el saldo es contra el TOTAL con IVA, que es lo que va a pagar', async () => {
+  it('cada pago trae su cifra sin IVA y su IVA aparte', async () => {
+    const m = (await estado()).data.movimientos;
+    expect(m.map((x: any) => [x.monto, x.sin_iva, x.iva])).toEqual([[50_000_00, 50_000_00, 0], [11_600_00, 10_000_00, 1_600_00]]);
+  });
+
+  it('lo cobrado es la suma de subtotales y el saldo es precio menos eso; el IVA cobrado, aparte', async () => {
     const t = (await estado()).data.totales;
-    expect(t.cobrado).toBe(50_000_00);
-    expect(t.saldo).toBe(t.total - 50_000_00);
-    expect(t.saldo).toBe(129_050_00 - 50_000_00);
+    expect(t.cobrado).toBe(60_000_00);
+    expect(t.saldo).toBe(111_250_00 - 60_000_00);
+    expect(t.iva_cobrado).toBe(1_600_00);
+    expect(t.iva).toBe(1_600_00);
+    expect(t.cobrado_con_iva, 'lo que tocó el banco').toBe(61_600_00);
+  });
+
+  it('el proyecto guarda lo mismo en sus cachés; `cobrado` sigue siendo lo del banco', async () => {
+    const p = (await o('mike', `/proyectos/${proyecto}`)).data;
+    expect(p.cobrado).toBe(61_600_00);
+    expect(p.cobrado_sin_iva).toBe(60_000_00);
+    expect(p.iva_cobrado).toBe(1_600_00);
+    expect(p.pagado_sin_iva).toBe(9_000_00);
+    expect(p.iva_pagado).toBe(0);
   });
 });
 
@@ -261,8 +272,8 @@ describe('quién lo abre', () => {
   it('el cliente abre el estado de SU proyecto', async () => {
     const r = await o('holcim', `/proyectos/${proyecto}/estado`, { app: 'peek101' });
     expect(r.estado, JSON.stringify(r)).toBe(200);
-    expect(r.data.totales.total).toBe(129_050_00);
-    expect(r.data.movimientos).toHaveLength(1);
+    expect(r.data.totales.total).toBe(111_250_00);
+    expect(r.data.movimientos).toHaveLength(2);
   });
 
   it('y NO el de otro cliente', async () => {

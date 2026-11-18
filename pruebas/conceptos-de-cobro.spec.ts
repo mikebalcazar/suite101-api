@@ -299,15 +299,15 @@ describe('importar de quote101: un concepto por renglón', () => {
     expect((await importar('no-existe')).estado).toBe(404);
   });
 
-  it('con el IVA incluido, el precio de quote (sin IVA) se copia con su IVA', async () => {
+  it('0.107.0 · los conceptos son antes de IVA: aunque el proyecto diga «IVA incluido», el precio de quote entra tal cual', async () => {
     const conIva = await crea('/proyectos', { cliente_id: cliente, nombre: 'Bodega con IVA' });
     await o('mike', `/proyectos/${conIva}`, { method: 'PATCH', json: { iva_incluido: 1, tasa_iva: 1600 } });
     const c = await crea('/cotizaciones', { cliente_id: cliente, total: 0, datos: { nombre: 'Bodega', proyecto_id: conIva, versiones: [], renglones: renglones([['Anaquel', 2, 10_000_00]]) } }, 'cotizador101');
     const r = await o('mike', `/proyectos/${conIva}/conceptos/importar`, { method: 'POST', json: { cotizacion_id: c } });
-    expect(r.data.conceptos[0]).toMatchObject({ precio_unitario: 11_600_00, monto: 23_200_00 });
+    expect(r.data.conceptos[0]).toMatchObject({ precio_unitario: 10_000_00, monto: 20_000_00 });
     const e = (await o('mike', `/proyectos/${conIva}/estado`)).data.totales;
     expect(e.subtotal).toBe(20_000_00);
-    expect(e.total).toBe(23_200_00);
+    expect(e.total).toBe(20_000_00);
   });
 
   it('una aprobada antes, sin precios escritos, se arma con el precio de sus piezas', async () => {

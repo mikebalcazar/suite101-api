@@ -228,6 +228,16 @@ export function montarFiscal(rutas: App): void {
     return ok(c, r);
   });
 
+  /* 0.107.0 · Las facturas de un pago: las que ya lo respaldan y las que se
+   * le pueden ligar (Mike, 18-nov-2026, desde el estado de cuenta del
+   * proyecto). Ligar es POST /fiscal/cfdi/:id/ligar con `monto_aplicado`. */
+  rutas.get('/:o/fiscal/movimientos/:id/facturas', async (c) => {
+    if (!puedeLeer(c)) return err(c, 'sin_permiso', 403);
+    const r = await stub(c).fiscal('facturasDelMovimiento', [c.req.param('id')!]);
+    if (esFalla(r)) return err(c, r.error, 404, r.detalle);
+    return ok(c, r);
+  });
+
   rutas.get('/:o/fiscal/sugerencias', async (c) => {
     if (!puedeLeer(c)) return err(c, 'sin_permiso', 403);
     const q = c.req.query();
