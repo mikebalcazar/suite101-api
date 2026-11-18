@@ -21,6 +21,8 @@ import { resolverHost } from './dominios';
 import { err, ok, type Vars } from './http';
 import type { Env } from './entorno';
 import { VERSION_CONTRATO } from '../schema/tipos';
+import { igualSeguro } from './lib';
+import type { ApiOrgDB } from './org-db';
 
 export { OrgDB } from './org-db';
 
@@ -137,6 +139,24 @@ app.get('/', (c) =>
     manda: 'la cookie de sesion (o Authorization: Bearer, para una app empacada) y la cabecera X-App',
   }),
 );
+
+/* 0.107.1 · Volver a repartir el IVA de los pagos ya ligados (Mike,
+ * 18-nov-2026, con botones: «Corregirlas todas»). No tiene sesión ni la
+ * necesita: la abre una llave de un solo uso que el workflow
+ * `corregir-reparto.yml` inventa, pone en el Worker y borra al terminar.
+ * Sin esa llave puesta, la ruta no existe. `?modo=corregir` escribe;
+ * cualquier otra cosa es ensayo y no toca nada. */
+app.post('/interno/:o/reparto-iva', async (c) => {
+  const llave = c.env.LLAVE_CORRECCION;
+  if (!llave || llave.length < 32 || !igualSeguro(c.req.header('X-Llave-Correccion') ?? '', llave)) {
+    return err(c, 'no_encontrado', 404);
+  }
+  const org = c.req.param('o');
+  const existe = await c.env.MASTER.prepare(`SELECT id FROM orgs WHERE id = ?`).bind(org).first();
+  if (!existe) return err(c, 'org_desconocida', 404, { org });
+  const stub = c.env.ORG.get(c.env.ORG.idFromName(org)) as unknown as ApiOrgDB;
+  return ok(c, { org, ...(await stub.corregirReparto(c.req.query('modo') !== 'corregir')) });
+});
 
 app.get('/yo', yo);
 app.route('/auth', auth);

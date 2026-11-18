@@ -57,6 +57,10 @@ export interface Env {
   ZONA_SAAS?: string;
   RESPALDO_SAAS?: string;
 
+  /** 0.107.1 · Llave de un solo uso para /interno/:o/reparto-iva. NO vive
+   *  en el Worker: el workflow `corregir-reparto.yml` la inventa al correr,
+   *  la pone, llama y la borra. Sin ella la ruta no existe (404). */
+  LLAVE_CORRECCION?: string;
   ENTORNO: string; // 'produccion' | 'staging' | 'prueba'
   /** bill101 fase D. El secreto del que se derivan las llaves con que se
    *  cifra la FIEL de cada empresa (src/fiel.ts). Si no está, nace solo en

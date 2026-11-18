@@ -232,6 +232,24 @@ export interface GrupoDeConceptos {
   importe: number;
   conceptos: Fila[];
 }
+/** 0.107.1 · Lo que dice (o hizo) `corregirReparto`. Centavos. */
+export interface CorreccionDeReparto {
+  ensayo: boolean;
+  /** Pagos con al menos una factura vigente ligada. */
+  revisados: number;
+  cambian: number;
+  movimientos: Array<{
+    id: string; fecha: string; descripcion: string; tipo: string; proyecto_id: string | null; monto: number;
+    antes: { subtotal: number; iva: number; retenciones: number; subtotal_guardado: boolean };
+    despues: { subtotal: number; iva: number; retenciones: number };
+  }>;
+  proyectos: Array<{
+    id: string; nombre: string; precio_venta: number; pagos: number;
+    antes: { cobrado_sin_iva: number; iva_cobrado: number; pagado_sin_iva: number; iva_pagado: number };
+    despues: { cobrado_sin_iva: number; iva_cobrado: number; pagado_sin_iva: number; iva_pagado: number };
+  }>;
+}
+
 export interface EstadoDelProyecto {
   generado_at: string;
   proyecto: Fila;
@@ -375,6 +393,9 @@ export interface ApiOrgDB {
   /** false si no existía; 'en_uso' si otras filas apuntan a esta (llave foránea). */
   borrar(tabla: Tabla, id: string): Promise<boolean | 'en_uso'>;
   recalcularProyecto(proyecto_id: string): Promise<Fila | null>;
+  /** 0.107.1 · Vuelve a repartir el IVA de los pagos ya ligados. `ensayo`
+   *  sólo cuenta; sin ensayo escribe y deja el antes en `reparto_corregido`. */
+  corregirReparto(ensayo: boolean): Promise<CorreccionDeReparto>;
   /** La conciliación semanal, entera o nada (B1). Sólo la llama POST /conciliaciones. */
   conciliar(args: {
     corte_at: string; usuario_id: string;
@@ -3460,27 +3481,103 @@ export class OrgDB extends DurableObject<Env> {
   repartirDesglose(movimiento_id: string): void {
     const m = this.sql.exec(`SELECT id, monto, proyecto_id FROM movimientos WHERE id = ?`, movimiento_id).toArray()[0] as Fila | undefined;
     if (!m) return;
-    const monto = Number(m.monto || 0);
+    const d = this.desgloseRepartido(movimiento_id, Number(m.monto || 0));
+    this.sql.exec(`UPDATE movimientos SET subtotal = ?, iva = ?, retenciones = ?, tasa_iva = ? WHERE id = ?`, d.subtotal, d.iva, d.retenciones, d.tasa_iva, movimiento_id);
+    if (m.proyecto_id) this.recalcularProyecto(String(m.proyecto_id));
+  }
+
+  /** El desglose que le toca a un pago por sus facturas vigentes, a
+   *  prorrata (ver `repartirDesglose`). Sin facturas: subtotal = monto. */
+  private desgloseRepartido(movimiento_id: string, monto: number): { subtotal: number; iva: number; retenciones: number; tasa_iva: number } {
     const ligas = this.sql.exec(
       `SELECT lm.monto_aplicado, c.iva, c.retenciones, c.total FROM cfdi_movimientos lm JOIN cfdi c ON c.id = lm.cfdi_id
         WHERE lm.movimiento_id = ? AND c.estado = 'vigente'`, movimiento_id,
     ).toArray() as Fila[];
-    if (!ligas.length) {
-      this.sql.exec(`UPDATE movimientos SET subtotal = ?, iva = 0, retenciones = 0, tasa_iva = 0 WHERE id = ?`, monto, movimiento_id);
-    } else {
-      let iva = 0, ret = 0;
-      for (const l of ligas) {
-        const total = Number(l.total || 0);
-        if (total <= 0) continue;
-        const parte = Math.min(Number(l.monto_aplicado || 0), total) / total;
-        iva += Math.round(Number(l.iva || 0) * parte);
-        ret += Math.round(Number(l.retenciones || 0) * parte);
-      }
-      const subtotal = monto - iva + ret;
-      const tasa = subtotal > 0 ? Math.round((iva * 10000) / subtotal) : 0;
-      this.sql.exec(`UPDATE movimientos SET subtotal = ?, iva = ?, retenciones = ?, tasa_iva = ? WHERE id = ?`, subtotal, iva, ret, tasa, movimiento_id);
+    if (!ligas.length) return { subtotal: monto, iva: 0, retenciones: 0, tasa_iva: 0 };
+    let iva = 0, ret = 0;
+    for (const l of ligas) {
+      const total = Number(l.total || 0);
+      if (total <= 0) continue;
+      const parte = Math.min(Number(l.monto_aplicado || 0), total) / total;
+      iva += Math.round(Number(l.iva || 0) * parte);
+      ret += Math.round(Number(l.retenciones || 0) * parte);
     }
-    if (m.proyecto_id) this.recalcularProyecto(String(m.proyecto_id));
+    const subtotal = monto - iva + ret;
+    return { subtotal, iva, retenciones: ret, tasa_iva: subtotal > 0 ? Math.round((iva * 10000) / subtotal) : 0 };
+  }
+
+  /** 0.107.1 · Los pagos que se ligaron ANTES de 0.107.0 se quedaron con el
+   *  desglose copiado de la factura entera: dos parcialidades de una misma
+   *  factura cargaban, cada una, todo su IVA. Mike, 18-nov-2026, con botones:
+   *  «Corregirlas todas». Sólo se tocan los pagos con al menos una factura
+   *  VIGENTE ligada: un pago marcado facturado a mano, sin CFDI, conserva el
+   *  desglose que le escribieron. `ensayo` no escribe nada: dice qué cambiaría
+   *  y en cuánto, pago por pago y proyecto por proyecto. Sin ensayo escribe
+   *  todo o nada, deja el antes de cada pago en `reparto_corregido` (para
+   *  poder explicarlo o deshacerlo) y recalcula cada proyecto una vez. */
+  corregirReparto(ensayo: boolean): CorreccionDeReparto {
+    const filas = this.sql.exec(
+      `SELECT m.id, m.fecha, m.descripcion, m.tipo, m.monto, m.subtotal, m.iva, m.retenciones, m.tasa_iva, m.proyecto_id,
+              p.nombre AS proyecto_nombre
+         FROM movimientos m LEFT JOIN proyectos p ON p.id = m.proyecto_id
+        WHERE EXISTS (SELECT 1 FROM cfdi_movimientos lm JOIN cfdi c ON c.id = lm.cfdi_id
+                       WHERE lm.movimiento_id = m.id AND c.estado = 'vigente')
+        ORDER BY m.fecha, m.id`,
+    ).toArray() as Fila[];
+    const movimientos: CorreccionDeReparto['movimientos'] = [];
+    const porProyecto = new Map<string, CorreccionDeReparto['proyectos'][number]>();
+    for (const f of filas) {
+      const monto = Number(f.monto || 0);
+      const iva = Number(f.iva || 0), ret = Number(f.retenciones || 0);
+      const subtotal = f.subtotal == null ? monto - iva + ret : Number(f.subtotal);
+      const d = this.desgloseRepartido(String(f.id), monto);
+      if (f.subtotal != null && d.subtotal === subtotal && d.iva === iva && d.retenciones === ret) continue;
+      movimientos.push({
+        id: String(f.id), fecha: String(f.fecha ?? ''), descripcion: String(f.descripcion ?? ''), tipo: String(f.tipo),
+        proyecto_id: f.proyecto_id ? String(f.proyecto_id) : null, monto,
+        antes: { subtotal, iva, retenciones: ret, subtotal_guardado: f.subtotal != null },
+        despues: { subtotal: d.subtotal, iva: d.iva, retenciones: d.retenciones },
+      });
+      if (!f.proyecto_id) continue;
+      const pid = String(f.proyecto_id);
+      let p = porProyecto.get(pid);
+      if (!p) {
+        const c = this.sql.exec(`SELECT precio_venta, cobrado_sin_iva, iva_cobrado, pagado_sin_iva, iva_pagado FROM proyectos WHERE id = ?`, pid).toArray()[0] as Fila | undefined;
+        const n = (k: string) => Number(c?.[k] || 0);
+        p = {
+          id: pid, nombre: String(f.proyecto_nombre ?? ''), precio_venta: n('precio_venta'), pagos: 0,
+          antes: { cobrado_sin_iva: n('cobrado_sin_iva'), iva_cobrado: n('iva_cobrado'), pagado_sin_iva: n('pagado_sin_iva'), iva_pagado: n('iva_pagado') },
+          despues: { cobrado_sin_iva: n('cobrado_sin_iva'), iva_cobrado: n('iva_cobrado'), pagado_sin_iva: n('pagado_sin_iva'), iva_pagado: n('iva_pagado') },
+        };
+        porProyecto.set(pid, p);
+      }
+      p.pagos++;
+      if (f.tipo === 'ingreso') { p.despues.cobrado_sin_iva += d.subtotal - subtotal; p.despues.iva_cobrado += d.iva - iva; }
+      else if (f.tipo === 'egreso') { p.despues.pagado_sin_iva += d.subtotal - subtotal; p.despues.iva_pagado += d.iva - iva; }
+    }
+    if (!ensayo && movimientos.length) {
+      const t = ahora();
+      this.ctx.storage.transactionSync(() => {
+        this.sql.exec(`CREATE TABLE IF NOT EXISTS reparto_corregido (
+          movimiento_id TEXT NOT NULL, corregido_at TEXT NOT NULL,
+          subtotal_antes INTEGER, iva_antes INTEGER, retenciones_antes INTEGER, tasa_iva_antes INTEGER,
+          subtotal_despues INTEGER NOT NULL, iva_despues INTEGER NOT NULL, retenciones_despues INTEGER NOT NULL)`);
+        for (const m of movimientos) {
+          const f = filas.find((x) => String(x.id) === m.id)!;
+          const d = this.desgloseRepartido(m.id, m.monto);
+          this.sql.exec(`INSERT INTO reparto_corregido VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            m.id, t, f.subtotal ?? null, f.iva ?? null, f.retenciones ?? null, f.tasa_iva ?? null, d.subtotal, d.iva, d.retenciones);
+          this.sql.exec(`UPDATE movimientos SET subtotal = ?, iva = ?, retenciones = ?, tasa_iva = ? WHERE id = ?`, d.subtotal, d.iva, d.retenciones, d.tasa_iva, m.id);
+        }
+        for (const pid of porProyecto.keys()) this.recalcularProyecto(pid);
+      });
+      // Lo que quedó de verdad en los cachés, no lo calculado.
+      for (const p of porProyecto.values()) {
+        const c = this.sql.exec(`SELECT cobrado_sin_iva, iva_cobrado, pagado_sin_iva, iva_pagado FROM proyectos WHERE id = ?`, p.id).toArray()[0] as Fila | undefined;
+        if (c) p.despues = { cobrado_sin_iva: Number(c.cobrado_sin_iva || 0), iva_cobrado: Number(c.iva_cobrado || 0), pagado_sin_iva: Number(c.pagado_sin_iva || 0), iva_pagado: Number(c.iva_pagado || 0) };
+      }
+    }
+    return { ensayo, revisados: filas.length, cambian: movimientos.length, movimientos, proyectos: [...porProyecto.values()] };
   }
 
   cancelarCfdi(id: string): Fila | { error: string } {
