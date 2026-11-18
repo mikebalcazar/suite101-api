@@ -68,6 +68,7 @@ import prefacturas from '../migrations/org/0052_prefacturas.sql';
 import cfdiDePruebas from '../migrations/org/0053_cfdi_de_pruebas.sql';
 import requerimientosPorTipo from '../migrations/org/0054_requerimientos_por_cambio_de_tipo.sql';
 import conceptosDeCobro from '../migrations/org/0055_conceptos_de_cobro.sql';
+import plantillasDePresupuesto from '../migrations/org/0056_plantillas_de_presupuesto.sql';
 import { MotorInversion } from './inversion-db';
 import { MotorFiscal } from './fiscal-db';
 import { MotorSat, type MemoriaSat } from './sat-db';
@@ -87,7 +88,7 @@ import { DEFS, type Def, type Tipo } from './tablas';
 import { PREFIJO_COSTO, TIPOS_COSTO, calcular, hoyMx, limpiarApu, usaA, type Apu, type Desglose, type Fuentes } from './costos';
 import { ahora, normalizar, ulid } from './lib';
 import { alcanceDeItem, CATEGORIA_PRESTAMO_CAPITAL, CATEGORIA_PRESTAMO_RECIBIDO, type MovimientoAlcance } from '../schema/tipos';
-import { TABLAS, type CotizacionParaConceptos, type ResultadoImportarConceptos, type Aviso, type ConteoQuote, type Etapa, type EventoOrden, type Peek, type Pool, type ProveedorDePago, type CuentaDeReembolso, type ReembolsoA, type Tabla } from '../schema/tipos';
+import { TABLAS, type CotizacionParaConceptos, type ResultadoImportarConceptos, type RenglonDeHoja, type ResultadoGuardarHoja, type Aviso, type ConteoQuote, type Etapa, type EventoOrden, type Peek, type Pool, type ProveedorDePago, type CuentaDeReembolso, type ReembolsoA, type Tabla } from '../schema/tipos';
 import type { Env } from './entorno';
 
 /* Las migraciones del OrgDB, en orden. Para agregar una: se escribe el .sql,
@@ -99,7 +100,7 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso, articulosComprados, prefacturas, cfdiDePruebas, requerimientosPorTipo, conceptosDeCobro];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso, articulosComprados, prefacturas, cfdiDePruebas, requerimientosPorTipo, conceptosDeCobro, plantillasDePresupuesto];
 
 /** La 0027, la 0030 (y la 0054, que la repite), la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
@@ -391,6 +392,8 @@ export interface ApiOrgDB {
   cotizacionesParaConceptos(proyecto_id: string): Promise<CotizacionParaConceptos[] | null>;
   /** 0.105.0 · Un concepto de cobro por renglón de la cotización (Mike, 18-nov-2026). */
   importarConceptos(args: { proyecto_id: string; cotizacion_id: string; reemplazar?: boolean; app: string; usuario_id: string }): Promise<ResultadoImportarConceptos>;
+  /** 0.106.0 · La hoja del presupuesto: todos los conceptos del proyecto de un jalón (Mike, 18-nov-2026). */
+  guardarHojaDeConceptos(args: { proyecto_id: string; renglones: RenglonDeHoja[]; app: string }): Promise<ResultadoGuardarHoja>;
   /** 0.49.0: un requerimiento levantado en la obra nace como ítem cotizado del
    *  proyecto ligado y cae en el borrador de requerimientos de quote101. */
   levantarRequerimiento(d: { element_id: string; obra_id: string; code: string; name: string; usuario_id: string; padre_item_id?: string | null; descripcion?: string | null }): Promise<{ item_id: string | null; cotizacion_id: string | null }>;
@@ -6060,6 +6063,63 @@ export class OrgDB extends DurableObject<Env> {
     });
     const proyecto = this.recalcularProyecto(args.proyecto_id)!;
     return { ok: true, fuente: r.fuente, conceptos: creados, reemplazados: ya, proyecto };
+  }
+
+  /* ─────────────── la hoja del presupuesto (0.106.0) ───────────────
+   *
+   * Mike, 18-nov-2026, con botones: «Hoja dentro de dash». Una cuadrícula
+   * como Sheets donde el presupuesto se edita completo y se guarda de un
+   * jalón; el total es el precio del proyecto. Y el mismo día: «Sólo
+   * existirán los conceptos que se importen desde quote (…) y los que se
+   * agreguen manualmente en la tabla de dash».
+   *
+   * La hoja manda TODOS los renglones, en su orden:
+   *   · con `id`: un concepto que ya existe y se queda (con lo que diga ahora).
+   *     Si vino de una cotización, conserva su folio y su grupo.
+   *   · sin `id`: uno nuevo, escrito a mano.
+   *   · un concepto del proyecto que no viene: se quita.
+   * Todo dentro de una transacción y con UN recálculo: la hoja se guarda
+   * entera o no se toca, y el precio nunca queda a medio sumar. */
+  guardarHojaDeConceptos(args: { proyecto_id: string; renglones: RenglonDeHoja[]; app: string }): ResultadoGuardarHoja {
+    const p = this.obtener('proyectos', args.proyecto_id);
+    if (!p) return { ok: false, error: 'no_encontrado', detalle: { proyecto_id: args.proyecto_id } };
+    const actuales = this.sql.exec(`SELECT id FROM conceptos WHERE proyecto_id = ?`, args.proyecto_id).toArray().map((f) => String(f.id));
+    const delProyecto = new Set(actuales);
+    const vistos = new Set<string>();
+    for (const [i, r] of args.renglones.entries()) {
+      if (r.id == null) continue;
+      if (!delProyecto.has(r.id)) {
+        return { ok: false, error: 'otro_proyecto', detalle: { renglon: i + 1, id: r.id, motivo: 'ese concepto no es de este proyecto (o ya se quitó): vuelve a abrir la hoja' } };
+      }
+      if (vistos.has(r.id)) return { ok: false, error: 'datos_invalidos', detalle: { renglon: i + 1, id: r.id, motivo: 'el mismo concepto viene dos veces' } };
+      vistos.add(r.id);
+    }
+    let creados = 0, cambiados = 0;
+    const quitados = actuales.filter((id) => !vistos.has(id));
+    const t = ahora();
+    this.ctx.storage.transactionSync(() => {
+      for (const id of quitados) this.sql.exec(`DELETE FROM conceptos WHERE id = ?`, id);
+      for (const [i, r] of args.renglones.entries()) {
+        const monto = Math.round(r.cantidad * r.precio_unitario);
+        if (r.id != null) {
+          this.sql.exec(
+            `UPDATE conceptos SET descripcion = ?, cantidad = ?, precio_unitario = ?, monto = ?, orden = ?, actualizado_at = ? WHERE id = ?`,
+            r.descripcion, r.cantidad, r.precio_unitario, monto, i + 1, t, r.id,
+          );
+          cambiados++;
+        } else {
+          this.sql.exec(
+            `INSERT INTO conceptos (id, proyecto_id, descripcion, cantidad, precio_unitario, monto, orden, creado_en_app, creado_at)
+             VALUES (?,?,?,?,?,?,?,?,?)`,
+            ulid(), args.proyecto_id, r.descripcion, r.cantidad, r.precio_unitario, monto, i + 1, args.app, t,
+          );
+          creados++;
+        }
+      }
+    });
+    const proyecto = this.recalcularProyecto(args.proyecto_id)!;
+    const conceptos = this.sql.exec(`SELECT * FROM conceptos WHERE proyecto_id = ? ORDER BY orden, creado_at`, args.proyecto_id).toArray() as Fila[];
+    return { ok: true, conceptos, creados, cambiados, quitados: quitados.length, proyecto };
   }
 
   /* ─────────────── el estado de cuenta de UN proyecto (§119) ───────────────

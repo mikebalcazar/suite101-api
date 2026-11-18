@@ -537,7 +537,14 @@ async function recorrido() {
   const item2 = ex.data?.filas?.[1]?.id;
 
   const ven = await pedir(STAGING, `/orgs/${ORG}/items/vender`, { app: 'cotizador101', method: 'POST', body: { item_ids: [item, item2], nombre_proyecto: 'Casa Pérez' } });
-  rev(ven.data?.proyecto?.precio_venta === 20000000, 'el precio del proyecto lo sumó la API', String(ven.data?.proyecto?.precio_venta));
+  // 0.105.0 · vender ya no le pone precio: lo ponen los conceptos de cobro
+  // (Mike, 18-nov-2026: «Ya no va a ir ligada a los ítems»).
+  rev(ven.data?.proyecto?.precio_venta === 0 && ven.data?.proyecto?.n_conceptos === 0, 'vender ítems no le pone precio: queda por cargar', String(ven.data?.proyecto?.precio_venta));
+  const pid = ven.data?.proyecto?.id;
+  const con = await pedir(STAGING, `/orgs/${ORG}/conceptos`, { app: 'dash101', method: 'POST', body: { proyecto_id: pid, descripcion: 'Cocina y clóset', cantidad: 2, precio_unitario: 10000000 } });
+  rev(con.estado === 201 && con.data?.monto === 20000000, 'el importe del concepto lo multiplica la API', String(con.data?.monto));
+  const conP = await pedir(STAGING, `/orgs/${ORG}/proyectos/${pid}`, { app: 'dash101' });
+  rev(conP.data?.precio_venta === 20000000, 'el precio del proyecto es la suma de sus conceptos', String(conP.data?.precio_venta));
 
   // 0.64.0 · el alcance en dos estados, con bitácora (Mike, 2-oct)
   const alc = await pedir(STAGING, `/orgs/${ORG}/items/${item}/alcance`, { app: 'dash101' });
@@ -1050,7 +1057,8 @@ async function importacion() {
 
   // Los cachés los recalculó la API, no se copiaron de Firestore.
   const proy = await pedir(STAGING, `/orgs/${ORGI}/proyectos/PRO1`, { app: 'dash101' });
-  rev(proy.data?.precio_venta === ITEMS, 'el precio del proyecto lo recalculó la API, no lo copió', `${proy.data?.precio_venta} (Firestore decía 999999)`);
+  // 0.105.0 · el precio son los conceptos de cobro: lo importado queda por cargar.
+  rev(proy.data?.precio_venta === 0, 'el precio del proyecto lo recalculó la API, no lo copió', `${proy.data?.precio_venta} (Firestore decía 999999)`);
   rev(proy.data?.cobrado === 6000000, 'el cobrado sale de los movimientos importados', String(proy.data?.cobrado));
 
   // Correrlo dos veces no duplica.
