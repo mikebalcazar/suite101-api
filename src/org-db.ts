@@ -70,6 +70,7 @@ import requerimientosPorTipo from '../migrations/org/0054_requerimientos_por_cam
 import conceptosDeCobro from '../migrations/org/0055_conceptos_de_cobro.sql';
 import plantillasDePresupuesto from '../migrations/org/0056_plantillas_de_presupuesto.sql';
 import cobradoSinIva from '../migrations/org/0057_cobrado_sin_iva.sql';
+import conceptoProducto from '../migrations/org/0058_concepto_producto.sql';
 import { MotorInversion } from './inversion-db';
 import { MotorFiscal } from './fiscal-db';
 import { MotorSat, type MemoriaSat } from './sat-db';
@@ -101,12 +102,12 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso, articulosComprados, prefacturas, cfdiDePruebas, requerimientosPorTipo, conceptosDeCobro, plantillasDePresupuesto, cobradoSinIva];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso, articulosComprados, prefacturas, cfdiDePruebas, requerimientosPorTipo, conceptosDeCobro, plantillasDePresupuesto, cobradoSinIva, conceptoProducto];
 
 /** La 0027, la 0030 (y la 0054, que la repite), la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
  *  en la lista; el archivo .sql es sólo la nota que lo dice. */
-const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar' | 'facturaV2' | 'disenoDelItem' | 'cuentaDeReembolso' | 'cfdiDePruebas' | 'migrarRequerimientosPorTipo' | 'conceptosDeCobro' | 'cobradoSinIva'> = {
+const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar' | 'facturaV2' | 'disenoDelItem' | 'cuentaDeReembolso' | 'cfdiDePruebas' | 'migrarRequerimientosPorTipo' | 'conceptosDeCobro' | 'cobradoSinIva' | 'conceptoProducto'> = {
   [MIGRACIONES.indexOf(sinNegocios)]: 'quitarNegocios',
   [MIGRACIONES.indexOf(requerimientosHuerfanos)]: 'migrarRequerimientosHuerfanos',
   [MIGRACIONES.indexOf(obrasALaSuite)]: 'migrarObrasSueltas',
@@ -122,6 +123,7 @@ const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfano
   [MIGRACIONES.indexOf(requerimientosPorTipo)]: 'migrarRequerimientosPorTipo',
   [MIGRACIONES.indexOf(conceptosDeCobro)]: 'conceptosDeCobro',
   [MIGRACIONES.indexOf(cobradoSinIva)]: 'cobradoSinIva',
+  [MIGRACIONES.indexOf(conceptoProducto)]: 'conceptoProducto',
 };
 
 /** La tabla `empresa` (0027): UN renglón, con id fijo, que es lo que antes
@@ -4256,6 +4258,31 @@ export class OrgDB extends DurableObject<Env> {
     this.sql.exec(cobradoSinIva.replace(/^ALTER TABLE .*$/gm, ''));
   }
 
+  /** 0058, en código: el producto del concepto, aparte de su descripción.
+   *  Primero lo importado de quote101: si el concepto todavía es el nombre
+   *  del renglón de la cotización, el nombre pasa a `nombre` (el producto) y la
+   *  descripción del renglón a `descripcion`. Luego, lo escrito «producto —
+   *  descripción» en una sola celda se parte en el primer « — » (el .sql).
+   *  Una cotización que no se deja leer se salta: el concepto queda como
+   *  estaba, que es como se veía. */
+  private conceptoProducto(): void {
+    if (!this.tieneColumna('conceptos', 'nombre')) this.sql.exec(`ALTER TABLE conceptos ADD COLUMN nombre TEXT NOT NULL DEFAULT ''`);
+    const filas = this.sql.exec(
+      `SELECT co.id, co.descripcion, co.linea, c.datos FROM conceptos co JOIN cotizaciones c ON c.id = co.cotizacion_id
+        WHERE co.nombre = '' AND co.linea IS NOT NULL`,
+    ).toArray() as Fila[];
+    for (const f of filas) {
+      try {
+        const datos = typeof f.datos === 'string' ? JSON.parse(f.datos) : (f.datos ?? {});
+        const m = datos?.versiones?.[0]?.muebles?.[Number(f.linea) - 1];
+        const nombre = String(m?.nombre ?? '').trim();
+        if (!m || !nombre || nombre !== String(f.descripcion ?? '').trim()) continue;
+        this.sql.exec(`UPDATE conceptos SET nombre = ?, descripcion = ? WHERE id = ?`, nombre, String(m.descripcion ?? '').trim(), f.id);
+      } catch { /* se queda como estaba */ }
+    }
+    this.sql.exec(conceptoProducto.replace(/^ALTER TABLE .*$/gm, ''));
+  }
+
   /** 0048, en código: la factura nueva, segunda vuelta. Misma forma que la 0047. */
   private facturaV2(): void {
     this.sql.exec(facturaV2.replace(/^ALTER TABLE .*$/gm, ''));
@@ -6103,7 +6130,7 @@ export class OrgDB extends DurableObject<Env> {
   conceptosDelProyecto(proyecto_id: string): { conceptos: Fila[]; grupos: GrupoDeConceptos[] } {
     const conceptos = this.sql
       .exec(
-        `SELECT id, descripcion, cantidad, precio_unitario, monto, orden, cotizacion_id, cotizacion_folio, cotizacion_nombre, linea
+        `SELECT id, nombre, descripcion, cantidad, precio_unitario, monto, orden, cotizacion_id, cotizacion_folio, cotizacion_nombre, linea
          FROM conceptos WHERE proyecto_id = ? ORDER BY orden, creado_at`,
         proyecto_id,
       )
@@ -6152,16 +6179,29 @@ export class OrgDB extends DurableObject<Env> {
    * El IVA: el precio de quote es sin IVA. Si el proyecto lleva el IVA
    * incluido (`iva_incluido` = 1), se le suma al copiarlo, para que el
    * concepto se lea como se leen todos los de esa obra. */
-  private renglonesDeCotizacion(cot: Fila): { fuente: 'quote' | 'piezas'; lineas: Array<{ linea: number; nombre: string; cantidad: number; precio_unitario: number }> } | null {
+  private renglonesDeCotizacion(cot: Fila): { fuente: 'quote' | 'piezas'; lineas: Array<{ linea: number; nombre: string; descripcion: string; cantidad: number; precio_unitario: number }> } | null {
     const datos = (cot.datos ?? {}) as Record<string, any>;
     if (Array.isArray(datos.renglones) && datos.renglones.length) {
+      /* 0.108.0 · El producto y su descripción por separado, como el PDF de
+       * la cotización. `renglones` sólo trae el nombre; la descripción es la
+       * del mueble del mismo renglón en la versión vigente. */
+      const muebles = Array.isArray(datos.versiones?.[0]?.muebles) ? datos.versiones[0].muebles as Array<Record<string, any>> : [];
       const lineas = (datos.renglones as Array<Record<string, any>>)
-        .map((r, i) => ({
-          linea: Number.isInteger(Number(r.linea)) ? Number(r.linea) : i + 1,
-          nombre: String(r.nombre ?? '').trim() || String(r.descripcion ?? '').trim() || `Renglón ${i + 1}`,
-          cantidad: Number(r.cantidad) > 0 ? Number(r.cantidad) : 1,
-          precio_unitario: Math.round(Number(r.precio_unitario) || 0),
-        }));
+        .map((r, i) => {
+          const linea = Number.isInteger(Number(r.linea)) ? Number(r.linea) : i + 1;
+          const m = muebles[linea - 1];
+          const nombreM = String(m?.nombre ?? '').trim();
+          const descM = String(m?.descripcion ?? '').trim();
+          const nombre = String(r.nombre ?? '').trim();
+          const deEste = !!m && (nombreM ? nombreM === nombre : descM === nombre);
+          return {
+            linea,
+            nombre: deEste ? nombreM : (nombre || String(r.descripcion ?? '').trim() || `Renglón ${i + 1}`),
+            descripcion: deEste ? descM : String(r.descripcion ?? '').trim(),
+            cantidad: Number(r.cantidad) > 0 ? Number(r.cantidad) : 1,
+            precio_unitario: Math.round(Number(r.precio_unitario) || 0),
+          };
+        });
       return { fuente: 'quote', lineas };
     }
     const piezas = this.sql
@@ -6169,13 +6209,13 @@ export class OrgDB extends DurableObject<Env> {
              WHERE json_extract(origen, '$.cotizacion_id') = ? ORDER BY CAST(json_extract(origen, '$.linea') AS INTEGER), creado_at`, String(cot.id))
       .toArray() as Fila[];
     if (!piezas.length) return null;
-    const lineas: Array<{ linea: number; nombre: string; cantidad: number; precio_unitario: number }> = [];
+    const lineas: Array<{ linea: number; nombre: string; descripcion: string; cantidad: number; precio_unitario: number }> = [];
     for (const it of piezas) {
       const nombre = String(it.nombre ?? '').trim() || 'Pieza';
       const pu = Math.round(Number(it.monto ?? 0) / Math.max(1, Number(it.cantidad ?? 1)));
       const igual = lineas.find((l) => l.nombre === nombre && l.precio_unitario === pu);
       if (igual) igual.cantidad += Math.max(1, Number(it.cantidad ?? 1));
-      else lineas.push({ linea: lineas.length + 1, nombre, cantidad: Math.max(1, Number(it.cantidad ?? 1)), precio_unitario: pu });
+      else lineas.push({ linea: lineas.length + 1, nombre, descripcion: '', cantidad: Math.max(1, Number(it.cantidad ?? 1)), precio_unitario: pu });
     }
     return { fuente: 'piezas', lineas };
   }
@@ -6243,9 +6283,9 @@ export class OrgDB extends DurableObject<Env> {
         const pu = conIva ? Math.round((l.precio_unitario * (10000 + tasa)) / 10000) : l.precio_unitario;
         const id = ulid();
         this.sql.exec(
-          `INSERT INTO conceptos (id, proyecto_id, descripcion, cantidad, precio_unitario, monto, orden, cotizacion_id, cotizacion_folio, cotizacion_nombre, linea, creado_en_app, creado_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-          id, args.proyecto_id, l.nombre, l.cantidad, pu, Math.round(l.cantidad * pu), orden++, args.cotizacion_id, folio, nombreCot, l.linea, args.app, ahora(),
+          `INSERT INTO conceptos (id, proyecto_id, nombre, descripcion, cantidad, precio_unitario, monto, orden, cotizacion_id, cotizacion_folio, cotizacion_nombre, linea, creado_en_app, creado_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          id, args.proyecto_id, l.nombre, l.descripcion, l.cantidad, pu, Math.round(l.cantidad * pu), orden++, args.cotizacion_id, folio, nombreCot, l.linea, args.app, ahora(),
         );
         creados.push(this.obtener('conceptos', id)!);
       }
@@ -6292,15 +6332,16 @@ export class OrgDB extends DurableObject<Env> {
         const monto = Math.round(r.cantidad * r.precio_unitario);
         if (r.id != null) {
           this.sql.exec(
-            `UPDATE conceptos SET descripcion = ?, cantidad = ?, precio_unitario = ?, monto = ?, orden = ?, actualizado_at = ? WHERE id = ?`,
-            r.descripcion, r.cantidad, r.precio_unitario, monto, i + 1, t, r.id,
+            // Un renglón sin `nombre` (un dash de antes de 0.108.0) no lo borra.
+            `UPDATE conceptos SET nombre = COALESCE(?, nombre), descripcion = ?, cantidad = ?, precio_unitario = ?, monto = ?, orden = ?, actualizado_at = ? WHERE id = ?`,
+            r.nombre ?? null, r.descripcion, r.cantidad, r.precio_unitario, monto, i + 1, t, r.id,
           );
           cambiados++;
         } else {
           this.sql.exec(
-            `INSERT INTO conceptos (id, proyecto_id, descripcion, cantidad, precio_unitario, monto, orden, creado_en_app, creado_at)
-             VALUES (?,?,?,?,?,?,?,?,?)`,
-            ulid(), args.proyecto_id, r.descripcion, r.cantidad, r.precio_unitario, monto, i + 1, args.app, t,
+            `INSERT INTO conceptos (id, proyecto_id, nombre, descripcion, cantidad, precio_unitario, monto, orden, creado_en_app, creado_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?)`,
+            ulid(), args.proyecto_id, r.nombre ?? '', r.descripcion, r.cantidad, r.precio_unitario, monto, i + 1, args.app, t,
           );
           creados++;
         }
@@ -6381,7 +6422,8 @@ export class OrgDB extends DurableObject<Env> {
      * lista es exactamente lo que suma `precio_venta`. */
     const { conceptos, grupos } = this.conceptosDelProyecto(proyecto_id);
     const items = conceptos.map((co) => ({
-      id: co.id, clave: null, nombre: co.descripcion, descripcion: null, tipo: null,
+      // 0.108.0 · El producto es el nombre; sin producto, la descripción.
+      id: co.id, clave: null, nombre: String(co.nombre ?? '') || co.descripcion, descripcion: co.nombre ? (String(co.descripcion ?? '') || null) : null, tipo: null,
       cantidad: Number(co.cantidad ?? 1), monto: Number(co.monto ?? 0),
       precio_unitario: Number(co.precio_unitario ?? 0), importe: Number(co.monto ?? 0),
       partida: co.cotizacion_folio ?? null, etapa: null, fecha_entrega: null, producto_id: null, producto_nombre: null,

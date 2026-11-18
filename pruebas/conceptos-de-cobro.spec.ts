@@ -255,9 +255,10 @@ describe('importar de quote101: un concepto por renglón', () => {
     const r = await importar(cot1);
     expect(r.estado, JSON.stringify(r)).toBe(201);
     expect(r.data.fuente).toBe('quote');
-    expect(r.data.conceptos.map((c: any) => [c.descripcion, c.cantidad, c.precio_unitario, c.monto, c.linea])).toEqual([
-      ['Cocina', 1, 150_000_00, 150_000_00, 1],
-      ['Puertas de intercomunicación', 4, 6_500_00, 26_000_00, 2],
+    // 0.108.0 · El nombre del renglón es el PRODUCTO; sin mueble no hay descripción.
+    expect(r.data.conceptos.map((c: any) => [c.nombre, c.descripcion, c.cantidad, c.precio_unitario, c.monto, c.linea])).toEqual([
+      ['Cocina', '', 1, 150_000_00, 150_000_00, 1],
+      ['Puertas de intercomunicación', '', 4, 6_500_00, 26_000_00, 2],
     ]);
     expect(r.data.conceptos[0].cotizacion_folio).toMatch(/^COT-/);
     expect(r.data.proyecto.precio_venta).toBe(176_000_00);
@@ -322,7 +323,7 @@ describe('importar de quote101: un concepto por renglón', () => {
     const r = await o('mike', `/proyectos/${vieja}/conceptos/importar`, { method: 'POST', json: { cotizacion_id: c } });
     expect(r.estado, JSON.stringify(r)).toBe(201);
     expect(r.data.fuente).toBe('piezas');
-    expect(r.data.conceptos.map((x: any) => [x.descripcion, x.cantidad, x.precio_unitario])).toEqual([
+    expect(r.data.conceptos.map((x: any) => [x.nombre, x.cantidad, x.precio_unitario])).toEqual([
       ['Cocina integral', 2, 1_374_000],
       ['Instalación', 1, 100_000],
     ]);
