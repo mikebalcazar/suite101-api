@@ -86,31 +86,58 @@ beforeAll(async () => {
   await item('Puerta modelo A', 2_850_00 * 25, 25);
   await item('Clóset', 40_000_00, 1);
   await item('Pérgola que nadie aprobó', 90_000_00, 1, 'cotizado');
+  /* 0.105.0 · Desde el 18-nov-2026 el precio NO sale de los ítems: sale de
+   * los conceptos de cobro (Mike: «Ya no va a ir ligada a los ítems»). Los
+   * ítems de arriba se quedan para medir justo eso: que no se cuelen. */
+  await o('mike', '/conceptos', { method: 'POST', json: { proyecto_id: proyecto, descripcion: 'Puertas modelo A', cantidad: 25, precio_unitario: 2_850_00 } });
+  await o('mike', '/conceptos', { method: 'POST', json: { proyecto_id: proyecto, descripcion: 'Clóset de recámara', cantidad: 1, precio_unitario: 40_000_00 } });
 }, 60000);
 
 describe('lo que dice el papel', () => {
   it('la suma de la lista ES el subtotal', async () => {
     const r = await estado();
     expect(r.estado, JSON.stringify(r)).toBe(200);
-    const suma = r.data.items.reduce((t: number, i: any) => t + i.importe, 0);
+    const suma = r.data.conceptos.reduce((t: number, i: any) => t + i.monto, 0);
     expect(suma).toBe(r.data.totales.subtotal);
-    /* 25 × 2,850 + 40,000 = 111,250. El cotizado NO entra. */
+    /* 25 × 2,850 + 40,000 = 111,250. */
     expect(suma).toBe(2_850_00 * 25 + 40_000_00);
-    expect(r.data.items).toHaveLength(2);
-    expect(r.data.totales.piezas).toBe(26);
+    expect(r.data.conceptos).toHaveLength(2);
+    expect(r.data.totales.piezas).toBe(2);
+    expect(r.data.totales.precio_por_cargar).toBe(false);
+    /* La lista de antes (`items`) trae los MISMOS conceptos, para la pantalla
+     * que no se ha puesto al día: también suma el subtotal. */
+    expect(r.data.items.reduce((t: number, i: any) => t + i.importe, 0)).toBe(r.data.totales.subtotal);
   });
 
-  it('el precio unitario sale de la cantidad, no del renglón', async () => {
+  it('el importe es cantidad × precio unitario', async () => {
     const r = await estado();
-    const puerta = r.data.items.find((i: any) => i.nombre === 'Puerta modelo A');
+    const puerta = r.data.conceptos.find((i: any) => i.descripcion === 'Puertas modelo A');
     expect(puerta.cantidad).toBe(25);
     expect(puerta.precio_unitario).toBe(2_850_00);
-    expect(puerta.importe).toBe(2_850_00 * 25);
+    expect(puerta.monto).toBe(2_850_00 * 25);
   });
 
-  it('lo que no está vendido no sale', async () => {
+  it('los ítems ya no le ponen precio: ni los vendidos ni los cotizados salen en el papel', async () => {
     const r = await estado();
-    expect(r.data.items.map((i: any) => i.nombre)).not.toContain('Pérgola que nadie aprobó');
+    const nombres = r.data.items.map((i: any) => i.nombre);
+    expect(nombres).not.toContain('Pérgola que nadie aprobó');
+    expect(nombres).not.toContain('Puerta modelo A');
+    expect(nombres).not.toContain('Clóset');
+  });
+
+  it('escritos a mano, van en un solo grupo', async () => {
+    const r = await estado();
+    expect(r.data.grupos).toHaveLength(1);
+    expect(r.data.grupos[0]).toMatchObject({ cotizacion_id: null, nombre: 'Otros conceptos', importe: 111_250_00 });
+  });
+
+  it('sin conceptos el precio está POR CARGAR: no hay saldo', async () => {
+    const r = await estado('mike', ajeno);
+    expect(r.estado).toBe(200);
+    expect(r.data.totales.precio_por_cargar).toBe(true);
+    expect(r.data.totales.saldo).toBeNull();
+    expect(r.data.totales.total).toBe(0);
+    expect(r.data.totales.precio_anterior, 'un proyecto nuevo no traía precio antes').toBeNull();
   });
 
   it('NO viajan los costos del taller, ni para la empresa', async () => {
@@ -293,7 +320,7 @@ describe('el mismo estado, en Excel', () => {
     const partes = abrir(bytes);
     expect(Object.keys(partes)).toContain('xl/worksheets/sheet1.xml');
     expect(Object.keys(partes)).toContain('xl/worksheets/sheet2.xml');
-    expect(partes['xl/workbook.xml']).toContain('name="Ítems"');
+    expect(partes['xl/workbook.xml']).toContain('name="Conceptos"');
     expect(partes['xl/workbook.xml']).toContain('name="Pagos"');
 
     const t = (await estado()).data.totales;

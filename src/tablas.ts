@@ -94,6 +94,22 @@ export const DEFS: Record<Tabla, Def> = {
     filtros: ['movimiento_id', 'item_id', 'proyecto_id'],
     orden: 'creado_at',
   },
+  /* 0055 · Los conceptos de cobro de un proyecto (Mike, 18-nov-2026: «Vamos
+   * a separar la contabilidad. Ya no va a ir ligada a los ítems»). El precio
+   * de venta del proyecto es su suma (recalcularProyecto). `monto` lo pone la
+   * API: cantidad × precio_unitario. Los que vienen de una cotización de
+   * quote101 traen su id, folio, nombre y renglón; los escribe
+   * POST /proyectos/:id/conceptos/importar y no el CRUD. */
+  conceptos: {
+    cols: {
+      ...IDENT, proyecto_id: 'texto', descripcion: 'texto', cantidad: 'real', precio_unitario: 'dinero', monto: 'dinero',
+      orden: 'entero', cotizacion_id: 'texto', cotizacion_folio: 'texto', cotizacion_nombre: 'texto', linea: 'entero',
+      creado_en_app: 'texto', actualizado_at: 'texto',
+    },
+    requeridos: ['proyecto_id', 'descripcion'],
+    filtros: ['proyecto_id', 'cotizacion_id'],
+    orden: 'orden',
+  },
   /* 0034 · El plan de pagos de un proyecto (Mike, 6-oct, con botones: «plan
    * de pagos por proyecto»): parcialidades con fecha y monto que el flujo
    * proyectado pone como cobros, descontando lo ya cobrado en orden de
@@ -171,6 +187,9 @@ export const DEFS: Record<Tabla, Def> = {
        * Lo escogió Mike con botones el 21-sep. No mueve ningún peso: sólo
        * dice cómo se LEE `precio_venta`. */
       tasa_iva: 'entero', iva_incluido: 'entero',
+      /* 0055 · cuántos conceptos de cobro tiene: caché. En 0 el precio está
+       * POR CARGAR, que no es lo mismo que valer $0. */
+      n_conceptos: 'entero',
     },
     requeridos: ['cliente_id', 'nombre'],
     filtros: ['cliente_id', 'estado'],

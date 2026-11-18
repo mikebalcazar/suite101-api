@@ -236,7 +236,8 @@ describe('la cantidad y los ítems sin ubicar', () => {
     expect(r.data.monto).toBe(30_000_00);
 
     const p = await o('mike', `/proyectos/${proyecto}`);
-    expect(p.data.precio_venta, 'la suma es del importe, no del importe por la cantidad').toBe(30_000_00);
+    // 0.105.0 · los ítems ya no le ponen precio al proyecto (Mike, 18-nov-2026): el importe vive en el ítem; el proyecto no suma ítems.
+    expect(p.data.precio_venta).toBe(0);
   });
 
   it('lo que ya existía vale 1 sin que nadie lo diga', async () => {

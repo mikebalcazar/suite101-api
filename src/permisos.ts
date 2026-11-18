@@ -52,6 +52,10 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
   // Las partidas son de dash101 y de nadie más. `monto_pagado` y `estado` no
   // están en su lista: son cachés (abajo).
   partidas: { dash101: ['proyecto_id', 'item_id', 'proveedor_id', 'proveedor_nombre', 'concepto', 'monto_acordado'] },
+  /* 0.105.0 · Los conceptos de cobro (Mike, 18-nov-2026) son de dash101.
+   * `monto` no está: lo calcula la API. Tampoco lo de la cotización: eso lo
+   * escribe la importación, que copia lo que quote101 dejó guardado. */
+  conceptos: { dash101: ['proyecto_id', 'descripcion', 'cantidad', 'precio_unitario', 'orden'] },
   movimientos: { dash101: '*' },
   /* 0.57.0 · Los accionistas son del tablero del dinero y de nadie más: los
    * retiros de utilidades son movimientos de dash101 (Mike, 30-sep-2026). */
@@ -116,7 +120,10 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
 /* Cachés: no los escribe NINGUNA app. Los recalcula la API después de cada
  * mutación. Si una app manda uno, se rechaza aunque su lista lo trajera. */
 export const CACHES: Partial<Record<Tabla, readonly string[]>> = {
-  proyectos: ['precio_venta', 'cobrado', 'pagado_prov', 'compromiso', 'avance'],
+  proyectos: ['precio_venta', 'cobrado', 'pagado_prov', 'compromiso', 'avance', 'n_conceptos'],
+  /* 0.105.0 · el importe del concepto es cantidad × precio unitario: lo
+   * multiplica la API, como suma el precio del proyecto. */
+  conceptos: ['monto'],
   partidas: ['monto_pagado', 'estado', 'tarea_id', 'obra_id', 'fecha_esperada'],
   /* 0.81.0 · lo que dio la cuenta y cuándo se movió: los escribe la API al
    * recalcular, nunca una app. */

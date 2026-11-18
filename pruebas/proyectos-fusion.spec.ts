@@ -79,12 +79,15 @@ beforeAll(async () => {
   // A: el que se queda. Un ítem vendido, sin más.
   A.proyecto = await crea('/proyectos', { negocio_id: negocio, cliente_id: cliente, nombre: 'Sanje CC37' });
   A.items.push(await crea('/items', { negocio_id: negocio, cliente_id: cliente, proyecto_id: A.proyecto, nombre: 'Barra', monto: 20_000_00, estado: 'vendido' }));
+  // 0.105.0 · el precio son sus conceptos de cobro, no sus ítems.
+  await crea('/conceptos', { proyecto_id: A.proyecto, descripcion: 'Barra', cantidad: 1, precio_unitario: 20_000_00 });
 
   // B: el que se va, con de todo colgando, y de OTRO cliente (el repetido).
   B.proyecto = await crea('/proyectos', { negocio_id: negocio, cliente_id: otroCliente, nombre: 'Sanje CC37 NEW' });
   for (const nombre of ['Cocina', 'Clóset']) {
     B.items.push(await crea('/items', { negocio_id: negocio, cliente_id: otroCliente, proyecto_id: B.proyecto, nombre, monto: 10_000_00, estado: 'vendido', partida: 'Planta baja' }));
   }
+  await crea('/conceptos', { proyecto_id: B.proyecto, descripcion: 'Cocina y clóset', cantidad: 2, precio_unitario: 10_000_00 });
   B.partida = await crea('/partidas', { proyecto_id: B.proyecto, proveedor_id: proveedor, proveedor_nombre: 'Maderas', concepto: 'Tablero', monto_acordado: 5_000_00 });
   B.movimiento = await crea('/movimientos', { negocio_id: negocio, tipo: 'ingreso', monto: 15_000_00, fecha: '2026-09-01', cuenta_id: cuenta, proyecto_id: B.proyecto, contraparte_tipo: 'cliente', contraparte_id: otroCliente, contraparte_nombre: 'Sanje (repetido)', concepto: 'Anticipo' });
   B.orden = await crea('/ordenes', { negocio_id: negocio, proyecto_id: B.proyecto, proveedor_id: proveedor, proveedor_nombre: 'Maderas', concepto: 'Bisagras', monto: 800_00, con_factura: false, fecha_maxima_pago: '2026-10-15' });
@@ -150,9 +153,12 @@ describe('fusionar dos proyectos', () => {
     const obras = Array.isArray(obra) ? obra : obra?.obras ?? obra?.filas ?? [];
     expect(obras.find((x: any) => x.id === B.obra)?.proyecto_id, 'la obra de quell sigue al proyecto').toBe(A.proyecto);
   });
-  it('los cachés del que se queda se recalculan: 3 ítems vendidos, un anticipo, un compromiso', async () => {
+  it('los cachés del que se queda se recalculan: sus conceptos y los del otro, un anticipo, un compromiso', async () => {
     const p = (await o('mike', `/proyectos/${A.proyecto}`)).data;
     expect(Number(p.precio_venta)).toBe(40_000_00);
+    expect(Number(p.n_conceptos)).toBe(2);
+    const cs = (await o('mike', `/conceptos?proyecto_id=${A.proyecto}`)).data.filas;
+    expect(cs.map((c: any) => c.descripcion), 'los del que se va, después de los suyos').toEqual(['Barra', 'Cocina y clóset']);
     expect(Number(p.cobrado)).toBe(15_000_00);
     expect(Number(p.compromiso)).toBe(5_000_00);
   });

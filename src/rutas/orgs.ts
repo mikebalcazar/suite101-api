@@ -34,7 +34,7 @@ import { APPS, LLAVE_APP, type App, type Tabla, TIPOS_PROVEEDOR, type TipoProvee
 const rutas = new Hono<{ Bindings: Env; Variables: Vars }>();
 
 /** Tablas con dinero que el personal sin `ve_dinero` no abre. */
-const TABLAS_DINERO: Tabla[] = ['movimientos', 'cuentas', 'opex', 'cotizaciones', 'partidas', 'conciliaciones', 'conciliacion_cuentas', 'accionistas'];
+const TABLAS_DINERO: Tabla[] = ['movimientos', 'cuentas', 'opex', 'cotizaciones', 'partidas', 'conciliaciones', 'conciliacion_cuentas', 'accionistas', 'conceptos', 'plan_pagos'];
 
 const stub = (c: Ctx): ApiOrgDB => c.env.ORG.get(c.env.ORG.idFromName(c.get('org_id'))) as unknown as ApiOrgDB;
 
@@ -604,21 +604,52 @@ rutas.get('/:o/clientes/:id/estado.xlsx', async (c) => {
     ...(r.otros_pagos as Array<Record<string, unknown>>),
   ].sort((a, b) => String(a.fecha ?? '').localeCompare(String(b.fecha ?? '')));
 
+  type P = Record<string, unknown>;
+  const saldoDe = (p: P): Celda => (p.precio_por_cargar ? 'Precio por cargar' : pesos(p.saldo));
+  /* 0.105.0 · Lo cotizado de cada proyecto, concepto por concepto y
+   * agrupado por cotización (Mike, 18-nov-2026: «un estado de cuenta por
+   * cliente (incluyendo todos sus proyectos (cotización y pagos) global»). */
+  const cotizado: Celda[][] = [];
+  for (const p of r.proyectos as P[]) {
+    cotizado.push([String(p.nombre ?? '')]);
+    const grupos = (p.grupos as Array<{ cotizacion_id: string | null; folio: string | null; nombre: string; numero: number | null; importe: number; conceptos: P[] }>) ?? [];
+    if (!grupos.length) cotizado.push(['', 'Precio por cargar']);
+    for (const g of grupos) {
+      cotizado.push(['', g.cotizacion_id ? `Cotización ${g.numero}${g.folio ? ' · ' + g.folio : ''}${g.nombre ? ' · ' + g.nombre : ''}` : g.nombre]);
+      for (const co of g.conceptos) cotizado.push(['', String(co.descripcion ?? ''), Number(co.cantidad ?? 1), pesos(co.precio_unitario), pesos(co.monto)]);
+    }
+    if (grupos.length) {
+      cotizado.push(['', '', '', 'Subtotal', pesos(p.subtotal)]);
+      cotizado.push(['', '', '', 'IVA', pesos(p.iva)]);
+      cotizado.push(['', '', '', 'Total', pesos(p.total)]);
+    }
+    cotizado.push([]);
+  }
+
   const libro = xlsx([
     {
       nombre: 'Por proyecto',
       filas: [
         ...encabezado,
-        ['Proyecto', 'Estado', 'Desde', 'Precio de venta', 'Cobrado', 'Saldo'],
-        ...(r.proyectos as Array<Record<string, unknown>>).map((p): Celda[] => [
+        ['Proyecto', 'Estado', 'Desde', 'Total con IVA', 'Cobrado', 'Saldo'],
+        ...(r.proyectos as P[]).map((p): Celda[] => [
           String(p.nombre ?? ''), String(p.estado ?? ''), String(p.fecha_inicio ?? ''),
-          pesos(p.precio_venta), pesos(p.cobrado), pesos(p.saldo),
+          p.precio_por_cargar ? 'Precio por cargar' : pesos(p.total), pesos(p.cobrado), saldoDe(p),
         ]),
         ...(t.sin_proyecto ? [['Cobros sin proyecto', '', '', 0, pesos(t.sin_proyecto), -pesos(t.sin_proyecto)] as Celda[]] : []),
         [],
-        ['', '', '', 'Vendido', pesos(t.vendido)],
+        ['', '', '', 'Total cotizado', pesos(t.total)],
         ['', '', '', 'Cobrado', pesos(t.cobrado)],
         ['', '', '', 'Saldo', pesos(t.saldo)],
+        ...(t.por_cargar ? [['', '', '', 'Proyectos con precio por cargar', t.por_cargar] as Celda[]] : []),
+      ],
+    },
+    {
+      nombre: 'Cotizado',
+      filas: [
+        ...encabezado,
+        ['Proyecto', 'Concepto', 'Cantidad', 'Precio unitario', 'Importe'],
+        ...cotizado,
       ],
     },
     {
@@ -959,6 +990,54 @@ rutas.post('/:o/proyectos/:id/separar', async (c) => {
  *  Que sea una y no dos es el punto: el día que los totales de la empresa y
  *  los del cliente se calculen en dos lugares, el que va a notar que no
  *  cuadran es el cliente. */
+/** GET /orgs/:o/pagos-pendientes[?proyecto_id=] — 0.105.0 · lo que se les
+ *  debe a contratistas y proveedores, por proyecto (Mike, 18-nov-2026: «poner
+ *  en dash los pagos pendientes de cada proyecto a cada contratista»). Son
+ *  costos: los ve quien ve las partidas. */
+rutas.get('/:o/pagos-pendientes', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro' || !quien.ve_costos) return err(c, 'sin_permiso', 403, { motivo: 'lo que se les debe a los contratistas son costos: solo owner, admin y socio' });
+  return ok(c, await stub(c).pagosPendientes(c.req.query('proyecto_id') || null));
+});
+
+/* ────────── los conceptos de cobro: importar de quote101 (0.105.0) ──────────
+ *
+ * Mike, 18-nov-2026, con botones: «Conceptos de cobro con opción a importar
+ * de las cotizaciones del proyecto de quote» y «Un concepto por renglón. Si
+ * se importa una segunda cotización del mismo proyecto, se debe ver que es
+ * una segunda cotización pero suma». Lo hace dash101, quien es de la empresa
+ * y ve dinero; los conceptos sueltos van por el CRUD genérico `/conceptos`. */
+function puedeCargarConceptos(c: Ctx) {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro' || !quien.ve_dinero) return err(c, 'sin_permiso', 403, { motivo: 'los conceptos de cobro los carga quien es de la empresa y ve dinero' });
+  if (c.get('app') !== 'dash101') return err(c, 'sin_permiso', 403, { motivo: 'los conceptos de cobro se cargan desde dash101', app: c.get('app') });
+  return null;
+}
+
+/** GET /orgs/:o/proyectos/:id/conceptos/cotizaciones — las cotizaciones del
+ *  proyecto, cuánto suman y si ya se importaron. No toca nada. */
+rutas.get('/:o/proyectos/:id/conceptos/cotizaciones', async (c) => {
+  const no = puedeCargarConceptos(c); if (no) return no;
+  const r = await stub(c).cotizacionesParaConceptos(c.req.param('id')!);
+  if (!r) return err(c, 'no_encontrado', 404, { que: 'proyecto', id: c.req.param('id') });
+  return ok(c, { cotizaciones: r });
+});
+
+/** POST /orgs/:o/proyectos/:id/conceptos/importar {cotizacion_id, reemplazar?}
+ *  — un concepto por renglón, con el folio de la cotización. */
+rutas.post('/:o/proyectos/:id/conceptos/importar', async (c) => {
+  const no = puedeCargarConceptos(c); if (no) return no;
+  const b = await c.req.json<{ cotizacion_id?: string; reemplazar?: boolean }>().catch(() => ({}) as { cotizacion_id?: string; reemplazar?: boolean });
+  if (!b.cotizacion_id) return err(c, 'datos_invalidos', 400, { falta: ['cotizacion_id'] });
+  const quien = c.get('quien');
+  const r = await stub(c).importarConceptos({
+    proyecto_id: c.req.param('id')!, cotizacion_id: String(b.cotizacion_id), reemplazar: b.reemplazar === true,
+    app: c.get('app'), usuario_id: quien.usuario_id,
+  });
+  if (!r.ok) return err(c, r.error, r.error === 'no_encontrado' ? 404 : 409, r.detalle);
+  return ok(c, { fuente: r.fuente, conceptos: r.conceptos, reemplazados: r.reemplazados, proyecto: podar(quien, 'proyectos', r.proyecto) }, 201);
+});
+
 rutas.get('/:o/proyectos/:id/estado', async (c) => {
   const quien = c.get('quien');
   if (quien.clase === 'personal') return err(c, 'sin_permiso', 403, { motivo: 'el estado de cuenta lleva dinero' });
@@ -1005,22 +1084,35 @@ rutas.get('/:o/proyectos/:id/estado.xlsx', async (c) => {
   ];
   const t = r.totales;
 
+  /* 0.105.0 · Los conceptos de cobro, agrupados por cotización (Mike,
+   * 18-nov-2026: «se debe ver que es una segunda cotización pero suma»).
+   * Con el precio por cargar no hay saldo: se dice con letras. */
+  const saldo: Celda = t.precio_por_cargar || t.saldo === null ? 'Precio por cargar' : pesos(t.saldo);
+  const filasConceptos: Celda[][] = [];
+  for (const g of r.grupos) {
+    const titulo = g.cotizacion_id
+      ? `Cotización ${g.numero}${g.folio ? ' · ' + g.folio : ''}${g.nombre ? ' · ' + g.nombre : ''}`
+      : g.nombre;
+    filasConceptos.push([titulo]);
+    for (const co of g.conceptos) {
+      filasConceptos.push([String(co.descripcion ?? ''), Number(co.cantidad ?? 1), pesos(co.precio_unitario), pesos(co.monto)]);
+    }
+    filasConceptos.push(['', '', `Suma ${g.cotizacion_id ? 'de la cotización ' + g.numero : 'de otros conceptos'}`, pesos(g.importe)]);
+    filasConceptos.push([]);
+  }
+
   const libro = xlsx([
     {
-      nombre: 'Ítems',
+      nombre: 'Conceptos',
       filas: [
         ...encabezado,
-        ['Código', 'Concepto', 'Modelo', 'Cantidad', 'Precio unitario', 'Importe'],
-        ...r.items.map((i): Celda[] => [
-          String(i.clave ?? ''), String(i.nombre ?? ''), String(i.producto_nombre ?? ''),
-          Number(i.cantidad ?? 1), pesos(i.precio_unitario), pesos(i.importe),
-        ]),
-        [],
-        ['', '', '', '', 'Subtotal', pesos(t.subtotal)],
-        ['', '', '', '', `IVA ${t.tasa_iva / 100}%`, pesos(t.iva)],
-        ['', '', '', '', 'Total', pesos(t.total)],
-        ['', '', '', '', 'Pagado', pesos(t.cobrado)],
-        ['', '', '', '', 'Saldo', pesos(t.saldo)],
+        ['Concepto', 'Cantidad', 'Precio unitario', 'Importe'],
+        ...(filasConceptos.length ? filasConceptos : [['Precio por cargar'], []]),
+        ['', '', 'Subtotal', pesos(t.subtotal)],
+        ['', '', `IVA ${t.tasa_iva / 100}%`, pesos(t.iva)],
+        ['', '', 'Total', pesos(t.total)],
+        ['', '', 'Pagado', pesos(t.cobrado)],
+        ['', '', 'Saldo', saldo],
       ],
     },
     {
@@ -1033,7 +1125,7 @@ rutas.get('/:o/proyectos/:id/estado.xlsx', async (c) => {
         ]),
         [],
         ['', '', 'Pagado', pesos(t.cobrado)],
-        ['', '', 'Saldo', pesos(t.saldo)],
+        ['', '', 'Saldo', saldo],
       ],
     },
   ]);
@@ -1831,11 +1923,31 @@ rutas.post('/:o/:tabla', async (c) => {
   if (tabla === 'clientes') { const repetido = await correoDeOtroCliente(c, datos, null); if (repetido) return repetido; }
   if (tabla === 'movimiento_items') { const mal = await anticipoQueNoCuadra(c, datos, null); if (mal) return mal; }
   if (tabla === 'plan_pagos') { const mal = await parcialidadQueNoCuadra(c, datos, null); if (mal) return mal; }
+  if (tabla === 'conceptos') { const mal = await conceptoQueNoCuadra(c, datos, true); if (mal) return mal; }
   { const mal = await revisarCostos(c, tabla, datos, null); if (mal) return mal; }
 
   const fila = await stub(c).crear(tabla, datos, { app: c.get('app'), usuario_id: quien.usuario_id, correo: c.get('sesion')?.correo ?? null });
   return ok(c, podar(quien, tabla, fila), 201);
 });
+
+/* 0.105.0 · Un concepto de cobro (Mike, 18-nov-2026): de un proyecto que
+ * existe, con descripción, y una cantidad que sea un número mayor que cero.
+ * El precio unitario ya lo revisó `revisarDinero` (centavos, entero); puede
+ * ser negativo: un descuento también es un concepto. */
+async function conceptoQueNoCuadra(c: Ctx, datos: Record<string, unknown>, nuevo: boolean) {
+  if (datos.cantidad !== undefined) {
+    const n = Number(datos.cantidad);
+    if (!Number.isFinite(n) || n <= 0) return err(c, 'datos_invalidos', 400, { campo: 'cantidad', recibido: datos.cantidad, regla: 'número mayor que cero' });
+  }
+  if (datos.descripcion !== undefined && !String(datos.descripcion ?? '').trim()) {
+    return err(c, 'datos_invalidos', 400, { falta: ['descripcion'] });
+  }
+  if (nuevo) {
+    const p = await stub(c).obtener('proyectos', String(datos.proyecto_id));
+    if (!p) return err(c, 'no_encontrado', 404, { proyecto_id: datos.proyecto_id });
+  }
+  return null;
+}
 
 /* 0.54.0 · Los datos con los que se le PAGA a un proveedor se revisan al
  * escribirlos, no cuando ya rebotó la transferencia. La CLABE lleva su dígito
@@ -1949,6 +2061,7 @@ rutas.patch('/:o/:tabla/:id', async (c) => {
   if (tabla === 'clientes') { const repetido = await correoDeOtroCliente(c, datos, c.req.param('id')!); if (repetido) return repetido; }
   if (tabla === 'movimiento_items') { const mal = await anticipoQueNoCuadra(c, datos, c.req.param('id')!); if (mal) return mal; }
   if (tabla === 'plan_pagos') { const mal = await parcialidadQueNoCuadra(c, datos, c.req.param('id')!); if (mal) return mal; }
+  if (tabla === 'conceptos') { const mal = await conceptoQueNoCuadra(c, datos, false); if (mal) return mal; }
   { const mal = await revisarCostos(c, tabla, datos, c.req.param('id')!); if (mal) return mal; }
 
   /* 0.46.0 · Una cotización aprobada es lo que se vendió: sus piezas ya están

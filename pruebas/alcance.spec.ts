@@ -120,7 +120,8 @@ describe('el requerimiento: tiene precio y no suma', () => {
   });
 
   it('no mueve el precio de venta aunque traiga su importe', async () => {
-    expect(await venta(), 'sólo la cocina').toBe(100_000_00);
+    // 0.105.0 · los ítems ya no le ponen precio al proyecto (Mike, 18-nov-2026): ni la cocina vendida suma.
+    expect(await venta(), 'los ítems no suman').toBe(0);
     expect((await o('mike', `/items/${req}`)).data.monto, 'y el requerimiento sí trae precio').toBe(20_000_00);
   });
 
@@ -137,7 +138,8 @@ describe('el requerimiento: tiene precio y no suma', () => {
     const r = await o('mike', `/items/${req}/aprobar`, { method: 'POST' });
     expect(r.estado, JSON.stringify(r)).toBe(200);
     expect(r.data.era).toBe('cotizado');
-    expect(await venta()).toBe(120_000_00);
+    // 0.105.0 · los ítems ya no le ponen precio al proyecto (Mike, 18-nov-2026): entra al alcance y el precio no se mueve.
+    expect(await venta()).toBe(0);
     expect((await enPlano())['Clóset de más']).toBe('dentro');
     expect((await o('mike', `/items/${req}`)).data.aprobado_at, 'y queda la fecha en que entró').toBeTruthy();
   });
@@ -151,7 +153,8 @@ describe('sacar del alcance', () => {
     const r = await o('mike', `/items/${it}/sacar`, { method: 'POST', json: { motivo: 'El cliente quitó la barra' } });
     expect(r.estado, JSON.stringify(r)).toBe(200);
     expect(r.data.alcance).toBe('fuera');
-    expect(await venta()).toBe(antes - 30_000_00);
+    // 0.105.0 · los ítems ya no le ponen precio al proyecto (Mike, 18-nov-2026).
+    expect(await venta()).toBe(antes);
     expect((await enPlano())['Barra']).toBe('fuera');
     const fila = (await o('mike', `/items/${it}`)).data;
     expect(fila.estado, 'no hay un tercer estado: fuera es cotizado').toBe('cotizado');
@@ -447,7 +450,8 @@ describe('0.49.0 · el requerimiento nace como ítem y cae en el borrador de quo
     expect(item).toMatchObject({ estado: 'vendido', tipo: 'puerta', monto: 150000, cantidad: 1, partida: 'Requerimientos', descripcion: 'Encino, 2.40 m' });
     expect(item.aprobado_at).toBeTruthy();
     expect(item.clave, 'estrena el prefijo de su tipo').toMatch(/^PT-\d+$/);
-    expect(await venta(), 'ahora sí suma').toBe(v + 150000);
+    // 0.105.0 · los ítems ya no le ponen precio al proyecto (Mike, 18-nov-2026).
+    expect(await venta(), 'tampoco aprobado le pone precio al proyecto').toBe(v);
     /* Y la entrada quedó en la bitácora, con quién la aprobó (0.64.0). */
     const b = (await o('mike', `/items/${it1}/alcance`)).data;
     expect(b.movimientos.map((m: any) => m.accion)).toEqual(['entra']);

@@ -67,6 +67,7 @@ import articulosComprados from '../migrations/org/0051_articulos_comprados.sql';
 import prefacturas from '../migrations/org/0052_prefacturas.sql';
 import cfdiDePruebas from '../migrations/org/0053_cfdi_de_pruebas.sql';
 import requerimientosPorTipo from '../migrations/org/0054_requerimientos_por_cambio_de_tipo.sql';
+import conceptosDeCobro from '../migrations/org/0055_conceptos_de_cobro.sql';
 import { MotorInversion } from './inversion-db';
 import { MotorFiscal } from './fiscal-db';
 import { MotorSat, type MemoriaSat } from './sat-db';
@@ -86,7 +87,7 @@ import { DEFS, type Def, type Tipo } from './tablas';
 import { PREFIJO_COSTO, TIPOS_COSTO, calcular, hoyMx, limpiarApu, usaA, type Apu, type Desglose, type Fuentes } from './costos';
 import { ahora, normalizar, ulid } from './lib';
 import { alcanceDeItem, CATEGORIA_PRESTAMO_CAPITAL, CATEGORIA_PRESTAMO_RECIBIDO, type MovimientoAlcance } from '../schema/tipos';
-import { TABLAS, type Aviso, type ConteoQuote, type Etapa, type EventoOrden, type Peek, type Pool, type ProveedorDePago, type CuentaDeReembolso, type ReembolsoA, type Tabla } from '../schema/tipos';
+import { TABLAS, type CotizacionParaConceptos, type ResultadoImportarConceptos, type Aviso, type ConteoQuote, type Etapa, type EventoOrden, type Peek, type Pool, type ProveedorDePago, type CuentaDeReembolso, type ReembolsoA, type Tabla } from '../schema/tipos';
 import type { Env } from './entorno';
 
 /* Las migraciones del OrgDB, en orden. Para agregar una: se escribe el .sql,
@@ -98,12 +99,12 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso, articulosComprados, prefacturas, cfdiDePruebas, requerimientosPorTipo];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso, articulosComprados, prefacturas, cfdiDePruebas, requerimientosPorTipo, conceptosDeCobro];
 
 /** La 0027, la 0030 (y la 0054, que la repite), la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
  *  en la lista; el archivo .sql es sólo la nota que lo dice. */
-const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar' | 'facturaV2' | 'disenoDelItem' | 'cuentaDeReembolso' | 'cfdiDePruebas' | 'migrarRequerimientosPorTipo'> = {
+const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar' | 'facturaV2' | 'disenoDelItem' | 'cuentaDeReembolso' | 'cfdiDePruebas' | 'migrarRequerimientosPorTipo' | 'conceptosDeCobro'> = {
   [MIGRACIONES.indexOf(sinNegocios)]: 'quitarNegocios',
   [MIGRACIONES.indexOf(requerimientosHuerfanos)]: 'migrarRequerimientosHuerfanos',
   [MIGRACIONES.indexOf(obrasALaSuite)]: 'migrarObrasSueltas',
@@ -117,6 +118,7 @@ const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfano
   [MIGRACIONES.indexOf(cuentaDeReembolso)]: 'cuentaDeReembolso',
   [MIGRACIONES.indexOf(cfdiDePruebas)]: 'cfdiDePruebas',
   [MIGRACIONES.indexOf(requerimientosPorTipo)]: 'migrarRequerimientosPorTipo',
+  [MIGRACIONES.indexOf(conceptosDeCobro)]: 'conceptosDeCobro',
 };
 
 /** La tabla `empresa` (0027): UN renglón, con id fijo, que es lo que antes
@@ -212,6 +214,91 @@ export interface LineaAprobada {
  *  usuario siempre; el correo cuando la ruta lo tiene a la mano. */
 export interface ContextoEscritura { app: string; usuario_id: string; correo?: string | null }
 
+/** 0.105.0 · El dinero de un precio: subtotal, IVA y total, en centavos y en
+ *  puntos base, como lo lee el proyecto (`iva_incluido`). */
+export interface Desglose3 { subtotal: number; iva: number; total: number }
+/** 0.105.0 · Los conceptos de cobro de un proyecto, agrupados: primero los de
+ *  cada cotización importada (en el orden en que entraron) y al final los
+ *  escritos a mano. `subtotal` es la suma de sus importes, como se capturaron. */
+export interface GrupoDeConceptos {
+  cotizacion_id: string | null;
+  folio: string | null;
+  nombre: string;
+  /** 1 la primera cotización importada, 2 la segunda… null: escritos a mano. */
+  numero: number | null;
+  importe: number;
+  conceptos: Fila[];
+}
+export interface EstadoDelProyecto {
+  generado_at: string;
+  proyecto: Fila;
+  cliente: Fila | null;
+  /** ES LA EMPRESA (0.63.0): {id: 'empresa', nombre, rfc, moneda}. Sigue
+   *  llamándose `negocio` para no romper peek101 ni dash101. */
+  negocio: Fila | null;
+  /** 0.105.0 · los conceptos de cobro, uno por renglón. */
+  conceptos: Fila[];
+  grupos: GrupoDeConceptos[];
+  /** Hasta 0.104 eran los ítems vendidos. Desde 0.105.0 son los MISMOS
+   *  conceptos con la forma de antes (nombre, cantidad, precio_unitario,
+   *  importe), para que una pantalla que no se ha puesto al día siga
+   *  enseñando una lista que suma lo de abajo. */
+  items: Fila[];
+  movimientos: Fila[];
+  totales: {
+    subtotal: number; iva: number; total: number;
+    tasa_iva: number; iva_incluido: boolean;
+    /** saldo null: el precio está por cargar y no hay contra qué restar. */
+    cobrado: number; saldo: number | null; piezas: number;
+    precio_por_cargar: boolean;
+    /** Lo que decía el proyecto antes del 18-nov-2026, mientras se carga
+     *  el nuevo. null si no tenía o si ya hay conceptos. */
+    precio_anterior: number | null;
+  };
+}
+export interface EstadoDeCuenta {
+  generado_at: string;
+  cliente: Fila;
+  /** Cada proyecto con sus conceptos agrupados, su subtotal, IVA y total, lo
+   *  cobrado (`pagos`) y su saldo (null si su precio está por cargar). */
+  proyectos: Fila[];
+  otros_pagos: Fila[];
+  totales: {
+    /** Σ precio_venta (como se capturó, sin desglosar el IVA). */
+    vendido: number;
+    subtotal: number; iva: number; total: number;
+    cobrado: number;
+    /** total − cobrado de los proyectos con precio, menos lo cobrado sin proyecto. */
+    saldo: number;
+    sin_proyecto: number;
+    por_cargar: number;
+  };
+}
+/** 0.105.0 · Subtotal, IVA y total de un precio, en enteros: `tasa` en
+ *  puntos base (1600 = 16 %); `incluido` dice si el IVA ya viene dentro y se
+ *  desglosa hacia atrás o si se suma encima. */
+export function desglosarIva(venta: number, tasa: number, incluido: boolean): Desglose3 {
+  const t = Math.max(0, Math.trunc(Number(tasa) || 0));
+  const subtotal = incluido ? Math.round((venta * 10000) / (10000 + t)) : venta;
+  const iva = incluido ? venta - subtotal : Math.round((venta * t) / 10000);
+  return { subtotal, iva, total: subtotal + iva };
+}
+/** 0.105.0 · `GET /orgs/:o/pagos-pendientes[?proyecto_id=]`: lo que se debe
+ *  a cada contratista o proveedor, por proyecto (acordado − pagado de sus
+ *  partidas, sólo lo que falta). Centavos. Son costos: owner, admin y socio. */
+export interface PagosPendientes {
+  total: number;
+  proyectos: Array<{
+    proyecto_id: string; nombre: string; estado: string; cliente_nombre: string | null; pendiente: number;
+    contratistas: Array<{
+      clave: string; proveedor_id: string | null; nombre: string; tipo: string | null;
+      acordado: number; pagado: number; pendiente: number;
+      partidas: Array<{ id: string; concepto: string; acordado: number; pagado: number; pendiente: number; estado: string; fecha_esperada: string | null; del_cronograma: boolean }>;
+    }>;
+  }>;
+  /** Cada contratista con todo lo que se le debe, el que más primero. */
+  contratistas: Array<{ clave: string; proveedor_id: string | null; nombre: string; tipo: string | null; pendiente: number; proyectos: number }>;
+}
 export interface AprobarCotizacion {
   cotizacion_id: string; proyecto_id: string; lineas: LineaAprobada[]; usuario_id: string; app: string; correo?: string | null;
   /** 0.49.0: la partida (pestaña) en la que caen las piezas. Sin ella, el
@@ -300,6 +387,10 @@ export interface ApiOrgDB {
     correo?: string | null;
   }): Promise<{ ok: true; proyecto: Fila; items: Fila[] } | { ok: false; error: string; detalle?: Record<string, any> }>;
   aprobarCotizacion(args: AprobarCotizacion): Promise<ResultadoAprobar>;
+  /** 0.105.0 · Las cotizaciones de quote101 de un proyecto, para importar sus renglones como conceptos de cobro. */
+  cotizacionesParaConceptos(proyecto_id: string): Promise<CotizacionParaConceptos[] | null>;
+  /** 0.105.0 · Un concepto de cobro por renglón de la cotización (Mike, 18-nov-2026). */
+  importarConceptos(args: { proyecto_id: string; cotizacion_id: string; reemplazar?: boolean; app: string; usuario_id: string }): Promise<ResultadoImportarConceptos>;
   /** 0.49.0: un requerimiento levantado en la obra nace como ítem cotizado del
    *  proyecto ligado y cae en el borrador de requerimientos de quote101. */
   levantarRequerimiento(d: { element_id: string; obra_id: string; code: string; name: string; usuario_id: string; padre_item_id?: string | null; descripcion?: string | null }): Promise<{ item_id: string | null; cotizacion_id: string | null }>;
@@ -313,30 +404,11 @@ export interface ApiOrgDB {
   clientePorUsuario(usuario_id: string): Promise<Fila | null>;
   /** El cliente con ese correo (normalizado), si lo hay (0.64.4). */
   clientePorCorreo(correo: string): Promise<Fila | null>;
-  estadoDeCuenta(cliente_id: string): Promise<{
-    cliente: Fila;
-    proyectos: Fila[];
-    otros_pagos: Fila[];
-    totales: { vendido: number; cobrado: number; saldo: number; sin_proyecto: number };
-  } | null>;
+  estadoDeCuenta(cliente_id: string): Promise<EstadoDeCuenta | null>;
   /** El estado de cuenta de UN proyecto: la lista que suma, el desglose de
    *  IVA como lo lleve esa obra, los pagos del cliente y la fecha del
    *  servidor. Lo abren dash101 y peek101 con el mismo cálculo (§119). */
-  estadoDelProyecto(proyecto_id: string): Promise<{
-    generado_at: string;
-    proyecto: Fila;
-    cliente: Fila | null;
-    /** ES LA EMPRESA (0.63.0): {id: 'empresa', nombre, rfc, moneda}. Sigue
-     *  llamándose `negocio` para no romper peek101 ni dash101. */
-    negocio: Fila | null;
-    items: Fila[];
-    movimientos: Fila[];
-    totales: {
-      subtotal: number; iva: number; total: number;
-      tasa_iva: number; iva_incluido: boolean;
-      cobrado: number; saldo: number; piezas: number;
-    };
-  } | null>;
+  estadoDelProyecto(proyecto_id: string): Promise<EstadoDelProyecto | null>;
   conectados(): Promise<number>;
   /** Puerta de servicio: solo la usa POST /admin/importar (fase 2). */
   importar(args: { filas: Record<string, Fila[]>; seco: boolean }): Promise<Importacion>;
@@ -378,6 +450,8 @@ export interface ApiOrgDB {
   /** Quién hay en los expedientes de roster101, para dar de alta un
    *  accionista jalándolo de ahí (0.60.0). */
   accionistasDeRoster(): Promise<Array<{ id: string; nombre: string; rfc: string; correo: string; puesto: string }>>;
+  /** 0.105.0 · Lo que se les debe a contratistas y proveedores, por proyecto. */
+  pagosPendientes(proyecto_id?: string | null): Promise<PagosPendientes>;
   pendientesDeOrdenes(): Promise<{ compras: { total: number; cuantas: number }; reembolsos: { total: number; cuantas: number } }>;
   verOrden(id: string): Promise<{ orden: Fila; eventos: Fila[]; archivos: Fila[]; proveedor: ProveedorDePago | null; reembolso_a: ReembolsoA | null } | null>;
   /** 0.56.1 · La orden que dejó ese egreso (o null): para que desde el movimiento se llegue a la orden con toda su historia y sus papeles. */
@@ -1118,6 +1192,18 @@ export class OrgDB extends DurableObject<Env> {
       fila.desglose = null;
       fila.historial = [];
     }
+    /* 0.105.0 · El importe de un concepto de cobro lo multiplica la base:
+     * cantidad × precio unitario, al centavo. */
+    if (tabla === 'conceptos') {
+      const cant = Number(fila.cantidad ?? 1);
+      fila.cantidad = Number.isFinite(cant) && cant > 0 ? cant : 1;
+      fila.precio_unitario = Math.trunc(Number(fila.precio_unitario ?? 0)) || 0;
+      fila.monto = Math.round(Number(fila.cantidad) * Number(fila.precio_unitario));
+      fila.descripcion = String(fila.descripcion ?? '').trim();
+      if (fila.orden === undefined || fila.orden === null) {
+        fila.orden = (this.sql.exec(`SELECT COALESCE(MAX(orden),0) + 1 AS o FROM conceptos WHERE proyecto_id = ?`, String(fila.proyecto_id ?? '')).one() as { o: number }).o;
+      }
+    }
     if (def.cols.creado_at) fila.creado_at = ahora();
     if (def.cols.ts && !fila.ts) fila.ts = ahora();
     if (def.cols.creado_por) fila.creado_por = contexto.usuario_id;
@@ -1171,6 +1257,23 @@ export class OrgDB extends DurableObject<Env> {
           else if (nuevo !== 'mo' && (u === 'h' || u === 'unidad')) datos.unidad = 'pza';
         }
       }
+    }
+    /* 0.105.0 · Un concepto que cambia de cantidad o de precio vuelve a
+     * multiplicarse con lo que no cambió. Y no se muda de proyecto: el que
+     * lo perdería no se recalcularía, y si es de otra obra se borra aquí y
+     * se escribe allá. */
+    if (tabla === 'conceptos') {
+      delete datos.proyecto_id;
+      if (datos.cantidad !== undefined || datos.precio_unitario !== undefined) {
+        const antes = this.obtener('conceptos', id);
+        if (antes) {
+          const cant = Number(datos.cantidad ?? antes.cantidad ?? 1);
+          datos.cantidad = Number.isFinite(cant) && cant > 0 ? cant : 1;
+          datos.precio_unitario = Math.trunc(Number(datos.precio_unitario ?? antes.precio_unitario ?? 0)) || 0;
+          datos.monto = Math.round(Number(datos.cantidad) * Number(datos.precio_unitario));
+        }
+      }
+      if (datos.descripcion !== undefined) datos.descripcion = String(datos.descripcion ?? '').trim();
     }
     const cols = Object.keys(datos).filter((c) => c in def.cols && c !== 'id');
     if (!cols.length) return this.obtener(tabla, id);
@@ -1310,7 +1413,7 @@ export class OrgDB extends DurableObject<Env> {
       if (/FOREIGN KEY/i.test((e as Error).message ?? '')) return 'en_uso';
       throw e;
     }
-    if ((tabla === 'movimientos' || tabla === 'partidas') && antes.proyecto_id) this.recalcularProyecto(String(antes.proyecto_id));
+    if ((tabla === 'movimientos' || tabla === 'partidas' || tabla === 'conceptos') && antes.proyecto_id) this.recalcularProyecto(String(antes.proyecto_id));
     return true;
   }
 
@@ -1572,6 +1675,10 @@ export class OrgDB extends DurableObject<Env> {
       const par = this.obtener('partidas', id);
       if (par?.proyecto_id) this.recalcularProyecto(String(par.proyecto_id));
     }
+    if (tabla === 'conceptos') {
+      const co = this.obtener('conceptos', id);
+      if (co?.proyecto_id) this.recalcularProyecto(String(co.proyecto_id));
+    }
   }
 
   /* ─────────────── agregados del proyecto (§4) ───────────────
@@ -1709,15 +1816,36 @@ export class OrgDB extends DurableObject<Env> {
     return { cortes, por_cuenta, acumulado };
   }
 
+  /** Si la base ya tiene la 0055. Se pregunta una vez: una vez que sí, ya no deja de tenerla. */
+  private conceptosListos = false;
+
   recalcularProyecto(proyecto_id: string): Fila | null {
     const p = this.sql.exec(`SELECT id, estado FROM proyectos WHERE id = ?`, proyecto_id).toArray()[0] as Fila | undefined;
     if (!p) return null;
 
+    // Los ítems vendidos dicen cuánto lleva la obra y si ya acabó; desde la
+    // 0055 ya no dicen cuánto vale.
     const venta = this.sql
       .exec(`SELECT COALESCE(SUM(monto),0) AS s, COUNT(*) AS n, COALESCE(AVG(etapa),0) AS e,
              COALESCE(SUM(CASE WHEN etapa = 7 THEN 1 ELSE 0 END),0) AS cerrados
              FROM items WHERE proyecto_id = ? AND estado = 'vendido'`, proyecto_id)
       .one() as { s: number; n: number; e: number; cerrados: number };
+    /* 0055 · El precio de venta es la suma de sus CONCEPTOS DE COBRO (Mike,
+     * 18-nov-2026: «Ya no va a ir ligada a los ítems. Los precios de los
+     * proyectos se harán por aparte»). Sin conceptos el precio está por
+     * cargar: queda en 0 y `n_conceptos` en 0 lo dice. */
+    if (!this.conceptosListos) this.conceptosListos = this.tieneColumna('proyectos', 'n_conceptos');
+    /* Una base vieja que todavía se está migrando (una migración en código
+     * de antes de la 0055 que toca ítems) no tiene la tabla: ahí sigue la
+     * regla de entonces, y la 0055 la respalda y la pone en cero al llegar. */
+    if (!this.conceptosListos) {
+      this.sql.exec(`UPDATE proyectos SET precio_venta = ? WHERE id = ?`, venta.s, proyecto_id);
+    }
+    const precio = this.conceptosListos
+      ? this.sql
+        .exec(`SELECT COALESCE(SUM(monto),0) AS s, COUNT(*) AS n FROM conceptos WHERE proyecto_id = ?`, proyecto_id)
+        .one() as { s: number; n: number }
+      : null;
     const cobrado = (this.sql
       .exec(`SELECT COALESCE(SUM(monto),0) AS s FROM movimientos WHERE proyecto_id = ? AND tipo = 'ingreso'`, proyecto_id)
       .one() as { s: number }).s;
@@ -1758,10 +1886,12 @@ export class OrgDB extends DurableObject<Env> {
     if (venta.n > 0 && venta.cerrados === venta.n && estado !== 'cerrado') estado = 'finiquito';
 
     this.sql.exec(
-      `UPDATE proyectos SET precio_venta = ?, cobrado = ?, pagado_prov = ?, compromiso = ?, avance = ?, estado = ?, actualizado_at = ? WHERE id = ?`,
-      venta.s, cobrado, pagado, compromiso, avance, estado, ahora(), proyecto_id,
+      `UPDATE proyectos SET cobrado = ?, pagado_prov = ?, compromiso = ?, avance = ?, estado = ?, actualizado_at = ? WHERE id = ?`,
+      cobrado, pagado, compromiso, avance, estado, ahora(), proyecto_id,
     );
-    this.avisar({ t: 'proyecto.cache', id: proyecto_id, precio_venta: venta.s, cobrado, avance }, 'dinero');
+    if (precio) this.sql.exec(`UPDATE proyectos SET precio_venta = ?, n_conceptos = ? WHERE id = ?`, precio.s, precio.n, proyecto_id);
+    const precioVenta = precio ? precio.s : venta.s;
+    this.avisar({ t: 'proyecto.cache', id: proyecto_id, precio_venta: precioVenta, n_conceptos: precio?.n ?? 0, cobrado, avance }, 'dinero');
     return this.obtener('proyectos', proyecto_id);
   }
 
@@ -2863,6 +2993,67 @@ export class OrgDB extends DurableObject<Env> {
    *  otros totales», y que resta esa suma del capital de la empresa. Lo lee
    *  quien ve dinero, no sólo quien paga: es una cifra del tablero, no el
    *  buzón —los renglones no salen por aquí. */
+  /* ─────────────── lo que se les debe (0.105.0) ───────────────
+   *
+   * Mike, 18-nov-2026: «vamos a poner en dash los pagos pendientes de cada
+   * proyecto a cada contratista». Lo pendiente de una partida es lo acordado
+   * menos lo pagado (`monto_pagado`, el caché de recalcularProyecto), y sólo
+   * entra lo que todavía se debe. Las partidas del cronograma (las fases de
+   * quell con contratista y costo) están aquí igual que las capturadas a
+   * mano: a quién se le debe no depende de dónde se escribió. */
+  pagosPendientes(proyecto_id?: string | null): PagosPendientes {
+    const filas = this.sql
+      .exec(
+        `SELECT pa.id, pa.proyecto_id, pa.proveedor_id, pa.proveedor_nombre, pa.concepto, pa.monto_acordado, pa.monto_pagado,
+                pa.estado, pa.fecha_esperada, pa.tarea_id, p.nombre AS proyecto_nombre, p.estado AS proyecto_estado,
+                cl.nombre AS cliente_nombre, pr.nombre AS proveedor_nombre_actual, pr.tipo AS proveedor_tipo
+         FROM partidas pa
+         JOIN proyectos p ON p.id = pa.proyecto_id
+         LEFT JOIN clientes cl ON cl.id = p.cliente_id
+         LEFT JOIN proveedores pr ON pr.id = pa.proveedor_id
+         WHERE pa.monto_acordado > COALESCE(pa.monto_pagado, 0) AND (? IS NULL OR pa.proyecto_id = ?)
+         ORDER BY p.nombre, COALESCE(pr.nombre, pa.proveedor_nombre, ''), COALESCE(pa.fecha_esperada, ''), pa.creado_at`,
+        proyecto_id ?? null, proyecto_id ?? null,
+      )
+      .toArray() as Fila[];
+
+    const proyectos: PagosPendientes['proyectos'] = [];
+    const contratistas = new Map<string, PagosPendientes['contratistas'][number]>();
+    for (const f of filas) {
+      const pendiente = Number(f.monto_acordado || 0) - Number(f.monto_pagado || 0);
+      const nombre = String(f.proveedor_nombre_actual ?? f.proveedor_nombre ?? '').trim() || 'Sin nombre';
+      const clave = f.proveedor_id ? `id:${f.proveedor_id}` : `nombre:${nombre.toLowerCase()}`;
+      let p = proyectos[proyectos.length - 1];
+      if (!p || p.proyecto_id !== String(f.proyecto_id)) {
+        p = { proyecto_id: String(f.proyecto_id), nombre: String(f.proyecto_nombre ?? ''), estado: String(f.proyecto_estado ?? ''), cliente_nombre: (f.cliente_nombre as string | null) ?? null, pendiente: 0, contratistas: [] };
+        proyectos.push(p);
+      }
+      let c = p.contratistas.find((x) => x.clave === clave);
+      if (!c) {
+        c = { clave, proveedor_id: (f.proveedor_id as string | null) ?? null, nombre, tipo: (f.proveedor_tipo as string | null) ?? null, acordado: 0, pagado: 0, pendiente: 0, partidas: [] };
+        p.contratistas.push(c);
+      }
+      c.partidas.push({
+        id: String(f.id), concepto: String(f.concepto ?? ''), acordado: Number(f.monto_acordado || 0), pagado: Number(f.monto_pagado || 0),
+        pendiente, estado: String(f.estado ?? 'pendiente'), fecha_esperada: (f.fecha_esperada as string | null) ?? null, del_cronograma: !!f.tarea_id,
+      });
+      c.acordado += Number(f.monto_acordado || 0);
+      c.pagado += Number(f.monto_pagado || 0);
+      c.pendiente += pendiente;
+      p.pendiente += pendiente;
+
+      const g = contratistas.get(clave) ?? { clave, proveedor_id: c.proveedor_id, nombre, tipo: c.tipo, pendiente: 0, proyectos: 0 };
+      if (!contratistas.has(clave)) contratistas.set(clave, g);
+      g.pendiente += pendiente;
+    }
+    for (const p of proyectos) for (const c of p.contratistas) contratistas.get(c.clave)!.proyectos += 1;
+    return {
+      total: proyectos.reduce((t, p) => t + p.pendiente, 0),
+      proyectos,
+      contratistas: [...contratistas.values()].sort((a, b) => b.pendiente - a.pendiente),
+    };
+  }
+
   pendientesDeOrdenes(): { compras: { total: number; cuantas: number }; reembolsos: { total: number; cuantas: number } } {
     const filas = this.sql
       .exec(`SELECT tipo, COUNT(*) AS n, COALESCE(SUM(monto), 0) AS suma FROM ordenes WHERE estado = 'en_buzon' GROUP BY tipo`)
@@ -3617,7 +3808,7 @@ export class OrgDB extends DurableObject<Env> {
 
     const cuantos = (sql: string, ...args: SqlStorageValue[]) => Number((this.sql.exec(sql, ...args).toArray()[0] as Fila).n);
     const tablas = (this.sql
-      .exec(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('proyectos', 'quell_projects') AND name NOT LIKE 'sqlite_%' AND sql LIKE '%proyecto_id%' ORDER BY name`)
+      .exec(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('proyectos', 'quell_projects', 'precios_anteriores') AND name NOT LIKE 'sqlite_%' AND sql LIKE '%proyecto_id%' ORDER BY name`)
       .toArray() as Fila[]).map((t) => String(t.name));
     const movidos: Record<string, number> = {};
     for (const t of tablas) {
@@ -3637,6 +3828,25 @@ export class OrgDB extends DurableObject<Env> {
 
     const itemIds = (this.sql.exec(`SELECT id FROM items WHERE proyecto_id = ?`, se_va_id).toArray() as Fila[]).map((f) => String(f.id));
     this.ctx.storage.transactionSync(() => {
+      /* 0.105.0 · Los conceptos de cobro del que se va quedan DESPUÉS de los
+       * del que se queda, en su mismo orden. Y el respaldo de precios (0055)
+       * es uno por proyecto: si los dos tenían, se suman en el que queda. */
+      if (tablas.includes('conceptos')) {
+        const max = cuantos(`SELECT COALESCE(MAX(orden),0) AS n FROM conceptos WHERE proyecto_id = ?`, queda_id);
+        this.sql.exec(`UPDATE conceptos SET orden = orden + ? WHERE proyecto_id = ?`, max, se_va_id);
+      }
+      if (this.tieneColumna('proyectos', 'n_conceptos')) {
+        const va = this.sql.exec(`SELECT precio_venta FROM precios_anteriores WHERE proyecto_id = ?`, se_va_id).toArray()[0] as Fila | undefined;
+        if (va) {
+          const hay = cuantos(`SELECT COUNT(*) AS n FROM precios_anteriores WHERE proyecto_id = ?`, queda_id) > 0;
+          if (hay) {
+            this.sql.exec(`UPDATE precios_anteriores SET precio_venta = precio_venta + ? WHERE proyecto_id = ?`, Number(va.precio_venta || 0), queda_id);
+            this.sql.exec(`DELETE FROM precios_anteriores WHERE proyecto_id = ?`, se_va_id);
+          } else {
+            this.sql.exec(`UPDATE precios_anteriores SET proyecto_id = ? WHERE proyecto_id = ?`, queda_id, se_va_id);
+          }
+        }
+      }
       for (const t of tablas) this.sql.exec(`UPDATE "${t}" SET proyecto_id = ? WHERE proyecto_id = ?`, queda_id, se_va_id);
       if (queda.cliente_id) this.sql.exec(`UPDATE items SET cliente_id = ? WHERE proyecto_id = ?`, String(queda.cliente_id), queda_id);
       this.sql.exec(`UPDATE cotizaciones SET datos = json_set(datos, '$.proyecto_id', ?) WHERE json_extract(datos, '$.proyecto_id') = ?`, queda_id, se_va_id);
@@ -3854,6 +4064,17 @@ export class OrgDB extends DurableObject<Env> {
     const enSandbox = `EXISTS (SELECT 1 FROM pac_config WHERE id = 'pac' AND sandbox = 1)`;
     this.sql.exec(`UPDATE cfdi SET pruebas = 1 WHERE pruebas IS NULL AND pac_id IS NOT NULL AND ${enSandbox}`);
     this.sql.exec(`UPDATE emisiones SET pruebas = 1 WHERE pruebas IS NULL AND ${enSandbox}`);
+  }
+
+  /** 0055, en código: los conceptos de cobro (0.105.0). La columna
+   *  `proyectos.n_conceptos` se agrega sólo si falta y ANTES del resto, que
+   *  la usa. Lo demás del .sql es repetible por sí solo. */
+  private conceptosDeCobro(): void {
+    for (const m of conceptosDeCobro.matchAll(/^ALTER TABLE (\w+) ADD COLUMN (\w+) (.+);$/gm)) {
+      const [, tabla, columna, tipo] = m;
+      if (!this.tieneColumna(tabla, columna)) this.sql.exec(`ALTER TABLE ${tabla} ADD COLUMN ${columna} ${tipo}`);
+    }
+    this.sql.exec(conceptosDeCobro.replace(/^ALTER TABLE .*$/gm, ''));
   }
 
   /** 0048, en código: la factura nueva, segunda vuelta. Misma forma que la 0047. */
@@ -5606,12 +5827,7 @@ export class OrgDB extends DurableObject<Env> {
    * tabla salen de dos consultas, un día se contradicen y las dos se ven
    * ciertas. Aquí el saldo global es, por construcción, la suma de los
    * renglones que se están enseñando. */
-  estadoDeCuenta(cliente_id: string): {
-    cliente: Fila;
-    proyectos: Fila[];
-    otros_pagos: Fila[];
-    totales: { vendido: number; cobrado: number; saldo: number; sin_proyecto: number };
-  } | null {
+  estadoDeCuenta(cliente_id: string): EstadoDeCuenta | null {
     const cliente = this.sql
       .exec(`SELECT id, nombre, rfc, correo, telefono FROM clientes WHERE id = ?`, cliente_id)
       .toArray()[0] as Fila | undefined;
@@ -5619,7 +5835,7 @@ export class OrgDB extends DurableObject<Env> {
 
     const proyectos = this.sql
       .exec(
-        `SELECT id, nombre, estado, fecha_inicio, fecha_cierre, precio_venta
+        `SELECT id, nombre, estado, fecha_inicio, fecha_cierre, precio_venta, n_conceptos, tasa_iva, iva_incluido
          FROM proyectos WHERE cliente_id = ? ORDER BY COALESCE(fecha_inicio, creado_at)`,
         cliente_id,
       )
@@ -5650,22 +5866,200 @@ export class OrgDB extends DurableObject<Env> {
       else otros_pagos.push(g);
     }
 
+    /* 0.105.0 · Cada proyecto con lo que se le cotizó —sus conceptos de cobro,
+     * agrupados por cotización— y lo que pagó, y su saldo contra el TOTAL CON
+     * IVA, que es lo que va a pagar: la misma cuenta que su estado de cuenta
+     * por proyecto, para que los dos documentos digan lo mismo. Un proyecto
+     * con el precio por cargar enseña lo cobrado pero no tiene saldo (Mike,
+     * 18-nov-2026: «Todos a cero de una vez»). */
     const conSaldo = proyectos.map((p) => {
       const suyosPagos = porProyecto.get(String(p.id)) ?? [];
       const cobrado = suyosPagos.reduce((t, g) => t + Number(g.monto || 0), 0);
+      const porCargar = Number(p.n_conceptos ?? 0) === 0;
+      const incluido = Number(p.iva_incluido ?? 0) === 1;
+      const d = desglosarIva(Number(p.precio_venta || 0), Number(p.tasa_iva ?? 1600), incluido);
       return {
         ...p,
+        iva_incluido: incluido,
+        precio_por_cargar: porCargar,
+        ...d,
         cobrado,
-        saldo: Number(p.precio_venta || 0) - cobrado,
+        saldo: porCargar ? null : d.total - cobrado,
+        grupos: this.conceptosDelProyecto(String(p.id)).grupos,
         pagos: suyosPagos,
       };
     });
 
+    const conPrecio = conSaldo.filter((p) => !p.precio_por_cargar);
     const vendido = proyectos.reduce((t, p) => t + Number(p.precio_venta || 0), 0);
     const sin_proyecto = otros_pagos.reduce((t, g) => t + Number(g.monto || 0), 0);
     const cobrado = conSaldo.reduce((t, p) => t + Number(p.cobrado), 0) + sin_proyecto;
+    const suma = (k: 'subtotal' | 'iva' | 'total') => conPrecio.reduce((t, p) => t + Number(p[k] || 0), 0);
+    const saldo = conPrecio.reduce((t, p) => t + Number(p.saldo || 0), 0) - sin_proyecto;
 
-    return { cliente, proyectos: conSaldo, otros_pagos, totales: { vendido, cobrado, saldo: vendido - cobrado, sin_proyecto } };
+    return {
+      generado_at: ahora(),
+      cliente, proyectos: conSaldo, otros_pagos,
+      totales: {
+        vendido, subtotal: suma('subtotal'), iva: suma('iva'), total: suma('total'),
+        cobrado, saldo, sin_proyecto, por_cargar: conSaldo.length - conPrecio.length,
+      },
+    };
+  }
+
+  /** 0.105.0 · Los conceptos de cobro de un proyecto, en su orden, y
+   *  agrupados: cada cotización importada es un grupo con su folio —la
+   *  primera, la segunda…— y lo escrito a mano va al final. Mike, 18-nov:
+   *  «se debe ver que es una segunda cotización pero suma». */
+  conceptosDelProyecto(proyecto_id: string): { conceptos: Fila[]; grupos: GrupoDeConceptos[] } {
+    const conceptos = this.sql
+      .exec(
+        `SELECT id, descripcion, cantidad, precio_unitario, monto, orden, cotizacion_id, cotizacion_folio, cotizacion_nombre, linea
+         FROM conceptos WHERE proyecto_id = ? ORDER BY orden, creado_at`,
+        proyecto_id,
+      )
+      .toArray() as Fila[];
+    const grupos: GrupoDeConceptos[] = [];
+    const porCot = new Map<string, GrupoDeConceptos>();
+    let aMano: GrupoDeConceptos | null = null;
+    for (const co of conceptos) {
+      const cid = co.cotizacion_id ? String(co.cotizacion_id) : null;
+      let g: GrupoDeConceptos | null | undefined = cid ? porCot.get(cid) : aMano;
+      if (!g) {
+        g = cid
+          ? { cotizacion_id: cid, folio: (co.cotizacion_folio as string | null) ?? null, nombre: String(co.cotizacion_nombre ?? '') || 'Cotización', numero: porCot.size + 1, importe: 0, conceptos: [] }
+          : { cotizacion_id: null, folio: null, nombre: 'Otros conceptos', numero: null, importe: 0, conceptos: [] };
+        if (cid) { porCot.set(cid, g); grupos.push(g); } else aMano = g;
+      }
+      g.conceptos.push(co);
+      g.importe += Number(co.monto || 0);
+    }
+    if (aMano) grupos.push(aMano);
+    return { conceptos, grupos };
+  }
+
+  /* ─────────────── los conceptos de cobro (0.105.0) ───────────────
+   *
+   * Mike, 18-nov-2026: «Vamos a separar la contabilidad. Ya no va a ir
+   * ligada a los ítems. Los precios de los proyectos se harán por aparte.»
+   * Con botones: «Conceptos de cobro con opción a importar de las
+   * cotizaciones del proyecto de quote» y «Un concepto por renglón. Si se
+   * importa una segunda cotización del mismo proyecto, se debe ver que es una
+   * segunda cotización pero suma».
+   *
+   * DE DÓNDE SALE EL PRECIO DE CADA RENGLÓN. quote101 lo calcula en la
+   * pantalla —costo × indirectos, comisiones y flete repartido, con el
+   * descuento de la hoja— y desde 0.105.0 lo deja escrito en la cotización al
+   * guardarla: `datos.renglones = [{linea, nombre, cantidad, precio_unitario}]`,
+   * en centavos y SIN IVA, igual que el precio con el que aprueba. Eso se
+   * copia tal cual: rehacer aquí la cuenta de quote sería tener dos maneras
+   * de calcular el mismo precio, y un día no darían lo mismo.
+   *
+   * Una cotización que se aprobó antes y ya no se edita no trae esos
+   * renglones, pero sus piezas sí traen su precio (`items.origen`): de ahí
+   * se arman. Una que no trae ninguna de las dos cosas contesta 409
+   * `sin_precios` y dice qué hacer.
+   *
+   * El IVA: el precio de quote es sin IVA. Si el proyecto lleva el IVA
+   * incluido (`iva_incluido` = 1), se le suma al copiarlo, para que el
+   * concepto se lea como se leen todos los de esa obra. */
+  private renglonesDeCotizacion(cot: Fila): { fuente: 'quote' | 'piezas'; lineas: Array<{ linea: number; nombre: string; cantidad: number; precio_unitario: number }> } | null {
+    const datos = (cot.datos ?? {}) as Record<string, any>;
+    if (Array.isArray(datos.renglones) && datos.renglones.length) {
+      const lineas = (datos.renglones as Array<Record<string, any>>)
+        .map((r, i) => ({
+          linea: Number.isInteger(Number(r.linea)) ? Number(r.linea) : i + 1,
+          nombre: String(r.nombre ?? '').trim() || String(r.descripcion ?? '').trim() || `Renglón ${i + 1}`,
+          cantidad: Number(r.cantidad) > 0 ? Number(r.cantidad) : 1,
+          precio_unitario: Math.round(Number(r.precio_unitario) || 0),
+        }));
+      return { fuente: 'quote', lineas };
+    }
+    const piezas = this.sql
+      .exec(`SELECT nombre, monto, cantidad, origen FROM items
+             WHERE json_extract(origen, '$.cotizacion_id') = ? ORDER BY CAST(json_extract(origen, '$.linea') AS INTEGER), creado_at`, String(cot.id))
+      .toArray() as Fila[];
+    if (!piezas.length) return null;
+    const lineas: Array<{ linea: number; nombre: string; cantidad: number; precio_unitario: number }> = [];
+    for (const it of piezas) {
+      const nombre = String(it.nombre ?? '').trim() || 'Pieza';
+      const pu = Math.round(Number(it.monto ?? 0) / Math.max(1, Number(it.cantidad ?? 1)));
+      const igual = lineas.find((l) => l.nombre === nombre && l.precio_unitario === pu);
+      if (igual) igual.cantidad += Math.max(1, Number(it.cantidad ?? 1));
+      else lineas.push({ linea: lineas.length + 1, nombre, cantidad: Math.max(1, Number(it.cantidad ?? 1)), precio_unitario: pu });
+    }
+    return { fuente: 'piezas', lineas };
+  }
+
+  cotizacionesParaConceptos(proyecto_id: string): CotizacionParaConceptos[] | null {
+    const p = this.obtener('proyectos', proyecto_id);
+    if (!p) return null;
+    const cots = (this.sql
+      .exec(`SELECT * FROM cotizaciones WHERE json_extract(datos, '$.proyecto_id') = ? ORDER BY creado_at`, proyecto_id)
+      .toArray() as Fila[]).map((f) => this.afuera('cotizaciones', f)!);
+    return cots
+      .filter((c) => !((c.datos ?? {}) as Record<string, any>).de_requerimientos)
+      .map((c) => {
+        const r = this.renglonesDeCotizacion(c);
+        const importados = (this.sql.exec(`SELECT COUNT(*) AS n FROM conceptos WHERE proyecto_id = ? AND cotizacion_id = ?`, proyecto_id, String(c.id)).one() as { n: number }).n;
+        return {
+          id: String(c.id), folio: (c.folio as string | null) ?? null,
+          nombre: String(((c.datos ?? {}) as Record<string, any>).nombre ?? '') || 'Cotización',
+          estado: String(c.estado ?? 'borrador'),
+          fuente: r?.fuente ?? null,
+          renglones: r?.lineas.length ?? 0,
+          subtotal: r ? r.lineas.reduce((t, l) => t + Math.round(l.cantidad * l.precio_unitario), 0) : 0,
+          importados,
+        };
+      });
+  }
+
+  importarConceptos(args: { proyecto_id: string; cotizacion_id: string; reemplazar?: boolean; app: string; usuario_id: string }): ResultadoImportarConceptos {
+    const p = this.obtener('proyectos', args.proyecto_id);
+    if (!p) return { ok: false, error: 'no_encontrado', detalle: { proyecto_id: args.proyecto_id } };
+    const cot = this.obtener('cotizaciones', args.cotizacion_id);
+    if (!cot) return { ok: false, error: 'no_encontrado', detalle: { cotizacion_id: args.cotizacion_id } };
+    const datos = (cot.datos ?? {}) as Record<string, any>;
+    if (String(datos.proyecto_id ?? '') !== args.proyecto_id) {
+      return { ok: false, error: 'otra_obra', detalle: { motivo: 'esa cotización es de otro proyecto', proyecto_de_la_cotizacion: datos.proyecto_id ?? null } };
+    }
+    const ya = (this.sql.exec(`SELECT COUNT(*) AS n FROM conceptos WHERE proyecto_id = ? AND cotizacion_id = ?`, args.proyecto_id, args.cotizacion_id).one() as { n: number }).n;
+    if (ya && !args.reemplazar) {
+      return { ok: false, error: 'ya_importada', detalle: { conceptos: ya, motivo: 'esa cotización ya está en los conceptos; para traerla otra vez, con reemplazar: true' } };
+    }
+    const r = this.renglonesDeCotizacion(cot);
+    if (!r || !r.lineas.length) {
+      return { ok: false, error: 'sin_precios', detalle: { motivo: 'esa cotización no trae el precio de sus renglones: ábrela en quote101 y haz cualquier cambio para que lo guarde' } };
+    }
+    const tasa = Math.max(0, Math.trunc(Number(p.tasa_iva ?? 1600)));
+    const conIva = Number(p.iva_incluido ?? 0) === 1;
+    const folio = (cot.folio as string | null) ?? null;
+    const nombreCot = String(datos.nombre ?? '') || 'Cotización';
+    const creados: Fila[] = [];
+    this.ctx.storage.transactionSync(() => {
+      let orden: number;
+      if (ya) {
+        // Reemplazar deja los conceptos nuevos donde estaban los viejos.
+        orden = (this.sql.exec(`SELECT COALESCE(MIN(orden),1) AS o FROM conceptos WHERE proyecto_id = ? AND cotizacion_id = ?`, args.proyecto_id, args.cotizacion_id).one() as { o: number }).o;
+        this.sql.exec(`DELETE FROM conceptos WHERE proyecto_id = ? AND cotizacion_id = ?`, args.proyecto_id, args.cotizacion_id);
+        const hueco = r.lineas.length;
+        this.sql.exec(`UPDATE conceptos SET orden = orden + ? WHERE proyecto_id = ? AND orden >= ?`, hueco, args.proyecto_id, orden);
+      } else {
+        orden = (this.sql.exec(`SELECT COALESCE(MAX(orden),0) + 1 AS o FROM conceptos WHERE proyecto_id = ?`, args.proyecto_id).one() as { o: number }).o;
+      }
+      for (const l of r.lineas) {
+        const pu = conIva ? Math.round((l.precio_unitario * (10000 + tasa)) / 10000) : l.precio_unitario;
+        const id = ulid();
+        this.sql.exec(
+          `INSERT INTO conceptos (id, proyecto_id, descripcion, cantidad, precio_unitario, monto, orden, cotizacion_id, cotizacion_folio, cotizacion_nombre, linea, creado_en_app, creado_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          id, args.proyecto_id, l.nombre, l.cantidad, pu, Math.round(l.cantidad * pu), orden++, args.cotizacion_id, folio, nombreCot, l.linea, args.app, ahora(),
+        );
+        creados.push(this.obtener('conceptos', id)!);
+      }
+    });
+    const proyecto = this.recalcularProyecto(args.proyecto_id)!;
+    return { ok: true, fuente: r.fuente, conceptos: creados, reemplazados: ya, proyecto };
   }
 
   /* ─────────────── el estado de cuenta de UN proyecto (§119) ───────────────
@@ -5700,19 +6094,7 @@ export class OrgDB extends DurableObject<Env> {
    * reloj de quien imprime, y un estado de cuenta con la fecha de la laptop
    * mal puesta es un documento con la fecha mal puesta.
    */
-  estadoDelProyecto(proyecto_id: string): {
-    generado_at: string;
-    proyecto: Fila;
-    cliente: Fila | null;
-    negocio: Fila | null;
-    items: Fila[];
-    movimientos: Fila[];
-    totales: {
-      subtotal: number; iva: number; total: number;
-      tasa_iva: number; iva_incluido: boolean;
-      cobrado: number; saldo: number; piezas: number;
-    };
-  } | null {
+  estadoDelProyecto(proyecto_id: string): EstadoDelProyecto | null {
     const completo = this.obtener('proyectos', proyecto_id);
     if (!completo) return null;
 
@@ -5734,6 +6116,7 @@ export class OrgDB extends DurableObject<Env> {
       fecha_inicio: completo.fecha_inicio, fecha_fin_estimada: completo.fecha_fin_estimada,
       fecha_cierre: completo.fecha_cierre, precio_venta: completo.precio_venta,
       tasa_iva: completo.tasa_iva, iva_incluido: completo.iva_incluido,
+      n_conceptos: completo.n_conceptos ?? 0,
     };
 
     const cliente = proyecto.cliente_id
@@ -5744,25 +6127,16 @@ export class OrgDB extends DurableObject<Env> {
      * RFC y la moneda de quien cobra sin cambiar nada. */
     const negocio = (this.sql.exec(`SELECT id, nombre, rfc, moneda FROM empresa WHERE id = 'empresa'`).toArray()[0] as Fila | undefined) ?? null;
 
-    /* Los VENDIDOS, que son los que suman. `pr.nombre` sale por LEFT JOIN
-     * para que un ítem agrupado diga de qué modelo es sin que la pantalla
-     * tenga que pedir el catálogo aparte. */
-    const items = this.sql
-      .exec(
-        `SELECT i.id, i.clave, i.nombre, i.descripcion, i.tipo, i.cantidad, i.monto,
-                i.etapa, i.fecha_entrega, i.partida, i.producto_id, pr.nombre AS producto_nombre
-         FROM items i
-         LEFT JOIN productos pr ON pr.id = i.producto_id
-         WHERE i.proyecto_id = ? AND i.estado = 'vendido'
-         ORDER BY COALESCE(i.partida, ''), COALESCE(i.orden, 0), i.creado_at`,
-        proyecto_id,
-      )
-      .toArray()
-      .map((f) => {
-        const i = f as Fila;
-        const cantidad = Math.max(1, Math.trunc(Number(i.cantidad ?? 1)));
-        return { ...i, cantidad, precio_unitario: Math.round(Number(i.monto ?? 0) / cantidad), importe: Number(i.monto ?? 0) };
-      });
+    /* 0.105.0 · Los CONCEPTOS DE COBRO, que son los que suman (Mike,
+     * 18-nov-2026: «Ya no va a ir ligada a los ítems»). La regla 1 sigue: la
+     * lista es exactamente lo que suma `precio_venta`. */
+    const { conceptos, grupos } = this.conceptosDelProyecto(proyecto_id);
+    const items = conceptos.map((co) => ({
+      id: co.id, clave: null, nombre: co.descripcion, descripcion: null, tipo: null,
+      cantidad: Number(co.cantidad ?? 1), monto: Number(co.monto ?? 0),
+      precio_unitario: Number(co.precio_unitario ?? 0), importe: Number(co.monto ?? 0),
+      partida: co.cotizacion_folio ?? null, etapa: null, fecha_entrega: null, producto_id: null, producto_nombre: null,
+    }));
 
     const movimientos = this.sql
       .exec(
@@ -5777,26 +6151,30 @@ export class OrgDB extends DurableObject<Env> {
       .toArray() as Fila[];
 
     /* El precio de venta es el caché que ya mantiene `recalcularProyecto`, y
-     * es por construcción la suma de los vendidos. No se vuelve a sumar aquí
-     * a propósito: dos maneras de calcular la misma cifra es una de más. */
+     * es por construcción la suma de los conceptos. No se vuelve a sumar aquí
+     * a propósito: dos maneras de calcular la misma cifra es una de más.
+     *
+     * En puntos base y con enteros de punta a punta: un 0.16 en coma
+     * flotante deja centavos de diferencia entre el PDF y el Excel. */
     const venta = Number(completo.precio_venta ?? 0);
     const tasa = Math.max(0, Math.trunc(Number(completo.tasa_iva ?? 1600)));
     const incluido = Number(completo.iva_incluido ?? 0) === 1;
-
-    /* En puntos base y con enteros de punta a punta: un 0.16 en coma
-     * flotante deja centavos de diferencia entre el PDF y el Excel. */
-    const subtotal = incluido ? Math.round((venta * 10000) / (10000 + tasa)) : venta;
-    const iva = incluido ? venta - subtotal : Math.round((venta * tasa) / 10000);
-    const total = subtotal + iva;
+    const { subtotal, iva, total } = desglosarIva(venta, tasa, incluido);
     const cobrado = movimientos.reduce((t, m) => t + Number(m.monto ?? 0), 0);
+    const porCargar = Number(completo.n_conceptos ?? 0) === 0;
+    const anterior = porCargar
+      ? ((this.sql.exec(`SELECT precio_venta FROM precios_anteriores WHERE proyecto_id = ?`, proyecto_id).toArray()[0] as { precio_venta: number } | undefined)?.precio_venta ?? null)
+      : null;
 
     return {
       generado_at: ahora(),
-      proyecto, cliente, negocio, items, movimientos,
+      proyecto, cliente, negocio, conceptos, grupos, items, movimientos,
       totales: {
         subtotal, iva, total, tasa_iva: tasa, iva_incluido: incluido,
-        cobrado, saldo: total - cobrado,
-        piezas: items.reduce((t, i) => t + Number(i.cantidad ?? 1), 0),
+        cobrado, saldo: porCargar ? null : total - cobrado,
+        piezas: conceptos.length,
+        precio_por_cargar: porCargar,
+        precio_anterior: anterior,
       },
     };
   }
@@ -5825,11 +6203,14 @@ export class OrgDB extends DurableObject<Env> {
     const proyectos = this.sql
       .exec(
         `SELECT id, cliente_id, nombre, descripcion, estado, fecha_inicio, fecha_fin_estimada,
-                fecha_cierre, precio_venta, cobrado, avance, creado_at, actualizado_at
+                fecha_cierre, precio_venta, n_conceptos, cobrado, avance, creado_at, actualizado_at
          FROM proyectos WHERE cliente_id = ? ORDER BY creado_at DESC`,
         cliente_id,
       )
-      .toArray() as Fila[];
+      .toArray()
+      /* 0.105.0 · Sin conceptos de cobro el precio está por cargar: peek101
+       * lo dice así y no enseña un saldo que no existe. */
+      .map((p) => ({ ...(p as Fila), precio_por_cargar: Number((p as Fila).n_conceptos ?? 0) === 0 })) as Fila[];
 
     /* 0.66.0 · Lo de quell101 viaja junto (Mike, 4-oct: «para el cliente es
      * muy tedioso irse metiendo a diferentes plataformas»): la obra ligada al
@@ -5881,8 +6262,10 @@ export class OrgDB extends DurableObject<Env> {
       )
       .toArray();
 
-    const vendido = proyectos.reduce((s, p) => s + Number(p.precio_venta || 0), 0);
+    const conPrecio = proyectos.filter((p) => !p.precio_por_cargar);
+    const vendido = conPrecio.reduce((s, p) => s + Number(p.precio_venta || 0), 0);
     const cobrado = proyectos.reduce((s, p) => s + Number(p.cobrado || 0), 0);
+    const cobradoConPrecio = conPrecio.reduce((s, p) => s + Number(p.cobrado || 0), 0);
     const avance = proyectos.length ? proyectos.reduce((s, p) => s + Number(p.avance || 0), 0) / proyectos.length : 0;
 
     const pagos = this.sql
@@ -5897,7 +6280,7 @@ export class OrgDB extends DurableObject<Env> {
     return {
       cliente,
       proyectos: conItems,
-      totales: { vendido, cobrado, saldo: vendido - cobrado, avance },
+      totales: { vendido, cobrado, saldo: vendido - cobradoConPrecio, avance, por_cargar: proyectos.length - conPrecio.length },
       pagos,
       pendientes,
     } as unknown as Peek;
