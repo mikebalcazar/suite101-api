@@ -200,6 +200,8 @@ export const DEFS: Record<Tabla, Def> = {
       /* 0055 · cuántos conceptos de cobro tiene: caché. En 0 el precio está
        * POR CARGAR, que no es lo mismo que valer $0. */
       n_conceptos: 'entero',
+      /* 0057 · cachés sin IVA: el estado de cuenta del proyecto va sin IVA. */
+      cobrado_sin_iva: 'dinero', iva_cobrado: 'dinero', pagado_sin_iva: 'dinero', iva_pagado: 'dinero',
     },
     requeridos: ['cliente_id', 'nombre'],
     filtros: ['cliente_id', 'estado'],

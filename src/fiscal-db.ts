@@ -44,6 +44,8 @@ export interface EntornoFiscal {
   /** Las dos de `org-db.ts` que ya sabían hacer esto (0009). */
   ligar(a: { cfdi_id: string; movimiento_id: string; monto_aplicado?: number }): Fila | Falla;
   cancelar(id: string): Fila | Falla;
+  /** 0.107.0 · Vuelve a sacar el desglose del pago de sus facturas vigentes. */
+  repartir(movimiento_id: string): void;
 }
 
 export type Origen = 'xml' | 'sat' | 'timbrado';
@@ -437,6 +439,49 @@ export class MotorFiscal {
     return { ok: true, cfdi: this.forma(this.cfdi(a.cfdi_id)!), ligados, aplicado_total: total };
   }
 
+  /** 0.107.0 · Las facturas de UN pago, para ligarlas desde el estado de
+   *  cuenta del proyecto (Mike, 18-nov-2026: «NECESITO PODER LIGAR LOS PAGOS
+   *  CARGADOS NUEVOS CON LAS FACTURAS EXISTENTES. Así poder ver la factura o
+   *  el movimiento en detalle si doy clic sobre él»).
+   *
+   *  `ligadas`: las vigentes que ya lo respaldan, con cuánto se le aplicó.
+   *  `posibles`: las facturas (tipo I) vigentes del mismo lado, con algo por
+   *  ligar, que no lo respaldan ya. Primero las del RFC del cliente del
+   *  proyecto, luego por cercanía de fecha; a lo más 30. `aplica` es lo que
+   *  se le aplicaría al ligarla: lo que le falta a la factura o lo que le
+   *  falta al pago, lo que sea menos. */
+  facturasDelMovimiento(movimiento_id: string): { movimiento: Fila; ligadas: Fila[]; posibles: Fila[] } | Falla {
+    const m = this.una(`SELECT id, tipo, monto, fecha, proyecto_id, contraparte_id, descripcion, subtotal, iva, retenciones, facturado FROM movimientos WHERE id = ?`, movimiento_id);
+    if (!m) return { error: 'movimiento_desconocido' };
+    const ligadas = this.todas(
+      `SELECT c.*, lm.monto_aplicado FROM cfdi_movimientos lm JOIN cfdi c ON c.id = lm.cfdi_id
+        WHERE lm.movimiento_id = ? AND c.estado = 'vigente' ORDER BY c.fecha`, movimiento_id,
+    ).map((f) => ({ ...this.forma(f), monto_aplicado: Number(f.monto_aplicado || 0) }));
+    const yaCubre = ligadas.reduce((t, f) => t + Number(f.monto_aplicado || 0), 0);
+    const falta = Math.max(0, Number(m.monto || 0) - yaCubre);
+    const cliente = m.proyecto_id
+      ? this.una(`SELECT cl.rfc FROM proyectos p JOIN clientes cl ON cl.id = p.cliente_id WHERE p.id = ?`, String(m.proyecto_id))
+      : (m.contraparte_id ? this.una(`SELECT rfc FROM clientes WHERE id = ?`, String(m.contraparte_id)) : undefined);
+    const rfc = String(cliente?.rfc ?? '').trim().toUpperCase();
+    const posibles = this.todas(
+      `SELECT c.*, (SELECT COALESCE(SUM(lm.monto_aplicado),0) FROM cfdi_movimientos lm WHERE lm.cfdi_id = c.id) AS aplicado
+         FROM cfdi c
+        WHERE c.estado = 'vigente' AND c.tipo = ? AND COALESCE(c.tipo_comprobante, 'I') = 'I'
+          AND NOT EXISTS (SELECT 1 FROM cfdi_movimientos lm WHERE lm.cfdi_id = c.id AND lm.movimiento_id = ?)`,
+      String(m.tipo), movimiento_id,
+    )
+      .map((f) => {
+        const restante = Number(f.total || 0) - Number(f.aplicado || 0);
+        const mismoRfc = !!rfc && String(f.rfc ?? f.rfc_receptor ?? '').trim().toUpperCase() === rfc;
+        return { ...this.forma(f), aplicado: Number(f.aplicado || 0), restante, mismo_rfc: mismoRfc,
+          dias: diasEntre(String(f.fecha), String(m.fecha)), aplica: Math.min(restante, falta) };
+      })
+      .filter((f) => f.restante > TOLERANCIA_MONTO)
+      .sort((a, b) => Number(b.mismo_rfc) - Number(a.mismo_rfc) || a.dias - b.dias)
+      .slice(0, 30);
+    return { movimiento: { ...m, facturado: !!m.facturado, falta }, ligadas, posibles };
+  }
+
   /** Deshacer una liga. Quien confirma se puede equivocar, y sin esto la
    *  única salida era cancelar la factura. El movimiento vuelve a estar sin
    *  facturar sólo si ninguna otra factura vigente lo respalda. */
@@ -457,6 +502,8 @@ export class MotorFiscal {
         // Con una sola que queda, el hueco del movimiento vuelve a decir cuál.
         if (vivas.length === 1) this.sql.exec(`UPDATE movimientos SET uuid_cfdi = ?, fecha_cfdi = ? WHERE id = ?`, String(vivas[0].uuid), String(vivas[0].fecha), a.movimiento_id);
       }
+      // 0.107.0 · Sin esta factura, el desglose del pago se vuelve a repartir.
+      this.e.repartir(a.movimiento_id);
     });
     return { ok: true, cfdi: this.forma(this.cfdi(a.cfdi_id)!), movimiento_facturado: facturado };
   }

@@ -122,7 +122,7 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
 /* Cachés: no los escribe NINGUNA app. Los recalcula la API después de cada
  * mutación. Si una app manda uno, se rechaza aunque su lista lo trajera. */
 export const CACHES: Partial<Record<Tabla, readonly string[]>> = {
-  proyectos: ['precio_venta', 'cobrado', 'pagado_prov', 'compromiso', 'avance', 'n_conceptos'],
+  proyectos: ['precio_venta', 'cobrado', 'pagado_prov', 'compromiso', 'avance', 'n_conceptos', 'cobrado_sin_iva', 'iva_cobrado', 'pagado_sin_iva', 'iva_pagado'],
   /* 0.105.0 · el importe del concepto es cantidad × precio unitario: lo
    * multiplica la API, como suma el precio del proyecto. */
   conceptos: ['monto'],

@@ -174,7 +174,9 @@ rutas.post('/importar', async (c) => {
   // contra la opinión de otra base, así que van en su propia lista y no
   // entran en el veredicto. Que cuadren o no se ve en otro lado: `cobrado`
   // sale de los mismos movimientos que ya se contaron arriba.
-  const CACHES_DINERO = ['proyectos.precio_venta', 'proyectos.cobrado', 'proyectos.pagado_prov', 'proyectos.compromiso', 'partidas.monto_pagado'];
+  const CACHES_DINERO = ['proyectos.precio_venta', 'proyectos.cobrado', 'proyectos.pagado_prov', 'proyectos.compromiso', 'partidas.monto_pagado',
+    // 0.107.0 · los cachés sin IVA del proyecto: también los recalcula la API.
+    'proyectos.cobrado_sin_iva', 'proyectos.iva_cobrado', 'proyectos.pagado_sin_iva', 'proyectos.iva_pagado'];
 
   const llavesDinero = [...new Set([...Object.keys(cosecha.sumas), ...Object.keys(r.sumas)])]
     .filter((k) => (cosecha.sumas[k] ?? 0) !== 0 || (r.sumas[k] ?? 0) !== 0)
