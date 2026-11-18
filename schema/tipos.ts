@@ -17,7 +17,14 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.107.1 (CORREGIR EL REPARTO DEL IVA DE LOS PAGOS YA
+ * Versión del contrato: 0.108.0 (EL CONCEPTO LLEVA SU PRODUCTO APARTE. Mike,
+ * 18-nov: «Necesito que la lista de conceptos tengan las mismas columnas que
+ * las del PDF. Separar el producto de la descripción». `conceptos.nombre`
+ * (0058); la hoja, las plantillas y el CRUD lo aceptan; importar de quote lo
+ * llena con el nombre del renglón y la descripción con la suya. Lo que ya
+ * estaba escrito «producto — descripción» se partió en el primer « — ».)
+ *
+ * Antes, 0.107.1 (CORREGIR EL REPARTO DEL IVA DE LOS PAGOS YA
  * LIGADOS. Mike, 18-nov, con botones: «Corregirlas todas». Sin cambio de
  * contrato para las apps: POST /interno/:o/reparto-iva sólo existe mientras
  * el workflow corregir-reparto.yml tiene puesta su llave de un solo uso.)
@@ -1733,7 +1740,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.107.1';
+export const VERSION_CONTRATO = '0.108.0';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
@@ -2142,6 +2149,10 @@ export interface PlanDePago {
 export interface Concepto {
   id: string;
   proyecto_id: string;
+  /** 0.108.0 · El producto o servicio («CAR-02», «Coffee Gradas»), aparte de
+   *  su descripción, como en el PDF de la cotización. Se llama `nombre` y
+   *  no `producto`: un producto es del catálogo (esquema.spec). '' si no tiene. */
+  nombre: string;
   descripcion: string;
   cantidad: number;
   /** centavos */
@@ -2188,6 +2199,8 @@ export type ResultadoImportarConceptos =
  *  centavos (entero, puede ser negativo: un descuento); `cantidad` > 0. */
 export interface RenglonDeHoja {
   id?: string | null;
+  /** 0.108.0 · El producto (nombre) y la descripción: al menos uno no vacío. */
+  nombre?: string;
   descripcion: string;
   cantidad: number;
   precio_unitario: number;
@@ -2207,7 +2220,7 @@ export type ResultadoGuardarHoja =
 export interface PlantillaPresupuesto {
   id: string;
   nombre: string;
-  renglones: Array<{ descripcion: string; cantidad: number; precio_unitario: number }>;
+  renglones: Array<{ nombre?: string; descripcion: string; cantidad: number; precio_unitario: number }>;
   creado_en_app: string | null;
   creado_at: string;
   actualizado_at: string | null;

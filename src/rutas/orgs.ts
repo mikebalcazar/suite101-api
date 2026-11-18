@@ -616,9 +616,9 @@ rutas.get('/:o/clientes/:id/estado.xlsx', async (c) => {
     if (!grupos.length) cotizado.push(['', 'Precio por cargar']);
     for (const g of grupos) {
       cotizado.push(['', g.cotizacion_id ? `Cotización ${g.numero}${g.folio ? ' · ' + g.folio : ''}${g.nombre ? ' · ' + g.nombre : ''}` : g.nombre]);
-      for (const co of g.conceptos) cotizado.push(['', String(co.descripcion ?? ''), Number(co.cantidad ?? 1), pesos(co.precio_unitario), pesos(co.monto)]);
+      for (const co of g.conceptos) cotizado.push(['', String(co.nombre ?? ''), String(co.descripcion ?? ''), Number(co.cantidad ?? 1), pesos(co.precio_unitario), pesos(co.monto)]);
     }
-    if (grupos.length) cotizado.push(['', '', '', 'Precio (sin IVA)', pesos(p.subtotal)]);
+    if (grupos.length) cotizado.push(['', '', '', '', 'Precio (sin IVA)', pesos(p.subtotal)]);
     cotizado.push([]);
   }
 
@@ -646,7 +646,7 @@ rutas.get('/:o/clientes/:id/estado.xlsx', async (c) => {
       nombre: 'Cotizado',
       filas: [
         ...encabezado,
-        ['Proyecto', 'Concepto', 'Cantidad', 'Precio unitario', 'Importe'],
+        ['Proyecto', 'Producto', 'Descripción', 'Cantidad', 'Precio unitario', 'Importe'],
         ...cotizado,
       ],
     },
@@ -1047,10 +1047,15 @@ export function renglonesQueNoCuadran(lista: unknown, conId: boolean): Record<st
   if (lista.length > TOPE_RENGLONES) return { campo: 'renglones', regla: `a lo más ${TOPE_RENGLONES} renglones`, recibidos: lista.length };
   for (const [i, r] of lista.entries()) {
     const n = i + 1;
-    if (!r || typeof r !== 'object') return { renglon: n, regla: 'cada renglón es {descripcion, cantidad, precio_unitario}' };
+    if (!r || typeof r !== 'object') return { renglon: n, regla: 'cada renglón es {nombre?, descripcion, cantidad, precio_unitario}' };
     const x = r as Record<string, unknown>;
-    if (typeof x.descripcion !== 'string' || !x.descripcion.trim()) return { renglon: n, campo: 'descripcion', regla: 'qué se cobra, no vacío' };
-    if (x.descripcion.trim().length > 300) return { renglon: n, campo: 'descripcion', regla: 'a lo más 300 letras' };
+    // 0.108.0 · producto aparte; al menos uno de los dos dice qué se cobra.
+    if (x.nombre !== undefined && x.nombre !== null && typeof x.nombre !== 'string') return { renglon: n, campo: 'nombre', regla: 'texto' };
+    if (typeof x.nombre === 'string' && x.nombre.trim().length > 200) return { renglon: n, campo: 'nombre', regla: 'a lo más 200 letras' };
+    if (x.descripcion === undefined || x.descripcion === null) x.descripcion = '';
+    if (typeof x.descripcion !== 'string') return { renglon: n, campo: 'descripcion', regla: 'texto' };
+    if (!x.descripcion.trim() && !String(x.nombre ?? '').trim()) return { renglon: n, campo: 'descripcion', regla: 'qué se cobra: producto o descripción, no vacíos los dos' };
+    if (x.descripcion.trim().length > 2000) return { renglon: n, campo: 'descripcion', regla: 'a lo más 2000 letras' };
     const cant = Number(x.cantidad);
     if (typeof x.cantidad !== 'number' || !Number.isFinite(cant) || cant <= 0) return { renglon: n, campo: 'cantidad', recibido: x.cantidad, regla: 'número mayor que cero' };
     if (typeof x.precio_unitario !== 'number' || !Number.isSafeInteger(x.precio_unitario)) return { renglon: n, campo: 'precio_unitario', recibido: x.precio_unitario, regla: 'centavos, entero' };
@@ -1069,7 +1074,7 @@ rutas.put('/:o/proyectos/:id/conceptos', async (c) => {
   const mal = renglonesQueNoCuadran(b.renglones, true);
   if (mal) return err(c, 'datos_invalidos', 400, mal);
   const renglones = (b.renglones as Array<Record<string, any>>).map((r) => ({
-    id: r.id ?? null, descripcion: String(r.descripcion).trim(), cantidad: Number(r.cantidad), precio_unitario: Number(r.precio_unitario),
+    id: r.id ?? null, nombre: r.nombre === undefined || r.nombre === null ? undefined : String(r.nombre).trim(), descripcion: String(r.descripcion ?? '').trim(), cantidad: Number(r.cantidad), precio_unitario: Number(r.precio_unitario),
   }));
   const quien = c.get('quien');
   const r = await stub(c).guardarHojaDeConceptos({ proyecto_id: c.req.param('id')!, renglones, app: c.get('app') });
@@ -1144,9 +1149,10 @@ rutas.get('/:o/proyectos/:id/estado.xlsx', async (c) => {
       : g.nombre;
     filasConceptos.push([titulo]);
     for (const co of g.conceptos) {
-      filasConceptos.push([String(co.descripcion ?? ''), Number(co.cantidad ?? 1), pesos(co.precio_unitario), pesos(co.monto)]);
+      // 0.108.0 · Producto y descripción en su columna, como el PDF.
+      filasConceptos.push([String(co.nombre ?? ''), String(co.descripcion ?? ''), Number(co.cantidad ?? 1), pesos(co.precio_unitario), pesos(co.monto)]);
     }
-    filasConceptos.push(['', '', `Suma ${g.cotizacion_id ? 'de la cotización ' + g.numero : 'de otros conceptos'}`, pesos(g.importe)]);
+    filasConceptos.push(['', '', '', `Suma ${g.cotizacion_id ? 'de la cotización ' + g.numero : 'de otros conceptos'}`, pesos(g.importe)]);
     filasConceptos.push([]);
   }
 
@@ -1155,15 +1161,15 @@ rutas.get('/:o/proyectos/:id/estado.xlsx', async (c) => {
       nombre: 'Conceptos',
       filas: [
         ...encabezado,
-        ['Concepto', 'Cantidad', 'Precio unitario', 'Importe'],
+        ['Producto', 'Descripción', 'Cantidad', 'Precio unitario', 'Importe'],
         ...(filasConceptos.length ? filasConceptos : [['Precio por cargar'], []]),
         /* 0.107.0 · SIN IVA (Mike, 18-nov-2026): el precio son los conceptos,
          * lo pagado son los subtotales, y el IVA cobrado va aparte. */
-        ['', '', 'Precio (sin IVA)', pesos(t.subtotal)],
-        ['', '', 'Pagado (sin IVA)', pesos(t.cobrado)],
-        ['', '', 'Saldo (sin IVA)', saldo],
+        ['', '', '', 'Precio (sin IVA)', pesos(t.subtotal)],
+        ['', '', '', 'Pagado (sin IVA)', pesos(t.cobrado)],
+        ['', '', '', 'Saldo (sin IVA)', saldo],
         [],
-        ['', '', 'IVA cobrado, aparte', pesos(t.iva_cobrado)],
+        ['', '', '', 'IVA cobrado, aparte', pesos(t.iva_cobrado)],
       ],
     },
     {
@@ -2018,8 +2024,19 @@ async function conceptoQueNoCuadra(c: Ctx, datos: Record<string, unknown>, nuevo
     const n = Number(datos.cantidad);
     if (!Number.isFinite(n) || n <= 0) return err(c, 'datos_invalidos', 400, { campo: 'cantidad', recibido: datos.cantidad, regla: 'número mayor que cero' });
   }
-  if (datos.descripcion !== undefined && !String(datos.descripcion ?? '').trim()) {
-    return err(c, 'datos_invalidos', 400, { falta: ['descripcion'] });
+  // 0.108.0 · Producto O descripción: un concepto sin ninguno no dice qué se cobra.
+  const vacio = (k: string) => !String(datos[k] ?? '').trim();
+  if (nuevo ? vacio('nombre') && vacio('descripcion')
+    : datos.descripcion !== undefined && datos.nombre !== undefined && vacio('nombre') && vacio('descripcion')) {
+    return err(c, 'datos_invalidos', 400, { falta: ['nombre o descripcion'] });
+  }
+  if (!nuevo && datos.descripcion !== undefined && datos.nombre === undefined && vacio('descripcion')) {
+    const id = c.req.param('id');
+    const antes = id ? await stub(c).obtener('conceptos', id) : null;
+    if (antes && !String(antes.nombre ?? '').trim()) return err(c, 'datos_invalidos', 400, { falta: ['nombre o descripcion'] });
+  }
+  if (datos.nombre !== undefined && String(datos.nombre ?? '').trim().length > 200) {
+    return err(c, 'datos_invalidos', 400, { campo: 'nombre', regla: 'a lo más 200 letras' });
   }
   if (nuevo) {
     const p = await stub(c).obtener('proyectos', String(datos.proyecto_id));

@@ -102,11 +102,12 @@ export const DEFS: Record<Tabla, Def> = {
    * POST /proyectos/:id/conceptos/importar y no el CRUD. */
   conceptos: {
     cols: {
-      ...IDENT, proyecto_id: 'texto', descripcion: 'texto', cantidad: 'real', precio_unitario: 'dinero', monto: 'dinero',
+      ...IDENT, proyecto_id: 'texto', nombre: 'texto', descripcion: 'texto', cantidad: 'real', precio_unitario: 'dinero', monto: 'dinero',
       orden: 'entero', cotizacion_id: 'texto', cotizacion_folio: 'texto', cotizacion_nombre: 'texto', linea: 'entero',
       creado_en_app: 'texto', actualizado_at: 'texto',
     },
-    requeridos: ['proyecto_id', 'descripcion'],
+    // 0.108.0 · producto O descripción: lo revisa conceptoQueNoCuadra.
+    requeridos: ['proyecto_id'],
     filtros: ['proyecto_id', 'cotizacion_id'],
     orden: 'orden',
   },
