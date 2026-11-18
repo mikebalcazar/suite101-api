@@ -34,7 +34,7 @@ import { APPS, LLAVE_APP, type App, type Tabla, TIPOS_PROVEEDOR, type TipoProvee
 const rutas = new Hono<{ Bindings: Env; Variables: Vars }>();
 
 /** Tablas con dinero que el personal sin `ve_dinero` no abre. */
-const TABLAS_DINERO: Tabla[] = ['movimientos', 'cuentas', 'opex', 'cotizaciones', 'partidas', 'conciliaciones', 'conciliacion_cuentas', 'accionistas', 'conceptos', 'plan_pagos'];
+const TABLAS_DINERO: Tabla[] = ['movimientos', 'cuentas', 'opex', 'cotizaciones', 'partidas', 'conciliaciones', 'conciliacion_cuentas', 'accionistas', 'conceptos', 'plan_pagos', 'plantillas_presupuesto'];
 
 const stub = (c: Ctx): ApiOrgDB => c.env.ORG.get(c.env.ORG.idFromName(c.get('org_id'))) as unknown as ApiOrgDB;
 
@@ -1038,6 +1038,57 @@ rutas.post('/:o/proyectos/:id/conceptos/importar', async (c) => {
   return ok(c, { fuente: r.fuente, conceptos: r.conceptos, reemplazados: r.reemplazados, proyecto: podar(quien, 'proyectos', r.proyecto) }, 201);
 });
 
+/* ────────── la hoja del presupuesto (0.106.0) ──────────
+ *
+ * Mike, 18-nov-2026, con botones: «Hoja dentro de dash». Los renglones se
+ * revisan aquí, todos antes de tocar nada: un renglón malo regresa 400 con su
+ * número y la hoja no se guarda a medias. */
+const TOPE_RENGLONES = 500;
+export function renglonesQueNoCuadran(lista: unknown, conId: boolean): Record<string, unknown> | null {
+  if (!Array.isArray(lista)) return { campo: 'renglones', regla: 'una lista' };
+  if (lista.length > TOPE_RENGLONES) return { campo: 'renglones', regla: `a lo más ${TOPE_RENGLONES} renglones`, recibidos: lista.length };
+  for (const [i, r] of lista.entries()) {
+    const n = i + 1;
+    if (!r || typeof r !== 'object') return { renglon: n, regla: 'cada renglón es {descripcion, cantidad, precio_unitario}' };
+    const x = r as Record<string, unknown>;
+    if (typeof x.descripcion !== 'string' || !x.descripcion.trim()) return { renglon: n, campo: 'descripcion', regla: 'qué se cobra, no vacío' };
+    if (x.descripcion.trim().length > 300) return { renglon: n, campo: 'descripcion', regla: 'a lo más 300 letras' };
+    const cant = Number(x.cantidad);
+    if (typeof x.cantidad !== 'number' || !Number.isFinite(cant) || cant <= 0) return { renglon: n, campo: 'cantidad', recibido: x.cantidad, regla: 'número mayor que cero' };
+    if (typeof x.precio_unitario !== 'number' || !Number.isSafeInteger(x.precio_unitario)) return { renglon: n, campo: 'precio_unitario', recibido: x.precio_unitario, regla: 'centavos, entero' };
+    if (conId && x.id != null && typeof x.id !== 'string') return { renglon: n, campo: 'id', regla: 'texto o nada' };
+    if (!conId && x.id !== undefined) return { renglon: n, campo: 'id', regla: 'una plantilla no lleva ids' };
+  }
+  return null;
+}
+
+/** PUT /orgs/:o/proyectos/:id/conceptos {renglones: [{id?, descripcion,
+ *  cantidad, precio_unitario}]} — la hoja completa, en su orden. Los que no
+ *  vienen se quitan. Contesta los conceptos como quedaron y el proyecto. */
+rutas.put('/:o/proyectos/:id/conceptos', async (c) => {
+  const no = puedeCargarConceptos(c); if (no) return no;
+  const b = await c.req.json<{ renglones?: unknown }>().catch(() => ({}) as { renglones?: unknown });
+  const mal = renglonesQueNoCuadran(b.renglones, true);
+  if (mal) return err(c, 'datos_invalidos', 400, mal);
+  const renglones = (b.renglones as Array<Record<string, any>>).map((r) => ({
+    id: r.id ?? null, descripcion: String(r.descripcion).trim(), cantidad: Number(r.cantidad), precio_unitario: Number(r.precio_unitario),
+  }));
+  const quien = c.get('quien');
+  const r = await stub(c).guardarHojaDeConceptos({ proyecto_id: c.req.param('id')!, renglones, app: c.get('app') });
+  if (!r.ok) return err(c, r.error, r.error === 'no_encontrado' ? 404 : r.error === 'otro_proyecto' ? 409 : 400, r.detalle);
+  return ok(c, { conceptos: r.conceptos, creados: r.creados, cambiados: r.cambiados, quitados: r.quitados, proyecto: podar(quien, 'proyectos', r.proyecto) });
+});
+
+/** 0.106.0 · Una plantilla: nombre no vacío y renglones que cuadren. */
+function plantillaQueNoCuadra(c: Ctx, datos: Record<string, unknown>) {
+  if (datos.nombre !== undefined && !String(datos.nombre ?? '').trim()) return err(c, 'datos_invalidos', 400, { falta: ['nombre'] });
+  if (datos.renglones !== undefined) {
+    const mal = renglonesQueNoCuadran(datos.renglones, false);
+    if (mal) return err(c, 'datos_invalidos', 400, mal);
+  }
+  return null;
+}
+
 rutas.get('/:o/proyectos/:id/estado', async (c) => {
   const quien = c.get('quien');
   if (quien.clase === 'personal') return err(c, 'sin_permiso', 403, { motivo: 'el estado de cuenta lleva dinero' });
@@ -1924,6 +1975,7 @@ rutas.post('/:o/:tabla', async (c) => {
   if (tabla === 'movimiento_items') { const mal = await anticipoQueNoCuadra(c, datos, null); if (mal) return mal; }
   if (tabla === 'plan_pagos') { const mal = await parcialidadQueNoCuadra(c, datos, null); if (mal) return mal; }
   if (tabla === 'conceptos') { const mal = await conceptoQueNoCuadra(c, datos, true); if (mal) return mal; }
+  if (tabla === 'plantillas_presupuesto') { const mal = plantillaQueNoCuadra(c, datos); if (mal) return mal; }
   { const mal = await revisarCostos(c, tabla, datos, null); if (mal) return mal; }
 
   const fila = await stub(c).crear(tabla, datos, { app: c.get('app'), usuario_id: quien.usuario_id, correo: c.get('sesion')?.correo ?? null });
@@ -2062,6 +2114,7 @@ rutas.patch('/:o/:tabla/:id', async (c) => {
   if (tabla === 'movimiento_items') { const mal = await anticipoQueNoCuadra(c, datos, c.req.param('id')!); if (mal) return mal; }
   if (tabla === 'plan_pagos') { const mal = await parcialidadQueNoCuadra(c, datos, c.req.param('id')!); if (mal) return mal; }
   if (tabla === 'conceptos') { const mal = await conceptoQueNoCuadra(c, datos, false); if (mal) return mal; }
+  if (tabla === 'plantillas_presupuesto') { const mal = plantillaQueNoCuadra(c, datos); if (mal) return mal; }
   { const mal = await revisarCostos(c, tabla, datos, c.req.param('id')!); if (mal) return mal; }
 
   /* 0.46.0 · Una cotización aprobada es lo que se vendió: sus piezas ya están

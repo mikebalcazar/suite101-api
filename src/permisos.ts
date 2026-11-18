@@ -56,6 +56,8 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
    * `monto` no está: lo calcula la API. Tampoco lo de la cotización: eso lo
    * escribe la importación, que copia lo que quote101 dejó guardado. */
   conceptos: { dash101: ['proyecto_id', 'descripcion', 'cantidad', 'precio_unitario', 'orden'] },
+  /* 0.106.0 · Las plantillas de presupuesto son de dash101 (Mike, 18-nov-2026). */
+  plantillas_presupuesto: { dash101: ['nombre', 'renglones'] },
   movimientos: { dash101: '*' },
   /* 0.57.0 · Los accionistas son del tablero del dinero y de nadie más: los
    * retiros de utilidades son movimientos de dash101 (Mike, 30-sep-2026). */

@@ -17,7 +17,18 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.105.0 (LA CONTABILIDAD DEL PROYECTO, APARTE DE LOS
+ * Versión del contrato: 0.106.0 (LA HOJA DEL PRESUPUESTO. Mike, 18-nov, con
+ * botones: «Hoja dentro de dash»: el presupuesto del proyecto se edita en una
+ * cuadrícula como Sheets y el total es el precio del proyecto. Y el mismo
+ * día: «Sólo existirán los conceptos que se importen desde quote (…) y los
+ * que se agreguen manualmente en la tabla de dash». Nuevas: PUT
+ * /proyectos/:id/conceptos {renglones} guarda la hoja completa de un jalón
+ * (los que no vienen se quitan; un recálculo; todo o nada) y la tabla
+ * `plantillas_presupuesto` (migración 0056, CRUD genérico de dash101):
+ * nombre y renglones en JSON, con el precio en centavos. Nada cambia en lo
+ * que ya existía.)
+ *
+ * 0.105.0 (LA CONTABILIDAD DEL PROYECTO, APARTE DE LOS
  * ÍTEMS. Mike, 18-nov: «Vamos a separar la contabilidad. Ya no va a ir ligada
  * a los ítems. Los precios de los proyectos se harán por aparte.» Escogió con
  * botones: conceptos de cobro con opción a importar de las cotizaciones de
@@ -1696,7 +1707,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.105.0';
+export const VERSION_CONTRATO = '0.106.0';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
@@ -2144,6 +2155,37 @@ export interface CotizacionParaConceptos {
 export type ResultadoImportarConceptos =
   | { ok: true; fuente: 'quote' | 'piezas'; conceptos: Record<string, unknown>[]; reemplazados: number; proyecto: Record<string, unknown> }
   | { ok: false; error: string; detalle?: Record<string, any> };
+
+/** 0.106.0 · Un renglón de la hoja del presupuesto (`PUT
+ *  /orgs/:o/proyectos/:id/conceptos`). Con `id`, un concepto del proyecto que
+ *  se queda; sin `id`, uno nuevo escrito a mano. `precio_unitario` en
+ *  centavos (entero, puede ser negativo: un descuento); `cantidad` > 0. */
+export interface RenglonDeHoja {
+  id?: string | null;
+  descripcion: string;
+  cantidad: number;
+  precio_unitario: number;
+}
+
+/** 0.106.0 · Lo que contesta guardar la hoja: los conceptos como quedaron,
+ *  en su orden, cuántos se crearon, cambiaron y quitaron, y el proyecto con
+ *  su precio ya sumado. */
+export type ResultadoGuardarHoja =
+  | { ok: true; conceptos: Record<string, unknown>[]; creados: number; cambiados: number; quitados: number; proyecto: Record<string, unknown> }
+  | { ok: false; error: string; detalle?: Record<string, any> };
+
+/** 0.106.0 · Una plantilla de presupuesto de dash101 (tabla
+ *  `plantillas_presupuesto`, CRUD genérico `/orgs/:o/plantillas_presupuesto`).
+ *  `renglones` con el precio en centavos. Usarla llena la hoja; no mueve un
+ *  peso. */
+export interface PlantillaPresupuesto {
+  id: string;
+  nombre: string;
+  renglones: Array<{ descripcion: string; cantidad: number; precio_unitario: number }>;
+  creado_en_app: string | null;
+  creado_at: string;
+  actualizado_at: string | null;
+}
 
 /** 0.71.0 · La nómina programada: cada cuánto se paga la raya, qué día y
  *  cuánto suele ser. `GET`/`PUT /orgs/:o/nomina/programa`. `monto` en
@@ -2747,6 +2789,8 @@ export const TABLAS = [
   'movimiento_items',
   'plan_pagos',
   'conceptos',
+  /* 0056 · las plantillas de presupuesto de dash101 (0.106.0). */
+  'plantillas_presupuesto',
   'accionistas',
   'personal',
   'estaciones',

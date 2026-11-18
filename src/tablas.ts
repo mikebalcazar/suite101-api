@@ -110,6 +110,16 @@ export const DEFS: Record<Tabla, Def> = {
     filtros: ['proyecto_id', 'cotizacion_id'],
     orden: 'orden',
   },
+  /* 0056 · Las plantillas de presupuesto de dash101 (0.106.0). `renglones`
+   * es [{descripcion, cantidad, precio_unitario}] con el precio en centavos;
+   * la API lo revisa al escribir (plantillaQueNoCuadra). Usarla llena la
+   * hoja del proyecto; no mueve un peso. */
+  plantillas_presupuesto: {
+    cols: { ...IDENT, nombre: 'texto', renglones: 'json', creado_en_app: 'texto', actualizado_at: 'texto' },
+    requeridos: ['nombre'],
+    filtros: [],
+    orden: 'nombre',
+  },
   /* 0034 · El plan de pagos de un proyecto (Mike, 6-oct, con botones: «plan
    * de pagos por proyecto»): parcialidades con fecha y monto que el flujo
    * proyectado pone como cobros, descontando lo ya cobrado en orden de
