@@ -137,8 +137,9 @@ describe('la migración 0054 sobre una pieza que se cambió a requerimiento', ()
     });
   });
 
-  it('la 0054 es la última y la base está justo antes', async () => {
-    expect(HASTA).toBe(MIGRACIONES.length - 1);
+  it('la base está justo antes de la 0054', async () => {
+    // Hasta 0.104 la 0054 era la última; la 0055 (conceptos de cobro) va después.
+    expect(MIGRACIONES[HASTA]).toContain('se CAMBIARON a requerimiento');
     const r = await dentro(elDO(), (db: any) => ({ version: db.version(), items: Number(db.sql.exec(`SELECT COUNT(*) AS n FROM items`).one().n) }));
     expect(r).toEqual({ version: HASTA, items: 0 });
   });

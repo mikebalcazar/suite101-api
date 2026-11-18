@@ -17,7 +17,25 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.104.2 (`desde` SE PUEDE RECORRER en PUT /fiscal/sat/config.
+ * Versión del contrato: 0.105.0 (LA CONTABILIDAD DEL PROYECTO, APARTE DE LOS
+ * ÍTEMS. Mike, 18-nov: «Vamos a separar la contabilidad. Ya no va a ir ligada
+ * a los ítems. Los precios de los proyectos se harán por aparte.» Escogió con
+ * botones: conceptos de cobro con opción a importar de las cotizaciones de
+ * quote, un concepto por renglón con cada cotización como su grupo, y todos
+ * los precios a cero de una vez con respaldo. Desde aquí `precio_venta` =
+ * Σ `conceptos.monto` (tabla nueva, migración 0055, CRUD genérico
+ * `/conceptos` de dash101) y `Proyecto.n_conceptos` = 0 quiere decir «Precio
+ * por cargar»: no hay saldo. Lo que había quedó en `precios_anteriores` y lo
+ * enseña `/estado` como `precio_anterior`. Nuevas: GET
+ * /proyectos/:id/conceptos/cotizaciones, POST /proyectos/:id/conceptos/importar
+ * (quote101 deja `datos.renglones` con el precio de cada renglón al guardar)
+ * y GET /pagos-pendientes (lo que se debe a cada contratista, por proyecto).
+ * `/estado` trae `conceptos` y `grupos`; `/estado-de-cuenta` del cliente trae
+ * lo cotizado de cada proyecto y su saldo contra el total con IVA; `/peek`
+ * no suma los proyectos por cargar. Ni aprobar una cotización ni vender un
+ * ítem le ponen precio al proyecto.)
+ *
+ * 0.104.2 (`desde` SE PUEDE RECORRER en PUT /fiscal/sat/config.
  * Mike, 7-nov: «hagas el ejercicio desde 2022, sacar los cálculos de impuestos
  * de 2022, 2023, 2024, y 2025». El 1-ene-2026 era fijo; ahora quien dirige o
  * lleva la contabilidad lo recorre y la siguiente tanda trae lo que falte.)
@@ -1678,7 +1696,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.104.2';
+export const VERSION_CONTRATO = '0.105.0';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
@@ -2072,6 +2090,60 @@ export interface PlanDePago {
   creado_at: string;
   actualizado_at: string | null;
 }
+
+/** 0.105.0 · Un concepto de cobro de un proyecto (Mike, 18-nov-2026: «Vamos
+ *  a separar la contabilidad. Ya no va a ir ligada a los ítems»). El precio de
+ *  venta del proyecto es la suma de sus `monto`; sin conceptos el precio está
+ *  POR CARGAR (`Proyecto.n_conceptos` = 0). Se leen como el proyecto lee su
+ *  IVA: sin él si `iva_incluido` = 0, con él si = 1.
+ *
+ *  CRUD genérico `/orgs/:o/conceptos` (filtros `proyecto_id`, `cotizacion_id`;
+ *  escribe dash101: descripcion, cantidad, precio_unitario, orden). `monto` lo
+ *  multiplica la API. Los de una cotización de quote101 los crea
+ *  `POST /orgs/:o/proyectos/:id/conceptos/importar` y traen su id, folio,
+ *  nombre y renglón, para que el estado de cuenta los agrupe por cotización. */
+export interface Concepto {
+  id: string;
+  proyecto_id: string;
+  descripcion: string;
+  cantidad: number;
+  /** centavos */
+  precio_unitario: number;
+  /** centavos: cantidad × precio_unitario */
+  monto: number;
+  orden: number;
+  cotizacion_id: string | null;
+  cotizacion_folio: string | null;
+  cotizacion_nombre: string | null;
+  linea: number | null;
+  creado_en_app: string | null;
+  creado_at: string;
+  actualizado_at: string | null;
+}
+
+/** 0.105.0 · `GET /orgs/:o/proyectos/:id/conceptos/cotizaciones`: las
+ *  cotizaciones de quote101 del proyecto y si se pueden importar. `fuente`:
+ *  'quote' (quote101 dejó el precio de cada renglón), 'piezas' (aprobada
+ *  antes de 0.105.0: sale del precio de sus piezas) o null (no trae precios;
+ *  importar contesta 409 `sin_precios`). `subtotal` en centavos, sin IVA. */
+export interface CotizacionParaConceptos {
+  id: string;
+  folio: string | null;
+  nombre: string;
+  estado: string;
+  fuente: 'quote' | 'piezas' | null;
+  renglones: number;
+  subtotal: number;
+  /** Cuántos conceptos del proyecto ya vienen de ella (0: no se ha importado). */
+  importados: number;
+}
+
+/** 0.105.0 · `POST /orgs/:o/proyectos/:id/conceptos/importar {cotizacion_id, reemplazar?}`.
+ *  409 `ya_importada` si ya está y no se pidió reemplazar; 409 `sin_precios`
+ *  si no trae precios; 409 `otra_obra` si es de otro proyecto. */
+export type ResultadoImportarConceptos =
+  | { ok: true; fuente: 'quote' | 'piezas'; conceptos: Record<string, unknown>[]; reemplazados: number; proyecto: Record<string, unknown> }
+  | { ok: false; error: string; detalle?: Record<string, any> };
 
 /** 0.71.0 · La nómina programada: cada cuánto se paga la raya, qué día y
  *  cuánto suele ser. `GET`/`PUT /orgs/:o/nomina/programa`. `monto` en
@@ -2469,6 +2541,10 @@ export interface Proyecto {
    *  todos, decisión de Mike del 21-sep); 1 = ya viene dentro y el documento
    *  lo desglosa hacia atrás. */
   iva_incluido: number;
+  /** 0.105.0 · caché: cuántos conceptos de cobro tiene. En 0 el precio está
+   *  POR CARGAR: `precio_venta` vale 0 pero no quiere decir $0, y no hay
+   *  saldo que calcular. */
+  n_conceptos: number;
   creado_at: string;
   actualizado_at: string | null;
 }
@@ -2670,6 +2746,7 @@ export const TABLAS = [
   'proveedor_cuentas',
   'movimiento_items',
   'plan_pagos',
+  'conceptos',
   'accionistas',
   'personal',
   'estaciones',
@@ -2722,6 +2799,10 @@ export const TABLAS_INTERNAS = [
    * muestra, sin folio; al timbrarse queda ligada a su emisión y su cfdi.
    * Va por /fiscal/prefacturas. */
   'prefacturas',
+  /* El respaldo de los precios de venta del 18-nov-2026 (0055, 0.105.0): lo
+   * que decía cada proyecto antes de ponerse en cero para cargar sus
+   * conceptos de cobro. Sale por GET /proyectos/:id/estado (precio_anterior). */
+  'precios_anteriores',
   'quell_users', 'quell_projects', 'quell_project_members', 'quell_plans', 'quell_elements', 'quell_log_entries',
   'quell_punch_items', 'quell_photos', 'quell_operaciones', 'quell_etapas', 'quell_element_etapas', 'quell_dudas',
   'quell_duda_respuestas', 'quell_element_contratistas',
@@ -2804,6 +2885,8 @@ export interface Peek {
     Omit<Proyecto, 'pagado_prov' | 'compromiso'> & {
       /** 0.66.0 · la obra de quell101 ligada al proyecto, o null. */
       obra: { id: string; nombre: string; estado: string } | null;
+      /** 0.105.0 · sin conceptos de cobro: «Precio por cargar», sin saldo. */
+      precio_por_cargar: boolean;
       items: Array<
         Pick<Item, 'id' | 'clave' | 'nombre' | 'monto' | 'moneda' | 'estado' | 'etapa' | 'etapa_at' | 'fecha_entrega'> & {
           /** 0.66.0 · las piezas del plano que cuelgan del ítem, con cuántos
@@ -2814,7 +2897,9 @@ export interface Peek {
     }
   >;
   /** centavos */
-  totales: { vendido: number; cobrado: number; saldo: number; avance: number };
+  /** 0.105.0 · `vendido` y `saldo` sólo de los proyectos con precio;
+   *  `cobrado` de todos; `por_cargar` cuántos tienen el precio por cargar. */
+  totales: { vendido: number; cobrado: number; saldo: number; avance: number; por_cargar: number };
   pagos: Array<Pick<Movimiento, 'id' | 'fecha' | 'monto' | 'proyecto_id' | 'descripcion'>>;
   /** 0.66.0 · los puntos por definir: las dudas abiertas que el taller le
    *  hizo al cliente, en todas sus obras, la más vieja primero. */
@@ -2832,7 +2917,7 @@ export type Aviso =
   | { t: 'item.etapa'; id: string; etapa: Etapa; clave: string | null; at: string }
   | { t: 'item.cambio'; id: string }
   | { t: 'movimiento.nuevo'; id: string; proyecto_id: string | null }
-  | { t: 'proyecto.cache'; id: string; precio_venta: number; cobrado: number; avance: number }
+  | { t: 'proyecto.cache'; id: string; precio_venta: number; n_conceptos?: number; cobrado: number; avance: number }
   | { t: 'conciliacion.nueva'; id: string; diferencia_total: number }
   /* 0.27.0 · se pagó una raya. Va al canal del dinero porque son N egresos
    * de golpe: una pantalla de saldos abierta tiene que enterarse. */

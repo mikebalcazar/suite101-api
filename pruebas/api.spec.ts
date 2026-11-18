@@ -197,8 +197,28 @@ describe('4 · el ítem, su etapa y el aviso por WebSocket', () => {
     });
     expect(v.estado).toBe(200);
     ids.proyecto = v.data.proyecto.id;
-    // el caché lo calcula la API: 150,000 + 50,000
-    expect(v.data.proyecto.precio_venta).toBe(20000000);
+    // 0.105.0 · los ítems ya no le ponen precio al proyecto (Mike,
+    // 18-nov-2026): vendidos y todo, el precio está POR CARGAR.
+    expect(v.data.proyecto.precio_venta).toBe(0);
+    expect(v.data.proyecto.n_conceptos).toBe(0);
+  });
+
+  it('0.105.0 · el precio lo ponen los conceptos de cobro, y el caché lo calcula la API', async () => {
+    const uno = await pedir(`/orgs/${ORG}/conceptos`, {
+      app: 'dash101', method: 'POST',
+      body: JSON.stringify({ proyecto_id: ids.proyecto, descripcion: 'Cocina', cantidad: 1, precio_unitario: 15000000 }),
+    });
+    expect(uno.estado).toBe(201);
+    expect(uno.data.monto).toBe(15000000);
+    const dos = await pedir(`/orgs/${ORG}/conceptos`, {
+      app: 'dash101', method: 'POST',
+      body: JSON.stringify({ proyecto_id: ids.proyecto, descripcion: 'Closet', cantidad: 2, precio_unitario: 2500000 }),
+    });
+    expect(dos.data.monto).toBe(5000000);
+    const p = await pedir(`/orgs/${ORG}/proyectos/${ids.proyecto}`, { app: 'dash101' });
+    // 150,000 + 2 × 25,000
+    expect(p.data.precio_venta).toBe(20000000);
+    expect(p.data.n_conceptos).toBe(2);
   });
 
   it('se mueve la etapa y el WebSocket lo avisa a otra pantalla', async () => {
@@ -438,9 +458,14 @@ describe('6 · el cliente solo ve lo suyo, y ya sumado', () => {
     expect(peek.estado).toBe(200);
     // El total y la suma de la tabla salen de la misma respuesta: no se pueden
     // contradecir. Fue un defecto real el 7-sep.
-    const suma = peek.data.proyectos.reduce((s: number, p: any) => s + p.precio_venta, 0);
+    // 0.105.0 · los que tienen el precio por cargar no suman ni restan saldo.
+    const conPrecio = peek.data.proyectos.filter((p: any) => !p.precio_por_cargar);
+    const suma = conPrecio.reduce((s: number, p: any) => s + p.precio_venta, 0);
+    const cobradoConPrecio = conPrecio.reduce((s: number, p: any) => s + p.cobrado, 0);
     expect(peek.data.totales.vendido).toBe(suma);
-    expect(peek.data.totales.saldo).toBe(peek.data.totales.vendido - peek.data.totales.cobrado);
+    expect(peek.data.totales.saldo).toBe(peek.data.totales.vendido - cobradoConPrecio);
+    expect(peek.data.totales.cobrado).toBe(peek.data.proyectos.reduce((s: number, p: any) => s + p.cobrado, 0));
+    expect(peek.data.totales.por_cargar).toBe(peek.data.proyectos.length - conPrecio.length);
 
     // El cliente no ve costos ni movimientos de egreso por ningún lado.
     for (const p of peek.data.proyectos) {
@@ -1928,7 +1953,9 @@ describe('0.46.0 · aprobar una cotización crea sus piezas en el proyecto', () 
     expect(r.data.productos_nuevos, 'sólo la cocina necesita producto nuevo: la puerta ya traía el suyo y la instalación es una').toBe(1);
     expect(r.data.cotizacion.estado).toBe('aceptada');
     expect(r.data.cotizacion.datos.aprobacion.items).toBe(6);
-    expect(r.data.proyecto.precio_venta, 'el precio de venta es la suma de las piezas').toBe(2 * 1374000 + 100000 + 3 * 250000);
+    // 0.105.0 · aprobar crea las piezas pero ya no le pone precio al proyecto:
+    // eso es de los conceptos de cobro (Mike, 18-nov-2026).
+    expect(r.data.proyecto.precio_venta, 'las piezas ya no suman el precio').toBe(0);
 
     const items = (await pedir(`/orgs/${ORG_A}/items?proyecto_id=${proy}`, { app: 'dash101' })).data.filas as any[];
     expect(items.length).toBe(6);

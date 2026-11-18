@@ -356,8 +356,10 @@ describe('§6.1 y §6.2 · los conteos y el dinero cuadran', () => {
     expect(item.data.creado_at).toBe('2026-01-15T12:00:00.000Z');
 
     const p = await pedir(`/orgs/${ORG}/proyectos/PRO1`, { app: 'dash101' });
-    // los cachés NO son los de Firestore: los recalculó la API
-    expect(p.data.precio_venta).toBe(ESPERADO.items_monto);
+    // los cachés NO son los de Firestore: los recalculó la API. 0.105.0 · el
+    // precio son los conceptos de cobro y lo importado no trae: por cargar.
+    expect(p.data.precio_venta).toBe(0);
+    expect(p.data.n_conceptos).toBe(0);
     expect(p.data.cobrado).toBe(6000000);
     expect(p.data.pagado_prov).toBe(100000);
     expect(p.data.compromiso).toBe(ESPERADO.partidas_acordado);
@@ -450,7 +452,8 @@ describe('§6.5 · los usuarios existen y entran con «olvidé mi PIN»', () => 
     const peek = await pedir(`/orgs/${ORG}/peek`, { app: 'peek101' });
     expect(peek.estado).toBe(200);
     expect(peek.data.cliente.id).toBe('CLI1');
-    expect(peek.data.totales.vendido).toBe(ESPERADO.items_monto);
+    expect(peek.data.totales.vendido, '0.105.0 · con el precio por cargar no suma').toBe(0);
+    expect(peek.data.totales.por_cargar).toBe(1);
     expect(peek.data.totales.cobrado).toBe(6000000);
     expect(peek.data.proyectos[0].items).toHaveLength(2);
 

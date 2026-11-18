@@ -107,6 +107,12 @@ describe('el tope de 500 no puede esconder lo que existe', () => {
   });
 
   it('el precio de venta del proyecto NO depende del tope: se suma en la base', async () => {
+    /* 0.105.0 · el precio son los conceptos de cobro (Mike, 18-nov-2026), y
+     * se suman en la base igual: se cargan los mismos tres y cuadra. */
+    for (const v of VIVOS) {
+      const c = await o('/conceptos', { method: 'POST', json: { proyecto_id: proyecto, descripcion: v.nombre, cantidad: 1, precio_unitario: v.monto } });
+      expect(c.estado, JSON.stringify(c)).toBe(201);
+    }
     const p = await o(`/proyectos/${proyecto}`);
     expect(p.estado).toBe(200);
     expect(p.data.precio_venta, 'la cifra que Mike vio era la correcta').toBe(SUMA_VIVOS);

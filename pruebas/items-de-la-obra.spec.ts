@@ -147,7 +147,8 @@ describe('la propuesta', () => {
     expect(otra.data.nuevos.length).toBe(antes.data.nuevos.length);
     // Y el precio de venta del proyecto no se movió con sólo mirar.
     const p = await o('mike', `/proyectos/${proyecto}`);
-    expect(p.data.precio_venta).toBe(100_000_00);
+    // 0.105.0 · los ítems ya no le ponen precio al proyecto (Mike, 18-nov-2026).
+    expect(p.data.precio_venta).toBe(0);
   });
 });
 
@@ -160,7 +161,7 @@ describe('aplicar lo que se aceptó', () => {
     expect(r.data.ligados).toBe(1);
 
     const p = await o('mike', `/proyectos/${proyecto}`);
-    expect(p.data.precio_venta, 'juntar piezas no es vender').toBe(100_000_00);
+    expect(p.data.precio_venta, 'juntar piezas no es vender').toBe(0);
   });
 
   it('crear le hace un ítem a la pieza huérfana: COTIZADO y en cero', async () => {
@@ -180,7 +181,7 @@ describe('aplicar lo que se aceptó', () => {
     expect(nuevo.monto).toBe(0);
 
     const p = await o('mike', `/proyectos/${proyecto}`);
-    expect(p.data.precio_venta, 'y el precio de venta no se movió ni un peso').toBe(100_000_00);
+    expect(p.data.precio_venta, 'y el precio de venta no se movió ni un peso').toBe(0);
   });
 
   it('aplicar otra vez no duplica: la pieza ya estaba ligada', async () => {
@@ -567,7 +568,8 @@ describe('desde el plano: con precio, o una pieza más al concepto (§103)', () 
       { element_id: eB, monto: 18_500_00, nombre: 'Clóset de blancos 1.20', descripcion: 'Nogal, tres entrepaños' },
     ] } });
     expect(r.estado, JSON.stringify(r)).toBe(200);
-    expect(await venta()).toBe(antes + 18_500_00);
+    // 0.105.0 · los ítems ya no le ponen precio al proyecto (Mike, 18-nov-2026): nace vendido, pero el precio son los conceptos de cobro.
+    expect(await venta()).toBe(antes);
 
     /* No sale en `candidatos`: nace con su pieza ya colgada, así que su
      * cupo es cero y no admite otra. Se busca donde vive, en los ítems del
@@ -611,7 +613,8 @@ describe('desde el plano: con precio, o una pieza más al concepto (§103)', () 
     const it = (await o('mike', `/items/${modelo}`)).data;
     expect(it.cantidad, 'tres puertas del mismo modelo').toBe(3);
     expect(it.monto, 'y el precio de una más').toBe(42_000_00);
-    expect(await venta()).toBe(antes + 14_000_00);
+    // 0.105.0 · los ítems ya no le ponen precio al proyecto (Mike, 18-nov-2026).
+    expect(await venta()).toBe(antes);
   });
 
   it('crecer el concepto deja huella en la bitácora de sus piezas', async () => {

@@ -255,8 +255,9 @@ describe('heredar el precio: lo que Mike pidió con todas sus letras', () => {
     expect(r.estado, JSON.stringify(r)).toBe(200);
     expect(r.data.item.monto, 'de 12 mil a 30 mil').toBe(30_000_00);
     expect(r.data.venta_antes).toBe(antes);
-    expect(r.data.venta_despues).toBe(antes + 18_000_00);
-    expect(await precioVenta()).toBe(antes + 18_000_00);
+    // 0.105.0 · los ítems ya no le ponen precio al proyecto (Mike, 18-nov-2026): el ítem cambia de precio, el proyecto no.
+    expect(r.data.venta_despues).toBe(antes);
+    expect(await precioVenta()).toBe(antes);
   });
 
   it('con cantidad, el precio es POR PIEZA', async () => {
@@ -772,8 +773,9 @@ describe('agrupar a un producto QUE YA EXISTE (§114)', () => {
     expect(r.data.producto.id).toBe(modelo);
     for (const id of sinPrecio) expect((await o('mike', `/items/${id}`)).data.monto).toBe(precio);
     expect(r.data.venta_antes).toBe(antes);
-    expect(r.data.venta_despues, 'dos piezas a 2,850 más').toBe(antes + 2 * precio);
-    expect(await precioVenta()).toBe(antes + 2 * precio);
+    // 0.105.0 · los ítems ya no le ponen precio al proyecto (Mike, 18-nov-2026).
+    expect(r.data.venta_despues, 'las piezas suben, el proyecto no').toBe(antes);
+    expect(await precioVenta()).toBe(antes);
   });
 
   it('el nombre y el precio que manden se IGNORAN: el modelo ya tiene los suyos', async () => {

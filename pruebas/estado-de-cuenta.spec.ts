@@ -67,11 +67,14 @@ beforeAll(async () => {
   casaUno = (await o('mike', '/proyectos', { method: 'POST', json: { negocio_id: negocio, cliente_id: holcim, nombre: 'Planta Norte', fecha_inicio: '2026-01-15' } })).data.id;
   casaDos = (await o('mike', '/proyectos', { method: 'POST', json: { negocio_id: negocio, cliente_id: holcim, nombre: 'Oficinas', fecha_inicio: '2026-03-01' } })).data.id;
 
-  // Lo vendido: ítems de cada proyecto. El precio lo suma la API.
+  /* Lo vendido: desde 0.105.0 son los CONCEPTOS DE COBRO de cada proyecto
+   * (Mike, 18-nov-2026: «Ya no va a ir ligada a los ítems»). El precio lo
+   * suma la API. Los ítems se dejan para medir que ya no cuentan. */
   for (const [proy, monto] of [[casaUno, 500_000_00], [casaDos, 300_000_00]] as const) {
     await o('mike', '/items', { method: 'POST', json: {
-      negocio_id: negocio, cliente_id: holcim, proyecto_id: proy, nombre: 'Alcance', monto, estado: 'vendido',
+      negocio_id: negocio, cliente_id: holcim, proyecto_id: proy, nombre: 'Alcance', monto: 999_00, estado: 'vendido',
     } });
+    await o('mike', '/conceptos', { method: 'POST', json: { proyecto_id: proy, descripcion: 'Alcance', cantidad: 1, precio_unitario: monto } });
   }
 }, 60000);
 
@@ -82,8 +85,12 @@ describe('el estado de cuenta', () => {
     expect(r.data.cliente.nombre).toBe('HOLCIM');
     expect(r.data.cliente.rfc, 'con lo que hace falta para un reporte').toBe('HOL010101AAA');
     expect(r.data.totales.vendido).toBe(800_000_00);
+    /* El saldo es contra el TOTAL CON IVA, como en el estado de cuenta de
+     * cada proyecto: 800,000 + 16 %. */
+    expect(r.data.totales.total).toBe(928_000_00);
     expect(r.data.totales.cobrado).toBe(0);
-    expect(r.data.totales.saldo).toBe(800_000_00);
+    expect(r.data.totales.saldo).toBe(928_000_00);
+    expect(r.data.totales.por_cargar).toBe(0);
   });
 
   it('por proyecto: cada uno con su precio, lo cobrado y lo que falta', async () => {
@@ -93,8 +100,12 @@ describe('el estado de cuenta', () => {
     const r = await o('mike', `/clientes/${holcim}/estado-de-cuenta`);
     const norte = r.data.proyectos.find((p: any) => p.nombre === 'Planta Norte');
     expect(norte.precio_venta).toBe(500_000_00);
+    expect(norte.total).toBe(580_000_00);
     expect(norte.cobrado).toBe(200_000_00);
-    expect(norte.saldo).toBe(300_000_00);
+    expect(norte.saldo).toBe(380_000_00);
+    // Lo cotizado viaja con él: sus conceptos, agrupados.
+    expect(norte.grupos).toHaveLength(1);
+    expect(norte.grupos[0].conceptos[0]).toMatchObject({ descripcion: 'Alcance', monto: 500_000_00 });
     // Y cada proyecto trae SUS pagos, para que el reporte los pueda desglosar.
     expect(norte.pagos).toHaveLength(1);
     expect(norte.pagos[0].fecha).toBe('2026-02-01');
@@ -110,7 +121,8 @@ describe('el estado de cuenta', () => {
     expect(r.data.otros_pagos, 'sale aparte, con su renglón').toHaveLength(1);
     expect(r.data.totales.sin_proyecto).toBe(80_000_00);
     expect(r.data.totales.cobrado, '200,000 + 50,000 + 80,000').toBe(330_000_00);
-    expect(r.data.totales.saldo).toBe(470_000_00);
+    // (580,000 − 200,000) + (348,000 − 50,000) − 80,000
+    expect(r.data.totales.saldo).toBe(598_000_00);
   });
 
   it('el saldo global ES la suma de los renglones que se enseñan', async () => {
@@ -122,11 +134,13 @@ describe('el estado de cuenta', () => {
     const sumaOtros = d.otros_pagos.reduce((t: number, g: any) => t + g.monto, 0);
     expect(sumaProyectos + sumaOtros).toBe(d.totales.cobrado);
     expect(d.proyectos.reduce((t: number, p: any) => t + p.precio_venta, 0)).toBe(d.totales.vendido);
-    expect(d.totales.vendido - d.totales.cobrado).toBe(d.totales.saldo);
+    const conPrecio = d.proyectos.filter((p: any) => !p.precio_por_cargar);
+    expect(conPrecio.reduce((t: number, p: any) => t + p.total, 0)).toBe(d.totales.total);
+    expect(conPrecio.reduce((t: number, p: any) => t + p.saldo, 0) - d.totales.sin_proyecto).toBe(d.totales.saldo);
     // Y renglón por renglón: el cobrado de un proyecto es la suma de SUS pagos.
     for (const p of d.proyectos) {
       expect(p.pagos.reduce((t: number, g: any) => t + g.monto, 0), `los pagos de ${p.nombre}`).toBe(p.cobrado);
-      expect(p.precio_venta - p.cobrado).toBe(p.saldo);
+      if (!p.precio_por_cargar) expect(p.total - p.cobrado).toBe(p.saldo);
     }
   });
 
@@ -149,6 +163,19 @@ describe('el estado de cuenta', () => {
     expect(Object.keys(uno)).toContain('facturado');
     expect(Object.keys(uno)).toContain('uuid_cfdi');
     expect(Object.keys(uno), 'y de qué cuenta entró').toContain('cuenta_nombre');
+  });
+
+  it('0.105.0 · un proyecto con el precio POR CARGAR enseña lo cobrado pero no tiene saldo', async () => {
+    const nuevo = (await o('mike', '/proyectos', { method: 'POST', json: { negocio_id: negocio, cliente_id: holcim, nombre: 'Bodega Sur', fecha_inicio: '2026-04-01' } })).data.id;
+    await cobrar(10_000_00, { proyecto_id: nuevo, cliente_id: holcim, nombre: 'HOLCIM', fecha: '2026-04-02' });
+    const r = await o('mike', `/clientes/${holcim}/estado-de-cuenta`);
+    const sur = r.data.proyectos.find((p: any) => p.nombre === 'Bodega Sur');
+    expect(sur.precio_por_cargar).toBe(true);
+    expect(sur.saldo).toBeNull();
+    expect(sur.cobrado).toBe(10_000_00);
+    expect(r.data.totales.por_cargar).toBe(1);
+    expect(r.data.totales.cobrado, 'lo cobrado sí suma').toBe(340_000_00);
+    expect(r.data.totales.saldo, 'el saldo no se mueve: no hay contra qué restar').toBe(598_000_00);
   });
 
   it('un cliente que no existe da 404, no una cuenta vacía', async () => {

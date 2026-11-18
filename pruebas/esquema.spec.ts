@@ -119,8 +119,10 @@ describe('el esquema del OrgDB', () => {
     // —relativa, porque el mismo PDF se ve a un ancho en el celular y a otro
     // en la compu—. `porcentaje` (0025) es la participación de un accionista,
     // de 0 a 100: lo que le toca, no dinero. `horas` (0041) es la jornada de
-    // una cuadrilla de cost101: tiempo, no dinero. Nada más es REAL.
-    expect(reales).toEqual(['avance', 'x', 'y', 'x', 'y', 'porcentaje', 'horas']);
+    // una cuadrilla de cost101: tiempo, no dinero. `cantidad` (0055) es la de
+    // un concepto de cobro —2.5 m² de cubierta—: cuántas, no cuánto; su
+    // precio y su importe son INTEGER. Nada más es REAL.
+    expect(reales).toEqual(['avance', 'x', 'y', 'x', 'y', 'porcentaje', 'horas', 'cantidad']);
     for (const col of ['monto', 'total', 'saldo_inicial', 'precio_venta', 'cobrado', 'pagado_prov', 'compromiso', 'monto_acordado', 'monto_pagado', 'precio']) {
       expect(sinNotas).toMatch(new RegExp(`${col}\\s+INTEGER`));
     }
