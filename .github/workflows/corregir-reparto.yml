@@ -1,0 +1,146 @@
+# Volver a repartir el IVA de los pagos que se ligaron antes de 0.107.0.
+#
+# Mike, 18-nov-2026, con botones: «Corregirlas todas». Antes de 0.107.0,
+# ligar un pago a su factura le copiaba el desglose de la factura ENTERA, y
+# dos parcialidades de una misma factura cargaban cada una todo su IVA.
+#
+# El chat no alcanza producción con sesión. Este workflow:
+#   1. inventa una llave de un solo uso (nunca se escribe en ningún lado),
+#   2. la pone en el Worker como secreto LLAVE_CORRECCION,
+#   3. llama POST /interno/:org/reparto-iva (ensayo o corregir),
+#   4. borra la llave pase lo que pase: sin ella la ruta vuelve a no existir,
+#   5. deja lo medido como comentario del commit.
+#
+# `ensayo` no escribe nada. `corregir` en producción sólo cuando Mike lo
+# decidió (OPERAR: en producción sólo se mira; se escribe cuando Mike decide).
+#
+#   POST /repos/mikebalcazar/suite101-api/actions/workflows/corregir-reparto.yml/dispatches
+#   {"ref":"main","inputs":{"entorno":"staging","org":"demo","modo":"ensayo"}}
+
+name: Corregir el reparto del IVA
+
+on:
+  workflow_dispatch:
+    inputs:
+      entorno:
+        description: staging o produccion
+        required: true
+        type: choice
+        options: [staging, produccion]
+      org:
+        description: La empresa (id en orgs)
+        required: true
+        type: string
+      modo:
+        description: ensayo (no escribe) o corregir
+        required: true
+        type: choice
+        options: [ensayo, corregir]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: corregir-reparto
+  cancel-in-progress: false
+
+jobs:
+  corregir:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      ENTORNO: ${{ inputs.entorno }}
+      ORG: ${{ inputs.org }}
+      MODO: ${{ inputs.modo }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      - name: Poner la llave de un solo uso
+        run: |
+          set -euo pipefail
+          case "$ORG" in (*[!a-z0-9-]*|'') echo "org inválida: $ORG" >&2; exit 1;; esac
+          LLAVE=$(openssl rand -hex 32)
+          echo "::add-mask::$LLAVE"
+          echo "LLAVE=$LLAVE" >> "$GITHUB_ENV"
+          if [ "$ENTORNO" = staging ]; then
+            echo "ENV_WRANGLER=--env staging" >> "$GITHUB_ENV"
+            echo "BASE=https://suite101-api-staging.mike-929.workers.dev" >> "$GITHUB_ENV"
+            printf '%s' "$LLAVE" | npx wrangler secret put LLAVE_CORRECCION --env staging
+          else
+            echo "ENV_WRANGLER=" >> "$GITHUB_ENV"
+            echo "BASE=https://suite101-api.mike-929.workers.dev" >> "$GITHUB_ENV"
+            printf '%s' "$LLAVE" | npx wrangler secret put LLAVE_CORRECCION
+          fi
+
+      - name: Llamar
+        id: llamar
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          exec > >(tee /tmp/salida.txt) 2>&1
+          echo "Corregir el reparto del IVA — $ENTORNO · $ORG · $MODO"
+          # El secreto tarda unos segundos en llegar a todos los Workers.
+          for i in $(seq 1 12); do
+            code=$(curl -sS -o /tmp/r.json -w '%{http_code}' -X POST -H "X-Llave-Correccion: $LLAVE" "$BASE/interno/$ORG/reparto-iva?modo=$MODO")
+            [ "$code" = 200 ] && break
+            if [ "$code" = 404 ] && grep -q org_desconocida /tmp/r.json; then break; fi
+            sleep 5
+          done
+          echo "HTTP $code (intento $i)"
+          if [ "$code" != 200 ]; then head -c 500 /tmp/r.json; echo; exit 1; fi
+          jq -r '
+            def p: (. / 100) as $v | ($v | floor) as $e | (($v - $e) * 100 | round) as $c
+              | ($e | tostring | until(test("\\d{4}") | not; sub("(?<a>\\d)(?<b>\\d{3})(?<c>,|$)"; "\(.a),\(.b)\(.c)"))) as $miles
+              | "$" + $miles + "." + (if $c < 10 then "0" else "" end) + ($c | tostring);
+            def m: if . < 0 then "-" + ((-.) | p) else p end;
+            .data as $d
+            | "\(if $d.ensayo then "ENSAYO (no se escribió nada)" else "CORREGIDO" end) · \($d.org)",
+              "pagos con factura vigente: \($d.revisados) · cambian: \($d.cambian)",
+              "",
+              "== Por proyecto ==",
+              ($d.proyectos[] | "\(.nombre) · \(.pagos) pagos · precio \(.precio_venta | m)",
+                "  cobrado sin IVA \(.antes.cobrado_sin_iva | m) → \(.despues.cobrado_sin_iva | m)   IVA cobrado \(.antes.iva_cobrado | m) → \(.despues.iva_cobrado | m)",
+                "  saldo sin IVA \((.precio_venta - .antes.cobrado_sin_iva) | m) → \((.precio_venta - .despues.cobrado_sin_iva) | m)"
+                + (if .antes.pagado_sin_iva != .despues.pagado_sin_iva or .antes.iva_pagado != .despues.iva_pagado
+                   then "\n  pagado sin IVA \(.antes.pagado_sin_iva | m) → \(.despues.pagado_sin_iva | m)   IVA pagado \(.antes.iva_pagado | m) → \(.despues.iva_pagado | m)" else "" end)),
+              "",
+              "== Pago por pago ==",
+              ($d.movimientos[] | "\(.fecha[0:10]) \(.tipo) \(.monto | m) \(.descripcion[0:40]) · sin IVA \(.antes.subtotal | m) → \(.despues.subtotal | m) · IVA \(.antes.iva | m) → \(.despues.iva | m)\(if .antes.subtotal_guardado then "" else " (no tenía subtotal)" end)")
+          ' /tmp/r.json
+
+      - name: Borrar la llave
+        if: always()
+        run: |
+          set -u
+          echo y | npx wrangler secret delete LLAVE_CORRECCION $ENV_WRANGLER || echo y | npx wrangler secret delete LLAVE_CORRECCION $ENV_WRANGLER
+          # Y se comprueba: sin llave, la ruta no existe.
+          sleep 10
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "X-Llave-Correccion: $LLAVE" "$BASE/interno/$ORG/reparto-iva?modo=ensayo")
+          echo "sin llave la ruta contesta $code" | tee -a /tmp/salida.txt
+          [ "$code" = 404 ] || echo "::warning::la ruta sigue contestando $code: revisar el secreto LLAVE_CORRECCION"
+
+      - name: Dejar lo medido en el commit
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -u
+          [ -f /tmp/salida.txt ] || echo "No hubo salida que reportar." > /tmp/salida.txt
+          jq -Rs '{body: ("**Corregir el reparto del IVA**\n\n```\n" + .[-60000:] + "\n```")}' /tmp/salida.txt > /tmp/comentario.json
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/commits/$SHA/comments" \
+            -d @/tmp/comentario.json -o /tmp/respuesta.json -w 'comentario: %{http_code}\n'
+
+      - name: Que la llamada mande
+        if: steps.llamar.outcome != 'success'
+        run: exit 1

@@ -17,7 +17,12 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.107.0 (EL ESTADO DE CUENTA DEL PROYECTO, SIN IVA.
+ * Versión del contrato: 0.107.1 (CORREGIR EL REPARTO DEL IVA DE LOS PAGOS YA
+ * LIGADOS. Mike, 18-nov, con botones: «Corregirlas todas». Sin cambio de
+ * contrato para las apps: POST /interno/:o/reparto-iva sólo existe mientras
+ * el workflow corregir-reparto.yml tiene puesta su llave de un solo uso.)
+ *
+ * Antes, 0.107.0 (EL ESTADO DE CUENTA DEL PROYECTO, SIN IVA.
  * Mike, 18-nov, revisando HOLCIM (recado de dash101): «En los estados de
  * cuenta de los proyectos, siempre haz las cuentas sin IVA y desglosa por
  * aparte el IVA que se haya pagado o cobrado. O sea los conceptos son antes
@@ -1728,7 +1733,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.107.0';
+export const VERSION_CONTRATO = '0.107.1';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
