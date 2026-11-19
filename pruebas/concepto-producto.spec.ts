@@ -219,3 +219,35 @@ describe('la sección del concepto', () => {
   });
 });
 
+
+/* 0.110.0 · Mike, 19-nov-2026: «quiero ya de ahora en adelante poder agrupar
+ * conceptos nuevos que agregue». */
+describe('un renglón nuevo entra a un grupo que ya existe', () => {
+  it('a una cotización de la hoja, con su folio y su nombre; uno importado puede salir a «Otros»', async () => {
+    const p = await crea('/proyectos', { cliente_id: cliente, nombre: 'Agrupar nuevos' });
+    const c = await crea('/cotizaciones', { cliente_id: cliente, total: 0, datos: { nombre: 'Adicionales', proyecto_id: p, versiones: [],
+      renglones: [{ linea: 1, nombre: 'BO.08', cantidad: 1, precio_unitario: 16_000_00 }] } }, 'cotizador101');
+    const imp = await o('mike', `/proyectos/${p}/conceptos/importar`, { method: 'POST', json: { cotizacion_id: c } });
+    expect(imp.estado, JSON.stringify(imp)).toBe(201);
+    const ya = imp.data.conceptos[0];
+    const r = await hoja(p, [
+      { id: ya.id, nombre: ya.nombre, descripcion: '', cantidad: 1, precio_unitario: 16_000_00 },
+      { cotizacion_id: c, seccion: 'N11', nombre: 'MWX-011', descripcion: 'Barra nueva', cantidad: 1, precio_unitario: 5_000_00 },
+      { nombre: 'Flete', descripcion: '', cantidad: 1, precio_unitario: 1_000_00 },
+    ]);
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    const [a, b, f] = r.data.conceptos;
+    expect(a).toMatchObject({ cotizacion_id: c, cotizacion_nombre: 'Adicionales' });
+    expect(b).toMatchObject({ cotizacion_id: c, cotizacion_nombre: 'Adicionales', cotizacion_folio: a.cotizacion_folio, seccion: 'N11' });
+    expect(f).toMatchObject({ cotizacion_id: null });
+    const e = (await o('mike', `/proyectos/${p}/estado`)).data;
+    expect(e.grupos.map((g: any) => [g.nombre, g.conceptos.length])).toEqual([['Adicionales', 2], ['Otros conceptos', 1]]);
+    // El importado sale a «Otros conceptos».
+    const r2 = await hoja(p, r.data.conceptos.map((x: any) => ({ id: x.id, nombre: x.nombre, descripcion: x.descripcion, cantidad: 1, precio_unitario: x.precio_unitario, cotizacion_id: x.id === a.id ? null : x.cotizacion_id })));
+    expect(r2.data.conceptos.find((x: any) => x.id === a.id)).toMatchObject({ cotizacion_id: null, cotizacion_nombre: null });
+  });
+  it('a una cotización que no está en el proyecto, no', async () => {
+    const r = await hoja(casa, [{ cotizacion_id: 'inventada', nombre: 'X', descripcion: '', cantidad: 1, precio_unitario: 1 }]);
+    expect(r).toMatchObject({ estado: 400, error: 'datos_invalidos', detalle: { campo: 'cotizacion_id' } });
+  });
+});

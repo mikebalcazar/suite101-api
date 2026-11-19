@@ -17,7 +17,12 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.109.0 (LA SECCIÓN DEL CONCEPTO. Mike, 19-nov: agrupar
+ * Versión del contrato: 0.110.0 (LA HOJA PONE CONCEPTOS NUEVOS EN SU GRUPO. Mike,
+ * 19-nov: «quiero ya de ahora en adelante poder agrupar conceptos nuevos que
+ * agregue». PUT /proyectos/:id/conceptos acepta `cotizacion_id` por renglón:
+ * una cotización que ya esté en los conceptos del proyecto, o null.)
+ *
+ * Antes, 0.109.0 (LA SECCIÓN DEL CONCEPTO. Mike, 19-nov: agrupar
  * por cotización y subagrupar por las divisiones de nivel (N01, N02…).
  * `conceptos.seccion` (0059); la hoja, las plantillas y el CRUD la aceptan; el
  * estado de cuenta la trae y el Excel la pone como subtítulo. Lo cargado como
@@ -1751,7 +1756,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.109.0';
+export const VERSION_CONTRATO = '0.110.0';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
@@ -2217,6 +2222,10 @@ export interface RenglonDeHoja {
   nombre?: string;
   /** 0.109.0 · La sección; sin ella, un concepto que ya existe conserva la suya. */
   seccion?: string;
+  /** 0.110.0 · La cotización en cuyo grupo va: una que ya esté en los
+   *  conceptos del proyecto, o null para «Otros conceptos». Sin ella, un
+   *  concepto que ya existe se queda donde estaba y uno nuevo va a «Otros». */
+  cotizacion_id?: string | null;
   descripcion: string;
   cantidad: number;
   precio_unitario: number;

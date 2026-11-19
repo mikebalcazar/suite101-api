@@ -1053,6 +1053,7 @@ export function renglonesQueNoCuadran(lista: unknown, conId: boolean): Record<st
     if (x.nombre !== undefined && x.nombre !== null && typeof x.nombre !== 'string') return { renglon: n, campo: 'nombre', regla: 'texto' };
     if (typeof x.nombre === 'string' && x.nombre.trim().length > 200) return { renglon: n, campo: 'nombre', regla: 'a lo más 200 letras' };
     if (x.seccion !== undefined && x.seccion !== null && (typeof x.seccion !== 'string' || x.seccion.trim().length > 60)) return { renglon: n, campo: 'seccion', regla: 'texto de a lo más 60 letras' };
+    if (x.cotizacion_id !== undefined && x.cotizacion_id !== null && typeof x.cotizacion_id !== 'string') return { renglon: n, campo: 'cotizacion_id', regla: 'texto o nada' };
     if (x.descripcion === undefined || x.descripcion === null) x.descripcion = '';
     if (typeof x.descripcion !== 'string') return { renglon: n, campo: 'descripcion', regla: 'texto' };
     if (!x.descripcion.trim() && !String(x.nombre ?? '').trim()) return { renglon: n, campo: 'descripcion', regla: 'qué se cobra: producto o descripción, no vacíos los dos' };
@@ -1076,7 +1077,8 @@ rutas.put('/:o/proyectos/:id/conceptos', async (c) => {
   if (mal) return err(c, 'datos_invalidos', 400, mal);
   const renglones = (b.renglones as Array<Record<string, any>>).map((r) => ({
     id: r.id ?? null, nombre: r.nombre === undefined || r.nombre === null ? undefined : String(r.nombre).trim(),
-    seccion: r.seccion === undefined || r.seccion === null ? undefined : String(r.seccion).trim(), descripcion: String(r.descripcion ?? '').trim(), cantidad: Number(r.cantidad), precio_unitario: Number(r.precio_unitario),
+    seccion: r.seccion === undefined || r.seccion === null ? undefined : String(r.seccion).trim(),
+    cotizacion_id: r.cotizacion_id === undefined ? undefined : r.cotizacion_id === null || r.cotizacion_id === '' ? null : String(r.cotizacion_id), descripcion: String(r.descripcion ?? '').trim(), cantidad: Number(r.cantidad), precio_unitario: Number(r.precio_unitario),
   }));
   const quien = c.get('quien');
   const r = await stub(c).guardarHojaDeConceptos({ proyecto_id: c.req.param('id')!, renglones, app: c.get('app') });
