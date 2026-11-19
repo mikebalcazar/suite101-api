@@ -1,3 +1,5 @@
+> **19-nov-2026 · QUALITAS según el histórico de IMA (API 0.111.3).** Mike compartió el histórico de pagos de QUALITAS de IMA: «Este Excel manda en cuanto a pagos». `corregir` acepta `monto` en un pago con UNA factura (la liga se mueve con él y `repartirDesglose` reparte el IVA otra vez; no pasa del total de la factura). Se usó para A-760 ($232,348 → $232,000).
+
 > **19-nov-2026 · corregir un pago que ya está (API 0.111.2).** Mike: «La cuenta a la que entraron los $23,200 de HOLCIM: entró a efectivo». La carga interna acepta `corregir [{movimiento_id, cuenta_id?, fecha?, descripcion?}]`: cambia eso y nada más (el dinero y sus facturas no se tocan), con ensayo que dice antes → después.
 
 > **19-nov-2026 · conciliar contra el banco (API 0.111.1).** Mike mandó la relación de pagos SPEI de Banorte 2023-2026 y pidió relacionar facturas y proyectos para conciliar TATA, SSA, HOLCIM, QUALITAS y APEX. La carga interna acepta `conciliar {rfc}`: todas las facturas vigentes del RFC con sus ligas (pago, fecha, monto aplicado, proyecto) y todos los ingresos de sus clientes con sus folios. El reporte del workflow los deja en líneas con tabs (F… y M…) para cruzarlos.

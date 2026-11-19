@@ -391,3 +391,25 @@ describe('corregir un pago que ya está', () => {
     expect(await mov(pago), 'el dinero no se toca').toMatchObject({ cuenta_id: caja, fecha: expect.stringMatching(/^2026-11-18/), monto: antes.monto, subtotal: antes.subtotal, iva: antes.iva });
   });
 });
+
+/* 0.111.3 · El histórico de IMA dice $232,000 donde la factura A-760 es de
+ * $232,348: el monto del pago se corrige, la liga se mueve con él, el IVA se
+ * reparte otra vez y la factura queda por completar en $348. */
+describe('corregir el monto de un pago con su factura', () => {
+  it('ajusta monto, sin IVA e IVA, y la factura dice cuánto le falta', async () => {
+    const f = await o('/fiscal/cfdi', { method: 'POST', json: { tipo: 'ingreso', rfc: 'IPA150629LBA', razon_social: 'IMA', uuid: 'FFFFFFFF-0000-4000-8000-000000000760', subtotal: 200_300_00, iva: 32_048_00, total: 232_348_00, fecha: '2026-02-27' } });
+    expect(f.estado, JSON.stringify(f)).toBe(201);
+    const obraM = await crea('/proyectos', { cliente_id: cliente, nombre: 'Monto A-760' });
+    const r1 = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: { buscar: '', proyecto_id: obraM, cuenta_id: cuenta, ligar: true, conceptos: [],
+      ingresos: [{ fecha: '2026-02-07', monto: 232_348_00, descripcion: 'Pago 12', cfdi_id: f.data.id }] } });
+    expect(r1.data, JSON.stringify(r1.data)).toMatchObject({ escrito: true, ligados: 1 });
+    const pago = (await o(`/proyectos/${obraM}/estado`)).data.movimientos[0].id;
+    const pide = (modo?: string, monto = 232_000_00) => interno(ORG, { llave: LLAVE, dada: LLAVE, modo, carga: { buscar: '', proyecto_id: obraM, conceptos: [], ingresos: [], corregir: [{ movimiento_id: pago, monto }] } });
+    expect((await pide()).data.corregidos[0]).toMatchObject({ antes: { monto: 232_348_00 }, despues: { monto: 232_000_00 }, problema: null });
+    expect((await pide('cargar', 240_000_00)).data).toMatchObject({ escrito: false, motivo: expect.stringContaining('pasa del total') });
+    expect((await pide('cargar')).data).toMatchObject({ escrito: true });
+    expect(await mov(pago)).toMatchObject({ monto: 232_000_00, subtotal: 200_000_00, iva: 32_000_00 });
+    const e = (await o(`/proyectos/${obraM}/estado`)).data;
+    expect(e.facturas_por_completar).toEqual([expect.objectContaining({ id: f.data.id, falta: 348_00, falta_sin_iva: 300_00 })]);
+  });
+});
