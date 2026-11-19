@@ -352,3 +352,20 @@ describe('ligar pagos que ya están, sin moverles el sin IVA', () => {
     expect(r.data).toMatchObject({ escrito: false, motivo: expect.stringContaining('ya tiene factura') });
   });
 });
+
+/* 0.111.1 · Para conciliar contra el banco: todas las facturas del RFC con
+ * sus ligas, y los ingresos de sus clientes con sus facturas. Sólo lee. */
+describe('conciliar', () => {
+  it('trae las facturas ligadas y sueltas, y los ingresos con sus folios', async () => {
+    await o(`/clientes/${cliente}`, { method: 'PATCH', json: { rfc: 'IPA150629LBA' } });
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, carga: { buscar: '', conceptos: [], ingresos: [], conciliar: { rfc: 'IPA150629LBA' } } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    const c = r.data.conciliacion;
+    const a767 = c.facturas.find((f: any) => f.folio === '767');
+    expect(a767.ligas.length).toBeGreaterThan(0);
+    expect(a767.ligas[0]).toMatchObject({ proyecto: 'QUALITAS por facturar' });
+    const pago = c.ingresos.find((m: any) => m.facturas.includes('A767') && m.monto === 290_000_00);
+    expect(pago).toMatchObject({ monto: 290_000_00, sin_iva: 250_000_00, facturas: ['A767'] });
+    expect(r.data.escrito).toBe(false);
+  });
+});
