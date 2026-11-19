@@ -17,7 +17,12 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.108.0 (EL CONCEPTO LLEVA SU PRODUCTO APARTE. Mike,
+ * Versión del contrato: 0.108.1 (CARGAR UN PROYECTO DESDE LA HOJA. Mike, 19-nov:
+ * «cargar los ingresos y los conceptos del proyecto de qualitas». Sin cambio
+ * para las apps: POST /interno/:o/carga-proyecto sólo existe mientras
+ * cargar-proyecto.yml tiene puesta su llave de un solo uso.)
+ *
+ * Antes, 0.108.0 (EL CONCEPTO LLEVA SU PRODUCTO APARTE. Mike,
  * 18-nov: «Necesito que la lista de conceptos tengan las mismas columnas que
  * las del PDF. Separar el producto de la descripción». `conceptos.nombre`
  * (0058); la hoja, las plantillas y el CRUD lo aceptan; importar de quote lo
@@ -1740,7 +1745,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.108.0';
+export const VERSION_CONTRATO = '0.108.1';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
