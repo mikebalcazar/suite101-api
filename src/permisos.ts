@@ -55,7 +55,7 @@ export const ESCRITORES: Partial<Record<Tabla, Partial<Record<App, Campos>>>> = 
   /* 0.105.0 · Los conceptos de cobro (Mike, 18-nov-2026) son de dash101.
    * `monto` no está: lo calcula la API. Tampoco lo de la cotización: eso lo
    * escribe la importación, que copia lo que quote101 dejó guardado. */
-  conceptos: { dash101: ['proyecto_id', 'nombre', 'descripcion', 'cantidad', 'precio_unitario', 'orden'] },
+  conceptos: { dash101: ['proyecto_id', 'nombre', 'seccion', 'descripcion', 'cantidad', 'precio_unitario', 'orden'] },
   /* 0.106.0 · Las plantillas de presupuesto son de dash101 (Mike, 18-nov-2026). */
   plantillas_presupuesto: { dash101: ['nombre', 'renglones'] },
   movimientos: { dash101: '*' },

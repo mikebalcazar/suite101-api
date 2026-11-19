@@ -17,7 +17,13 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.108.1 (CARGAR UN PROYECTO DESDE LA HOJA. Mike, 19-nov:
+ * Versión del contrato: 0.109.0 (LA SECCIÓN DEL CONCEPTO. Mike, 19-nov: agrupar
+ * por cotización y subagrupar por las divisiones de nivel (N01, N02…).
+ * `conceptos.seccion` (0059); la hoja, las plantillas y el CRUD la aceptan; el
+ * estado de cuenta la trae y el Excel la pone como subtítulo. Lo cargado como
+ * «N01 · MURO BIENVENIDA» se separó.)
+ *
+ * Antes, 0.108.1 (CARGAR UN PROYECTO DESDE LA HOJA. Mike, 19-nov:
  * «cargar los ingresos y los conceptos del proyecto de qualitas». Sin cambio
  * para las apps: POST /interno/:o/carga-proyecto sólo existe mientras
  * cargar-proyecto.yml tiene puesta su llave de un solo uso.)
@@ -1745,7 +1751,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.108.1';
+export const VERSION_CONTRATO = '0.109.0';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
@@ -2158,6 +2164,9 @@ export interface Concepto {
    *  su descripción, como en el PDF de la cotización. Se llama `nombre` y
    *  no `producto`: un producto es del catálogo (esquema.spec). '' si no tiene. */
   nombre: string;
+  /** 0.109.0 · La sección dentro de su cotización («N01», «MEZZANINE»): los
+   *  conceptos se subagrupan por ella. '' es sin sección. */
+  seccion: string;
   descripcion: string;
   cantidad: number;
   /** centavos */
@@ -2206,6 +2215,8 @@ export interface RenglonDeHoja {
   id?: string | null;
   /** 0.108.0 · El producto (nombre) y la descripción: al menos uno no vacío. */
   nombre?: string;
+  /** 0.109.0 · La sección; sin ella, un concepto que ya existe conserva la suya. */
+  seccion?: string;
   descripcion: string;
   cantidad: number;
   precio_unitario: number;
@@ -2225,7 +2236,7 @@ export type ResultadoGuardarHoja =
 export interface PlantillaPresupuesto {
   id: string;
   nombre: string;
-  renglones: Array<{ nombre?: string; descripcion: string; cantidad: number; precio_unitario: number }>;
+  renglones: Array<{ nombre?: string; seccion?: string; descripcion: string; cantidad: number; precio_unitario: number }>;
   creado_en_app: string | null;
   creado_at: string;
   actualizado_at: string | null;
