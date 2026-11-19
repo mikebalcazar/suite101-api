@@ -1,0 +1,159 @@
+# Cargar los conceptos y los ingresos de un proyecto desde la hoja de Mike.
+#
+# Mike, 19-nov-2026: «Necesito que me ayudes a cargar los ingresos y los
+# conceptos del proyecto de qualitas». Con la misma llave de un solo uso que
+# corregir-reparto.yml: se inventa, se pone, se llama y se borra.
+#
+# `ensayo` sólo busca y mide (el proyecto, las cuentas, lo que ya tiene, las
+# facturas de cada folio y cuánto quedaría). `cargar` escribe, con proyecto_id
+# y cuenta_id exactos dentro de la carga y sin repetidos. En producción sólo
+# cuando Mike lo decidió.
+#
+#   POST /repos/mikebalcazar/suite101-api/actions/workflows/cargar-proyecto.yml/dispatches
+#   {"ref":"main","inputs":{"entorno":"staging","org":"demo","modo":"ensayo","carga":"{…}"}}
+
+name: Cargar un proyecto desde la hoja
+
+on:
+  workflow_dispatch:
+    inputs:
+      entorno:
+        description: staging o produccion
+        required: true
+        type: choice
+        options: [staging, produccion]
+      org:
+        description: La empresa (id en orgs)
+        required: true
+        type: string
+      modo:
+        description: ensayo (no escribe) o cargar
+        required: true
+        type: choice
+        options: [ensayo, cargar]
+      carga:
+        description: 'JSON: {buscar, proyecto_id?, cuenta_id?, ligar?, conceptos:[…], ingresos:[…]}'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: llave-correccion
+  cancel-in-progress: false
+
+jobs:
+  cargar:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      ENTORNO: ${{ inputs.entorno }}
+      ORG: ${{ inputs.org }}
+      MODO: ${{ inputs.modo }}
+      CARGA: ${{ inputs.carga }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      - name: Revisar la carga y poner la llave de un solo uso
+        run: |
+          set -euo pipefail
+          case "$ORG" in (*[!a-z0-9-]*|'') echo "org inválida: $ORG" >&2; exit 1;; esac
+          printf '%s' "$CARGA" > /tmp/carga.json
+          jq -e '(.conceptos|type=="array") and (.ingresos|type=="array")' /tmp/carga.json >/dev/null
+          LLAVE=$(openssl rand -hex 32)
+          echo "::add-mask::$LLAVE"
+          echo "LLAVE=$LLAVE" >> "$GITHUB_ENV"
+          if [ "$ENTORNO" = staging ]; then
+            echo "ENV_WRANGLER=--env staging" >> "$GITHUB_ENV"
+            echo "BASE=https://suite101-api-staging.mike-929.workers.dev" >> "$GITHUB_ENV"
+            printf '%s' "$LLAVE" | npx wrangler secret put LLAVE_CORRECCION --env staging
+          else
+            echo "ENV_WRANGLER=" >> "$GITHUB_ENV"
+            echo "BASE=https://suite101-api.mike-929.workers.dev" >> "$GITHUB_ENV"
+            printf '%s' "$LLAVE" | npx wrangler secret put LLAVE_CORRECCION
+          fi
+
+      - name: Llamar
+        id: llamar
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          exec > >(tee /tmp/salida.txt) 2>&1
+          echo "Cargar un proyecto — $ENTORNO · $ORG · $MODO"
+          for i in $(seq 1 12); do
+            code=$(curl -sS -o /tmp/r.json -w '%{http_code}' -X POST -H "X-Llave-Correccion: $LLAVE" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/carga.json "$BASE/interno/$ORG/carga-proyecto?modo=$MODO")
+            [ "$code" = 200 ] && break
+            if [ "$code" = 404 ] && grep -q org_desconocida /tmp/r.json; then break; fi
+            if [ "$code" = 400 ]; then break; fi
+            sleep 5
+          done
+          echo "HTTP $code (intento $i)"
+          if [ "$code" != 200 ]; then head -c 800 /tmp/r.json; echo; exit 1; fi
+          jq -r '
+            def p: (. / 100) as $v | ($v | floor) as $e | (($v - $e) * 100 | round) as $c
+              | ($e | tostring | until(test("\\d{4}") | not; sub("(?<a>\\d)(?<b>\\d{3})(?<c>,|$)"; "\(.a),\(.b)\(.c)"))) as $miles
+              | "$" + $miles + "." + (if $c < 10 then "0" else "" end) + ($c | tostring);
+            def m: if . < 0 then "-" + ((-.) | p) else p end;
+            .data as $d
+            | "\(if $d.escribir then (if $d.escrito then "CARGADO" else "NO SE CARGÓ" end) else "ENSAYO (no se escribió nada)" end) · \($d.org)",
+              (if $d.motivo then "motivo: \($d.motivo)" else empty end),
+              (if $d.escrito then "facturas ligadas: \($d.ligados)" else empty end),
+              "",
+              "== Proyectos que coinciden ==",
+              ($d.proyectos[] | "\(.id) · \(.nombre) · cliente \(.cliente // "—") · precio \(.precio_venta | m) · \(.n_conceptos) conceptos · \(.ingresos) ingresos · cobrado \(.cobrado | m)"),
+              "",
+              "== Cuentas ==",
+              ($d.cuentas[] | "\(.id) · \(.nombre) · \(.tipo // "—")"),
+              "",
+              (if $d.proyecto then "== El proyecto: \($d.proyecto.nombre) (\($d.proyecto.id)) · cliente \($d.proyecto.cliente // "—") ==" else "== Sin proyecto exacto ==" end),
+              "conceptos que ya tiene: \($d.conceptos_que_hay | length) por \([$d.conceptos_que_hay[].monto] | add // 0 | m)",
+              "ingresos que ya tiene: \($d.ingresos_que_hay | length)",
+              ($d.ingresos_que_hay[] | "  \(.fecha) \(.monto | m) \(.descripcion[0:50])"),
+              "repetidos (mismo monto, ±3 días): \($d.repetidos | length)",
+              ($d.repetidos[] | "  \(.fecha) \(.monto | m) \(.descripcion) ≈ ya: \(.ya.fecha) \(.ya.descripcion[0:40])"),
+              "",
+              "a crear: \($d.a_crear.conceptos) conceptos por \($d.a_crear.precio | m) · \($d.a_crear.ingresos) ingresos por \($d.a_crear.cobrado | m)",
+              (if $d.despues then "después: precio \($d.despues.precio_venta | m) · cobrado sin IVA \($d.despues.cobrado_sin_iva | m) · saldo \($d.despues.saldo | m)" else empty end),
+              "",
+              "== Facturas expedidas por folio ==",
+              ($d.facturas[] | "\(.folio) · pago \(.fecha) \(.monto | m) → " + (if (.encontradas | length) == 0 then "NO ESTÁ" else ([.encontradas[] | "\((.serie // "") + (.folio // "")) \(.fecha) total \(.total | m) (IVA \(.iva | m)) \(.estado) ligado \(.ya_ligado | m) · \(.razon_social // .rfc // "—")"] | join(" | ")) end)),
+              (if $d.si_se_ligan then "si se ligan: cobrado sin IVA \($d.si_se_ligan.cobrado_sin_iva | m) · IVA \($d.si_se_ligan.iva | m)" else empty end)
+          ' /tmp/r.json
+      - name: Borrar la llave
+        if: always()
+        run: |
+          set -u
+          echo y | npx wrangler secret delete LLAVE_CORRECCION $ENV_WRANGLER || echo y | npx wrangler secret delete LLAVE_CORRECCION $ENV_WRANGLER
+          # Y se comprueba: sin llave, la ruta no existe.
+          sleep 10
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "X-Llave-Correccion: $LLAVE" -H 'Content-Type: application/json' -d '{"conceptos":[],"ingresos":[]}' "$BASE/interno/$ORG/carga-proyecto?modo=ensayo")
+          echo "sin llave la ruta contesta $code" | tee -a /tmp/salida.txt
+          [ "$code" = 404 ] || echo "::warning::la ruta sigue contestando $code: revisar el secreto LLAVE_CORRECCION"
+
+      - name: Dejar lo medido en el commit
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -u
+          [ -f /tmp/salida.txt ] || echo "No hubo salida que reportar." > /tmp/salida.txt
+          jq -Rs '{body: ("**Cargar un proyecto**\n\n```\n" + .[-60000:] + "\n```")}' /tmp/salida.txt > /tmp/comentario.json
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/commits/$SHA/comments" \
+            -d @/tmp/comentario.json -o /tmp/respuesta.json -w 'comentario: %{http_code}\n'
+
+      - name: Que la llamada mande
+        if: steps.llamar.outcome != 'success'
+        run: exit 1

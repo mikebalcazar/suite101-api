@@ -41,7 +41,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: corregir-reparto
+  group: llave-correccion
   cancel-in-progress: false
 
 jobs:

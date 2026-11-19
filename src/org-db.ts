@@ -234,6 +234,49 @@ export interface GrupoDeConceptos {
   importe: number;
   conceptos: Fila[];
 }
+/** 0.108.1 · Lo que se carga a un proyecto desde la hoja de Mike. Centavos.
+ *  Los ingresos van SIN IVA (Mike, 19-nov-2026, con botones: «Nada trae
+ *  IVA»): subtotal = monto, IVA 0, no facturados. */
+export interface CargaDeProyecto {
+  /** Texto que se busca en el nombre del proyecto o de su cliente. */
+  buscar: string;
+  /** El proyecto exacto; sin él sólo se busca. */
+  proyecto_id?: string | null;
+  /** La cuenta a la que entró el dinero; sin ella no se escribe. */
+  cuenta_id?: string | null;
+  /** `grupo` agrupa los conceptos como una cotización («Presupuesto
+   *  general», «Adicionales»): el estado de cuenta los enseña juntos, con su
+   *  suma. Sin grupo van a «Otros conceptos». */
+  conceptos: Array<{ grupo?: string; nombre: string; descripcion?: string; cantidad?: number; precio_unitario: number }>;
+  /** `folio`: el de la factura expedida que respalda el pago, si la hay. */
+  ingresos: Array<{ fecha: string; monto: number; descripcion: string; requiere_factura?: boolean; folio?: string | null }>;
+  /** Ligar cada ingreso a su factura (por folio) al cargarlo. Sólo cuando
+   *  hay exactamente una factura vigente con ese folio. */
+  ligar?: boolean;
+  escribir: boolean;
+}
+
+export interface ResultadoCargaDeProyecto {
+  escribir: boolean;
+  escrito: boolean;
+  /** Por qué no se escribió, si se pidió escribir. */
+  motivo: string | null;
+  proyectos: Array<{ id: string; nombre: string; cliente: string | null; precio_venta: number; n_conceptos: number; cobrado: number; cobrado_sin_iva: number; ingresos: number }>;
+  cuentas: Array<{ id: string; nombre: string; tipo: string | null }>;
+  proyecto: { id: string; nombre: string; cliente_id: string | null; cliente: string | null } | null;
+  conceptos_que_hay: Array<{ nombre: string; descripcion: string; monto: number }>;
+  ingresos_que_hay: Array<{ id: string; fecha: string; monto: number; descripcion: string; cuenta_id: string | null }>;
+  /** Los ingresos de la carga que ya parecen estar: mismo monto y fecha a ±3 días. */
+  repetidos: Array<{ fecha: string; monto: number; descripcion: string; ya: { id: string; fecha: string; descripcion: string } }>;
+  a_crear: { conceptos: number; precio: number; ingresos: number; cobrado: number };
+  /** Las facturas expedidas que llevan el folio de cada ingreso. */
+  facturas: Array<{ folio: string; fecha: string; monto: number; encontradas: Array<{ id: string; serie: string | null; folio: string | null; fecha: string; subtotal: number; iva: number; total: number; rfc: string | null; razon_social: string | null; estado: string; ya_ligado: number }> }>;
+  /** Lo que quedaría SIN IVA si se ligan (el pago toma su parte del IVA de la factura). */
+  si_se_ligan: { cobrado_sin_iva: number; iva: number } | null;
+  ligados: number;
+  despues: { precio_venta: number; cobrado_sin_iva: number; saldo: number } | null;
+}
+
 /** 0.107.1 · Lo que dice (o hizo) `corregirReparto`. Centavos. */
 export interface CorreccionDeReparto {
   ensayo: boolean;
@@ -398,6 +441,10 @@ export interface ApiOrgDB {
   /** 0.107.1 · Vuelve a repartir el IVA de los pagos ya ligados. `ensayo`
    *  sólo cuenta; sin ensayo escribe y deja el antes en `reparto_corregido`. */
   corregirReparto(ensayo: boolean): Promise<CorreccionDeReparto>;
+  /** 0.108.1 · Cargar de un jalón los conceptos y los ingresos de un proyecto
+   *  (lo que Mike trae en su hoja). Sin `escribir` sólo dice qué hay y qué
+   *  se crearía. */
+  cargaDeProyecto(args: CargaDeProyecto): Promise<ResultadoCargaDeProyecto>;
   /** La conciliación semanal, entera o nada (B1). Sólo la llama POST /conciliaciones. */
   conciliar(args: {
     corte_at: string; usuario_id: string;
@@ -3517,6 +3564,145 @@ export class OrgDB extends DurableObject<Env> {
    *  y en cuánto, pago por pago y proyecto por proyecto. Sin ensayo escribe
    *  todo o nada, deja el antes de cada pago en `reparto_corregido` (para
    *  poder explicarlo o deshacerlo) y recalcula cada proyecto una vez. */
+  /** 0.108.1 · Mike, 19-nov-2026: «Necesito que me ayudes a cargar los
+   *  ingresos y los conceptos del proyecto de qualitas.» El chat no alcanza
+   *  producción con sesión: esto lo llama /interno/:o/carga-proyecto con la
+   *  llave de un solo uso. Primero se busca y se mide (escribir = false); se
+   *  escribe sólo con el proyecto y la cuenta exactos y sin repetidos, todo o
+   *  nada, con el mismo `crear` que usa el CRUD (cachés, saldos y avisos). */
+  cargaDeProyecto(args: CargaDeProyecto): ResultadoCargaDeProyecto {
+    const q = `%${String(args.buscar ?? '').trim().toLowerCase()}%`;
+    const proyectos = (this.sql.exec(
+      `SELECT p.id, p.nombre, p.precio_venta, p.n_conceptos, p.cobrado, p.cobrado_sin_iva, c.nombre AS cliente,
+              (SELECT COUNT(*) FROM movimientos m WHERE m.proyecto_id = p.id AND m.tipo = 'ingreso') AS ingresos
+         FROM proyectos p LEFT JOIN clientes c ON c.id = p.cliente_id
+        WHERE (? <> '%%' AND (LOWER(p.nombre) LIKE ? OR LOWER(COALESCE(c.nombre,'')) LIKE ?)) OR p.id = ?
+        ORDER BY p.nombre`, q, q, q, String(args.proyecto_id ?? ''),
+    ).toArray() as Fila[]).map((f) => ({
+      id: String(f.id), nombre: String(f.nombre ?? ''), cliente: f.cliente == null ? null : String(f.cliente),
+      precio_venta: Number(f.precio_venta || 0), n_conceptos: Number(f.n_conceptos || 0), cobrado: Number(f.cobrado || 0),
+      cobrado_sin_iva: Number(f.cobrado_sin_iva || 0), ingresos: Number(f.ingresos || 0),
+    }));
+    const cuentas = (this.sql.exec(`SELECT id, nombre, tipo FROM cuentas ORDER BY nombre`).toArray() as Fila[])
+      .map((f) => ({ id: String(f.id), nombre: String(f.nombre ?? ''), tipo: f.tipo == null ? null : String(f.tipo) }));
+    const conceptos = (args.conceptos ?? []).map((c) => ({
+      grupo: String(c.grupo ?? '').trim(),
+      nombre: String(c.nombre ?? '').trim(), descripcion: String(c.descripcion ?? '').trim(),
+      cantidad: Number(c.cantidad) > 0 ? Number(c.cantidad) : 1, precio_unitario: Math.trunc(Number(c.precio_unitario)),
+    }));
+    const ingresos = (args.ingresos ?? []).map((i) => ({
+      fecha: String(i.fecha ?? '').slice(0, 10), monto: Math.trunc(Number(i.monto)), descripcion: String(i.descripcion ?? '').trim(),
+      requiere_factura: !!i.requiere_factura, folio: i.folio == null ? '' : String(i.folio).trim(),
+    }));
+    const precio = conceptos.reduce((t, c) => t + Math.round(c.cantidad * c.precio_unitario), 0);
+    const cobrado = ingresos.reduce((t, i) => t + i.monto, 0);
+    const res: ResultadoCargaDeProyecto = {
+      escribir: !!args.escribir, escrito: false, motivo: null, proyectos, cuentas, proyecto: null,
+      conceptos_que_hay: [], ingresos_que_hay: [], repetidos: [],
+      a_crear: { conceptos: conceptos.length, precio, ingresos: ingresos.length, cobrado }, despues: null,
+      facturas: [], si_se_ligan: null, ligados: 0,
+    };
+    /* Las facturas expedidas (tipo ingreso) con el folio de cada pago, con
+     * serie o sin ella, y lo que ya tienen ligado. */
+    const deFolio = new Map<string, ResultadoCargaDeProyecto['facturas'][number]['encontradas']>();
+    for (const i of ingresos) {
+      if (!i.folio || deFolio.has(i.folio)) continue;
+      deFolio.set(i.folio, (this.sql.exec(
+        `SELECT c.id, c.serie, c.folio, c.fecha, c.subtotal, c.iva, c.total, c.rfc, c.razon_social, c.estado,
+                (SELECT COALESCE(SUM(monto_aplicado),0) FROM cfdi_movimientos WHERE cfdi_id = c.id) AS ya
+           FROM cfdi c WHERE c.tipo = 'ingreso' AND (c.folio = ? OR TRIM(COALESCE(c.serie,'') || COALESCE(c.folio,'')) = ?)
+          ORDER BY c.fecha`, i.folio, i.folio,
+      ).toArray() as Fila[]).map((f) => ({
+        id: String(f.id), serie: f.serie == null ? null : String(f.serie), folio: f.folio == null ? null : String(f.folio),
+        fecha: String(f.fecha ?? '').slice(0, 10), subtotal: Number(f.subtotal || 0), iva: Number(f.iva || 0), total: Number(f.total || 0),
+        rfc: f.rfc == null ? null : String(f.rfc), razon_social: f.razon_social == null ? null : String(f.razon_social),
+        estado: String(f.estado ?? ''), ya_ligado: Number(f.ya || 0),
+      })));
+    }
+    const unica = (folio: string) => { const v = (deFolio.get(folio) ?? []).filter((f) => f.estado === 'vigente'); return v.length === 1 ? v[0] : null; };
+    let sinIvaLigado = 0, ivaLigado = 0;
+    for (const i of ingresos) {
+      if (i.folio) res.facturas.push({ folio: i.folio, fecha: i.fecha, monto: i.monto, encontradas: deFolio.get(i.folio) ?? [] });
+      const f = i.folio ? unica(i.folio) : null;
+      if (f && f.total > 0) {
+        const parte = Math.min(i.monto, f.total) / f.total;
+        const iva = Math.round(f.iva * parte);
+        ivaLigado += iva; sinIvaLigado += i.monto - iva;
+      } else sinIvaLigado += i.monto;
+    }
+    if (res.facturas.length) res.si_se_ligan = { cobrado_sin_iva: sinIvaLigado, iva: ivaLigado };
+    const malo = conceptos.find((c) => (!c.nombre && !c.descripcion) || !Number.isSafeInteger(c.precio_unitario))
+      ?? ingresos.find((i) => !/^\d{4}-\d{2}-\d{2}$/.test(i.fecha) || !Number.isSafeInteger(i.monto) || i.monto <= 0);
+    const pid = args.proyecto_id ? String(args.proyecto_id) : (proyectos.length === 1 ? proyectos[0].id : null);
+    const p = pid ? this.sql.exec(`SELECT p.id, p.nombre, p.cliente_id, p.precio_venta, c.nombre AS cliente FROM proyectos p LEFT JOIN clientes c ON c.id = p.cliente_id WHERE p.id = ?`, pid).toArray()[0] as Fila | undefined : undefined;
+    if (p) {
+      res.proyecto = { id: String(p.id), nombre: String(p.nombre ?? ''), cliente_id: p.cliente_id == null ? null : String(p.cliente_id), cliente: p.cliente == null ? null : String(p.cliente) };
+      res.conceptos_que_hay = (this.sql.exec(`SELECT nombre, descripcion, monto FROM conceptos WHERE proyecto_id = ? ORDER BY orden`, p.id).toArray() as Fila[])
+        .map((f) => ({ nombre: String(f.nombre ?? ''), descripcion: String(f.descripcion ?? ''), monto: Number(f.monto || 0) }));
+      res.ingresos_que_hay = (this.sql.exec(`SELECT id, fecha, monto, descripcion, cuenta_id FROM movimientos WHERE proyecto_id = ? AND tipo = 'ingreso' ORDER BY fecha`, p.id).toArray() as Fila[])
+        .map((f) => ({ id: String(f.id), fecha: String(f.fecha ?? '').slice(0, 10), monto: Number(f.monto || 0), descripcion: String(f.descripcion ?? ''), cuenta_id: f.cuenta_id == null ? null : String(f.cuenta_id) }));
+      const dia = (s: string) => Date.parse(`${s}T12:00:00Z`) / 86_400_000;
+      for (const i of ingresos) {
+        const ya = res.ingresos_que_hay.find((m) => m.monto === i.monto && Math.abs(dia(m.fecha) - dia(i.fecha)) <= 3);
+        if (ya) res.repetidos.push({ ...i, ya: { id: ya.id, fecha: ya.fecha, descripcion: ya.descripcion } });
+      }
+      const sinIvaHoy = Number((this.sql.exec(`SELECT cobrado_sin_iva FROM proyectos WHERE id = ?`, p.id).toArray()[0] as Fila | undefined)?.cobrado_sin_iva || 0);
+      const precioDespues = res.conceptos_que_hay.reduce((t, c) => t + c.monto, 0) + precio;
+      res.despues = { precio_venta: precioDespues, cobrado_sin_iva: sinIvaHoy + cobrado, saldo: precioDespues - sinIvaHoy - cobrado };
+    }
+    if (!args.escribir) return res;
+    const cuenta = args.cuenta_id ? cuentas.find((c) => c.id === String(args.cuenta_id)) : undefined;
+    res.motivo = malo ? `un renglón no cuadra: ${JSON.stringify(malo)}`
+      : !p ? 'falta el proyecto exacto (proyecto_id)'
+      : !cuenta ? 'falta la cuenta exacta (cuenta_id)'
+      : res.repetidos.length ? `${res.repetidos.length} ingresos ya parecen estar cargados`
+      : res.conceptos_que_hay.length && conceptos.length ? 'el proyecto ya tiene conceptos: no se le agregan otros encima'
+      : null;
+    if (res.motivo) return res;
+    const ctx: ContextoEscritura = { app: 'dash101', usuario_id: 'carga-interna' };
+    const creados: Array<{ id: string; folio: string; monto: number }> = [];
+    this.ctx.storage.transactionSync(() => {
+      /* Un grupo es como una cotización cargada a mano: un id propio
+       * (`carga:<proyecto>:<grupo>`) para que el estado de cuenta lo agrupe y
+       * lo sume, sin chocar nunca con una cotización de quote101. */
+      const linea = new Map<string, number>();
+      for (const c of conceptos) {
+        const n = (linea.get(c.grupo) ?? 0) + 1;
+        linea.set(c.grupo, n);
+        this.crear('conceptos', {
+          proyecto_id: p!.id, nombre: c.nombre, descripcion: c.descripcion, cantidad: c.cantidad, precio_unitario: c.precio_unitario,
+          ...(c.grupo ? { cotizacion_id: `carga:${p!.id}:${normalizar(c.grupo)}`, cotizacion_nombre: c.grupo, linea: n } : {}),
+        }, ctx);
+      }
+      for (const i of ingresos) {
+        const m = this.crear('movimientos', {
+          tipo: 'ingreso', monto: i.monto, fecha: i.fecha, cuenta_id: cuenta!.id, proyecto_id: p!.id,
+          contraparte_tipo: p!.cliente_id ? 'cliente' : null, contraparte_id: p!.cliente_id ?? null, contraparte_nombre: p!.cliente ?? null,
+          descripcion: i.descripcion, facturado: false, subtotal: i.monto, iva: 0, tasa_iva: 0, retenciones: 0, requiere_factura: i.requiere_factura,
+        }, ctx);
+        creados.push({ id: String(m.id), folio: i.folio, monto: i.monto });
+      }
+      this.recalcularProyecto(String(p!.id));
+    });
+    res.escrito = true;
+    /* Ligar después de crear, con el mismo camino que «Ligar» en el estado de
+     * cuenta: cada pago toma su parte del IVA de su factura (repartirDesglose). */
+    if (args.ligar) {
+      for (const m of creados) {
+        const f = m.folio ? unica(m.folio) : null;
+        if (!f) continue;
+        const ya = Number((this.sql.exec(`SELECT COALESCE(SUM(monto_aplicado),0) AS s FROM cfdi_movimientos WHERE cfdi_id = ?`, f.id).one() as { s: number }).s);
+        const aplica = Math.min(m.monto, f.total - ya);
+        if (aplica <= 0) continue;
+        const r = this.ligarCfdi({ cfdi_id: f.id, movimiento_id: m.id, monto_aplicado: aplica });
+        if ('ok' in r) res.ligados++;
+      }
+    }
+    const f = this.sql.exec(`SELECT precio_venta, cobrado_sin_iva FROM proyectos WHERE id = ?`, p!.id).toArray()[0] as Fila;
+    res.despues = { precio_venta: Number(f.precio_venta || 0), cobrado_sin_iva: Number(f.cobrado_sin_iva || 0), saldo: Number(f.precio_venta || 0) - Number(f.cobrado_sin_iva || 0) };
+    return res;
+  }
+
   corregirReparto(ensayo: boolean): CorreccionDeReparto {
     const filas = this.sql.exec(
       `SELECT m.id, m.fecha, m.descripcion, m.tipo, m.monto, m.subtotal, m.iva, m.retenciones, m.tasa_iva, m.proyecto_id,

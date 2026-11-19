@@ -158,6 +158,29 @@ app.post('/interno/:o/reparto-iva', async (c) => {
   return ok(c, { org, ...(await stub.corregirReparto(c.req.query('modo') !== 'corregir')) });
 });
 
+/* 0.108.1 · Cargar los conceptos y los ingresos de un proyecto desde la hoja
+ * de Mike (19-nov-2026: «cargar los ingresos y los conceptos del proyecto de
+ * qualitas»). La misma llave de un solo uso; la pone `cargar-proyecto.yml`.
+ * `?modo=cargar` escribe (con proyecto_id y cuenta_id exactos y sin
+ * repetidos); cualquier otra cosa sólo busca y mide. */
+app.post('/interno/:o/carga-proyecto', async (c) => {
+  const llave = c.env.LLAVE_CORRECCION;
+  if (!llave || llave.length < 32 || !igualSeguro(c.req.header('X-Llave-Correccion') ?? '', llave)) {
+    return err(c, 'no_encontrado', 404);
+  }
+  const org = c.req.param('o');
+  const existe = await c.env.MASTER.prepare(`SELECT id FROM orgs WHERE id = ?`).bind(org).first();
+  if (!existe) return err(c, 'org_desconocida', 404, { org });
+  const b = await c.req.json<Record<string, any>>().catch(() => null);
+  if (!b || !Array.isArray(b.conceptos) || !Array.isArray(b.ingresos)) return err(c, 'datos_invalidos', 400, { falta: ['conceptos', 'ingresos'] });
+  if (b.conceptos.length > 500 || b.ingresos.length > 500) return err(c, 'datos_invalidos', 400, { regla: 'a lo más 500 de cada uno' });
+  const stub = c.env.ORG.get(c.env.ORG.idFromName(org)) as unknown as ApiOrgDB;
+  return ok(c, { org, ...(await stub.cargaDeProyecto({
+    buscar: String(b.buscar ?? ''), proyecto_id: b.proyecto_id ?? null, cuenta_id: b.cuenta_id ?? null,
+    conceptos: b.conceptos, ingresos: b.ingresos, ligar: b.ligar === true, escribir: c.req.query('modo') === 'cargar',
+  })) });
+});
+
 app.get('/yo', yo);
 app.route('/auth', auth);
 app.route('/orgs', orgs);
