@@ -413,3 +413,20 @@ describe('corregir el monto de un pago con su factura', () => {
     expect(e.facturas_por_completar).toEqual([expect.objectContaining({ id: f.data.id, falta: 348_00, falta_sin_iva: 300_00 })]);
   });
 });
+
+/* 0.111.4 · Mike, 19-nov-2026: en QUALITAS sólo los pagos de su hoja y los
+ * posteriores; «Los demás habrá que ubicarlos en otros proyectos». */
+describe('sacar un pago del proyecto', () => {
+  it('queda sin proyecto, con su dinero, y el proyecto se recalcula', async () => {
+    const obraS = await crea('/proyectos', { cliente_id: cliente, nombre: 'Sacar pago' });
+    const r1 = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: { buscar: '', proyecto_id: obraS, cuenta_id: cuenta, conceptos: [],
+      ingresos: [{ fecha: '2026-01-30', monto: 348_000_00, iva: 48_000_00, descripcion: 'Pago 18 · SIN FACTURA' }] } });
+    expect(r1.data, JSON.stringify(r1.data)).toMatchObject({ escrito: true });
+    const pago = (await o(`/proyectos/${obraS}/estado`)).data.movimientos[0].id;
+    expect((await proyecto(obraS)).cobrado_sin_iva).toBe(300_000_00);
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: { buscar: '', proyecto_id: obraS, conceptos: [], ingresos: [], corregir: [{ movimiento_id: pago, sin_proyecto: true }] } });
+    expect(r.data, JSON.stringify(r.data)).toMatchObject({ escrito: true, corregidos: [expect.objectContaining({ antes: expect.objectContaining({ proyecto_id: obraS }), despues: expect.objectContaining({ proyecto_id: null }) })] });
+    expect(await mov(pago)).toMatchObject({ proyecto_id: null, monto: 348_000_00, subtotal: 300_000_00, iva: 48_000_00 });
+    expect((await proyecto(obraS)).cobrado_sin_iva).toBe(0);
+  });
+});

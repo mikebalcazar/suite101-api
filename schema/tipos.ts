@@ -17,7 +17,12 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.111.3 (EL MONTO DE UN PAGO CON SU FACTURA. Mike, 19-nov: «este
+ * Versión del contrato: 0.111.4 (SACAR UN PAGO DEL PROYECTO. Mike, 19-nov: «Los demás
+ * habrá que ubicarlos en otros proyectos». `corregir` acepta `sin_proyecto`:
+ * el ingreso queda del cliente, sin obra, con su dinero y sus facturas. Sin
+ * cambio para las apps.)
+ *
+ * Antes, 0.111.3 (EL MONTO DE UN PAGO CON SU FACTURA. Mike, 19-nov: «este
  * Excel manda en cuanto a pagos» (histórico de IMA de QUALITAS). `corregir`
  * acepta `monto` en un pago con una sola factura: la liga se mueve con él y
  * el IVA se reparte otra vez. Sin cambio para las apps.)
@@ -1792,7 +1797,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.111.3';
+export const VERSION_CONTRATO = '0.111.4';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
