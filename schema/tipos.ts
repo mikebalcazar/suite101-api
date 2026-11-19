@@ -17,7 +17,12 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.110.0 (LA HOJA PONE CONCEPTOS NUEVOS EN SU GRUPO. Mike,
+ * Versión del contrato: 0.110.1 (CARGAR UN PROYECTO NUEVO. Mike, 19-nov: TATA E2 y
+ * APEX GDL-MTY. La ruta interna de carga crea el proyecto, busca clientes, liga
+ * pagos a una factura por id y busca facturas por monto. Sin cambio de contrato
+ * para las apps.)
+ *
+ * Antes, 0.110.0 (LA HOJA PONE CONCEPTOS NUEVOS EN SU GRUPO. Mike,
  * 19-nov: «quiero ya de ahora en adelante poder agrupar conceptos nuevos que
  * agregue». PUT /proyectos/:id/conceptos acepta `cotizacion_id` por renglón:
  * una cotización que ya esté en los conceptos del proyecto, o null.)
@@ -1756,7 +1761,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.110.0';
+export const VERSION_CONTRATO = '0.110.1';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {

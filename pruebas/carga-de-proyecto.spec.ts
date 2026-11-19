@@ -120,7 +120,7 @@ describe('las facturas de cada pago', () => {
     cfdi = f.data.id;
     await conFolio(cfdi, 'A', '733');
     const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, carga: carga() });
-    expect(r.data.facturas).toEqual([expect.objectContaining({ folio: '733', encontradas: [expect.objectContaining({ id: cfdi, total: 200_000_00, iva: 27_586_21, ya_ligado: 0 })] })]);
+    expect(r.data.facturas.filter((f: any) => f.folio)).toEqual([expect.objectContaining({ folio: '733', encontradas: [expect.objectContaining({ id: cfdi, total: 200_000_00, iva: 27_586_21, ya_ligado: 0 })] })]);
     expect(r.data.si_se_ligan).toEqual({ cobrado_sin_iva: 172_413_79 + 50_000_00, iva: 27_586_21 });
   });
 });
@@ -164,5 +164,93 @@ describe('cargar', () => {
   });
   it('el otro proyecto no se tocó', async () => {
     expect((await o(`/proyectos/${otraObra}`)).data).toMatchObject({ n_conceptos: 0, cobrado: 0 });
+  });
+});
+
+/* 0.110.1 · Mike, 19-nov-2026: «Necesito cargar estos ingresos y precios en un
+ * proyecto nuevo de IMA que se llama TATA E2 (…) Hay que revisar si hay
+ * facturas que coincidan con los ingresos.» */
+describe('un proyecto nuevo y las facturas por monto', () => {
+  let cfdi = '';
+  beforeAll(async () => {
+    const f = await o('/fiscal/cfdi', { method: 'POST', json: { tipo: 'ingreso', rfc: 'IPA150629LBA', razon_social: 'IMA', uuid: 'DDDDDDDD-0000-4000-8000-000000000769', subtotal: 11_705_17, iva: 1_872_83, total: 13_578_00, fecha: '2026-04-11' } });
+    expect(f.estado, JSON.stringify(f)).toBe(201);
+    cfdi = f.data.id;
+    await conFolio(cfdi, 'A', '769');
+  });
+  const tata = (extra: Record<string, unknown> = {}) => ({
+    buscar: 'TATA E2', buscar_cliente: 'qualitas',
+    conceptos: [{ nombre: 'Puertas', cantidad: 3, precio_unitario: 16_000_00 }, { nombre: 'Recepción', cantidad: 1, precio_unitario: 97_000_00 }],
+    ingresos: [
+      { fecha: '2026-04-03', monto: 104_400_00, descripcion: 'Anticipo' },
+      { fecha: '2026-04-10', monto: 11_705_17, descripcion: 'Anticipo 2 · factura A-769', folio: 'A-769' },
+    ],
+    ...extra,
+  });
+  it('el ensayo enseña los clientes, y la factura por su folio «A-769» y por su monto', async () => {
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, carga: tata() });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.proyectos).toEqual([]);
+    expect(r.data.clientes.map((c: any) => c.id)).toContain(cliente);
+    const [a, b] = r.data.facturas;
+    expect(a).toMatchObject({ folio: '', encontradas: [], por_monto: [] });
+    expect(b.encontradas.map((f: any) => f.id)).toEqual([cfdi]);
+    expect(b.por_monto.map((f: any) => f.id)).toEqual([cfdi]);
+  });
+  it('sin cliente que exista no crea nada', async () => {
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: tata({ cuenta_id: cuenta, crear_proyecto: { nombre: 'TATA E2', cliente_id: 'no-existe' } }) });
+    expect(r.data).toMatchObject({ escrito: false, motivo: expect.stringContaining('cliente') });
+  });
+  it('crea el proyecto, carga, y liga la factura escogida', async () => {
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: tata({ cuenta_id: cuenta, ligar: true, crear_proyecto: { nombre: 'TATA E2', cliente_id: cliente },
+      ingresos: [
+        { fecha: '2026-04-03', monto: 104_400_00, descripcion: 'Anticipo' },
+        { fecha: '2026-04-10', monto: 13_578_00, descripcion: 'Anticipo 2 · factura A-769', cfdi_id: cfdi },
+      ] }) });
+    expect(r.data, JSON.stringify(r.data)).toMatchObject({ escrito: true, ligados: 1, proyecto: { nombre: 'TATA E2', cliente_id: cliente } });
+    expect(r.data.despues).toMatchObject({ precio_venta: 145_000_00, cobrado_sin_iva: 104_400_00 + 11_705_17 });
+    const otra = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: tata({ cuenta_id: cuenta, crear_proyecto: { nombre: 'TATA E2', cliente_id: cliente } }) });
+    expect(otra.data).toMatchObject({ escrito: false, motivo: expect.stringContaining('ya hay un proyecto') });
+  });
+});
+
+/* 0.110.1 · Mike, 19-nov-2026: «la factura A762 es de APEX, no de Quálitas.
+ * Hay que corregir ese pago», con botones: «Moverlo a APEX». */
+describe('traer un pago que quedó en otro proyecto', () => {
+  let pago = '', cfdi = '';
+  beforeAll(async () => {
+    const f = await o('/fiscal/cfdi', { method: 'POST', json: { tipo: 'ingreso', rfc: 'IPA150629LBA', razon_social: 'IMA', uuid: 'DDDDDDDD-0000-4000-8000-000000000762', subtotal: 100_000_00, iva: 16_000_00, total: 116_000_00, fecha: '2026-02-28' } });
+    expect(f.estado, JSON.stringify(f)).toBe(201);
+    cfdi = f.data.id;
+    await conFolio(cfdi, 'A', '762');
+    pago = await crea('/movimientos', { tipo: 'ingreso', monto: 116_000_00, fecha: '2026-03-03', cuenta_id: cuenta, proyecto_id: otraObra, contraparte_tipo: 'cliente', contraparte_id: cliente, descripcion: 'Pago 16 · factura 762' });
+    const l = await o(`/fiscal/cfdi/${cfdi}/ligar`, { method: 'POST', json: { movimiento_id: pago } });
+    expect(l.estado, JSON.stringify(l)).toBe(200);
+  });
+  const apex = (extra: Record<string, unknown> = {}) => ({
+    buscar: 'APEX GDL-MTY', conceptos: [{ nombre: 'Celosía acústica GDL', precio_unitario: 90_720_00 }], ingresos: [],
+    traer: [{ movimiento_id: pago, descripcion: 'Pago 1 GDL · factura A-762' }], ...extra,
+  });
+  it('el ensayo dice de dónde viene, con su factura, y no mueve nada', async () => {
+    const antes = (await proyecto(otraObra)).cobrado_sin_iva;
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, carga: apex() });
+    expect(r.data.traidos).toEqual([expect.objectContaining({ id: pago, proyecto_id: otraObra, monto: 116_000_00, facturas: ['A762'], problema: null })]);
+    expect((await mov(pago)).proyecto_id).toBe(otraObra);
+    expect((await proyecto(otraObra)).cobrado_sin_iva).toBe(antes);
+  });
+  it('un gasto o un id que no existe no se trae', async () => {
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: apex({ cuenta_id: cuenta, crear_proyecto: { nombre: 'APEX GDL-MTY', cliente_id: cliente }, traer: [{ movimiento_id: 'no-existe' }] }) });
+    expect(r.data).toMatchObject({ escrito: false, motivo: expect.stringContaining('no existe') });
+  });
+  it('se muda con su factura y los dos proyectos se recalculan', async () => {
+    const antes = (await proyecto(otraObra)).cobrado_sin_iva;
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: apex({ cuenta_id: cuenta, crear_proyecto: { nombre: 'APEX GDL-MTY', cliente_id: cliente } }) });
+    expect(r.data, JSON.stringify(r.data)).toMatchObject({ escrito: true });
+    const nuevo = r.data.proyecto.id;
+    expect(await mov(pago)).toMatchObject({ proyecto_id: nuevo, descripcion: 'Pago 1 GDL · factura A-762', subtotal: 100_000_00, iva: 16_000_00 });
+    expect((await proyecto(otraObra)).cobrado_sin_iva).toBe(antes - 100_000_00);
+    expect(await proyecto(nuevo)).toMatchObject({ precio_venta: 90_720_00, cobrado_sin_iva: 100_000_00, iva_cobrado: 16_000_00 });
+    const otra = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: apex({ proyecto_id: nuevo, cuenta_id: cuenta, conceptos: [] }) });
+    expect(otra.data).toMatchObject({ escrito: false, motivo: expect.stringContaining('ya es de este proyecto') });
   });
 });
