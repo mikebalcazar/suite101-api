@@ -1052,6 +1052,7 @@ export function renglonesQueNoCuadran(lista: unknown, conId: boolean): Record<st
     // 0.108.0 · producto aparte; al menos uno de los dos dice qué se cobra.
     if (x.nombre !== undefined && x.nombre !== null && typeof x.nombre !== 'string') return { renglon: n, campo: 'nombre', regla: 'texto' };
     if (typeof x.nombre === 'string' && x.nombre.trim().length > 200) return { renglon: n, campo: 'nombre', regla: 'a lo más 200 letras' };
+    if (x.seccion !== undefined && x.seccion !== null && (typeof x.seccion !== 'string' || x.seccion.trim().length > 60)) return { renglon: n, campo: 'seccion', regla: 'texto de a lo más 60 letras' };
     if (x.descripcion === undefined || x.descripcion === null) x.descripcion = '';
     if (typeof x.descripcion !== 'string') return { renglon: n, campo: 'descripcion', regla: 'texto' };
     if (!x.descripcion.trim() && !String(x.nombre ?? '').trim()) return { renglon: n, campo: 'descripcion', regla: 'qué se cobra: producto o descripción, no vacíos los dos' };
@@ -1074,7 +1075,8 @@ rutas.put('/:o/proyectos/:id/conceptos', async (c) => {
   const mal = renglonesQueNoCuadran(b.renglones, true);
   if (mal) return err(c, 'datos_invalidos', 400, mal);
   const renglones = (b.renglones as Array<Record<string, any>>).map((r) => ({
-    id: r.id ?? null, nombre: r.nombre === undefined || r.nombre === null ? undefined : String(r.nombre).trim(), descripcion: String(r.descripcion ?? '').trim(), cantidad: Number(r.cantidad), precio_unitario: Number(r.precio_unitario),
+    id: r.id ?? null, nombre: r.nombre === undefined || r.nombre === null ? undefined : String(r.nombre).trim(),
+    seccion: r.seccion === undefined || r.seccion === null ? undefined : String(r.seccion).trim(), descripcion: String(r.descripcion ?? '').trim(), cantidad: Number(r.cantidad), precio_unitario: Number(r.precio_unitario),
   }));
   const quien = c.get('quien');
   const r = await stub(c).guardarHojaDeConceptos({ proyecto_id: c.req.param('id')!, renglones, app: c.get('app') });
@@ -1148,7 +1150,10 @@ rutas.get('/:o/proyectos/:id/estado.xlsx', async (c) => {
       ? `Cotización ${g.numero}${g.folio ? ' · ' + g.folio : ''}${g.nombre ? ' · ' + g.nombre : ''}`
       : g.nombre;
     filasConceptos.push([titulo]);
+    let seccion = '';
     for (const co of g.conceptos) {
+      // 0.109.0 · Cada sección (N01, MEZZANINE…) con su subtítulo.
+      if (String(co.seccion ?? '') && String(co.seccion ?? '') !== seccion) { seccion = String(co.seccion); filasConceptos.push([`  ${seccion}`]); }
       // 0.108.0 · Producto y descripción en su columna, como el PDF.
       filasConceptos.push([String(co.nombre ?? ''), String(co.descripcion ?? ''), Number(co.cantidad ?? 1), pesos(co.precio_unitario), pesos(co.monto)]);
     }

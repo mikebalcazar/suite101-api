@@ -71,6 +71,7 @@ import conceptosDeCobro from '../migrations/org/0055_conceptos_de_cobro.sql';
 import plantillasDePresupuesto from '../migrations/org/0056_plantillas_de_presupuesto.sql';
 import cobradoSinIva from '../migrations/org/0057_cobrado_sin_iva.sql';
 import conceptoProducto from '../migrations/org/0058_concepto_producto.sql';
+import conceptoSeccion from '../migrations/org/0059_concepto_seccion.sql';
 import { MotorInversion } from './inversion-db';
 import { MotorFiscal } from './fiscal-db';
 import { MotorSat, type MemoriaSat } from './sat-db';
@@ -102,12 +103,12 @@ import type { Env } from './entorno';
  *  propia lista compararía contra una base que no existe — y eso pasó: la
  *  prueba del esquema se quedó en la 0003 y nadie lo notó, porque la 0004 sólo
  *  agregaba una tabla que el contrato no expone. */
-export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso, articulosComprados, prefacturas, cfdiDePruebas, requerimientosPorTipo, conceptosDeCobro, plantillasDePresupuesto, cobradoSinIva, conceptoProducto];
+export const MIGRACIONES: string[] = [inicial, partidasATabla, conciliaciones, folios, ajustes, quell, roster, ordenes, fiscal, obras, cantidad, facturaEsperada, bitacoraPrecio, raya, partidaOrden, alcance, productos, ivaDelProyecto, docsDelItem, reembolsos, rosterEquipos, proveedoresDatos, proveedorCuentas, subitems, accionistas, movimientoPartida, sinNegocios, alcanceDosEstados, planoGirado, requerimientosHuerfanos, cronograma, fases, candados, planPagos, fasesDefault, poblarCostos, tiemposDefault, descripcionDePieza, obrasALaSuite, empresaLogoYDatos, costos, inversion, inversionRiesgos, bill, ordenesCanceladas, sat, timbrar, facturaV2, disenoDelItem, cuentaDeReembolso, articulosComprados, prefacturas, cfdiDePruebas, requerimientosPorTipo, conceptosDeCobro, plantillasDePresupuesto, cobradoSinIva, conceptoProducto, conceptoSeccion];
 
 /** La 0027, la 0030 (y la 0054, que la repite), la 0039 y la 0040 no son SQL: corren en código, porque lo que hacen
  *  depende de lo que haya en la base. `migrar()` las reconoce por su lugar
  *  en la lista; el archivo .sql es sólo la nota que lo dice. */
-const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar' | 'facturaV2' | 'disenoDelItem' | 'cuentaDeReembolso' | 'cfdiDePruebas' | 'migrarRequerimientosPorTipo' | 'conceptosDeCobro' | 'cobradoSinIva' | 'conceptoProducto'> = {
+const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfanos' | 'migrarObrasSueltas' | 'empresaLogoYDatos' | 'costosDeObra' | 'inversionRiesgos' | 'bill101' | 'timbrar' | 'facturaV2' | 'disenoDelItem' | 'cuentaDeReembolso' | 'cfdiDePruebas' | 'migrarRequerimientosPorTipo' | 'conceptosDeCobro' | 'cobradoSinIva' | 'conceptoProducto' | 'conceptoSeccion'> = {
   [MIGRACIONES.indexOf(sinNegocios)]: 'quitarNegocios',
   [MIGRACIONES.indexOf(requerimientosHuerfanos)]: 'migrarRequerimientosHuerfanos',
   [MIGRACIONES.indexOf(obrasALaSuite)]: 'migrarObrasSueltas',
@@ -124,6 +125,7 @@ const EN_CODIGO: Record<number, 'quitarNegocios' | 'migrarRequerimientosHuerfano
   [MIGRACIONES.indexOf(conceptosDeCobro)]: 'conceptosDeCobro',
   [MIGRACIONES.indexOf(cobradoSinIva)]: 'cobradoSinIva',
   [MIGRACIONES.indexOf(conceptoProducto)]: 'conceptoProducto',
+  [MIGRACIONES.indexOf(conceptoSeccion)]: 'conceptoSeccion',
 };
 
 /** La tabla `empresa` (0027): UN renglón, con id fijo, que es lo que antes
@@ -247,7 +249,7 @@ export interface CargaDeProyecto {
   /** `grupo` agrupa los conceptos como una cotización («Presupuesto
    *  general», «Adicionales»): el estado de cuenta los enseña juntos, con su
    *  suma. Sin grupo van a «Otros conceptos». */
-  conceptos: Array<{ grupo?: string; nombre: string; descripcion?: string; cantidad?: number; precio_unitario: number }>;
+  conceptos: Array<{ grupo?: string; seccion?: string; nombre: string; descripcion?: string; cantidad?: number; precio_unitario: number }>;
   /** `folio`: el de la factura expedida que respalda el pago, si la hay. */
   ingresos: Array<{ fecha: string; monto: number; descripcion: string; requiere_factura?: boolean; folio?: string | null }>;
   /** Ligar cada ingreso a su factura (por folio) al cargarlo. Sólo cuando
@@ -3587,6 +3589,7 @@ export class OrgDB extends DurableObject<Env> {
       .map((f) => ({ id: String(f.id), nombre: String(f.nombre ?? ''), tipo: f.tipo == null ? null : String(f.tipo) }));
     const conceptos = (args.conceptos ?? []).map((c) => ({
       grupo: String(c.grupo ?? '').trim(),
+      seccion: String(c.seccion ?? '').trim(),
       nombre: String(c.nombre ?? '').trim(), descripcion: String(c.descripcion ?? '').trim(),
       cantidad: Number(c.cantidad) > 0 ? Number(c.cantidad) : 1, precio_unitario: Math.trunc(Number(c.precio_unitario)),
     }));
@@ -3670,7 +3673,7 @@ export class OrgDB extends DurableObject<Env> {
         const n = (linea.get(c.grupo) ?? 0) + 1;
         linea.set(c.grupo, n);
         this.crear('conceptos', {
-          proyecto_id: p!.id, nombre: c.nombre, descripcion: c.descripcion, cantidad: c.cantidad, precio_unitario: c.precio_unitario,
+          proyecto_id: p!.id, nombre: c.nombre, seccion: c.seccion, descripcion: c.descripcion, cantidad: c.cantidad, precio_unitario: c.precio_unitario,
           ...(c.grupo ? { cotizacion_id: `carga:${p!.id}:${normalizar(c.grupo)}`, cotizacion_nombre: c.grupo, linea: n } : {}),
         }, ctx);
       }
@@ -4451,6 +4454,12 @@ export class OrgDB extends DurableObject<Env> {
    *  descripción» en una sola celda se parte en el primer « — » (el .sql).
    *  Una cotización que no se deja leer se salta: el concepto queda como
    *  estaba, que es como se veía. */
+  /** 0059, en código: la sección del concepto (ver el .sql). */
+  private conceptoSeccion(): void {
+    if (!this.tieneColumna('conceptos', 'seccion')) this.sql.exec(`ALTER TABLE conceptos ADD COLUMN seccion TEXT NOT NULL DEFAULT ''`);
+    this.sql.exec(conceptoSeccion.replace(/^ALTER TABLE .*$/gm, ''));
+  }
+
   private conceptoProducto(): void {
     if (!this.tieneColumna('conceptos', 'nombre')) this.sql.exec(`ALTER TABLE conceptos ADD COLUMN nombre TEXT NOT NULL DEFAULT ''`);
     const filas = this.sql.exec(
@@ -6316,7 +6325,7 @@ export class OrgDB extends DurableObject<Env> {
   conceptosDelProyecto(proyecto_id: string): { conceptos: Fila[]; grupos: GrupoDeConceptos[] } {
     const conceptos = this.sql
       .exec(
-        `SELECT id, nombre, descripcion, cantidad, precio_unitario, monto, orden, cotizacion_id, cotizacion_folio, cotizacion_nombre, linea
+        `SELECT id, nombre, seccion, descripcion, cantidad, precio_unitario, monto, orden, cotizacion_id, cotizacion_folio, cotizacion_nombre, linea
          FROM conceptos WHERE proyecto_id = ? ORDER BY orden, creado_at`,
         proyecto_id,
       )
@@ -6519,15 +6528,15 @@ export class OrgDB extends DurableObject<Env> {
         if (r.id != null) {
           this.sql.exec(
             // Un renglón sin `nombre` (un dash de antes de 0.108.0) no lo borra.
-            `UPDATE conceptos SET nombre = COALESCE(?, nombre), descripcion = ?, cantidad = ?, precio_unitario = ?, monto = ?, orden = ?, actualizado_at = ? WHERE id = ?`,
-            r.nombre ?? null, r.descripcion, r.cantidad, r.precio_unitario, monto, i + 1, t, r.id,
+            `UPDATE conceptos SET nombre = COALESCE(?, nombre), seccion = COALESCE(?, seccion), descripcion = ?, cantidad = ?, precio_unitario = ?, monto = ?, orden = ?, actualizado_at = ? WHERE id = ?`,
+            r.nombre ?? null, r.seccion ?? null, r.descripcion, r.cantidad, r.precio_unitario, monto, i + 1, t, r.id,
           );
           cambiados++;
         } else {
           this.sql.exec(
-            `INSERT INTO conceptos (id, proyecto_id, nombre, descripcion, cantidad, precio_unitario, monto, orden, creado_en_app, creado_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?)`,
-            ulid(), args.proyecto_id, r.nombre ?? '', r.descripcion, r.cantidad, r.precio_unitario, monto, i + 1, args.app, t,
+            `INSERT INTO conceptos (id, proyecto_id, nombre, seccion, descripcion, cantidad, precio_unitario, monto, orden, creado_en_app, creado_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+            ulid(), args.proyecto_id, r.nombre ?? '', r.seccion ?? '', r.descripcion, r.cantidad, r.precio_unitario, monto, i + 1, args.app, t,
           );
           creados++;
         }

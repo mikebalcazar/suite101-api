@@ -185,3 +185,37 @@ describe('el estado de cuenta', () => {
     expect(it).toMatchObject({ nombre: 'CAR-02', descripcion: 'Gradas con estructura PTR cal 14 y MDF 18 mm' });
   });
 });
+
+/* 0.109.0 · Mike, 19-nov-2026: agrupar por cotización y subagrupar por las
+ * divisiones de nivel (N01, N02…). */
+describe('la sección del concepto', () => {
+  it('la hoja la guarda; un renglón que no la manda conserva la suya', async () => {
+    const p = await crea('/proyectos', { cliente_id: cliente, nombre: 'Con secciones' });
+    const r = await hoja(p, [
+      { seccion: 'N01', nombre: 'I5.200-01', descripcion: 'MURO BIENVENIDA', cantidad: 1, precio_unitario: 100 },
+      { seccion: 'N02', nombre: 'I5.200-01', descripcion: 'MURO BIENVENIDA', cantidad: 1, precio_unitario: 100 },
+    ]);
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.conceptos.map((c: any) => c.seccion)).toEqual(['N01', 'N02']);
+    const r2 = await hoja(p, r.data.conceptos.map((c: any) => ({ id: c.id, nombre: c.nombre, descripcion: c.descripcion, cantidad: 1, precio_unitario: 100 })));
+    expect(r2.data.conceptos.map((c: any) => c.seccion)).toEqual(['N01', 'N02']);
+    const e = (await o('mike', `/proyectos/${p}/estado`)).data;
+    expect(e.grupos[0].conceptos.map((c: any) => c.seccion)).toEqual(['N01', 'N02']);
+  });
+  it('lo cargado como «N01 · MURO BIENVENIDA» se separa; lo que no es sección, no (0059)', async () => {
+    const p = await crea('/proyectos', { cliente_id: cliente, nombre: 'Cargado antes' });
+    const a = await crea('/conceptos', { proyecto_id: p, nombre: 'I5.200-01', descripcion: 'x', cantidad: 1, precio_unitario: 1 });
+    const b = await crea('/conceptos', { proyecto_id: p, nombre: 'I5.002-06', descripcion: 'x', cantidad: 1, precio_unitario: 1 });
+    const c = await crea('/conceptos', { proyecto_id: p, nombre: 'Z', descripcion: 'x', cantidad: 1, precio_unitario: 1 });
+    await dentro(objeto(), (x: any) => {
+      x.sql.exec(`UPDATE conceptos SET cotizacion_id = 'carga:p:presupuesto general', descripcion = 'N01 · MURO BIENVENIDA' WHERE id = ?`, a);
+      x.sql.exec(`UPDATE conceptos SET cotizacion_id = 'carga:p:adicionales', descripcion = 'Estación de Impresión Mezzanine · sin cargo (lista $57,350 c/u)' WHERE id = ?`, b);
+      x.sql.exec(`UPDATE conceptos SET descripcion = 'N03 · A mano, no se toca' WHERE id = ?`, c);
+      x.conceptoSeccion();
+    });
+    expect((await o('mike', `/conceptos/${a}`)).data).toMatchObject({ seccion: 'N01', descripcion: 'MURO BIENVENIDA' });
+    expect((await o('mike', `/conceptos/${b}`)).data).toMatchObject({ seccion: '', descripcion: 'Estación de Impresión Mezzanine · sin cargo (lista $57,350 c/u)' });
+    expect((await o('mike', `/conceptos/${c}`)).data).toMatchObject({ seccion: '', descripcion: 'N03 · A mano, no se toca' });
+  });
+});
+
