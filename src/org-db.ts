@@ -251,12 +251,25 @@ export interface CargaDeProyecto {
    *  suma. Sin grupo van a «Otros conceptos». */
   conceptos: Array<{ grupo?: string; seccion?: string; nombre: string; descripcion?: string; cantidad?: number; precio_unitario: number }>;
   /** `folio`: el de la factura expedida que respalda el pago, si la hay. */
-  ingresos: Array<{ fecha: string; monto: number; descripcion: string; requiere_factura?: boolean; folio?: string | null }>;
+  ingresos: Array<{ fecha: string; monto: number; descripcion: string; requiere_factura?: boolean; folio?: string | null; cfdi_id?: string | null }>;
+  /** 0.110.1 · Si el proyecto todavía no existe: se crea con este nombre y
+   *  cliente al escribir (Mike, 19-nov-2026: «un proyecto nuevo de IMA que se
+   *  llama TATA E2»). */
+  crear_proyecto?: { nombre: string; cliente_id: string } | null;
+  /** Texto para enseñar los clientes que se le parecen. */
+  buscar_cliente?: string;
+  /** 0.110.1 · Ingresos que ya existen en OTRO proyecto y son de éste: se
+   *  mudan con su factura ligada, y los dos proyectos se recalculan (Mike,
+   *  19-nov-2026: «la factura A762 es de APEX, no de Quálitas. Hay que
+   *  corregir ese pago», con botones: «Moverlo a APEX»). */
+  traer?: Array<{ movimiento_id: string; descripcion?: string | null }>;
   /** Ligar cada ingreso a su factura (por folio) al cargarlo. Sólo cuando
    *  hay exactamente una factura vigente con ese folio. */
   ligar?: boolean;
   escribir: boolean;
 }
+
+export interface FacturaDeCarga { id: string; serie: string | null; folio: string | null; fecha: string; subtotal: number; iva: number; total: number; rfc: string | null; razon_social: string | null; estado: string; ya_ligado: number }
 
 export interface ResultadoCargaDeProyecto {
   escribir: boolean;
@@ -271,8 +284,13 @@ export interface ResultadoCargaDeProyecto {
   /** Los ingresos de la carga que ya parecen estar: mismo monto y fecha a ±3 días. */
   repetidos: Array<{ fecha: string; monto: number; descripcion: string; ya: { id: string; fecha: string; descripcion: string } }>;
   a_crear: { conceptos: number; precio: number; ingresos: number; cobrado: number };
-  /** Las facturas expedidas que llevan el folio de cada ingreso. */
-  facturas: Array<{ folio: string; fecha: string; monto: number; encontradas: Array<{ id: string; serie: string | null; folio: string | null; fecha: string; subtotal: number; iva: number; total: number; rfc: string | null; razon_social: string | null; estado: string; ya_ligado: number }> }>;
+  /** Las facturas expedidas de cada ingreso: las de su folio y, aunque no
+   *  traiga folio, las vigentes cuyo total o subtotal es su monto (a $1) y
+   *  cuya fecha está a 60 días o menos (0.110.1). */
+  facturas: Array<{ folio: string; fecha: string; monto: number; encontradas: FacturaDeCarga[]; por_monto: FacturaDeCarga[] }>;
+  clientes: Array<{ id: string; nombre: string; rfc: string | null }>;
+  /** Los ingresos que se traen de otro proyecto, como están hoy. */
+  traidos: Array<{ id: string; fecha: string; monto: number; descripcion: string; descripcion_nueva: string | null; proyecto_id: string | null; proyecto: string | null; facturas: string[]; problema: string | null }>;
   /** Lo que quedaría SIN IVA si se ligan (el pago toma su parte del IVA de la factura). */
   si_se_ligan: { cobrado_sin_iva: number; iva: number } | null;
   ligados: number;
@@ -3596,6 +3614,7 @@ export class OrgDB extends DurableObject<Env> {
     const ingresos = (args.ingresos ?? []).map((i) => ({
       fecha: String(i.fecha ?? '').slice(0, 10), monto: Math.trunc(Number(i.monto)), descripcion: String(i.descripcion ?? '').trim(),
       requiere_factura: !!i.requiere_factura, folio: i.folio == null ? '' : String(i.folio).trim(),
+      cfdi_id: i.cfdi_id ? String(i.cfdi_id) : undefined,
     }));
     const precio = conceptos.reduce((t, c) => t + Math.round(c.cantidad * c.precio_unitario), 0);
     const cobrado = ingresos.reduce((t, i) => t + i.monto, 0);
@@ -3603,41 +3622,83 @@ export class OrgDB extends DurableObject<Env> {
       escribir: !!args.escribir, escrito: false, motivo: null, proyectos, cuentas, proyecto: null,
       conceptos_que_hay: [], ingresos_que_hay: [], repetidos: [],
       a_crear: { conceptos: conceptos.length, precio, ingresos: ingresos.length, cobrado }, despues: null,
-      facturas: [], si_se_ligan: null, ligados: 0,
+      facturas: [], si_se_ligan: null, ligados: 0, clientes: [], traidos: [],
     };
+    for (const t of args.traer ?? []) {
+      const id = String(t?.movimiento_id ?? '');
+      const m = this.sql.exec(
+        `SELECT m.id, m.tipo, m.fecha, m.monto, m.descripcion, m.proyecto_id, p.nombre AS proyecto,
+                (SELECT COUNT(*) FROM movimiento_items mi WHERE mi.movimiento_id = m.id) AS repartos
+           FROM movimientos m LEFT JOIN proyectos p ON p.id = m.proyecto_id WHERE m.id = ?`, id,
+      ).toArray()[0] as Fila | undefined;
+      const facturas = (this.sql.exec(
+        `SELECT COALESCE(c.serie,'') || COALESCE(c.folio,'') AS f FROM cfdi_movimientos lm JOIN cfdi c ON c.id = lm.cfdi_id WHERE lm.movimiento_id = ?`, id,
+      ).toArray() as Fila[]).map((f) => String(f.f));
+      const nueva = t?.descripcion == null ? null : String(t.descripcion).trim() || null;
+      res.traidos.push({
+        id, fecha: String(m?.fecha ?? '').slice(0, 10), monto: Number(m?.monto || 0), descripcion: String(m?.descripcion ?? ''), descripcion_nueva: nueva,
+        proyecto_id: m?.proyecto_id == null ? null : String(m.proyecto_id), proyecto: m?.proyecto == null ? null : String(m.proyecto), facturas,
+        problema: !m ? 'no existe' : m.tipo !== 'ingreso' ? 'no es un ingreso' : Number(m.repartos) > 0 ? 'está repartido entre ítems de su proyecto' : null,
+      });
+    }
+    if (String(args.buscar_cliente ?? '').trim()) {
+      const qc = `%${String(args.buscar_cliente).trim().toLowerCase()}%`;
+      const qn = `%${normalizar(String(args.buscar_cliente))}%`;
+      res.clientes = (this.sql.exec(`SELECT id, nombre, rfc FROM clientes WHERE LOWER(nombre) LIKE ? OR COALESCE(nombre_norm,'') LIKE ? OR LOWER(COALESCE(rfc,'')) LIKE ? ORDER BY nombre LIMIT 20`, qc, qn, qc).toArray() as Fila[])
+        .map((f) => ({ id: String(f.id), nombre: String(f.nombre ?? ''), rfc: f.rfc == null ? null : String(f.rfc) }));
+    }
     /* Las facturas expedidas (tipo ingreso) con el folio de cada pago, con
      * serie o sin ella, y lo que ya tienen ligado. */
-    const deFolio = new Map<string, ResultadoCargaDeProyecto['facturas'][number]['encontradas']>();
+    const COLS_CFDI = `c.id, c.serie, c.folio, c.fecha, c.subtotal, c.iva, c.total, c.rfc, c.razon_social, c.estado,
+                (SELECT COALESCE(SUM(monto_aplicado),0) FROM cfdi_movimientos WHERE cfdi_id = c.id) AS ya`;
+    const factura = (f: Fila): FacturaDeCarga => ({
+      id: String(f.id), serie: f.serie == null ? null : String(f.serie), folio: f.folio == null ? null : String(f.folio),
+      fecha: String(f.fecha ?? '').slice(0, 10), subtotal: Number(f.subtotal || 0), iva: Number(f.iva || 0), total: Number(f.total || 0),
+      rfc: f.rfc == null ? null : String(f.rfc), razon_social: f.razon_social == null ? null : String(f.razon_social),
+      estado: String(f.estado ?? ''), ya_ligado: Number(f.ya || 0),
+    });
+    /* El folio como lo escribe la gente: «A-769», «A769» o «769». */
+    const plano = (t: string) => t.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const deFolio = new Map<string, FacturaDeCarga[]>();
     for (const i of ingresos) {
       if (!i.folio || deFolio.has(i.folio)) continue;
+      const numero = i.folio.replace(/\D/g, '');
       deFolio.set(i.folio, (this.sql.exec(
-        `SELECT c.id, c.serie, c.folio, c.fecha, c.subtotal, c.iva, c.total, c.rfc, c.razon_social, c.estado,
-                (SELECT COALESCE(SUM(monto_aplicado),0) FROM cfdi_movimientos WHERE cfdi_id = c.id) AS ya
-           FROM cfdi c WHERE c.tipo = 'ingreso' AND (c.folio = ? OR TRIM(COALESCE(c.serie,'') || COALESCE(c.folio,'')) = ?)
-          ORDER BY c.fecha`, i.folio, i.folio,
-      ).toArray() as Fila[]).map((f) => ({
-        id: String(f.id), serie: f.serie == null ? null : String(f.serie), folio: f.folio == null ? null : String(f.folio),
-        fecha: String(f.fecha ?? '').slice(0, 10), subtotal: Number(f.subtotal || 0), iva: Number(f.iva || 0), total: Number(f.total || 0),
-        rfc: f.rfc == null ? null : String(f.rfc), razon_social: f.razon_social == null ? null : String(f.razon_social),
-        estado: String(f.estado ?? ''), ya_ligado: Number(f.ya || 0),
-      })));
+        `SELECT ${COLS_CFDI} FROM cfdi c WHERE c.tipo = 'ingreso'
+            AND (UPPER(REPLACE(REPLACE(COALESCE(c.serie,'') || COALESCE(c.folio,''), '-', ''), ' ', '')) = ? OR (? <> '' AND c.folio = ? AND ? = ?))
+          ORDER BY c.fecha`, plano(i.folio), numero, numero, plano(i.folio), numero,
+      ).toArray() as Fila[]).map(factura));
+    }
+    const porId = new Map<string, FacturaDeCarga>();
+    for (const i of ingresos) {
+      if (!i.cfdi_id || porId.has(i.cfdi_id)) continue;
+      const f = this.sql.exec(`SELECT ${COLS_CFDI} FROM cfdi c WHERE c.id = ? AND c.tipo = 'ingreso'`, i.cfdi_id).toArray()[0] as Fila | undefined;
+      if (f) porId.set(i.cfdi_id, factura(f));
     }
     const unica = (folio: string) => { const v = (deFolio.get(folio) ?? []).filter((f) => f.estado === 'vigente'); return v.length === 1 ? v[0] : null; };
+    /** La factura con la que se liga un ingreso: la que se escogió (cfdi_id) o la única de su folio. */
+    const suFactura = (i: { folio: string; cfdi_id?: string }) => (i.cfdi_id ? (porId.get(i.cfdi_id) ?? null) : i.folio ? unica(i.folio) : null);
     let sinIvaLigado = 0, ivaLigado = 0;
     for (const i of ingresos) {
-      if (i.folio) res.facturas.push({ folio: i.folio, fecha: i.fecha, monto: i.monto, encontradas: deFolio.get(i.folio) ?? [] });
-      const f = i.folio ? unica(i.folio) : null;
+      const porMonto = (this.sql.exec(
+        `SELECT ${COLS_CFDI} FROM cfdi c WHERE c.tipo = 'ingreso' AND c.estado = 'vigente'
+            AND (ABS(c.total - ?) <= 100 OR ABS(c.subtotal - ?) <= 100)
+            AND (? = '' OR ABS(julianday(substr(c.fecha,1,10)) - julianday(?)) <= 60)
+          ORDER BY ABS(julianday(substr(c.fecha,1,10)) - julianday(COALESCE(NULLIF(?, ''), substr(c.fecha,1,10)))), c.fecha LIMIT 5`, i.monto, i.monto, i.fecha, i.fecha, i.fecha,
+      ).toArray() as Fila[]).map(factura);
+      res.facturas.push({ folio: i.folio, fecha: i.fecha, monto: i.monto, encontradas: i.folio ? (deFolio.get(i.folio) ?? []) : [], por_monto: porMonto });
+      const f = suFactura(i);
       if (f && f.total > 0) {
         const parte = Math.min(i.monto, f.total) / f.total;
         const iva = Math.round(f.iva * parte);
         ivaLigado += iva; sinIvaLigado += i.monto - iva;
       } else sinIvaLigado += i.monto;
     }
-    if (res.facturas.length) res.si_se_ligan = { cobrado_sin_iva: sinIvaLigado, iva: ivaLigado };
+    if (ingresos.some((i) => suFactura(i))) res.si_se_ligan = { cobrado_sin_iva: sinIvaLigado, iva: ivaLigado };
     const malo = conceptos.find((c) => (!c.nombre && !c.descripcion) || !Number.isSafeInteger(c.precio_unitario))
       ?? ingresos.find((i) => !/^\d{4}-\d{2}-\d{2}$/.test(i.fecha) || !Number.isSafeInteger(i.monto) || i.monto <= 0);
-    const pid = args.proyecto_id ? String(args.proyecto_id) : (proyectos.length === 1 ? proyectos[0].id : null);
-    const p = pid ? this.sql.exec(`SELECT p.id, p.nombre, p.cliente_id, p.precio_venta, c.nombre AS cliente FROM proyectos p LEFT JOIN clientes c ON c.id = p.cliente_id WHERE p.id = ?`, pid).toArray()[0] as Fila | undefined : undefined;
+    const pid = args.proyecto_id ? String(args.proyecto_id) : (proyectos.length === 1 && !args.crear_proyecto ? proyectos[0].id : null);
+    let p = pid ? this.sql.exec(`SELECT p.id, p.nombre, p.cliente_id, p.precio_venta, c.nombre AS cliente FROM proyectos p LEFT JOIN clientes c ON c.id = p.cliente_id WHERE p.id = ?`, pid).toArray()[0] as Fila | undefined : undefined;
     if (p) {
       res.proyecto = { id: String(p.id), nombre: String(p.nombre ?? ''), cliente_id: p.cliente_id == null ? null : String(p.cliente_id), cliente: p.cliente == null ? null : String(p.cliente) };
       res.conceptos_que_hay = (this.sql.exec(`SELECT nombre, descripcion, monto FROM conceptos WHERE proyecto_id = ? ORDER BY orden`, p.id).toArray() as Fila[])
@@ -3655,16 +3716,29 @@ export class OrgDB extends DurableObject<Env> {
     }
     if (!args.escribir) return res;
     const cuenta = args.cuenta_id ? cuentas.find((c) => c.id === String(args.cuenta_id)) : undefined;
+    const nuevo = !p && args.crear_proyecto ? args.crear_proyecto : null;
+    const clienteNuevo = nuevo ? this.sql.exec(`SELECT id, nombre FROM clientes WHERE id = ?`, String(nuevo.cliente_id ?? '')).toArray()[0] as Fila | undefined : undefined;
     res.motivo = malo ? `un renglón no cuadra: ${JSON.stringify(malo)}`
-      : !p ? 'falta el proyecto exacto (proyecto_id)'
+      : nuevo && !String(nuevo.nombre ?? '').trim() ? 'falta el nombre del proyecto nuevo'
+      : nuevo && !clienteNuevo ? 'el cliente del proyecto nuevo no existe (cliente_id)'
+      : nuevo && proyectos.some((x) => normalizar(x.nombre) === normalizar(String(nuevo.nombre))) ? 'ya hay un proyecto con ese nombre: usa su proyecto_id'
+      : !p && !nuevo ? 'falta el proyecto exacto (proyecto_id) o crear_proyecto'
+      : ingresos.find((i) => i.cfdi_id && !porId.has(i.cfdi_id)) ? 'una factura escogida (cfdi_id) no existe'
+      : res.traidos.find((t) => t.problema) ? `un ingreso que se trae no se puede mover: ${JSON.stringify(res.traidos.find((t) => t.problema))}`
+      : p && res.traidos.find((t) => t.proyecto_id === String(p!.id)) ? 'un ingreso que se trae ya es de este proyecto'
       : !cuenta ? 'falta la cuenta exacta (cuenta_id)'
       : res.repetidos.length ? `${res.repetidos.length} ingresos ya parecen estar cargados`
       : res.conceptos_que_hay.length && conceptos.length ? 'el proyecto ya tiene conceptos: no se le agregan otros encima'
       : null;
     if (res.motivo) return res;
     const ctx: ContextoEscritura = { app: 'dash101', usuario_id: 'carga-interna' };
-    const creados: Array<{ id: string; folio: string; monto: number }> = [];
+    const creados: Array<{ id: string; folio: string; monto: number; cfdi_id?: string }> = [];
     this.ctx.storage.transactionSync(() => {
+      if (nuevo) {
+        const pr = this.crear('proyectos', { nombre: String(nuevo.nombre).trim(), cliente_id: String(clienteNuevo!.id), estado: 'activo' }, ctx);
+        p = { id: pr.id, nombre: pr.nombre, cliente_id: pr.cliente_id, precio_venta: 0, cliente: clienteNuevo!.nombre };
+        res.proyecto = { id: String(pr.id), nombre: String(pr.nombre ?? ''), cliente_id: String(clienteNuevo!.id), cliente: String(clienteNuevo!.nombre ?? '') };
+      }
       /* Un grupo es como una cotización cargada a mano: un id propio
        * (`carga:<proyecto>:<grupo>`) para que el estado de cuenta lo agrupe y
        * lo sume, sin chocar nunca con una cotización de quote101. */
@@ -3683,8 +3757,19 @@ export class OrgDB extends DurableObject<Env> {
           contraparte_tipo: p!.cliente_id ? 'cliente' : null, contraparte_id: p!.cliente_id ?? null, contraparte_nombre: p!.cliente ?? null,
           descripcion: i.descripcion, facturado: false, subtotal: i.monto, iva: 0, tasa_iva: 0, retenciones: 0, requiere_factura: i.requiere_factura,
         }, ctx);
-        creados.push({ id: String(m.id), folio: i.folio, monto: i.monto });
+        creados.push({ id: String(m.id), folio: i.folio, monto: i.monto, cfdi_id: i.cfdi_id });
       }
+      /* Los que se traen: cambian de proyecto y de cliente; su factura
+       * ligada se va con ellos (la liga es del movimiento). */
+      const viejos = new Set<string>();
+      for (const t of res.traidos) {
+        if (t.proyecto_id) viejos.add(t.proyecto_id);
+        this.actualizar('movimientos', t.id, {
+          proyecto_id: p!.id, contraparte_tipo: p!.cliente_id ? 'cliente' : null, contraparte_id: p!.cliente_id ?? null, contraparte_nombre: p!.cliente ?? null,
+          ...(t.descripcion_nueva ? { descripcion: t.descripcion_nueva } : {}),
+        }, ctx);
+      }
+      for (const v of viejos) this.recalcularProyecto(v);
       this.recalcularProyecto(String(p!.id));
     });
     res.escrito = true;
@@ -3692,7 +3777,7 @@ export class OrgDB extends DurableObject<Env> {
      * cuenta: cada pago toma su parte del IVA de su factura (repartirDesglose). */
     if (args.ligar) {
       for (const m of creados) {
-        const f = m.folio ? unica(m.folio) : null;
+        const f = suFactura(m);
         if (!f) continue;
         const ya = Number((this.sql.exec(`SELECT COALESCE(SUM(monto_aplicado),0) AS s FROM cfdi_movimientos WHERE cfdi_id = ?`, f.id).one() as { s: number }).s);
         const aplica = Math.min(m.monto, f.total - ya);

@@ -177,7 +177,10 @@ app.post('/interno/:o/carga-proyecto', async (c) => {
   const stub = c.env.ORG.get(c.env.ORG.idFromName(org)) as unknown as ApiOrgDB;
   return ok(c, { org, ...(await stub.cargaDeProyecto({
     buscar: String(b.buscar ?? ''), proyecto_id: b.proyecto_id ?? null, cuenta_id: b.cuenta_id ?? null,
-    conceptos: b.conceptos, ingresos: b.ingresos, ligar: b.ligar === true, escribir: c.req.query('modo') === 'cargar',
+    conceptos: b.conceptos, ingresos: b.ingresos, ligar: b.ligar === true,
+    crear_proyecto: b.crear_proyecto && typeof b.crear_proyecto === 'object' ? { nombre: String(b.crear_proyecto.nombre ?? ''), cliente_id: String(b.crear_proyecto.cliente_id ?? '') } : null,
+    buscar_cliente: typeof b.buscar_cliente === 'string' ? b.buscar_cliente : undefined, escribir: c.req.query('modo') === 'cargar',
+    traer: Array.isArray(b.traer) ? b.traer.slice(0, 50) : undefined,
   })) });
 });
 

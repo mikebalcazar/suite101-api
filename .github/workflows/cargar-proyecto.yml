@@ -116,15 +116,20 @@ jobs:
               (if $d.proyecto then "== El proyecto: \($d.proyecto.nombre) (\($d.proyecto.id)) · cliente \($d.proyecto.cliente // "—") ==" else "== Sin proyecto exacto ==" end),
               "conceptos que ya tiene: \($d.conceptos_que_hay | length) por \([$d.conceptos_que_hay[].monto] | add // 0 | m)",
               "ingresos que ya tiene: \($d.ingresos_que_hay | length)",
-              ($d.ingresos_que_hay[] | "  \(.fecha) \(.monto | m) \(.descripcion[0:50])"),
+              ($d.ingresos_que_hay[] | "  \(.id) · \(.fecha) \(.monto | m) \(.descripcion[0:50])"),
               "repetidos (mismo monto, ±3 días): \($d.repetidos | length)",
               ($d.repetidos[] | "  \(.fecha) \(.monto | m) \(.descripcion) ≈ ya: \(.ya.fecha) \(.ya.descripcion[0:40])"),
               "",
+              (if ($d.traidos // []) | length > 0 then "== Ingresos que se traen de otro proyecto ==", ($d.traidos[] | "  \(.id) · \(.fecha) \(.monto | m) \(.descripcion) · de \(.proyecto // "—") · facturas \(.facturas | join(", ")) → \(.descripcion_nueva // "(misma descripción)")\(if .problema then " · NO SE PUEDE: \(.problema)" else "" end)"), "" else empty end),
               "a crear: \($d.a_crear.conceptos) conceptos por \($d.a_crear.precio | m) · \($d.a_crear.ingresos) ingresos por \($d.a_crear.cobrado | m)",
               (if $d.despues then "después: precio \($d.despues.precio_venta | m) · cobrado sin IVA \($d.despues.cobrado_sin_iva | m) · saldo \($d.despues.saldo | m)" else empty end),
               "",
-              "== Facturas expedidas por folio ==",
-              ($d.facturas[] | "\(.folio) · pago \(.fecha) \(.monto | m) → " + (if (.encontradas | length) == 0 then "NO ESTÁ" else ([.encontradas[] | "\((.serie // "") + (.folio // "")) \(.fecha) total \(.total | m) (IVA \(.iva | m)) \(.estado) ligado \(.ya_ligado | m) · \(.razon_social // .rfc // "—")"] | join(" | ")) end)),
+              (if ($d.clientes // []) | length > 0 then "== Clientes ==", ($d.clientes[] | "\(.id) · \(.nombre) · \(.rfc // "—")"), "" else empty end),
+              "== Facturas expedidas, pago por pago ==",
+              ($d.facturas[] | def fac: "\(.id) \((.serie // "") + (.folio // "")) \(.fecha) sub \(.subtotal | m) total \(.total | m) (IVA \(.iva | m)) \(.estado) ligado \(.ya_ligado | m) · \(.razon_social // .rfc // "—")";
+                "pago \(if .folio == "" then "sin folio" else .folio end) · \(if .fecha == "" then "sin fecha" else .fecha end) \(.monto | m)",
+                (if .folio == "" then empty elif (.encontradas | length) == 0 then "  por folio: NO ESTÁ" else (.encontradas[] | "  por folio: " + fac) end),
+                (if (.por_monto // []) | length == 0 then "  por monto: ninguna" else (.por_monto[] | "  por monto: " + fac) end)),
               (if $d.si_se_ligan then "si se ligan: cobrado sin IVA \($d.si_se_ligan.cobrado_sin_iva | m) · IVA \($d.si_se_ligan.iva | m)" else empty end)
           ' /tmp/r.json
       - name: Borrar la llave
