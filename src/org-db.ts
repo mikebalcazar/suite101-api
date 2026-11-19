@@ -6518,6 +6518,20 @@ export class OrgDB extends DurableObject<Env> {
       if (vistos.has(r.id)) return { ok: false, error: 'datos_invalidos', detalle: { renglon: i + 1, id: r.id, motivo: 'el mismo concepto viene dos veces' } };
       vistos.add(r.id);
     }
+    /* 0.110.0 · Un renglón puede entrar a una cotización que YA está en la
+     * hoja (Mike, 19-nov-2026: «poder agrupar conceptos nuevos que agregue»).
+     * Sólo a una de este proyecto: su folio y su nombre se copian de los
+     * conceptos que ya la tienen, no los dice quien guarda. */
+    const cots = new Map<string, { folio: unknown; nombre: unknown }>();
+    for (const f of this.sql.exec(`SELECT cotizacion_id, MAX(cotizacion_folio) AS folio, MAX(cotizacion_nombre) AS nombre FROM conceptos
+                                    WHERE proyecto_id = ? AND cotizacion_id IS NOT NULL GROUP BY cotizacion_id`, args.proyecto_id).toArray() as Fila[]) {
+      cots.set(String(f.cotizacion_id), { folio: f.folio ?? null, nombre: f.nombre ?? null });
+    }
+    for (const [i, r] of args.renglones.entries()) {
+      if (r.cotizacion_id != null && !cots.has(r.cotizacion_id)) {
+        return { ok: false, error: 'datos_invalidos', detalle: { renglon: i + 1, campo: 'cotizacion_id', motivo: 'esa cotización no está en los conceptos de este proyecto' } };
+      }
+    }
     let creados = 0, cambiados = 0;
     const quitados = actuales.filter((id) => !vistos.has(id));
     const t = ahora();
@@ -6531,12 +6545,18 @@ export class OrgDB extends DurableObject<Env> {
             `UPDATE conceptos SET nombre = COALESCE(?, nombre), seccion = COALESCE(?, seccion), descripcion = ?, cantidad = ?, precio_unitario = ?, monto = ?, orden = ?, actualizado_at = ? WHERE id = ?`,
             r.nombre ?? null, r.seccion ?? null, r.descripcion, r.cantidad, r.precio_unitario, monto, i + 1, t, r.id,
           );
+          if (r.cotizacion_id !== undefined) {
+            const c = r.cotizacion_id === null ? null : cots.get(r.cotizacion_id)!;
+            this.sql.exec(`UPDATE conceptos SET cotizacion_id = ?, cotizacion_folio = ?, cotizacion_nombre = ? WHERE id = ? AND COALESCE(cotizacion_id,'') <> COALESCE(?,'')`,
+              r.cotizacion_id, c?.folio ?? null, c?.nombre ?? null, r.id, r.cotizacion_id);
+          }
           cambiados++;
         } else {
           this.sql.exec(
-            `INSERT INTO conceptos (id, proyecto_id, nombre, seccion, descripcion, cantidad, precio_unitario, monto, orden, creado_en_app, creado_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+            `INSERT INTO conceptos (id, proyecto_id, nombre, seccion, descripcion, cantidad, precio_unitario, monto, orden, creado_en_app, creado_at, cotizacion_id, cotizacion_folio, cotizacion_nombre)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
             ulid(), args.proyecto_id, r.nombre ?? '', r.seccion ?? '', r.descripcion, r.cantidad, r.precio_unitario, monto, i + 1, args.app, t,
+            r.cotizacion_id ?? null, r.cotizacion_id ? cots.get(r.cotizacion_id)!.folio ?? null : null, r.cotizacion_id ? cots.get(r.cotizacion_id)!.nombre ?? null : null,
           );
           creados++;
         }
