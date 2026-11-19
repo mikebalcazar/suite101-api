@@ -17,7 +17,12 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.111.2 (CORREGIR UN PAGO QUE YA ESTÁ. Mike, 19-nov: «los
+ * Versión del contrato: 0.111.3 (EL MONTO DE UN PAGO CON SU FACTURA. Mike, 19-nov: «este
+ * Excel manda en cuanto a pagos» (histórico de IMA de QUALITAS). `corregir`
+ * acepta `monto` en un pago con una sola factura: la liga se mueve con él y
+ * el IVA se reparte otra vez. Sin cambio para las apps.)
+ *
+ * Antes, 0.111.2 (CORREGIR UN PAGO QUE YA ESTÁ. Mike, 19-nov: «los
  * $23,200 de HOLCIM entró a efectivo». La carga interna acepta `corregir`:
  * cuenta, fecha o descripción de un ingreso, sin tocar su dinero ni sus
  * facturas. Sin cambio para las apps.)
@@ -1787,7 +1792,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.111.2';
+export const VERSION_CONTRATO = '0.111.3';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
