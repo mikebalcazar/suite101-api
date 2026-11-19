@@ -273,6 +273,12 @@ export interface CargaDeProyecto {
    *  IVA) y se le sube el IVA de su parte de la factura: lo que entró al
    *  banco. Mike, 19-nov-2026: «A-768 OK ligada completa, A-767 OK». */
   ligar_existentes?: Array<{ movimiento_id: string; cfdi_id: string }>;
+  /** 0.111.1 · Sólo leer, para conciliar contra el banco: TODAS las facturas
+   *  vigentes de un RFC con a qué pagos están ligadas, y todos los ingresos
+   *  de sus clientes con sus facturas (Mike, 19-nov-2026: «vemos si podemos
+   *  ya conciliar todo de los proyectos de TATA, SSA, Holcim, Qualitas y
+   *  Apex»). */
+  conciliar?: { rfc: string } | null;
   /** Ligar cada ingreso a su factura (por folio) al cargarlo. Sólo cuando
    *  hay exactamente una factura vigente con ese folio. */
   ligar?: boolean;
@@ -303,6 +309,10 @@ export interface ResultadoCargaDeProyecto {
   sin_ligar: {
     facturas: Array<FacturaDeCarga & { uuid: string; conceptos: string[] }>;
     ingresos: Array<{ id: string; fecha: string; monto: number; subtotal: number | null; iva: number; descripcion: string; proyecto: string | null; cliente: string | null }>;
+  } | null;
+  conciliacion: {
+    facturas: Array<FacturaDeCarga & { uuid: string; conceptos: string[]; ligas: Array<{ movimiento_id: string; fecha: string; monto_aplicado: number; proyecto: string | null }> }>;
+    ingresos: Array<{ id: string; fecha: string; monto: number; sin_iva: number; iva: number; descripcion: string; proyecto: string | null; cuenta: string | null; facturas: string[] }>;
   } | null;
   por_ligar: Array<{ movimiento_id: string; cfdi_id: string; factura: string; fecha: string; descripcion: string; sin_iva: number; monto_antes: number; monto_despues: number; iva: number; problema: string | null }>;
   traidos: Array<{ id: string; fecha: string; monto: number; descripcion: string; descripcion_nueva: string | null; proyecto_id: string | null; proyecto: string | null; facturas: string[]; problema: string | null }>;
@@ -3646,7 +3656,7 @@ export class OrgDB extends DurableObject<Env> {
       escribir: !!args.escribir, escrito: false, motivo: null, proyectos, cuentas, proyecto: null,
       conceptos_que_hay: [], ingresos_que_hay: [], repetidos: [],
       a_crear: { conceptos: conceptos.length, precio, ingresos: ingresos.length, cobrado }, despues: null,
-      facturas: [], si_se_ligan: null, ligados: 0, clientes: [], traidos: [], sin_ligar: null, por_ligar: [],
+      facturas: [], si_se_ligan: null, ligados: 0, clientes: [], traidos: [], sin_ligar: null, por_ligar: [], conciliacion: null,
     };
     for (const t of args.traer ?? []) {
       const id = String(t?.movimiento_id ?? '');
@@ -3752,6 +3762,40 @@ export class OrgDB extends DurableObject<Env> {
             : ligadoSinIva + pedido > f.subtotal + 100 ? 'los pagos pasan del subtotal de la factura' : null,
         });
       }
+    }
+    if (args.conciliar && String(args.conciliar.rfc ?? '').trim()) {
+      const rfc = String(args.conciliar.rfc).trim().toUpperCase();
+      const ligasDe = new Map<string, Array<{ movimiento_id: string; fecha: string; monto_aplicado: number; proyecto: string | null }>>();
+      const folioDe = new Map<string, string[]>();
+      for (const l of this.sql.exec(
+        `SELECT lm.cfdi_id, lm.movimiento_id, lm.monto_aplicado, m.fecha, p.nombre AS proyecto, COALESCE(k.serie,'') || COALESCE(k.folio,'') AS folio
+           FROM cfdi_movimientos lm JOIN movimientos m ON m.id = lm.movimiento_id JOIN cfdi k ON k.id = lm.cfdi_id
+           LEFT JOIN proyectos p ON p.id = m.proyecto_id`,
+      ).toArray() as Fila[]) {
+        const c = String(l.cfdi_id), mid = String(l.movimiento_id);
+        ligasDe.set(c, [...(ligasDe.get(c) ?? []), { movimiento_id: mid, fecha: String(l.fecha ?? '').slice(0, 10), monto_aplicado: Number(l.monto_aplicado || 0), proyecto: l.proyecto == null ? null : String(l.proyecto) }]);
+        folioDe.set(mid, [...(folioDe.get(mid) ?? []), String(l.folio || c)]);
+      }
+      res.conciliacion = {
+        facturas: (this.sql.exec(`SELECT ${COLS_CFDI}, c.uuid FROM cfdi c WHERE c.tipo = 'ingreso' AND c.estado = 'vigente' AND UPPER(COALESCE(c.rfc,'')) = ? ORDER BY c.fecha`, rfc)
+          .toArray() as Fila[]).map((f) => ({
+            ...factura(f), uuid: String(f.uuid ?? ''),
+            conceptos: (this.sql.exec(`SELECT descripcion FROM cfdi_conceptos WHERE cfdi_id = ? ORDER BY orden`, f.id).toArray() as Fila[])
+              .map((x) => String(x.descripcion ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean),
+            ligas: ligasDe.get(String(f.id)) ?? [],
+          })),
+        ingresos: (this.sql.exec(
+          `SELECT m.id, m.fecha, m.monto, COALESCE(m.subtotal, m.monto - COALESCE(m.iva,0) + COALESCE(m.retenciones,0)) AS sin_iva, COALESCE(m.iva,0) AS iva,
+                  m.descripcion, p.nombre AS proyecto, cu.nombre AS cuenta
+             FROM movimientos m LEFT JOIN proyectos p ON p.id = m.proyecto_id LEFT JOIN cuentas cu ON cu.id = m.cuenta_id
+             LEFT JOIN clientes cl ON cl.id = COALESCE(p.cliente_id, CASE WHEN m.contraparte_tipo = 'cliente' THEN m.contraparte_id END)
+            WHERE m.tipo = 'ingreso' AND UPPER(COALESCE(cl.rfc,'')) = ? ORDER BY m.fecha`, rfc,
+        ).toArray() as Fila[]).map((m) => ({
+          id: String(m.id), fecha: String(m.fecha ?? '').slice(0, 10), monto: Number(m.monto || 0), sin_iva: Number(m.sin_iva || 0), iva: Number(m.iva || 0),
+          descripcion: String(m.descripcion ?? ''), proyecto: m.proyecto == null ? null : String(m.proyecto), cuenta: m.cuenta == null ? null : String(m.cuenta),
+          facturas: folioDe.get(String(m.id)) ?? [],
+        })),
+      };
     }
     let sinIvaLigado = 0, ivaLigado = 0;
     for (const i of ingresos) {
