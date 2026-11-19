@@ -178,7 +178,11 @@ app.post('/interno/:o/carga-proyecto', async (c) => {
   return ok(c, { org, ...(await stub.cargaDeProyecto({
     buscar: String(b.buscar ?? ''), proyecto_id: b.proyecto_id ?? null, cuenta_id: b.cuenta_id ?? null,
     conceptos: b.conceptos, ingresos: b.ingresos, ligar: b.ligar === true,
-    crear_proyecto: b.crear_proyecto && typeof b.crear_proyecto === 'object' ? { nombre: String(b.crear_proyecto.nombre ?? ''), cliente_id: String(b.crear_proyecto.cliente_id ?? '') } : null,
+    crear_proyecto: b.crear_proyecto && typeof b.crear_proyecto === 'object' ? {
+      nombre: String(b.crear_proyecto.nombre ?? ''), cliente_id: String(b.crear_proyecto.cliente_id ?? ''),
+      estado: b.crear_proyecto.estado == null ? undefined : String(b.crear_proyecto.estado),
+      descripcion: b.crear_proyecto.descripcion == null ? undefined : String(b.crear_proyecto.descripcion),
+    } : null,
     buscar_cliente: typeof b.buscar_cliente === 'string' ? b.buscar_cliente : undefined, escribir: c.req.query('modo') === 'cargar',
     traer: Array.isArray(b.traer) ? b.traer.slice(0, 50) : undefined,
     sin_ligar: b.sin_ligar && typeof b.sin_ligar === 'object' ? { rfc: String(b.sin_ligar.rfc ?? '') } : null,

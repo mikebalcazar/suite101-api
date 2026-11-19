@@ -255,7 +255,7 @@ export interface CargaDeProyecto {
   /** 0.110.1 · Si el proyecto todavía no existe: se crea con este nombre y
    *  cliente al escribir (Mike, 19-nov-2026: «un proyecto nuevo de IMA que se
    *  llama TATA E2»). */
-  crear_proyecto?: { nombre: string; cliente_id: string } | null;
+  crear_proyecto?: { nombre: string; cliente_id: string; estado?: string; descripcion?: string } | null;
   /** Texto para enseñar los clientes que se le parecen. */
   buscar_cliente?: string;
   /** 0.110.1 · Ingresos que ya existen en OTRO proyecto y son de éste: se
@@ -3627,7 +3627,9 @@ export class OrgDB extends DurableObject<Env> {
    *  escribe sólo con el proyecto y la cuenta exactos y sin repetidos, todo o
    *  nada, con el mismo `crear` que usa el CRUD (cachés, saldos y avisos). */
   cargaDeProyecto(args: CargaDeProyecto): ResultadoCargaDeProyecto {
-    const q = `%${String(args.buscar ?? '').trim().toLowerCase()}%`;
+    /* 0.111.5 · `*` enseña todos los proyectos, para saber cuáles ya existen
+     * antes de dar de alta obras viejas (Mike, 19-nov-2026). */
+    const q = String(args.buscar ?? '').trim() === '*' ? '%' : `%${String(args.buscar ?? '').trim().toLowerCase()}%`;
     const proyectos = (this.sql.exec(
       `SELECT p.id, p.nombre, p.precio_venta, p.n_conceptos, p.cobrado, p.cobrado_sin_iva, c.nombre AS cliente,
               (SELECT COUNT(*) FROM movimientos m WHERE m.proyecto_id = p.id AND m.tipo = 'ingreso') AS ingresos
@@ -3888,7 +3890,10 @@ export class OrgDB extends DurableObject<Env> {
     const creados: Array<{ id: string; folio: string; monto: number; cfdi_id?: string }> = [];
     this.ctx.storage.transactionSync(() => {
       if (nuevo) {
-        const pr = this.crear('proyectos', { nombre: String(nuevo.nombre).trim(), cliente_id: String(clienteNuevo!.id), estado: 'activo' }, ctx);
+        /* 0.111.5 · Una obra vieja nace cerrada (Mike, 19-nov-2026: «Sí, como
+         * obras cerradas»). */
+        const estado = ['planeando', 'activo', 'pausado', 'finiquito', 'cerrado'].includes(String(nuevo.estado ?? '')) ? String(nuevo.estado) : 'activo';
+        const pr = this.crear('proyectos', { nombre: String(nuevo.nombre).trim(), cliente_id: String(clienteNuevo!.id), estado, ...(nuevo.descripcion ? { descripcion: String(nuevo.descripcion) } : {}) }, ctx);
         p = { id: pr.id, nombre: pr.nombre, cliente_id: pr.cliente_id, precio_venta: 0, cliente: clienteNuevo!.nombre };
         res.proyecto = { id: String(pr.id), nombre: String(pr.nombre ?? ''), cliente_id: String(clienteNuevo!.id), cliente: String(clienteNuevo!.nombre ?? '') };
       }

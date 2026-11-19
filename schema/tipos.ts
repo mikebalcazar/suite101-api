@@ -17,7 +17,11 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.111.4 (SACAR UN PAGO DEL PROYECTO. Mike, 19-nov: «Los demás
+ * Versión del contrato: 0.111.5 (OBRAS VIEJAS DE IMA. Mike, 19-nov: «Sí, como obras
+ * cerradas». `crear_proyecto` acepta `estado` y `descripcion`; `buscar: "*"`
+ * enseña todos los proyectos. Sin cambio para las apps.)
+ *
+ * Antes, 0.111.4 (SACAR UN PAGO DEL PROYECTO. Mike, 19-nov: «Los demás
  * habrá que ubicarlos en otros proyectos». `corregir` acepta `sin_proyecto`:
  * el ingreso queda del cliente, sin obra, con su dinero y sus facturas. Sin
  * cambio para las apps.)
@@ -1797,7 +1801,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.111.4';
+export const VERSION_CONTRATO = '0.111.5';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
