@@ -182,6 +182,7 @@ app.post('/interno/:o/carga-proyecto', async (c) => {
     buscar_cliente: typeof b.buscar_cliente === 'string' ? b.buscar_cliente : undefined, escribir: c.req.query('modo') === 'cargar',
     traer: Array.isArray(b.traer) ? b.traer.slice(0, 50) : undefined,
     sin_ligar: b.sin_ligar && typeof b.sin_ligar === 'object' ? { rfc: String(b.sin_ligar.rfc ?? '') } : null,
+    ligar_existentes: Array.isArray(b.ligar_existentes) ? b.ligar_existentes.slice(0, 50) : undefined,
   })) });
 });
 

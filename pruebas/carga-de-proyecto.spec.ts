@@ -294,3 +294,61 @@ describe('lo que falta ligar de un RFC', () => {
     expect(Array.isArray(r.data.sin_ligar.ingresos)).toBe(true);
   });
 });
+
+/* 0.111.0 · Mike, 19-nov-2026: «A-768 OK ligada completa. A-767 OK,
+ * necesito una nota grande que faltan 100k de pago para acompletar factura.
+ * Siempre el formato en la contabilidad de proyectos va sin IVA». */
+describe('ligar pagos que ya están, sin moverles el sin IVA', () => {
+  let a767 = '', a768 = '', p17 = '', p18 = '', p10 = '', dct = '', obraQ = '';
+  beforeAll(async () => {
+    const fac = async (uuid: string, sub: number, folio: string) => {
+      const f = await o('/fiscal/cfdi', { method: 'POST', json: { tipo: 'ingreso', rfc: 'IPA150629LBA', razon_social: 'IMA', uuid, subtotal: sub, iva: sub * 16 / 100, total: sub * 116 / 100, fecha: '2026-04-29' } });
+      expect(f.estado, JSON.stringify(f)).toBe(201);
+      await conFolio(f.data.id, 'A', folio);
+      return String(f.data.id);
+    };
+    a767 = await fac('EEEEEEEE-0000-4000-8000-000000000767', 450_000_00, '767');
+    a768 = await fac('EEEEEEEE-0000-4000-8000-000000000768', 75_000_00, '768');
+    obraQ = await crea('/proyectos', { cliente_id: cliente, nombre: 'QUALITAS por facturar' });
+    const pago = (monto: number, fecha: string, descripcion: string) => crea('/movimientos', {
+      tipo: 'ingreso', monto, fecha, cuenta_id: cuenta, proyecto_id: obraQ, contraparte_tipo: 'cliente', contraparte_id: cliente, descripcion, subtotal: monto, iva: 0,
+    });
+    p17 = await pago(250_000_00, '2026-03-14', 'Pago 17 · por facturar');
+    p18 = await pago(50_000_00, '2026-03-21', 'Pago 18 · por facturar');
+    p10 = await pago(50_000_00, '2026-04-10', 'Pago · por facturar');
+    dct = await pago(25_000_00, '2026-04-25', 'Anticipo DCT · por facturar');
+  });
+  const ligar = (modo?: string, lista?: Array<{ movimiento_id: string; cfdi_id: string }>) => interno(ORG, { llave: LLAVE, dada: LLAVE, modo, carga: {
+    buscar: '', proyecto_id: obraQ, conceptos: [], ingresos: [],
+    ligar_existentes: lista ?? [{ movimiento_id: p17, cfdi_id: a767 }, { movimiento_id: p18, cfdi_id: a767 }, { movimiento_id: p10, cfdi_id: a768 }, { movimiento_id: dct, cfdi_id: a768 }],
+  } });
+  it('el ensayo dice cuánto entra al banco con su IVA, y no escribe', async () => {
+    const antes = await proyecto(obraQ);
+    const r = await ligar();
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect(r.data.por_ligar.find((x: any) => x.movimiento_id === p17)).toMatchObject({ factura: 'A767', sin_iva: 250_000_00, monto_antes: 250_000_00, monto_despues: 290_000_00, iva: 40_000_00, problema: null });
+    expect((await proyecto(obraQ)).cobrado_sin_iva).toBe(antes.cobrado_sin_iva);
+    expect((await mov(p17)).monto).toBe(250_000_00);
+  });
+  it('pasar del subtotal de la factura no se puede', async () => {
+    const r = await ligar('cargar', [{ movimiento_id: p17, cfdi_id: a768 }]);
+    expect(r.data).toMatchObject({ escrito: false, motivo: expect.stringContaining('pasan del subtotal') });
+  });
+  it('liga, el sin IVA no se mueve, y el estado de cuenta avisa lo que falta de A-767', async () => {
+    const antes = await proyecto(obraQ);
+    const r = await ligar('cargar');
+    expect(r.data, JSON.stringify(r.data)).toMatchObject({ escrito: true, ligados: 4 });
+    expect(await mov(p17)).toMatchObject({ monto: 290_000_00, subtotal: 250_000_00, iva: 40_000_00 });
+    expect(await mov(dct)).toMatchObject({ monto: 29_000_00, subtotal: 25_000_00, iva: 4_000_00 });
+    const p = await proyecto(obraQ);
+    expect(p.cobrado_sin_iva).toBe(antes.cobrado_sin_iva);
+    expect(p.iva_cobrado - antes.iva_cobrado).toBe(60_000_00);
+    const e = await o(`/proyectos/${obraQ}/estado`);
+    expect(e.estado, JSON.stringify(e)).toBe(200);
+    expect(e.data.facturas_por_completar).toEqual([expect.objectContaining({ id: a767, folio: '767', ligado: 348_000_00, falta: 174_000_00, falta_sin_iva: 150_000_00 })]);
+  });
+  it('otra vez: ya tienen factura', async () => {
+    const r = await ligar('cargar');
+    expect(r.data).toMatchObject({ escrito: false, motivo: expect.stringContaining('ya tiene factura') });
+  });
+});
