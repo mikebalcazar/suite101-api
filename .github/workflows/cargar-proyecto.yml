@@ -138,7 +138,7 @@ jobs:
               (if $d.conciliacion then "", "== Conciliación (centavos, separado por tabs) ==",
                 ($d.conciliacion.facturas[] | ["F", .id, ((.serie // "") + (.folio // "")), .fecha, .subtotal, .total, .ya_ligado,
                   ([.ligas[] | "\(.fecha)|\(.monto_aplicado)|\(.proyecto // "-")"] | join(";")), ((.conceptos // []) | join(" / ") | .[0:120])] | map(tostring) | join("\t")),
-                ($d.conciliacion.ingresos[] | ["M", .id, .fecha, .monto, .sin_iva, .iva, (.proyecto // "-"), (.cuenta // "-"), (.facturas | join(",")), .descripcion[0:50]] | map(tostring) | join("\t"))) else empty end),
+                ($d.conciliacion.ingresos[] | ["M", .id, .fecha, .monto, .sin_iva, .iva, (.proyecto // "-"), (.cuenta // "-"), (.facturas | join(",")), .descripcion[0:50]] | map(tostring) | join("\t")) else empty end),
               (if $d.si_se_ligan then "si se ligan: cobrado sin IVA \($d.si_se_ligan.cobrado_sin_iva | m) · IVA \($d.si_se_ligan.iva | m)" else empty end)
           ' /tmp/r.json
       - name: Borrar la llave
