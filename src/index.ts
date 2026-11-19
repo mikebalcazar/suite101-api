@@ -181,6 +181,7 @@ app.post('/interno/:o/carga-proyecto', async (c) => {
     crear_proyecto: b.crear_proyecto && typeof b.crear_proyecto === 'object' ? { nombre: String(b.crear_proyecto.nombre ?? ''), cliente_id: String(b.crear_proyecto.cliente_id ?? '') } : null,
     buscar_cliente: typeof b.buscar_cliente === 'string' ? b.buscar_cliente : undefined, escribir: c.req.query('modo') === 'cargar',
     traer: Array.isArray(b.traer) ? b.traer.slice(0, 50) : undefined,
+    sin_ligar: b.sin_ligar && typeof b.sin_ligar === 'object' ? { rfc: String(b.sin_ligar.rfc ?? '') } : null,
   })) });
 });
 
