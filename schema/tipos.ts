@@ -17,7 +17,12 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.110.2 (UN PAGO CON IVA SIN FACTURA TODAVÍA. Mike, 19-nov:
+ * Versión del contrato: 0.110.3 (LO QUE FALTA LIGAR. Mike, 19-nov: «buscar las facturas
+ * que aún no están ligadas que correspondan con los montos». La carga interna
+ * trae, sólo leyendo, las facturas de un RFC con algo sin ligar y sus ingresos
+ * sin factura. Sin cambio para las apps.)
+ *
+ * Antes, 0.110.2 (UN PAGO CON IVA SIN FACTURA TODAVÍA. Mike, 19-nov:
  * «HOLCIM, hoy pagaron 20,000 + IVA». La carga interna acepta `iva` por ingreso:
  * el monto es lo que entró y el IVA va aparte. Sin cambio para las apps.)
  *
@@ -1765,7 +1770,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.110.2';
+export const VERSION_CONTRATO = '0.110.3';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {

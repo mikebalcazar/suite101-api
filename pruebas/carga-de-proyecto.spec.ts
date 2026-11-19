@@ -278,3 +278,19 @@ describe('un pago con IVA que todavía no tiene factura', () => {
     }
   });
 });
+
+/* 0.110.3 · Mike, 19-nov-2026: «buscar las facturas que aún no están
+ * ligadas que correspondan con los montos». Sólo lee. */
+describe('lo que falta ligar de un RFC', () => {
+  it('trae las facturas con algo sin ligar y los ingresos sin factura, y no escribe', async () => {
+    const f = await o('/fiscal/cfdi', { method: 'POST', json: { tipo: 'ingreso', rfc: 'IPA150629LBA', razon_social: 'IMA', uuid: 'DDDDDDDD-0000-4000-8000-000000000767', subtotal: 450_000_00, iva: 72_000_00, total: 522_000_00, fecha: '2026-04-29' } });
+    expect(f.estado, JSON.stringify(f)).toBe(201);
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, carga: { buscar: '', conceptos: [], ingresos: [], sin_ligar: { rfc: 'ipa150629lba' } } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    const ids = r.data.sin_ligar.facturas.map((x: any) => x.id);
+    expect(ids).toContain(f.data.id);
+    for (const x of r.data.sin_ligar.facturas) expect(x.ya_ligado).toBeLessThan(x.total);
+    expect(r.data.escrito).toBe(false);
+    expect(Array.isArray(r.data.sin_ligar.ingresos)).toBe(true);
+  });
+});

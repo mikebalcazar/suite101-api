@@ -130,6 +130,10 @@ jobs:
                 "pago \(if .folio == "" then "sin folio" else .folio end) · \(if .fecha == "" then "sin fecha" else .fecha end) \(.monto | m)",
                 (if .folio == "" then empty elif (.encontradas | length) == 0 then "  por folio: NO ESTÁ" else (.encontradas[] | "  por folio: " + fac) end),
                 (if (.por_monto // []) | length == 0 then "  por monto: ninguna" else (.por_monto[] | "  por monto: " + fac) end)),
+              (if $d.sin_ligar then "", "== Facturas vigentes con algo sin ligar ==",
+                ($d.sin_ligar.facturas[] | "  \(.id) \((.serie // "") + (.folio // "")) \(.fecha) sub \(.subtotal | m) total \(.total | m) ligado \(.ya_ligado | m)"),
+                "", "== Ingresos sin factura ==",
+                ($d.sin_ligar.ingresos[] | "  \(.id) \(.fecha) \(.monto | m) (sin IVA \((.subtotal // .monto) | m)) · \(.proyecto // "—") · \(.descripcion[0:45])") else empty end),
               (if $d.si_se_ligan then "si se ligan: cobrado sin IVA \($d.si_se_ligan.cobrado_sin_iva | m) · IVA \($d.si_se_ligan.iva | m)" else empty end)
           ' /tmp/r.json
       - name: Borrar la llave

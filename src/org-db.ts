@@ -263,6 +263,11 @@ export interface CargaDeProyecto {
    *  19-nov-2026: «la factura A762 es de APEX, no de Quálitas. Hay que
    *  corregir ese pago», con botones: «Moverlo a APEX»). */
   traer?: Array<{ movimiento_id: string; descripcion?: string | null }>;
+  /** 0.110.3 · Sólo leer: las facturas expedidas vigentes que aún tienen
+   *  algo sin ligar y los ingresos sin ninguna factura, de un RFC (Mike,
+   *  19-nov-2026: «buscar las facturas que aún no están ligadas que
+   *  correspondan con los montos y lo mejor que se pueda con las fechas»). */
+  sin_ligar?: { rfc: string } | null;
   /** Ligar cada ingreso a su factura (por folio) al cargarlo. Sólo cuando
    *  hay exactamente una factura vigente con ese folio. */
   ligar?: boolean;
@@ -290,6 +295,10 @@ export interface ResultadoCargaDeProyecto {
   facturas: Array<{ folio: string; fecha: string; monto: number; encontradas: FacturaDeCarga[]; por_monto: FacturaDeCarga[] }>;
   clientes: Array<{ id: string; nombre: string; rfc: string | null }>;
   /** Los ingresos que se traen de otro proyecto, como están hoy. */
+  sin_ligar: {
+    facturas: FacturaDeCarga[];
+    ingresos: Array<{ id: string; fecha: string; monto: number; subtotal: number | null; iva: number; descripcion: string; proyecto: string | null; cliente: string | null }>;
+  } | null;
   traidos: Array<{ id: string; fecha: string; monto: number; descripcion: string; descripcion_nueva: string | null; proyecto_id: string | null; proyecto: string | null; facturas: string[]; problema: string | null }>;
   /** Lo que quedaría SIN IVA si se ligan (el pago toma su parte del IVA de la factura). */
   si_se_ligan: { cobrado_sin_iva: number; iva: number } | null;
@@ -3626,7 +3635,7 @@ export class OrgDB extends DurableObject<Env> {
       escribir: !!args.escribir, escrito: false, motivo: null, proyectos, cuentas, proyecto: null,
       conceptos_que_hay: [], ingresos_que_hay: [], repetidos: [],
       a_crear: { conceptos: conceptos.length, precio, ingresos: ingresos.length, cobrado }, despues: null,
-      facturas: [], si_se_ligan: null, ligados: 0, clientes: [], traidos: [],
+      facturas: [], si_se_ligan: null, ligados: 0, clientes: [], traidos: [], sin_ligar: null,
     };
     for (const t of args.traer ?? []) {
       const id = String(t?.movimiento_id ?? '');
@@ -3682,6 +3691,26 @@ export class OrgDB extends DurableObject<Env> {
     const unica = (folio: string) => { const v = (deFolio.get(folio) ?? []).filter((f) => f.estado === 'vigente'); return v.length === 1 ? v[0] : null; };
     /** La factura con la que se liga un ingreso: la que se escogió (cfdi_id) o la única de su folio. */
     const suFactura = (i: { folio: string; cfdi_id?: string }) => (i.cfdi_id ? (porId.get(i.cfdi_id) ?? null) : i.folio ? unica(i.folio) : null);
+    if (args.sin_ligar && String(args.sin_ligar.rfc ?? '').trim()) {
+      const rfc = String(args.sin_ligar.rfc).trim().toUpperCase();
+      res.sin_ligar = {
+        facturas: (this.sql.exec(
+          `SELECT * FROM (SELECT ${COLS_CFDI} FROM cfdi c WHERE c.tipo = 'ingreso' AND c.estado = 'vigente' AND UPPER(COALESCE(c.rfc,'')) = ?)
+            WHERE ya < total ORDER BY fecha`, rfc,
+        ).toArray() as Fila[]).map(factura),
+        ingresos: (this.sql.exec(
+          `SELECT m.id, m.fecha, m.monto, m.subtotal, m.iva, m.descripcion, p.nombre AS proyecto, cl.nombre AS cliente
+             FROM movimientos m LEFT JOIN proyectos p ON p.id = m.proyecto_id
+             LEFT JOIN clientes cl ON cl.id = COALESCE(p.cliente_id, CASE WHEN m.contraparte_tipo = 'cliente' THEN m.contraparte_id END)
+            WHERE m.tipo = 'ingreso' AND UPPER(COALESCE(cl.rfc,'')) = ?
+              AND NOT EXISTS (SELECT 1 FROM cfdi_movimientos lm WHERE lm.movimiento_id = m.id)
+            ORDER BY m.fecha`, rfc,
+        ).toArray() as Fila[]).map((f) => ({
+          id: String(f.id), fecha: String(f.fecha ?? '').slice(0, 10), monto: Number(f.monto || 0), subtotal: f.subtotal == null ? null : Number(f.subtotal),
+          iva: Number(f.iva || 0), descripcion: String(f.descripcion ?? ''), proyecto: f.proyecto == null ? null : String(f.proyecto), cliente: f.cliente == null ? null : String(f.cliente),
+        })),
+      };
+    }
     let sinIvaLigado = 0, ivaLigado = 0;
     for (const i of ingresos) {
       const porMonto = (this.sql.exec(
