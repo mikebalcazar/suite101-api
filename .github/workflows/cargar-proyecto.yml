@@ -120,6 +120,7 @@ jobs:
               "repetidos (mismo monto, ±3 días): \($d.repetidos | length)",
               ($d.repetidos[] | "  \(.fecha) \(.monto | m) \(.descripcion) ≈ ya: \(.ya.fecha) \(.ya.descripcion[0:40])"),
               "",
+              (if ($d.por_ligar // []) | length > 0 then "== Pagos que ya están y se ligan ==", ($d.por_ligar[] | "  \(.factura) ← \(.fecha) \(.descripcion[0:40]) · sin IVA \(.sin_iva | m) · banco \(.monto_antes | m) → \(.monto_despues | m) (IVA \(.iva | m))\(if .problema then " · NO SE PUEDE: \(.problema)" else "" end)"), "" else empty end),
               (if ($d.traidos // []) | length > 0 then "== Ingresos que se traen de otro proyecto ==", ($d.traidos[] | "  \(.id) · \(.fecha) \(.monto | m) \(.descripcion) · de \(.proyecto // "—") · facturas \(.facturas | join(", ")) → \(.descripcion_nueva // "(misma descripción)")\(if .problema then " · NO SE PUEDE: \(.problema)" else "" end)"), "" else empty end),
               "a crear: \($d.a_crear.conceptos) conceptos por \($d.a_crear.precio | m) · \($d.a_crear.ingresos) ingresos por \($d.a_crear.cobrado | m)",
               (if $d.despues then "después: precio \($d.despues.precio_venta | m) · cobrado sin IVA \($d.despues.cobrado_sin_iva | m) · saldo \($d.despues.saldo | m)" else empty end),
@@ -131,7 +132,7 @@ jobs:
                 (if .folio == "" then empty elif (.encontradas | length) == 0 then "  por folio: NO ESTÁ" else (.encontradas[] | "  por folio: " + fac) end),
                 (if (.por_monto // []) | length == 0 then "  por monto: ninguna" else (.por_monto[] | "  por monto: " + fac) end)),
               (if $d.sin_ligar then "", "== Facturas vigentes con algo sin ligar ==",
-                ($d.sin_ligar.facturas[] | "  \(.id) \((.serie // "") + (.folio // "")) \(.fecha) sub \(.subtotal | m) total \(.total | m) ligado \(.ya_ligado | m)"),
+                ($d.sin_ligar.facturas[] | "  \(.id) \((.serie // "") + (.folio // "")) \(.fecha) sub \(.subtotal | m) total \(.total | m) ligado \(.ya_ligado | m) · uuid \(.uuid // "")\n      \((.conceptos // []) | join(" | ") | .[0:220])"),
                 "", "== Ingresos sin factura ==",
                 ($d.sin_ligar.ingresos[] | "  \(.id) \(.fecha) \(.monto | m) (sin IVA \((.subtotal // .monto) | m)) · \(.proyecto // "—") · \(.descripcion[0:45])") else empty end),
               (if $d.si_se_ligan then "si se ligan: cobrado sin IVA \($d.si_se_ligan.cobrado_sin_iva | m) · IVA \($d.si_se_ligan.iva | m)" else empty end)

@@ -268,6 +268,11 @@ export interface CargaDeProyecto {
    *  19-nov-2026: «buscar las facturas que aún no están ligadas que
    *  correspondan con los montos y lo mejor que se pueda con las fechas»). */
   sin_ligar?: { rfc: string } | null;
+  /** 0.111.0 · Ligar pagos que YA están en el proyecto a una factura. El
+   *  pago se queda con lo que vale SIN IVA (la cuenta del proyecto va sin
+   *  IVA) y se le sube el IVA de su parte de la factura: lo que entró al
+   *  banco. Mike, 19-nov-2026: «A-768 OK ligada completa, A-767 OK». */
+  ligar_existentes?: Array<{ movimiento_id: string; cfdi_id: string }>;
   /** Ligar cada ingreso a su factura (por folio) al cargarlo. Sólo cuando
    *  hay exactamente una factura vigente con ese folio. */
   ligar?: boolean;
@@ -296,9 +301,10 @@ export interface ResultadoCargaDeProyecto {
   clientes: Array<{ id: string; nombre: string; rfc: string | null }>;
   /** Los ingresos que se traen de otro proyecto, como están hoy. */
   sin_ligar: {
-    facturas: FacturaDeCarga[];
+    facturas: Array<FacturaDeCarga & { uuid: string; conceptos: string[] }>;
     ingresos: Array<{ id: string; fecha: string; monto: number; subtotal: number | null; iva: number; descripcion: string; proyecto: string | null; cliente: string | null }>;
   } | null;
+  por_ligar: Array<{ movimiento_id: string; cfdi_id: string; factura: string; fecha: string; descripcion: string; sin_iva: number; monto_antes: number; monto_despues: number; iva: number; problema: string | null }>;
   traidos: Array<{ id: string; fecha: string; monto: number; descripcion: string; descripcion_nueva: string | null; proyecto_id: string | null; proyecto: string | null; facturas: string[]; problema: string | null }>;
   /** Lo que quedaría SIN IVA si se ligan (el pago toma su parte del IVA de la factura). */
   si_se_ligan: { cobrado_sin_iva: number; iva: number } | null;
@@ -340,6 +346,11 @@ export interface EstadoDelProyecto {
    *  enseñando una lista que suma lo de abajo. */
   items: Fila[];
   movimientos: Fila[];
+  /** 0.111.0 · Las facturas ligadas a pagos de este proyecto a las que
+   *  todavía les falta pago (Mike, 19-nov-2026: «necesito una nota grande
+   *  que faltan 100k de pago para acompletar factura»). `falta_sin_iva` es lo
+   *  que falta en la cuenta del proyecto, que va sin IVA. */
+  facturas_por_completar: Array<{ id: string; uuid: string; serie: string | null; folio: string | null; fecha: string; subtotal: number; total: number; ligado: number; falta: number; falta_sin_iva: number }>;
   totales: {
     subtotal: number; iva: number; total: number;
     tasa_iva: number; iva_incluido: boolean;
@@ -3635,7 +3646,7 @@ export class OrgDB extends DurableObject<Env> {
       escribir: !!args.escribir, escrito: false, motivo: null, proyectos, cuentas, proyecto: null,
       conceptos_que_hay: [], ingresos_que_hay: [], repetidos: [],
       a_crear: { conceptos: conceptos.length, precio, ingresos: ingresos.length, cobrado }, despues: null,
-      facturas: [], si_se_ligan: null, ligados: 0, clientes: [], traidos: [], sin_ligar: null,
+      facturas: [], si_se_ligan: null, ligados: 0, clientes: [], traidos: [], sin_ligar: null, por_ligar: [],
     };
     for (const t of args.traer ?? []) {
       const id = String(t?.movimiento_id ?? '');
@@ -3697,7 +3708,13 @@ export class OrgDB extends DurableObject<Env> {
         facturas: (this.sql.exec(
           `SELECT * FROM (SELECT ${COLS_CFDI} FROM cfdi c WHERE c.tipo = 'ingreso' AND c.estado = 'vigente' AND UPPER(COALESCE(c.rfc,'')) = ?)
             WHERE ya < total ORDER BY fecha`, rfc,
-        ).toArray() as Fila[]).map(factura),
+        ).toArray() as Fila[]).map((f) => ({
+          ...factura(f),
+          uuid: String((this.sql.exec(`SELECT uuid FROM cfdi WHERE id = ?`, f.id).toArray()[0] as Fila | undefined)?.uuid ?? ''),
+          /* Lo que dice la factura, para saber de qué obra es. */
+          conceptos: (this.sql.exec(`SELECT descripcion FROM cfdi_conceptos WHERE cfdi_id = ? ORDER BY orden`, f.id).toArray() as Fila[])
+            .map((c) => String(c.descripcion ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean),
+        })),
         ingresos: (this.sql.exec(
           `SELECT m.id, m.fecha, m.monto, m.subtotal, m.iva, m.descripcion, p.nombre AS proyecto, cl.nombre AS cliente
              FROM movimientos m LEFT JOIN proyectos p ON p.id = m.proyecto_id
@@ -3710,6 +3727,31 @@ export class OrgDB extends DurableObject<Env> {
           iva: Number(f.iva || 0), descripcion: String(f.descripcion ?? ''), proyecto: f.proyecto == null ? null : String(f.proyecto), cliente: f.cliente == null ? null : String(f.cliente),
         })),
       };
+    }
+    {
+      const yaPide = new Map<string, number>();
+      for (const e of args.ligar_existentes ?? []) {
+        const mid = String(e?.movimiento_id ?? ''), cid = String(e?.cfdi_id ?? '');
+        const m = this.sql.exec(
+          `SELECT m.id, m.tipo, m.fecha, m.monto, m.descripcion, COALESCE(m.subtotal, m.monto - COALESCE(m.iva,0) + COALESCE(m.retenciones,0)) AS sin_iva,
+                  (SELECT COUNT(*) FROM cfdi_movimientos x WHERE x.movimiento_id = m.id) AS ligas
+             FROM movimientos m WHERE m.id = ?`, mid,
+        ).toArray()[0] as Fila | undefined;
+        const k = this.sql.exec(`SELECT ${COLS_CFDI} FROM cfdi c WHERE c.id = ?`, cid).toArray()[0] as Fila | undefined;
+        const f = k ? factura(k) : null;
+        const sinIva = Number(m?.sin_iva || 0);
+        const iva = f && f.subtotal > 0 ? Math.round(sinIva * f.iva / f.subtotal) : 0;
+        const pedido = (yaPide.get(cid) ?? 0) + sinIva;
+        yaPide.set(cid, pedido);
+        const ligadoSinIva = f && f.total > 0 ? Math.round(f.ya_ligado * f.subtotal / f.total) : 0;
+        res.por_ligar.push({
+          movimiento_id: mid, cfdi_id: cid, factura: f ? `${f.serie ?? ''}${f.folio ?? ''}` : '', fecha: String(m?.fecha ?? '').slice(0, 10),
+          descripcion: String(m?.descripcion ?? ''), sin_iva: sinIva, monto_antes: Number(m?.monto || 0), monto_despues: sinIva + iva, iva,
+          problema: !m ? 'el pago no existe' : m.tipo !== 'ingreso' ? 'no es un ingreso' : Number(m.ligas) > 0 ? 'el pago ya tiene factura'
+            : !f ? 'la factura no existe' : f.estado !== 'vigente' ? 'la factura no está vigente'
+            : ligadoSinIva + pedido > f.subtotal + 100 ? 'los pagos pasan del subtotal de la factura' : null,
+        });
+      }
     }
     let sinIvaLigado = 0, ivaLigado = 0;
     for (const i of ingresos) {
@@ -3758,9 +3800,10 @@ export class OrgDB extends DurableObject<Env> {
       : nuevo && proyectos.some((x) => normalizar(x.nombre) === normalizar(String(nuevo.nombre))) ? 'ya hay un proyecto con ese nombre: usa su proyecto_id'
       : !p && !nuevo ? 'falta el proyecto exacto (proyecto_id) o crear_proyecto'
       : ingresos.find((i) => i.cfdi_id && !porId.has(i.cfdi_id)) ? 'una factura escogida (cfdi_id) no existe'
+      : res.por_ligar.find((x) => x.problema) ? `un pago no se puede ligar: ${JSON.stringify(res.por_ligar.find((x) => x.problema))}`
       : res.traidos.find((t) => t.problema) ? `un ingreso que se trae no se puede mover: ${JSON.stringify(res.traidos.find((t) => t.problema))}`
       : p && res.traidos.find((t) => t.proyecto_id === String(p!.id)) ? 'un ingreso que se trae ya es de este proyecto'
-      : !cuenta ? 'falta la cuenta exacta (cuenta_id)'
+      : !cuenta && ingresos.length > 0 ? 'falta la cuenta exacta (cuenta_id)'
       : res.repetidos.length ? `${res.repetidos.length} ingresos ya parecen estar cargados`
       : res.conceptos_que_hay.length && conceptos.length ? 'el proyecto ya tiene conceptos: no se le agregan otros encima'
       : null;
@@ -3807,6 +3850,14 @@ export class OrgDB extends DurableObject<Env> {
       this.recalcularProyecto(String(p!.id));
     });
     res.escrito = true;
+    /* 0.111.0 · Los pagos que ya estaban: se les sube el IVA de su parte y
+     * se ligan por ese total; `repartirDesglose` les deja el mismo sin IVA. */
+    for (const x of res.por_ligar) {
+      if (x.monto_despues !== x.monto_antes) this.actualizar('movimientos', x.movimiento_id, { monto: x.monto_despues }, ctx);
+      const r = this.ligarCfdi({ cfdi_id: x.cfdi_id, movimiento_id: x.movimiento_id, monto_aplicado: x.monto_despues });
+      if ('ok' in r) res.ligados++;
+    }
+    if (res.por_ligar.length) this.recalcularProyecto(String(p!.id));
     /* Ligar después de crear, con el mismo camino que «Ligar» en el estado de
      * cuenta: cada pago toma su parte del IVA de su factura (repartirDesglose). */
     if (args.ligar) {
@@ -6793,6 +6844,23 @@ export class OrgDB extends DurableObject<Env> {
         proyecto_id,
       )
       .toArray() as Fila[]).map((m): Fila => ({ ...m, facturas: facturasDe.get(String(m.id)) ?? [] }));
+    const facturas_por_completar = (this.sql.exec(
+      `SELECT k.id, k.uuid, k.serie, k.folio, k.fecha, k.subtotal, k.total,
+              (SELECT COALESCE(SUM(x.monto_aplicado),0) FROM cfdi_movimientos x WHERE x.cfdi_id = k.id) AS ligado
+         FROM cfdi k
+        WHERE k.estado = 'vigente' AND k.tipo = 'ingreso' AND k.id IN (
+          SELECT lm.cfdi_id FROM cfdi_movimientos lm JOIN movimientos m ON m.id = lm.movimiento_id WHERE m.proyecto_id = ? AND m.tipo = 'ingreso')
+        ORDER BY k.fecha`, proyecto_id,
+    ).toArray() as Fila[])
+      .filter((k) => Number(k.ligado || 0) < Number(k.total || 0) - 100)
+      .map((k) => {
+        const total = Number(k.total || 0), sub = Number(k.subtotal || 0), falta = total - Number(k.ligado || 0);
+        return {
+          id: String(k.id), uuid: String(k.uuid ?? ''), serie: k.serie == null ? null : String(k.serie), folio: k.folio == null ? null : String(k.folio),
+          fecha: String(k.fecha ?? '').slice(0, 10), subtotal: sub, total, ligado: Number(k.ligado || 0), falta,
+          falta_sin_iva: total > 0 ? Math.round(falta * sub / total) : falta,
+        };
+      });
 
     /* El precio de venta es el caché que ya mantiene `recalcularProyecto`, y
      * es por construcción la suma de los conceptos. No se vuelve a sumar aquí
@@ -6824,7 +6892,7 @@ export class OrgDB extends DurableObject<Env> {
 
     return {
       generado_at: ahora(),
-      proyecto, cliente, negocio, conceptos, grupos, items, movimientos,
+      proyecto, cliente, negocio, conceptos, grupos, items, movimientos, facturas_por_completar,
       totales: {
         subtotal, iva, total, tasa_iva: tasa, iva_incluido: incluido,
         cobrado, saldo: porCargar ? null : total - cobrado,

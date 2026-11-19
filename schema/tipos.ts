@@ -17,7 +17,14 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.110.3 (LO QUE FALTA LIGAR. Mike, 19-nov: «buscar las facturas
+ * Versión del contrato: 0.111.0 (LA FACTURA A LA QUE LE FALTA PAGO. Mike, 19-nov:
+ * «A-767 OK, necesito una nota grande que faltan 100k de pago para acompletar
+ * factura». GET /proyectos/:id/estado trae `facturas_por_completar`: las
+ * facturas ligadas a sus pagos a las que aún les falta, con lo que falta con
+ * y sin IVA. La carga interna liga pagos que ya están (`ligar_existentes`):
+ * el pago se queda con su sin IVA y se le sube el IVA de su parte.)
+ *
+ * Antes, 0.110.3 (LO QUE FALTA LIGAR. Mike, 19-nov: «buscar las facturas
  * que aún no están ligadas que correspondan con los montos». La carga interna
  * trae, sólo leyendo, las facturas de un RFC con algo sin ligar y sus ingresos
  * sin factura. Sin cambio para las apps.)
@@ -1770,7 +1777,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.110.3';
+export const VERSION_CONTRATO = '0.111.0';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
