@@ -17,7 +17,12 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.111.1 (CONCILIAR CONTRA EL BANCO. Mike, 19-nov: «vemos si
+ * Versión del contrato: 0.111.2 (CORREGIR UN PAGO QUE YA ESTÁ. Mike, 19-nov: «los
+ * $23,200 de HOLCIM entró a efectivo». La carga interna acepta `corregir`:
+ * cuenta, fecha o descripción de un ingreso, sin tocar su dinero ni sus
+ * facturas. Sin cambio para las apps.)
+ *
+ * Antes, 0.111.1 (CONCILIAR CONTRA EL BANCO. Mike, 19-nov: «vemos si
  * podemos ya conciliar todo». La carga interna acepta `conciliar {rfc}`: trae,
  * sólo leyendo, todas las facturas vigentes del RFC con sus ligas y los
  * ingresos de sus clientes con sus folios. Sin cambio para las apps.)
@@ -1782,7 +1787,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.111.1';
+export const VERSION_CONTRATO = '0.111.2';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {

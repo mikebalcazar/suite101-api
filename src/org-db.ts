@@ -279,6 +279,11 @@ export interface CargaDeProyecto {
    *  ya conciliar todo de los proyectos de TATA, SSA, Holcim, Qualitas y
    *  Apex»). */
   conciliar?: { rfc: string } | null;
+  /** 0.111.2 · Corregir pagos que ya están: a qué cuenta entraron, su fecha
+   *  o su descripción (Mike, 19-nov-2026: «La cuenta a la que entraron los
+   *  $23,200 de HOLCIM: entró a efectivo»). El dinero y sus facturas no se
+   *  tocan aquí. */
+  corregir?: Array<{ movimiento_id: string; cuenta_id?: string | null; fecha?: string | null; descripcion?: string | null }>;
   /** Ligar cada ingreso a su factura (por folio) al cargarlo. Sólo cuando
    *  hay exactamente una factura vigente con ese folio. */
   ligar?: boolean;
@@ -314,6 +319,7 @@ export interface ResultadoCargaDeProyecto {
     facturas: Array<FacturaDeCarga & { uuid: string; conceptos: string[]; ligas: Array<{ movimiento_id: string; fecha: string; monto_aplicado: number; proyecto: string | null }> }>;
     ingresos: Array<{ id: string; fecha: string; monto: number; sin_iva: number; iva: number; descripcion: string; proyecto: string | null; cuenta: string | null; facturas: string[] }>;
   } | null;
+  corregidos: Array<{ movimiento_id: string; antes: { cuenta: string | null; fecha: string; descripcion: string }; despues: { cuenta: string | null; fecha: string; descripcion: string }; problema: string | null }>;
   por_ligar: Array<{ movimiento_id: string; cfdi_id: string; factura: string; fecha: string; descripcion: string; sin_iva: number; monto_antes: number; monto_despues: number; iva: number; problema: string | null }>;
   traidos: Array<{ id: string; fecha: string; monto: number; descripcion: string; descripcion_nueva: string | null; proyecto_id: string | null; proyecto: string | null; facturas: string[]; problema: string | null }>;
   /** Lo que quedaría SIN IVA si se ligan (el pago toma su parte del IVA de la factura). */
@@ -3656,8 +3662,23 @@ export class OrgDB extends DurableObject<Env> {
       escribir: !!args.escribir, escrito: false, motivo: null, proyectos, cuentas, proyecto: null,
       conceptos_que_hay: [], ingresos_que_hay: [], repetidos: [],
       a_crear: { conceptos: conceptos.length, precio, ingresos: ingresos.length, cobrado }, despues: null,
-      facturas: [], si_se_ligan: null, ligados: 0, clientes: [], traidos: [], sin_ligar: null, por_ligar: [], conciliacion: null,
+      facturas: [], si_se_ligan: null, ligados: 0, clientes: [], traidos: [], sin_ligar: null, por_ligar: [], conciliacion: null, corregidos: [],
     };
+    const nombreCuenta = (id: unknown) => (id == null ? null : cuentas.find((c) => c.id === String(id))?.nombre ?? String(id));
+    for (const c of args.corregir ?? []) {
+      const mid = String(c?.movimiento_id ?? '');
+      const m = this.sql.exec(`SELECT id, tipo, fecha, descripcion, cuenta_id FROM movimientos WHERE id = ?`, mid).toArray()[0] as Fila | undefined;
+      const fecha = c?.fecha == null ? null : String(c.fecha).slice(0, 10);
+      const cuentaNueva = c?.cuenta_id == null ? null : String(c.cuenta_id);
+      const antes = { cuenta: nombreCuenta(m?.cuenta_id), fecha: String(m?.fecha ?? '').slice(0, 10), descripcion: String(m?.descripcion ?? '') };
+      res.corregidos.push({
+        movimiento_id: mid, antes,
+        despues: { cuenta: cuentaNueva ? nombreCuenta(cuentaNueva) : antes.cuenta, fecha: fecha ?? antes.fecha, descripcion: c?.descripcion == null ? antes.descripcion : String(c.descripcion).trim() },
+        problema: !m ? 'el pago no existe' : m.tipo !== 'ingreso' ? 'no es un ingreso'
+          : cuentaNueva && !cuentas.some((x) => x.id === cuentaNueva) ? 'la cuenta no existe'
+          : fecha && !/^\d{4}-\d{2}-\d{2}$/.test(fecha) ? 'la fecha no es AAAA-MM-DD' : null,
+      });
+    }
     for (const t of args.traer ?? []) {
       const id = String(t?.movimiento_id ?? '');
       const m = this.sql.exec(
@@ -3844,6 +3865,7 @@ export class OrgDB extends DurableObject<Env> {
       : nuevo && proyectos.some((x) => normalizar(x.nombre) === normalizar(String(nuevo.nombre))) ? 'ya hay un proyecto con ese nombre: usa su proyecto_id'
       : !p && !nuevo ? 'falta el proyecto exacto (proyecto_id) o crear_proyecto'
       : ingresos.find((i) => i.cfdi_id && !porId.has(i.cfdi_id)) ? 'una factura escogida (cfdi_id) no existe'
+      : res.corregidos.find((x) => x.problema) ? `un pago no se puede corregir: ${JSON.stringify(res.corregidos.find((x) => x.problema))}`
       : res.por_ligar.find((x) => x.problema) ? `un pago no se puede ligar: ${JSON.stringify(res.por_ligar.find((x) => x.problema))}`
       : res.traidos.find((t) => t.problema) ? `un ingreso que se trae no se puede mover: ${JSON.stringify(res.traidos.find((t) => t.problema))}`
       : p && res.traidos.find((t) => t.proyecto_id === String(p!.id)) ? 'un ingreso que se trae ya es de este proyecto'
@@ -3902,6 +3924,14 @@ export class OrgDB extends DurableObject<Env> {
       if ('ok' in r) res.ligados++;
     }
     if (res.por_ligar.length) this.recalcularProyecto(String(p!.id));
+    for (const c of args.corregir ?? []) {
+      const datos: Fila = {};
+      if (c.cuenta_id) datos.cuenta_id = String(c.cuenta_id);
+      if (c.fecha) datos.fecha = String(c.fecha).slice(0, 10);
+      if (c.descripcion != null) datos.descripcion = String(c.descripcion).trim();
+      if (Object.keys(datos).length) this.actualizar('movimientos', String(c.movimiento_id), datos, ctx);
+    }
+    if ((args.corregir ?? []).length) this.recalcularProyecto(String(p!.id));
     /* Ligar después de crear, con el mismo camino que «Ligar» en el estado de
      * cuenta: cada pago toma su parte del IVA de su factura (repartirDesglose). */
     if (args.ligar) {

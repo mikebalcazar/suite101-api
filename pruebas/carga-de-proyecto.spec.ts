@@ -369,3 +369,25 @@ describe('conciliar', () => {
     expect(r.data.escrito).toBe(false);
   });
 });
+
+/* 0.111.2 · Mike, 19-nov-2026: «La cuenta a la que entraron los $23,200 de
+ * HOLCIM: entró a efectivo». Corregir la cuenta, la fecha o la descripción
+ * de un pago que ya está, sin tocar su dinero. */
+describe('corregir un pago que ya está', () => {
+  it('cambia la cuenta y la fecha, el ensayo no escribe, y una cuenta que no existe no pasa', async () => {
+    const caja = await crea('/cuentas', { nombre: 'EFECTIVO', tipo: 'caja' });
+    const pago = await crea('/movimientos', { tipo: 'ingreso', monto: 23_200_00, fecha: '2026-11-19', cuenta_id: cuenta, proyecto_id: obra, descripcion: 'Pago · por facturar', subtotal: 20_000_00, iva: 3_200_00 });
+    const carga = (modo?: string, c: Record<string, unknown> = {}) => interno(ORG, { llave: LLAVE, dada: LLAVE, modo, carga: {
+      buscar: '', proyecto_id: obra, conceptos: [], ingresos: [], corregir: [{ movimiento_id: pago, cuenta_id: caja, fecha: '2026-11-18', ...c }],
+    } });
+    const antes = await mov(pago);
+    const e = await carga();
+    expect(e.data.corregidos[0]).toMatchObject({ antes: { fecha: '2026-11-19' }, despues: { cuenta: 'EFECTIVO', fecha: '2026-11-18' }, problema: null });
+    expect((await mov(pago)).cuenta_id).toBe(cuenta);
+    const mal = await carga('cargar', { cuenta_id: 'no-existe' });
+    expect(mal.data).toMatchObject({ escrito: false, motivo: expect.stringContaining('la cuenta no existe') });
+    const r = await carga('cargar');
+    expect(r.data, JSON.stringify(r.data)).toMatchObject({ escrito: true });
+    expect(await mov(pago), 'el dinero no se toca').toMatchObject({ cuenta_id: caja, fecha: expect.stringMatching(/^2026-11-18/), monto: antes.monto, subtotal: antes.subtotal, iva: antes.iva });
+  });
+});
