@@ -17,7 +17,11 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.110.1 (CARGAR UN PROYECTO NUEVO. Mike, 19-nov: TATA E2 y
+ * Versión del contrato: 0.110.2 (UN PAGO CON IVA SIN FACTURA TODAVÍA. Mike, 19-nov:
+ * «HOLCIM, hoy pagaron 20,000 + IVA». La carga interna acepta `iva` por ingreso:
+ * el monto es lo que entró y el IVA va aparte. Sin cambio para las apps.)
+ *
+ * Antes, 0.110.1 (CARGAR UN PROYECTO NUEVO. Mike, 19-nov: TATA E2 y
  * APEX GDL-MTY. La ruta interna de carga crea el proyecto, busca clientes, liga
  * pagos a una factura por id y busca facturas por monto. Sin cambio de contrato
  * para las apps.)
@@ -1761,7 +1765,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.110.1';
+export const VERSION_CONTRATO = '0.110.2';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {

@@ -254,3 +254,27 @@ describe('traer un pago que quedó en otro proyecto', () => {
     expect(otra.data).toMatchObject({ escrito: false, motivo: expect.stringContaining('ya es de este proyecto') });
   });
 });
+
+/* 0.110.2 · Mike, 19-nov-2026: «HOLCIM, hoy pagaron 20,000 + IVA». Sin
+ * factura todavía: entra el total al banco y el IVA va aparte. */
+describe('un pago con IVA que todavía no tiene factura', () => {
+  it('entra el total, el subtotal sin IVA y el IVA aparte', async () => {
+    const antes = await proyecto(otraObra);
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: {
+      buscar: '', proyecto_id: otraObra, cuenta_id: cuenta, conceptos: [],
+      ingresos: [{ fecha: '2026-11-19', monto: 23_200_00, iva: 3_200_00, descripcion: 'Pago · por facturar', requiere_factura: true }],
+    } });
+    expect(r.data, JSON.stringify(r.data)).toMatchObject({ escrito: true });
+    const p = await proyecto(otraObra);
+    expect(p.cobrado_sin_iva - antes.cobrado_sin_iva).toBe(20_000_00);
+    expect(p.iva_cobrado - antes.iva_cobrado).toBe(3_200_00);
+  });
+  it('un IVA mayor que el pago, o con factura, no entra', async () => {
+    for (const i of [{ monto: 1_000_00, iva: 1_000_00 }, { monto: 1_160_00, iva: 160_00, folio: '733' }]) {
+      const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: {
+        buscar: '', proyecto_id: otraObra, cuenta_id: cuenta, conceptos: [], ingresos: [{ fecha: '2026-11-20', descripcion: 'x', ...i }],
+      } });
+      expect(r.data).toMatchObject({ escrito: false, motivo: expect.stringContaining('no cuadra') });
+    }
+  });
+});
