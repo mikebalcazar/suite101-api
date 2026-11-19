@@ -1,3 +1,5 @@
+> **19-nov-2026 · obras viejas de IMA como proyectos cerrados (API 0.111.5).** Mike, con botones: «Sí, como obras cerradas» (59 pagos 2023-2025 de Banorte). `crear_proyecto` acepta `estado` y `descripcion`; `buscar: "*"` enseña todos los proyectos para no duplicar.
+
 > **19-nov-2026 · QUALITAS como lo acordó Mike con el cliente (API 0.111.4).** Mike: «Solo agrega pagos que se hayan hecho después de la fecha del último pago en su hoja de Excel. Los demás habrá que ubicarlos en otros proyectos». `corregir` acepta `sin_proyecto: true`: el ingreso queda del cliente, sin obra. Salieron de QUALITAS el de 31-dic-2025 ($60,320) y el de 30-ene-2026 ($348,000); están sin proyecto hasta ubicarlos.
 
 > **19-nov-2026 · QUALITAS según el histórico de IMA (API 0.111.3).** Mike compartió el histórico de pagos de QUALITAS de IMA: «Este Excel manda en cuanto a pagos». `corregir` acepta `monto` en un pago con UNA factura (la liga se mueve con él y `repartirDesglose` reparte el IVA otra vez; no pasa del total de la factura). Se usó para A-760 ($232,348 → $232,000).

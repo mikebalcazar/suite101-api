@@ -430,3 +430,19 @@ describe('sacar un pago del proyecto', () => {
     expect((await proyecto(obraS)).cobrado_sin_iva).toBe(0);
   });
 });
+
+/* 0.111.5 · Obras viejas de IMA: nacen cerradas, y `*` enseña todos los
+ * proyectos para no crear uno que ya está. */
+describe('una obra vieja', () => {
+  it('«*» lista todos los proyectos', async () => {
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, carga: { buscar: '*', conceptos: [], ingresos: [] } });
+    expect(r.data.proyectos.length).toBeGreaterThan(3);
+  });
+  it('se crea cerrada, con su descripción', async () => {
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: { buscar: 'STELLANTIS 2023', cuenta_id: cuenta, conceptos: [],
+      crear_proyecto: { nombre: 'STELLANTIS 2023', cliente_id: cliente, estado: 'cerrado', descripcion: 'IP-23404 · cargada del banco' },
+      ingresos: [{ fecha: '2023-03-11', monto: 159_143_88, iva: 21_950_88, descripcion: 'Pago · SIN FACTURA' }] } });
+    expect(r.data, JSON.stringify(r.data)).toMatchObject({ escrito: true });
+    expect(await proyecto(r.data.proyecto.id)).toMatchObject({ estado: 'cerrado', descripcion: 'IP-23404 · cargada del banco', cobrado_sin_iva: 137_193_00 });
+  });
+});
