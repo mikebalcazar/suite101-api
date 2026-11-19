@@ -283,7 +283,7 @@ export interface CargaDeProyecto {
    *  o su descripción (Mike, 19-nov-2026: «La cuenta a la que entraron los
    *  $23,200 de HOLCIM: entró a efectivo»). El dinero y sus facturas no se
    *  tocan aquí. */
-  corregir?: Array<{ movimiento_id: string; cuenta_id?: string | null; fecha?: string | null; descripcion?: string | null; monto?: number | null }>;
+  corregir?: Array<{ movimiento_id: string; cuenta_id?: string | null; fecha?: string | null; descripcion?: string | null; monto?: number | null; sin_proyecto?: boolean }>;
   /** Ligar cada ingreso a su factura (por folio) al cargarlo. Sólo cuando
    *  hay exactamente una factura vigente con ese folio. */
   ligar?: boolean;
@@ -319,7 +319,7 @@ export interface ResultadoCargaDeProyecto {
     facturas: Array<FacturaDeCarga & { uuid: string; conceptos: string[]; ligas: Array<{ movimiento_id: string; fecha: string; monto_aplicado: number; proyecto: string | null }> }>;
     ingresos: Array<{ id: string; fecha: string; monto: number; sin_iva: number; iva: number; descripcion: string; proyecto: string | null; cuenta: string | null; facturas: string[] }>;
   } | null;
-  corregidos: Array<{ movimiento_id: string; antes: { cuenta: string | null; fecha: string; descripcion: string; monto: number }; despues: { cuenta: string | null; fecha: string; descripcion: string; monto: number }; problema: string | null }>;
+  corregidos: Array<{ movimiento_id: string; antes: { cuenta: string | null; fecha: string; descripcion: string; monto: number; proyecto_id: string | null }; despues: { cuenta: string | null; fecha: string; descripcion: string; monto: number; proyecto_id: string | null }; problema: string | null }>;
   por_ligar: Array<{ movimiento_id: string; cfdi_id: string; factura: string; fecha: string; descripcion: string; sin_iva: number; monto_antes: number; monto_despues: number; iva: number; problema: string | null }>;
   traidos: Array<{ id: string; fecha: string; monto: number; descripcion: string; descripcion_nueva: string | null; proyecto_id: string | null; proyecto: string | null; facturas: string[]; problema: string | null }>;
   /** Lo que quedaría SIN IVA si se ligan (el pago toma su parte del IVA de la factura). */
@@ -3667,7 +3667,7 @@ export class OrgDB extends DurableObject<Env> {
     const nombreCuenta = (id: unknown) => (id == null ? null : cuentas.find((c) => c.id === String(id))?.nombre ?? String(id));
     for (const c of args.corregir ?? []) {
       const mid = String(c?.movimiento_id ?? '');
-      const m = this.sql.exec(`SELECT id, tipo, fecha, descripcion, cuenta_id, monto FROM movimientos WHERE id = ?`, mid).toArray()[0] as Fila | undefined;
+      const m = this.sql.exec(`SELECT id, tipo, fecha, descripcion, cuenta_id, monto, proyecto_id FROM movimientos WHERE id = ?`, mid).toArray()[0] as Fila | undefined;
       /* 0.111.3 · El monto sólo se corrige en un pago con UNA factura: la liga
        * se mueve con él y el IVA se reparte otra vez (Mike, 19-nov-2026: el
        * histórico de IMA dice $232,000 donde la factura A-760 es de $232,348). */
@@ -3677,10 +3677,10 @@ export class OrgDB extends DurableObject<Env> {
            FROM cfdi_movimientos lm JOIN cfdi k ON k.id = lm.cfdi_id WHERE lm.movimiento_id = ?`, mid).toArray() as Fila[];
       const fecha = c?.fecha == null ? null : String(c.fecha).slice(0, 10);
       const cuentaNueva = c?.cuenta_id == null ? null : String(c.cuenta_id);
-      const antes = { cuenta: nombreCuenta(m?.cuenta_id), fecha: String(m?.fecha ?? '').slice(0, 10), descripcion: String(m?.descripcion ?? ''), monto: Number(m?.monto || 0) };
+      const antes = { cuenta: nombreCuenta(m?.cuenta_id), fecha: String(m?.fecha ?? '').slice(0, 10), descripcion: String(m?.descripcion ?? ''), monto: Number(m?.monto || 0), proyecto_id: m?.proyecto_id == null ? null : String(m.proyecto_id) };
       res.corregidos.push({
         movimiento_id: mid, antes,
-        despues: { cuenta: cuentaNueva ? nombreCuenta(cuentaNueva) : antes.cuenta, fecha: fecha ?? antes.fecha, descripcion: c?.descripcion == null ? antes.descripcion : String(c.descripcion).trim(), monto: montoNuevo ?? antes.monto },
+        despues: { cuenta: cuentaNueva ? nombreCuenta(cuentaNueva) : antes.cuenta, fecha: fecha ?? antes.fecha, descripcion: c?.descripcion == null ? antes.descripcion : String(c.descripcion).trim(), monto: montoNuevo ?? antes.monto, proyecto_id: c?.sin_proyecto ? null : antes.proyecto_id },
         problema: !m ? 'el pago no existe' : m.tipo !== 'ingreso' ? 'no es un ingreso'
           : cuentaNueva && !cuentas.some((x) => x.id === cuentaNueva) ? 'la cuenta no existe'
           : fecha && !/^\d{4}-\d{2}-\d{2}$/.test(fecha) ? 'la fecha no es AAAA-MM-DD'
@@ -3940,6 +3940,10 @@ export class OrgDB extends DurableObject<Env> {
       if (c.fecha) datos.fecha = String(c.fecha).slice(0, 10);
       if (c.descripcion != null) datos.descripcion = String(c.descripcion).trim();
       if (c.monto != null) datos.monto = Math.trunc(Number(c.monto));
+      /* 0.111.4 · Sacarlo del proyecto: se queda como ingreso del cliente,
+       * sin obra, con sus facturas (Mike, 19-nov-2026: «Los demás habrá que
+       * ubicarlos en otros proyectos»). */
+      if (c.sin_proyecto) datos.proyecto_id = null;
       if (Object.keys(datos).length) this.actualizar('movimientos', String(c.movimiento_id), datos, ctx);
       if (c.monto != null) {
         this.sql.exec(`UPDATE cfdi_movimientos SET monto_aplicado = ? WHERE movimiento_id = ?`, Math.trunc(Number(c.monto)), String(c.movimiento_id));
