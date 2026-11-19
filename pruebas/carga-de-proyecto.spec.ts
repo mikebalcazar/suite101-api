@@ -446,3 +446,27 @@ describe('una obra vieja', () => {
     expect(await proyecto(r.data.proyecto.id)).toMatchObject({ estado: 'cerrado', descripcion: 'IP-23404 · cargada del banco', cobrado_sin_iva: 137_193_00 });
   });
 });
+
+/* 0.111.6 · Mike, 19-nov-2026: «borra los pagos hechos de la contabilidad
+ * (…) esos pagos no se han realizado». Sólo ingresos sin proyecto. */
+describe('borrar un pago que no pasó', () => {
+  it('uno de un proyecto no se borra; sin proyecto, sí, y deja de contar para el cliente', async () => {
+    const obraB = await crea('/proyectos', { cliente_id: cliente, nombre: 'Borrar pago' });
+    const r1 = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: { buscar: '', proyecto_id: obraB, cuenta_id: cuenta, conceptos: [],
+      ingresos: [{ fecha: '2024-09-27', monto: 266_800_00, iva: 36_800_00, descripcion: 'IP-24554 · por ubicar' }] } });
+    expect(r1.data, JSON.stringify(r1.data)).toMatchObject({ escrito: true });
+    const pago = (await o(`/proyectos/${obraB}/estado`)).data.movimientos[0].id;
+    const pide = (modo?: string) => interno(ORG, { llave: LLAVE, dada: LLAVE, modo, carga: { buscar: '', proyecto_id: obraB, conceptos: [], ingresos: [], borrar: [{ movimiento_id: pago }] } });
+    expect((await pide('cargar')).data).toMatchObject({ escrito: false, motivo: expect.stringContaining('es de un proyecto') });
+    await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: { buscar: '', proyecto_id: obraB, conceptos: [], ingresos: [], corregir: [{ movimiento_id: pago, sin_proyecto: true }] } });
+    const antes = (await o(`/clientes/${cliente}/estado-de-cuenta`)).data;
+    const ensayo = (await pide()).data;
+    expect(ensayo).toMatchObject({ escrito: false, borrados: [expect.objectContaining({ movimiento_id: pago, monto: 266_800_00, sin_iva: 230_000_00, iva: 36_800_00, proyecto_id: null, problema: null })] });
+    expect((await mov(pago))).toMatchObject({ monto: 266_800_00 });
+    expect((await pide('cargar')).data).toMatchObject({ escrito: true });
+    expect((await o(`/movimientos/${pago}`)).estado).toBe(404);
+    const despues = (await o(`/clientes/${cliente}/estado-de-cuenta`)).data;
+    expect(despues.otros_pagos.length).toBe(antes.otros_pagos.length - 1);
+    expect(despues.totales.sin_proyecto).toBe(antes.totales.sin_proyecto - 230_000_00);
+  });
+});

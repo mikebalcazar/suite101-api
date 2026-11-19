@@ -284,6 +284,13 @@ export interface CargaDeProyecto {
    *  $23,200 de HOLCIM: entró a efectivo»). El dinero y sus facturas no se
    *  tocan aquí. */
   corregir?: Array<{ movimiento_id: string; cuenta_id?: string | null; fecha?: string | null; descripcion?: string | null; monto?: number | null; sin_proyecto?: boolean }>;
+  /** 0.111.6 · Borrar ingresos que no pasaron. Sólo ingresos SIN proyecto
+   *  (los «por ubicar»): uno de una obra se saca primero con `corregir`. Si
+   *  tenía facturas ligadas, las ligas se quitan y la factura queda sin
+   *  ligar (Mike, 19-nov-2026: «borra los pagos hechos de la contabilidad.
+   *  Probablemente hayan sido reembolsados (…) esos pagos no se han
+   *  realizado»). */
+  borrar?: Array<{ movimiento_id: string }>;
   /** Ligar cada ingreso a su factura (por folio) al cargarlo. Sólo cuando
    *  hay exactamente una factura vigente con ese folio. */
   ligar?: boolean;
@@ -319,6 +326,8 @@ export interface ResultadoCargaDeProyecto {
     facturas: Array<FacturaDeCarga & { uuid: string; conceptos: string[]; ligas: Array<{ movimiento_id: string; fecha: string; monto_aplicado: number; proyecto: string | null }> }>;
     ingresos: Array<{ id: string; fecha: string; monto: number; sin_iva: number; iva: number; descripcion: string; proyecto: string | null; cuenta: string | null; facturas: string[] }>;
   } | null;
+  /** 0.111.6 · Los ingresos que se borran, como están hoy. */
+  borrados: Array<{ movimiento_id: string; fecha: string; monto: number; sin_iva: number; iva: number; descripcion: string; cuenta: string | null; cliente: string | null; proyecto_id: string | null; facturas: string[]; problema: string | null }>;
   corregidos: Array<{ movimiento_id: string; antes: { cuenta: string | null; fecha: string; descripcion: string; monto: number; proyecto_id: string | null }; despues: { cuenta: string | null; fecha: string; descripcion: string; monto: number; proyecto_id: string | null }; problema: string | null }>;
   por_ligar: Array<{ movimiento_id: string; cfdi_id: string; factura: string; fecha: string; descripcion: string; sin_iva: number; monto_antes: number; monto_despues: number; iva: number; problema: string | null }>;
   traidos: Array<{ id: string; fecha: string; monto: number; descripcion: string; descripcion_nueva: string | null; proyecto_id: string | null; proyecto: string | null; facturas: string[]; problema: string | null }>;
@@ -3664,7 +3673,7 @@ export class OrgDB extends DurableObject<Env> {
       escribir: !!args.escribir, escrito: false, motivo: null, proyectos, cuentas, proyecto: null,
       conceptos_que_hay: [], ingresos_que_hay: [], repetidos: [],
       a_crear: { conceptos: conceptos.length, precio, ingresos: ingresos.length, cobrado }, despues: null,
-      facturas: [], si_se_ligan: null, ligados: 0, clientes: [], traidos: [], sin_ligar: null, por_ligar: [], conciliacion: null, corregidos: [],
+      facturas: [], si_se_ligan: null, ligados: 0, clientes: [], traidos: [], sin_ligar: null, por_ligar: [], conciliacion: null, corregidos: [], borrados: [],
     };
     const nombreCuenta = (id: unknown) => (id == null ? null : cuentas.find((c) => c.id === String(id))?.nombre ?? String(id));
     for (const c of args.corregir ?? []) {
@@ -3690,6 +3699,26 @@ export class OrgDB extends DurableObject<Env> {
           : montoNuevo != null && ligas.length !== 1 ? 'el monto sólo se corrige en un pago con una factura'
           : montoNuevo != null && Number(ligas[0].ya) - Number(ligas[0].monto_aplicado) + montoNuevo > Number(ligas[0].total) ? 'el monto pasa del total de su factura' : null,
       });
+    }
+    const vistos = new Set<string>();
+    for (const b of args.borrar ?? []) {
+      const mid = String(b?.movimiento_id ?? '');
+      const m = this.sql.exec(
+        `SELECT m.id, m.tipo, m.fecha, m.monto, m.subtotal, m.iva, m.descripcion, m.cuenta_id, m.proyecto_id, c.nombre AS cliente
+           FROM movimientos m LEFT JOIN clientes c ON c.id = m.contraparte_id WHERE m.id = ?`, mid).toArray()[0] as Fila | undefined;
+      const facturas = (this.sql.exec(
+        `SELECT TRIM(COALESCE(k.serie,'') || '-' || COALESCE(k.folio,''), '-') AS f FROM cfdi_movimientos lm JOIN cfdi k ON k.id = lm.cfdi_id WHERE lm.movimiento_id = ?`, mid,
+      ).toArray() as Fila[]).map((x) => String(x.f || '¿sin folio?'));
+      const iva = Number(m?.iva || 0);
+      const sinIva = m?.subtotal != null ? Number(m.subtotal) : Number(m?.monto || 0) - iva;
+      res.borrados.push({
+        movimiento_id: mid, fecha: String(m?.fecha ?? '').slice(0, 10), monto: Number(m?.monto || 0), sin_iva: sinIva, iva,
+        descripcion: String(m?.descripcion ?? ''), cuenta: nombreCuenta(m?.cuenta_id), cliente: m?.cliente == null ? null : String(m.cliente),
+        proyecto_id: m?.proyecto_id == null ? null : String(m.proyecto_id), facturas,
+        problema: !m ? 'el pago no existe' : m.tipo !== 'ingreso' ? 'no es un ingreso' : vistos.has(mid) ? 'viene repetido'
+          : m.proyecto_id != null ? 'es de un proyecto: sácalo primero con corregir (sin_proyecto)' : null,
+      });
+      vistos.add(mid);
     }
     for (const t of args.traer ?? []) {
       const id = String(t?.movimiento_id ?? '');
@@ -3877,6 +3906,7 @@ export class OrgDB extends DurableObject<Env> {
       : nuevo && proyectos.some((x) => normalizar(x.nombre) === normalizar(String(nuevo.nombre))) ? 'ya hay un proyecto con ese nombre: usa su proyecto_id'
       : !p && !nuevo ? 'falta el proyecto exacto (proyecto_id) o crear_proyecto'
       : ingresos.find((i) => i.cfdi_id && !porId.has(i.cfdi_id)) ? 'una factura escogida (cfdi_id) no existe'
+      : res.borrados.find((x) => x.problema) ? `un pago no se puede borrar: ${JSON.stringify(res.borrados.find((x) => x.problema))}`
       : res.corregidos.find((x) => x.problema) ? `un pago no se puede corregir: ${JSON.stringify(res.corregidos.find((x) => x.problema))}`
       : res.por_ligar.find((x) => x.problema) ? `un pago no se puede ligar: ${JSON.stringify(res.por_ligar.find((x) => x.problema))}`
       : res.traidos.find((t) => t.problema) ? `un ingreso que se trae no se puede mover: ${JSON.stringify(res.traidos.find((t) => t.problema))}`
@@ -3887,6 +3917,22 @@ export class OrgDB extends DurableObject<Env> {
       : null;
     if (res.motivo) return res;
     const ctx: ContextoEscritura = { app: 'dash101', usuario_id: 'carga-interna' };
+    /* Todos o ninguno: si uno lo usa otra cosa (una conciliación, una orden),
+     * no se borra ni ése ni los demás, y se dice cuál. */
+    if (res.borrados.length) {
+      try {
+        this.ctx.storage.transactionSync(() => {
+          for (const x of res.borrados) {
+            this.sql.exec(`DELETE FROM cfdi_movimientos WHERE movimiento_id = ?`, x.movimiento_id);
+            const r = this.borrar('movimientos', x.movimiento_id);
+            if (r !== true) throw new Error(`${x.movimiento_id} ${r === 'en_uso' ? 'lo usa otra cosa (conciliación u orden)' : 'no existe'}`);
+          }
+        });
+      } catch (e) {
+        res.motivo = `no se borró ninguno: ${(e as Error).message}`;
+        return res;
+      }
+    }
     const creados: Array<{ id: string; folio: string; monto: number; cfdi_id?: string }> = [];
     this.ctx.storage.transactionSync(() => {
       if (nuevo) {

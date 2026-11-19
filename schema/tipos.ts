@@ -17,7 +17,12 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.111.5 (OBRAS VIEJAS DE IMA. Mike, 19-nov: «Sí, como obras
+ * Versión del contrato: 0.111.6 (BORRAR PAGOS QUE NO PASARON. Mike, 19-nov:
+ * «borra los pagos hechos de la contabilidad (…) esos pagos no se han
+ * realizado». La carga acepta `borrar`: sólo ingresos sin proyecto, todos o
+ * ninguno; sus ligas a facturas se quitan. Sin cambio para las apps.)
+ *
+ * Antes, 0.111.5 (OBRAS VIEJAS DE IMA. Mike, 19-nov: «Sí, como obras
  * cerradas». `crear_proyecto` acepta `estado` y `descripcion`; `buscar: "*"`
  * enseña todos los proyectos. Sin cambio para las apps.)
  *
@@ -1801,7 +1806,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.111.5';
+export const VERSION_CONTRATO = '0.111.6';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
