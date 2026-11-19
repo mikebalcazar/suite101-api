@@ -251,7 +251,7 @@ export interface CargaDeProyecto {
    *  suma. Sin grupo van a «Otros conceptos». */
   conceptos: Array<{ grupo?: string; seccion?: string; nombre: string; descripcion?: string; cantidad?: number; precio_unitario: number }>;
   /** `folio`: el de la factura expedida que respalda el pago, si la hay. */
-  ingresos: Array<{ fecha: string; monto: number; descripcion: string; requiere_factura?: boolean; folio?: string | null; cfdi_id?: string | null }>;
+  ingresos: Array<{ fecha: string; monto: number; descripcion: string; requiere_factura?: boolean; folio?: string | null; cfdi_id?: string | null; iva?: number | null }>;
   /** 0.110.1 · Si el proyecto todavía no existe: se crea con este nombre y
    *  cliente al escribir (Mike, 19-nov-2026: «un proyecto nuevo de IMA que se
    *  llama TATA E2»). */
@@ -3615,9 +3615,13 @@ export class OrgDB extends DurableObject<Env> {
       fecha: String(i.fecha ?? '').slice(0, 10), monto: Math.trunc(Number(i.monto)), descripcion: String(i.descripcion ?? '').trim(),
       requiere_factura: !!i.requiere_factura, folio: i.folio == null ? '' : String(i.folio).trim(),
       cfdi_id: i.cfdi_id ? String(i.cfdi_id) : undefined,
+      /* 0.110.2 · El IVA que trae un pago que todavía no tiene factura (Mike,
+       * 19-nov-2026: «HOLCIM, hoy pagaron 20,000 + IVA»): `monto` es lo que
+       * entró al banco y el subtotal es el monto menos este IVA. */
+      iva: i.iva == null ? 0 : Math.trunc(Number(i.iva)),
     }));
     const precio = conceptos.reduce((t, c) => t + Math.round(c.cantidad * c.precio_unitario), 0);
-    const cobrado = ingresos.reduce((t, i) => t + i.monto, 0);
+    const cobrado = ingresos.reduce((t, i) => t + i.monto - i.iva, 0);
     const res: ResultadoCargaDeProyecto = {
       escribir: !!args.escribir, escrito: false, motivo: null, proyectos, cuentas, proyecto: null,
       conceptos_que_hay: [], ingresos_que_hay: [], repetidos: [],
@@ -3692,11 +3696,12 @@ export class OrgDB extends DurableObject<Env> {
         const parte = Math.min(i.monto, f.total) / f.total;
         const iva = Math.round(f.iva * parte);
         ivaLigado += iva; sinIvaLigado += i.monto - iva;
-      } else sinIvaLigado += i.monto;
+      } else { sinIvaLigado += i.monto - i.iva; ivaLigado += i.iva; }
     }
     if (ingresos.some((i) => suFactura(i))) res.si_se_ligan = { cobrado_sin_iva: sinIvaLigado, iva: ivaLigado };
     const malo = conceptos.find((c) => (!c.nombre && !c.descripcion) || !Number.isSafeInteger(c.precio_unitario))
-      ?? ingresos.find((i) => !/^\d{4}-\d{2}-\d{2}$/.test(i.fecha) || !Number.isSafeInteger(i.monto) || i.monto <= 0);
+      ?? ingresos.find((i) => !/^\d{4}-\d{2}-\d{2}$/.test(i.fecha) || !Number.isSafeInteger(i.monto) || i.monto <= 0
+        || !Number.isSafeInteger(i.iva) || i.iva < 0 || i.iva >= i.monto || (i.iva > 0 && !!(i.cfdi_id || i.folio)));
     const pid = args.proyecto_id ? String(args.proyecto_id) : (proyectos.length === 1 && !args.crear_proyecto ? proyectos[0].id : null);
     let p = pid ? this.sql.exec(`SELECT p.id, p.nombre, p.cliente_id, p.precio_venta, c.nombre AS cliente FROM proyectos p LEFT JOIN clientes c ON c.id = p.cliente_id WHERE p.id = ?`, pid).toArray()[0] as Fila | undefined : undefined;
     if (p) {
@@ -3755,7 +3760,7 @@ export class OrgDB extends DurableObject<Env> {
         const m = this.crear('movimientos', {
           tipo: 'ingreso', monto: i.monto, fecha: i.fecha, cuenta_id: cuenta!.id, proyecto_id: p!.id,
           contraparte_tipo: p!.cliente_id ? 'cliente' : null, contraparte_id: p!.cliente_id ?? null, contraparte_nombre: p!.cliente ?? null,
-          descripcion: i.descripcion, facturado: false, subtotal: i.monto, iva: 0, tasa_iva: 0, retenciones: 0, requiere_factura: i.requiere_factura,
+          descripcion: i.descripcion, facturado: false, subtotal: i.monto - i.iva, iva: i.iva, tasa_iva: i.iva > 0 ? 1600 : 0, retenciones: 0, requiere_factura: i.requiere_factura,
         }, ctx);
         creados.push({ id: String(m.id), folio: i.folio, monto: i.monto, cfdi_id: i.cfdi_id });
       }
