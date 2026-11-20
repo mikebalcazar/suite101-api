@@ -578,6 +578,18 @@ describe('0.49.0 · las piezas de una cotización aprobada nacen en su partida',
     expect(silla.partida).toBe('Etapa 2');
   });
 
+  /* 0.115.1 · Mike, 20-nov-2026: «Acabo de aprobar una cotización en un
+   * proyecto (Aniceto Ortega NEW) y no aparece el proyecto en la lista». */
+  it('aprobar activa un proyecto que estaba planeando; uno pausado se queda pausado', async () => {
+    for (const [estado, espera] of [['planeando', 'activo'], ['pausado', 'pausado']] as const) {
+      const pr = (await o('mike', '/proyectos', { app: 'dash101', method: 'POST', json: { nombre: `Obra ${estado} con cotización`, cliente_id: cliente, estado } })).data.id as string;
+      const c = (await o('mike', '/cotizaciones', { ...C, method: 'POST', json: { negocio_id: negocio, cliente_id: cliente, total: 0, datos: { nombre: `Cot ${estado}`, proyecto_id: pr, versiones: [] } } })).data.id as string;
+      const r = await o('mike', `/cotizaciones/${c}/aprobar`, { ...C, method: 'POST', json: { proyecto_id: pr, lineas: [{ nombre: 'Clóset', cantidad: 1, precio: 1000 }] } });
+      expect(r.estado, JSON.stringify(r)).toBe(201);
+      expect((await o('mike', `/proyectos/${pr}`, { app: 'dash101' })).data.estado, estado).toBe(espera);
+    }
+  });
+
   it('un item_id que no es del proyecto se rechaza sin escribir nada', async () => {
     const c = await cotizacion('Corrida 5');
     const r = await o('mike', `/cotizaciones/${c}/aprobar`, { ...C, method: 'POST', json: { proyecto_id: proyecto, lineas: [{ nombre: 'Buena', cantidad: 1, precio: 100 }, { item_id: 'no-existe', nombre: 'Mala', cantidad: 1, precio: 100 }] } });

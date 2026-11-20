@@ -245,6 +245,18 @@ describe('proyectos sin ingresos a planeando, y el primer cobro los activa', () 
     await crea('/movimientos', { tipo: 'ingreso', monto: 10_000_00, fecha: '2026-11-20', cuenta_id: cuenta, proyecto_id: vacio, descripcion: 'Anticipo' });
     expect((await proyecto(vacio)).estado).toBe('activo');
   });
+  it('activar por id: sólo uno en planeando, y el ensayo no toca nada', async () => {
+    const p = await crea('/proyectos', { nombre: 'Aprobada antes', cliente_id: cliente, estado: 'planeando' });
+    const e = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'ensayo', carga: { buscar: '', conceptos: [], ingresos: [], activar_proyectos: [p] } });
+    expect(e.data.activados).toEqual([expect.objectContaining({ id: p, estado: 'planeando', activado: false, problema: null })]);
+    expect((await proyecto(p)).estado).toBe('planeando');
+    const mal = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: { buscar: '', conceptos: [], ingresos: [], activar_proyectos: [p, obra] } });
+    expect(mal.data.motivo).toMatch(/no se puede activar/);
+    expect((await proyecto(p)).estado, 'todo o nada').toBe('planeando');
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: { buscar: '', conceptos: [], ingresos: [], activar_proyectos: [p] } });
+    expect(r.data.escrito).toBe(true);
+    expect((await proyecto(p)).estado).toBe('activo');
+  });
   it('un proyecto pausado a mano no se activa con un cobro', async () => {
     const p = await crea('/proyectos', { nombre: 'Pausada a propósito', cliente_id: cliente, estado: 'pausado' });
     await crea('/movimientos', { tipo: 'ingreso', monto: 5_000_00, fecha: '2026-11-20', cuenta_id: cuenta, proyecto_id: p, descripcion: 'Pago' });

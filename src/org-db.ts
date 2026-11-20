@@ -312,6 +312,9 @@ export interface CargaDeProyecto {
    *  20-nov-2026: «todos los que están sin movimientos ahorita (ingresos)
    *  márcalos como no activos»). Con su primer cobro vuelven a activo solos. */
   sin_ingresos_a_planeando?: { marcar?: boolean } | null;
+  /** 0.115.1 · Pasar a «activo» proyectos que están en planeando, por id (el
+   *  de Aniceto Ortega NEW, que se aprobó antes de que aprobar activara). */
+  activar_proyectos?: string[] | null;
   /** Ligar cada ingreso a su factura (por folio) al cargarlo. Sólo cuando
    *  hay exactamente una factura vigente con ese folio. */
   ligar?: boolean;
@@ -327,6 +330,8 @@ export interface ResultadoCargaDeProyecto {
   motivo: string | null;
   /** 0.113.1 · El cliente que se creó con `crear_cliente`. */
   cliente_creado?: { id: string; nombre: string; rfc: string | null } | null;
+  /** 0.115.1 · Los que se piden activar: cómo están y si se activaron. */
+  activados?: Array<{ id: string; nombre: string; estado: string; activado: boolean; problema: string | null }> | null;
   /** 0.115.0 · Proyectos sin ingresos que pasan (o pasarían) a planeando. */
   sin_ingresos?: { lista: Array<{ id: string; nombre: string; cliente: string | null; estado: string; precio_venta: number; n_conceptos: number }>; marcados: number } | null;
   /** 0.114.0 · Las cuentas por pagar (partidas) que hay, y si se borraron. */
@@ -2370,6 +2375,11 @@ export class OrgDB extends DurableObject<Env> {
         JSON.stringify(datos), ahora(), args.cotizacion_id,
       );
     });
+    /* 0.115.1 · Aprobar la cotización activa un proyecto que estaba planeando
+     * (Mike, 20-nov-2026: «Acabo de aprobar una cotización en un proyecto
+     * (Aniceto Ortega NEW) y no aparece el proyecto en la lista»). Igual que
+     * el primer cobro; pausado, finiquito y cerrado no se tocan. */
+    this.sql.exec(`UPDATE proyectos SET estado = 'activo', actualizado_at = ? WHERE id = ? AND estado = 'planeando'`, ahora(), args.proyecto_id);
     const p = this.recalcularProyecto(args.proyecto_id)!;
     return { ok: true, cotizacion: this.obtener('cotizaciones', args.cotizacion_id)!, proyecto: p, items: creados, productos_nuevos: productosNuevos };
   }
@@ -3962,6 +3972,25 @@ export class OrgDB extends DurableObject<Env> {
       const sinIvaHoy = Number((this.sql.exec(`SELECT cobrado_sin_iva FROM proyectos WHERE id = ?`, p.id).toArray()[0] as Fila | undefined)?.cobrado_sin_iva || 0);
       const precioDespues = res.conceptos_que_hay.reduce((t, c) => t + c.monto, 0) + precio;
       res.despues = { precio_venta: precioDespues, cobrado_sin_iva: sinIvaHoy + cobrado, saldo: precioDespues - sinIvaHoy - cobrado };
+    }
+    if (args.activar_proyectos?.length) {
+      res.activados = args.activar_proyectos.slice(0, 50).map((id) => {
+        const f = this.sql.exec(`SELECT id, nombre, estado FROM proyectos WHERE id = ?`, String(id)).toArray()[0] as Fila | undefined;
+        return { id: String(id), nombre: String(f?.nombre ?? ''), estado: String(f?.estado ?? ''), activado: false,
+          problema: !f ? 'no existe' : f.estado !== 'planeando' ? `está en ${String(f.estado)}, no en planeando` : null };
+      });
+      if (!args.escribir) return res;
+      if (res.activados.some((x) => x.problema)) { res.motivo = `uno no se puede activar: ${JSON.stringify(res.activados.find((x) => x.problema))}`; return res; }
+      if (conceptos.length || ingresos.length || args.partidas_por_pagar || args.sin_ingresos_a_planeando || args.crear_proyecto) {
+        res.motivo = 'activar proyectos va solo, sin otra cosa en la misma carga';
+        return res;
+      }
+      const t = ahora();
+      this.ctx.storage.transactionSync(() => {
+        for (const x of res.activados!) { this.sql.exec(`UPDATE proyectos SET estado = 'activo', actualizado_at = ? WHERE id = ? AND estado = 'planeando'`, t, x.id); x.activado = true; x.estado = 'activo'; }
+      });
+      res.escrito = true;
+      return res;
     }
     if (args.sin_ingresos_a_planeando) {
       const lista = (this.sql.exec(

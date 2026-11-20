@@ -106,6 +106,7 @@ jobs:
             | "\(if $d.escribir then (if $d.escrito then "CARGADO" else "NO SE CARGÓ" end) else "ENSAYO (no se escribió nada)" end) · \($d.org)",
               (if $d.motivo then "motivo: \($d.motivo)" else empty end),
               (if $d.escrito then "facturas ligadas: \($d.ligados)" else empty end),
+              (if $d.activados then "== Proyectos que se activan ==", ($d.activados[] | "  \(.id) · \(.nombre) · \(.estado)\(if .activado then " · ACTIVADO" else "" end)\(if .problema then " · NO SE PUEDE: \(.problema)" else "" end)"), "" else empty end),
               (if $d.sin_ingresos then "== Proyectos sin ingresos (pasan a planeando) ==", "hay \($d.sin_ingresos.lista | length) · marcados: \($d.sin_ingresos.marcados)",
                 ($d.sin_ingresos.lista[] | "  \(.id) · \(.nombre) · cliente \(.cliente // "—") · estado \(.estado) · precio \(.precio_venta | m) · \(.n_conceptos) conceptos"), "" else empty end),
               (if $d.partidas then "== Cuentas por pagar (partidas) ==",
