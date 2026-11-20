@@ -17,7 +17,15 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.112.1 (BILL101 SALE DE LA PUERTA. Mike, 19-nov:
+ * Versión del contrato: 0.112.2 (PATRON101 ES DE QUIEN PRESTA. Mike, 20-nov:
+ * «hay que meter patron101 a dash también. Igual que bill101»; con botones:
+ * «Mandarlo a dash101». Lo de quien dirige vive en dash101 → Préstamos; la
+ * puerta de la suite y la lista de plataformas presentan patron101 como
+ * donde entra quien presta, y la tarjeta de dash101 dice que los préstamos
+ * están ahí. Las rutas /inversion/*, los papeles y la llave `investor` no
+ * cambian: sólo textos.)
+ *
+ * Antes, 0.112.1 (BILL101 SALE DE LA PUERTA. Mike, 19-nov:
  * «vamos a fusionar bill101 con dash101»; 20-nov, con botones: «Redirigirla
  * hoy». La puerta de la suite y la lista de plataformas de la bienvenida ya
  * no traen bill101; la tarjeta de dash101 dice que lo fiscal está ahí. Las
@@ -1819,7 +1827,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.112.1';
+export const VERSION_CONTRATO = '0.112.2';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {

@@ -155,6 +155,21 @@ describe('la puerta de la suite', () => {
     expect(tarjeta).not.toMatch(/declaraci/i);
   });
 
+  /* 20-nov-2026 · lo de quien dirige en patron101 se mudó al menú
+   * «Préstamos» de dash101 (Mike: «hay que meter patron101 a dash también.
+   * Igual que bill101»; con botones: «Mandarlo a dash101»). A diferencia de
+   * bill101, patron101 SIGUE: es donde entra quien le presta a la empresa.
+   * Su tarjeta lo dice así, y la de dash101 dice que los préstamos están
+   * ahí. */
+  it('patron101 se presenta como lo de quien presta; los préstamos de la empresa los dice dash101', async () => {
+    const html = await (await SELF.fetch(`${SUITE}/`)).text();
+    const de = (host: string) => html.match(new RegExp(`<a class="app"[^>]*href="https://${host}\\.suite101\\.app"`))?.[0] ?? '';
+    expect(de('patron')).toContain('Para quien le presta a la empresa');
+    expect(de('patron')).not.toMatch(/Rondas de inversión/);
+    expect(de('dash')).toContain('los préstamos de la empresa');
+    expect(de('dash')).toContain('facturas e impuestos estimados');
+  });
+
   it('/salud contesta también en la puerta, para medirla', async () => {
     const r = await SELF.fetch(`${SUITE}/salud`);
     expect(r.status).toBe(200);

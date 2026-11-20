@@ -44,7 +44,10 @@ const CATALOGO: Array<{ app: App; nombre: string; lema: string; sub: string; rut
   { app: 'quell101', nombre: 'quell101', lema: 'La obra sobre el plano', sub: 'quell101' },
   { app: 'cotizador101', nombre: 'quote101', lema: 'Cotizaciones', sub: 'quote101' },
   { app: 'cost101', nombre: 'cost101', lema: 'Costos por partida', sub: 'cost101' },
-  { app: 'investor101', nombre: 'patron101', lema: 'Inversionistas', sub: 'patron101' },
+  /* 20-nov-2026 · patron101 es sólo de quien presta: lo de quien dirige vive
+   * en dash101 → Préstamos. La dirección se le sigue dando a quien abre la
+   * empresa porque es la que le pasa a su gente. */
+  { app: 'investor101', nombre: 'patron101', lema: 'Donde entra quien te presta', sub: 'patron101' },
   { app: 'supply101', nombre: 'supply101', lema: 'Compras y reembolsos', sub: 'supply101' },
   { app: 'roster101', nombre: 'roster101', lema: 'Expedientes del personal', sub: 'roster101', ruta: '/admin' },
   { app: 'peek101', nombre: 'peek101', lema: 'Lo que ve tu cliente', sub: 'peek101' },
