@@ -129,7 +129,7 @@ jobs:
               "",
               (if ($d.clientes // []) | length > 0 then "== Clientes ==", ($d.clientes[] | "\(.id) · \(.nombre) · \(.rfc // "—")"), "" else empty end),
               "== Facturas expedidas, pago por pago ==",
-              ($d.facturas[] | def fac: "\(.id) \((.serie // "") + (.folio // "")) \(.fecha) sub \(.subtotal | m) total \(.total | m) (IVA \(.iva | m)) \(.estado) ligado \(.ya_ligado | m) · \(.razon_social // .rfc // "—")";
+              ($d.facturas[] | def fac: "\(.id) \((.serie // "") + (.folio // "")) \(.fecha) sub \(.subtotal | m) total \(.total | m) (IVA \(.iva | m)) \(.estado) ligado \(.ya_ligado | m) · \(.razon_social // "—") · RFC \(.rfc // "—")";
                 "pago \(if .folio == "" then "sin folio" else .folio end) · \(if .fecha == "" then "sin fecha" else .fecha end) \(.monto | m)",
                 (if .folio == "" then empty elif (.encontradas | length) == 0 then "  por folio: NO ESTÁ" else (.encontradas[] | "  por folio: " + fac) end),
                 (if (.por_monto // []) | length == 0 then "  por monto: ninguna" else (.por_monto[] | "  por monto: " + fac) end)),
