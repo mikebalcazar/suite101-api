@@ -17,7 +17,14 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.111.6 (BORRAR PAGOS QUE NO PASARON. Mike, 19-nov:
+ * Versión del contrato: 0.112.0 (BUSCAR LA FACTURA DE UN PAGO. Mike, 19-nov:
+ * «agregar la opción de buscar factura y que revise en los CFDIs si alguno
+ * coincide o está cerca y los sugiera». GET /fiscal/facturas-sugeridas
+ * ?tipo&monto(centavos)&fecha&cliente_id&proyecto_id&movimiento_id →
+ * `{ facturas }` con `restante`, `diferencia`, `coincide`
+ * (exacto|sin_iva|cerca|null), `mismo_rfc`, `dias`. Aditivo.)
+ *
+ * Antes, 0.111.6 (BORRAR PAGOS QUE NO PASARON. Mike, 19-nov:
  * «borra los pagos hechos de la contabilidad (…) esos pagos no se han
  * realizado». La carga acepta `borrar`: sólo ingresos sin proyecto, todos o
  * ninguno; sus ligas a facturas se quitan. Sin cambio para las apps.)
@@ -1806,7 +1813,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.111.6';
+export const VERSION_CONTRATO = '0.112.0';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {

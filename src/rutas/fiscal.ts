@@ -238,6 +238,21 @@ export function montarFiscal(rutas: App): void {
     return ok(c, r);
   });
 
+  /* 0.112.0 · Las facturas que pueden ser de un pago que se está capturando
+   * (Mike, 19-nov-2026, en el formulario del movimiento: «buscar factura»).
+   * `monto` en centavos; `fecha`, `cliente_id`, `proyecto_id` y
+   * `movimiento_id` (al corregir uno) ayudan a ordenar. */
+  rutas.get('/:o/fiscal/facturas-sugeridas', async (c) => {
+    if (!puedeLeer(c)) return err(c, 'sin_permiso', 403);
+    const q = c.req.query();
+    const r = await stub(c).fiscal('facturasSugeridas', [{
+      tipo: q.tipo ?? '', monto: Number(q.monto), fecha: q.fecha || null,
+      cliente_id: q.cliente_id || null, proyecto_id: q.proyecto_id || null, movimiento_id: q.movimiento_id || null,
+    }]);
+    if (esFalla(r)) return err(c, r.error, 400, r.detalle);
+    return ok(c, r);
+  });
+
   rutas.get('/:o/fiscal/sugerencias', async (c) => {
     if (!puedeLeer(c)) return err(c, 'sin_permiso', 403);
     const q = c.req.query();
