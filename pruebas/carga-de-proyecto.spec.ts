@@ -470,3 +470,21 @@ describe('borrar un pago que no pasó', () => {
     expect(despues.totales.sin_proyecto).toBe(antes.totales.sin_proyecto - 230_000_00);
   });
 });
+
+/* 0.112.0 · Mike, 19-nov-2026, en el formulario del movimiento: «buscar
+ * factura y que revise en los CFDIs si alguno coincide o está cerca». */
+describe('buscar la factura de un pago que se captura', () => {
+  it('sugiere la exacta, la de su subtotal y las cercanas; no las lejanas', async () => {
+    const cli = await crea('/clientes', { nombre: 'Sugerencias SA', rfc: 'SUG010101AB1' });
+    const f = await o('/fiscal/cfdi', { method: 'POST', json: { tipo: 'ingreso', rfc: 'SUG010101AB1', razon_social: 'Sugerencias', uuid: 'EEEEEEEE-0000-4000-8000-000000000901', subtotal: 106_431_71, iva: 17_029_07, total: 123_460_78, fecha: '2026-11-10' } });
+    expect(f.estado, JSON.stringify(f)).toBe(201);
+    const busca = async (monto: number, extra = '') => (await o(`/fiscal/facturas-sugeridas?tipo=ingreso&monto=${monto}&fecha=2026-11-19&cliente_id=${cli}${extra}`));
+    const exacta = await busca(123_460_78);
+    expect(exacta.estado, JSON.stringify(exacta)).toBe(200);
+    expect(exacta.data.facturas[0]).toMatchObject({ id: f.data.id, coincide: 'exacto', mismo_rfc: true, dias: 9, restante: 123_460_78 });
+    expect((await busca(106_431_71)).data.facturas[0]).toMatchObject({ id: f.data.id, coincide: 'sin_iva' });
+    expect((await busca(118_000_00)).data.facturas.find((x: any) => x.id === f.data.id)).toMatchObject({ coincide: 'cerca', diferencia: 5_460_78 });
+    expect((await busca(40_000_00)).data.facturas.find((x: any) => x.id === f.data.id)).toBeUndefined();
+    expect((await o('/fiscal/facturas-sugeridas?tipo=ingreso&monto=0')).estado).toBe(400);
+  });
+});

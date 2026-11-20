@@ -482,6 +482,53 @@ export class MotorFiscal {
     return { movimiento: { ...m, facturado: !!m.facturado, falta }, ligadas, posibles };
   }
 
+  /** 0.112.0 · Las facturas que pueden ser de un pago QUE SE ESTÁ
+   *  CAPTURANDO (todavía sin id), desde el formulario del movimiento (Mike,
+   *  19-nov-2026: «agregar la opción de buscar factura y que revise en los
+   *  CFDIs si alguno coincide o está cerca y los sugiera»).
+   *
+   *  Las vigentes tipo I del mismo lado con algo por ligar. `coincide`:
+   *  `exacto` si el monto es lo que le falta o su total (a $1); `sin_iva` si
+   *  es su subtotal; `cerca` si se aleja 10 % o menos. Se enseñan las que
+   *  coinciden o están cerca, y las del RFC del cliente a 30 % o menos;
+   *  primero las exactas, luego las del cliente, luego por diferencia y por
+   *  días. A lo más 10. */
+  facturasSugeridas(args: { tipo: string; monto: number; fecha?: string | null; cliente_id?: string | null; proyecto_id?: string | null; movimiento_id?: string | null }): { facturas: Fila[] } | Falla {
+    const tipo = args.tipo === 'egreso' ? 'egreso' : args.tipo === 'ingreso' ? 'ingreso' : null;
+    const monto = Math.trunc(Number(args.monto));
+    if (!tipo || !Number.isSafeInteger(monto) || monto <= 0) return { error: 'datos_invalidos', detalle: { falta: ['tipo', 'monto'] } };
+    const fecha = args.fecha && /^\d{4}-\d{2}-\d{2}/.test(args.fecha) ? args.fecha.slice(0, 10) : new Date().toISOString().slice(0, 10);
+    const cliente = args.proyecto_id
+      ? this.una(`SELECT cl.rfc FROM proyectos p JOIN clientes cl ON cl.id = p.cliente_id WHERE p.id = ?`, String(args.proyecto_id))
+      : undefined;
+    const delCliente = !cliente?.rfc && args.cliente_id ? this.una(`SELECT rfc FROM clientes WHERE id = ?`, String(args.cliente_id)) : undefined;
+    const rfc = String(cliente?.rfc ?? delCliente?.rfc ?? '').trim().toUpperCase();
+    const facturas = this.todas(
+      `SELECT c.*, (SELECT COALESCE(SUM(lm.monto_aplicado),0) FROM cfdi_movimientos lm WHERE lm.cfdi_id = c.id) AS aplicado
+         FROM cfdi c
+        WHERE c.estado = 'vigente' AND c.tipo = ? AND COALESCE(c.tipo_comprobante, 'I') = 'I'
+          AND NOT EXISTS (SELECT 1 FROM cfdi_movimientos lm WHERE lm.cfdi_id = c.id AND lm.movimiento_id = ?)`,
+      tipo, String(args.movimiento_id ?? ''),
+    )
+      .map((f) => {
+        const total = Number(f.total || 0);
+        const restante = total - Number(f.aplicado || 0);
+        const diferencia = Math.min(Math.abs(monto - restante), Math.abs(monto - total));
+        const coincide = diferencia <= TOLERANCIA_MONTO ? 'exacto'
+          : Math.abs(monto - Number(f.subtotal || 0)) <= TOLERANCIA_MONTO ? 'sin_iva'
+          : diferencia <= monto * 0.1 ? 'cerca' : null;
+        const mismoRfc = !!rfc && String(f.rfc ?? f.rfc_receptor ?? '').trim().toUpperCase() === rfc;
+        return { ...this.forma(f), restante, diferencia: coincide === 'sin_iva' ? 0 : diferencia, coincide, mismo_rfc: mismoRfc, dias: diasEntre(String(f.fecha), fecha) };
+      })
+      .filter((f) => f.restante > TOLERANCIA_MONTO && (f.coincide !== null || (f.mismo_rfc && f.diferencia <= monto * 0.3)))
+      .sort((a, b) => {
+        const rango = (x: { coincide: string | null }) => (x.coincide === 'exacto' || x.coincide === 'sin_iva' ? 0 : 1);
+        return rango(a) - rango(b) || Number(b.mismo_rfc) - Number(a.mismo_rfc) || a.diferencia - b.diferencia || a.dias - b.dias;
+      })
+      .slice(0, 10);
+    return { facturas };
+  }
+
   /** Deshacer una liga. Quien confirma se puede equivocar, y sin esto la
    *  única salida era cancelar la factura. El movimiento vuelve a estar sin
    *  facturar sólo si ninguna otra factura vigente lo respalda. */
