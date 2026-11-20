@@ -37,13 +37,14 @@ const enBase = (sub: string) => (sub === 'suite101' ? 'app' : PREFIJO[sub as App
 
 /** Lo que sale en la lista, en el orden de la puerta de la suite. `sub` es el
  *  nombre del sitio; `ruta`, lo que va después (el panel de roster101). */
+/* 20-nov-2026 · bill101 ya no sale: se mudó al menú «Fiscal» de dash101
+ * (Mike, con botones: «Redirigirla hoy»); bill.suite101.app redirige allá. */
 const CATALOGO: Array<{ app: App; nombre: string; lema: string; sub: string; ruta?: string }> = [
   { app: 'dash101', nombre: 'dash101', lema: 'El dinero del taller', sub: 'dash101' },
   { app: 'quell101', nombre: 'quell101', lema: 'La obra sobre el plano', sub: 'quell101' },
   { app: 'cotizador101', nombre: 'quote101', lema: 'Cotizaciones', sub: 'quote101' },
   { app: 'cost101', nombre: 'cost101', lema: 'Costos por partida', sub: 'cost101' },
   { app: 'investor101', nombre: 'patron101', lema: 'Inversionistas', sub: 'patron101' },
-  { app: 'bill101', nombre: 'bill101', lema: 'Facturas e impuestos estimados', sub: 'bill101' },
   { app: 'supply101', nombre: 'supply101', lema: 'Compras y reembolsos', sub: 'supply101' },
   { app: 'roster101', nombre: 'roster101', lema: 'Expedientes del personal', sub: 'roster101', ruta: '/admin' },
   { app: 'peek101', nombre: 'peek101', lema: 'Lo que ve tu cliente', sub: 'peek101' },

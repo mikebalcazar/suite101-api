@@ -13,7 +13,8 @@ import { DOMINIO_SUITE, DOMINIOS_SUITE, FICHAS_ESCRITORIO, destinoDeDescarga } f
 const SUITE = `https://${DOMINIO_SUITE}`;
 /* Siete programas de la empresa. master101 NO va: es el panel del dueño de la
  * suite y lo tiene sólo Mike (2-oct-2026). */
-const APPS = ['dash101', 'quell101', 'quote101', 'cost101', 'patron101', 'bill101', 'supply101', 'roster101', 'peek101', 'workshop101'];
+/* 20-nov-2026 · bill101 ya no va: se mudó al menú «Fiscal» de dash101. */
+const APPS = ['dash101', 'quell101', 'quote101', 'cost101', 'patron101', 'supply101', 'roster101', 'peek101', 'workshop101'];
 
 describe('la puerta de la suite', () => {
   it('draw, nest y shape (escritorio) llevan a su ficha en el sitio', async () => {
@@ -142,13 +143,16 @@ describe('la puerta de la suite', () => {
     expect((html.match(/<a class="app" /g) ?? []).length).toBe(APPS.length);
   });
 
-  /* 9-oct-2026 · bill101 lee facturas y estima impuestos; todavía no las
-   * emite, no las timbra ni las baja del SAT. La tarjeta no lo promete. */
-  it('la tarjeta de bill101 sólo dice lo que hace hoy', async () => {
+  /* 20-nov-2026 · bill101 se mudó al menú «Fiscal» de dash101 (Mike, con
+   * botones: «Redirigirla hoy»). Su tarjeta sale de la puerta, y la de
+   * dash101 dice que lo fiscal está ahí, sin prometer de más. */
+  it('bill101 ya no tiene tarjeta: lo fiscal lo dice la de dash101', async () => {
     const html = await (await SELF.fetch(`${SUITE}/`)).text();
-    const tarjeta = html.match(/<a class="app"[^>]*href="https:\/\/bill\.suite101\.app"[^]*?<\/a>/)?.[0] ?? '';
-    expect(tarjeta).toContain('estimados');
-    expect(tarjeta).not.toMatch(/timbr|descarga|declaraci/i);
+    expect(html).not.toContain('data-app="bill101"');
+    expect(html).not.toContain('href="https://bill.suite101.app"');
+    const tarjeta = html.match(/<a class="app"[^>]*href="https:\/\/dash\.suite101\.app"[^]*?<\/a>/)?.[0] ?? '';
+    expect(tarjeta).toContain('facturas e impuestos estimados');
+    expect(tarjeta).not.toMatch(/declaraci/i);
   });
 
   it('/salud contesta también en la puerta, para medirla', async () => {
