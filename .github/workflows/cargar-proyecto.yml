@@ -122,7 +122,7 @@ jobs:
               (if $d.proyecto then "== El proyecto: \($d.proyecto.nombre) (\($d.proyecto.id)) · cliente \($d.proyecto.cliente // "—") ==" else "== Sin proyecto exacto ==" end),
               "conceptos que ya tiene: \($d.conceptos_que_hay | length) por \([$d.conceptos_que_hay[].monto] | add // 0 | m)",
               "ingresos que ya tiene: \($d.ingresos_que_hay | length)",
-              ($d.ingresos_que_hay[] | "  \(.id) · \(.fecha) \(.monto | m) \(.descripcion[0:50])"),
+              ($d.ingresos_que_hay[] | . as $i | "  \(.id) · \(.fecha) \(.monto | m) · \(([$d.cuentas[] | select(.id == $i.cuenta_id) | .nombre] | first) // $i.cuenta_id // "sin cuenta") · \(.descripcion[0:50])"),
               "repetidos (mismo monto, ±3 días): \($d.repetidos | length)",
               ($d.repetidos[] | "  \(.fecha) \(.monto | m) \(.descripcion) ≈ ya: \(.ya.fecha) \(.ya.descripcion[0:40])"),
               "",
