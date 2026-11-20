@@ -251,7 +251,12 @@ export interface CargaDeProyecto {
    *  suma. Sin grupo van a «Otros conceptos». */
   conceptos: Array<{ grupo?: string; seccion?: string; nombre: string; descripcion?: string; cantidad?: number; precio_unitario: number }>;
   /** `folio`: el de la factura expedida que respalda el pago, si la hay. */
-  ingresos: Array<{ fecha: string; monto: number; descripcion: string; requiere_factura?: boolean; folio?: string | null; cfdi_id?: string | null; iva?: number | null }>;
+  /** 0.114.1 · `cuenta_id` en un ingreso manda sobre la de la carga (el efectivo
+   *  y las transferencias de una misma hoja entran a cuentas distintas), y
+   *  `no_es_repetido` deja pasar uno que se parece a otro ya cargado y sí es
+   *  otro pago (Mike, 20-nov-2026: Sanje, «Transfer a Bego» del 21-oct, un día
+   *  después de otro de $50,000). */
+  ingresos: Array<{ fecha: string; monto: number; descripcion: string; requiere_factura?: boolean; folio?: string | null; cfdi_id?: string | null; iva?: number | null; cuenta_id?: string | null; no_es_repetido?: boolean }>;
   /** 0.110.1 · Si el proyecto todavía no existe: se crea con este nombre y
    *  cliente al escribir (Mike, 19-nov-2026: «un proyecto nuevo de IMA que se
    *  llama TATA E2»). */
@@ -3711,6 +3716,8 @@ export class OrgDB extends DurableObject<Env> {
        * 19-nov-2026: «HOLCIM, hoy pagaron 20,000 + IVA»): `monto` es lo que
        * entró al banco y el subtotal es el monto menos este IVA. */
       iva: i.iva == null ? 0 : Math.trunc(Number(i.iva)),
+      cuenta_id: i.cuenta_id ? String(i.cuenta_id) : undefined,
+      no_es_repetido: i.no_es_repetido === true,
     }));
     const precio = conceptos.reduce((t, c) => t + Math.round(c.cantidad * c.precio_unitario), 0);
     const cobrado = ingresos.reduce((t, i) => t + i.monto - i.iva, 0);
@@ -3935,7 +3942,7 @@ export class OrgDB extends DurableObject<Env> {
       const dia = (s: string) => Date.parse(`${s}T12:00:00Z`) / 86_400_000;
       for (const i of ingresos) {
         const ya = res.ingresos_que_hay.find((m) => m.monto === i.monto && Math.abs(dia(m.fecha) - dia(i.fecha)) <= 3);
-        if (ya) res.repetidos.push({ ...i, ya: { id: ya.id, fecha: ya.fecha, descripcion: ya.descripcion } });
+        if (ya && !i.no_es_repetido) res.repetidos.push({ fecha: i.fecha, monto: i.monto, descripcion: i.descripcion, ya: { id: ya.id, fecha: ya.fecha, descripcion: ya.descripcion } });
       }
       const sinIvaHoy = Number((this.sql.exec(`SELECT cobrado_sin_iva FROM proyectos WHERE id = ?`, p.id).toArray()[0] as Fila | undefined)?.cobrado_sin_iva || 0);
       const precioDespues = res.conceptos_que_hay.reduce((t, c) => t + c.monto, 0) + precio;
@@ -4005,7 +4012,8 @@ export class OrgDB extends DurableObject<Env> {
       : res.por_ligar.find((x) => x.problema) ? `un pago no se puede ligar: ${JSON.stringify(res.por_ligar.find((x) => x.problema))}`
       : res.traidos.find((t) => t.problema) ? `un ingreso que se trae no se puede mover: ${JSON.stringify(res.traidos.find((t) => t.problema))}`
       : p && res.traidos.find((t) => t.proyecto_id === String(p!.id)) ? 'un ingreso que se trae ya es de este proyecto'
-      : !cuenta && ingresos.length > 0 ? 'falta la cuenta exacta (cuenta_id)'
+      : ingresos.find((i) => i.cuenta_id && !cuentas.some((c) => c.id === i.cuenta_id)) ? 'la cuenta de un ingreso no existe (cuenta_id)'
+      : !cuenta && ingresos.some((i) => !i.cuenta_id) ? 'falta la cuenta exacta (cuenta_id)'
       : res.repetidos.length ? `${res.repetidos.length} ingresos ya parecen estar cargados`
       : res.conceptos_que_hay.length && conceptos.length ? 'el proyecto ya tiene conceptos: no se le agregan otros encima'
       : null;
@@ -4056,7 +4064,7 @@ export class OrgDB extends DurableObject<Env> {
       }
       for (const i of ingresos) {
         const m = this.crear('movimientos', {
-          tipo: 'ingreso', monto: i.monto, fecha: i.fecha, cuenta_id: cuenta!.id, proyecto_id: p!.id,
+          tipo: 'ingreso', monto: i.monto, fecha: i.fecha, cuenta_id: i.cuenta_id ?? cuenta!.id, proyecto_id: p!.id,
           contraparte_tipo: p!.cliente_id ? 'cliente' : null, contraparte_id: p!.cliente_id ?? null, contraparte_nombre: p!.cliente ?? null,
           descripcion: i.descripcion, facturado: false, subtotal: i.monto - i.iva, iva: i.iva, tasa_iva: i.iva > 0 ? 1600 : 0, retenciones: 0, requiere_factura: i.requiere_factura,
         }, ctx);

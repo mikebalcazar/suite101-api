@@ -214,6 +214,40 @@ describe('un proyecto nuevo y las facturas por monto', () => {
   });
 });
 
+/* 0.114.1 · Mike, 20-nov-2026: Sanje CC37. La hoja trae efectivo y
+ * transferencias, y un pago a Bego del 21-oct que se parece a otro de $50,000
+ * del 20-oct ya cargado y es otro. */
+describe('cada pago con su cuenta, y uno que se parece a otro sin serlo', () => {
+  let p2 = '', efectivo = '';
+  beforeAll(async () => {
+    p2 = await crea('/proyectos', { nombre: 'Sanje CC37', cliente_id: cliente, estado: 'activo' });
+    efectivo = await crea('/cuentas', { nombre: 'Efectivo', tipo: 'caja', saldo_inicial: 0 });
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: { buscar: 'sanje', proyecto_id: p2, cuenta_id: cuenta, conceptos: [], ingresos: [{ fecha: '2026-10-20', monto: 50_000_00, descripcion: 'Transfer BBVA Mike' }] } });
+    expect(r.data.escrito, JSON.stringify(r.data)).toBe(true);
+  });
+  const sanje = (ingresos: unknown[]) => ({ buscar: 'sanje', proyecto_id: p2, cuenta_id: cuenta, conceptos: [], ingresos });
+  it('sin decir que es otro, el parecido detiene la carga', async () => {
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: sanje([{ fecha: '2026-10-21', monto: 50_000_00, descripcion: 'Transfer a Bego' }]) });
+    expect(r.data).toMatchObject({ escrito: false, motivo: expect.stringContaining('ya parecen estar cargados') });
+  });
+  it('una cuenta que no existe tampoco entra', async () => {
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: sanje([{ fecha: '2026-10-30', monto: 50_000_00, descripcion: 'Efvo Diego', cuenta_id: 'no-existe' }]) });
+    expect(r.data).toMatchObject({ escrito: false, motivo: expect.stringContaining('la cuenta de un ingreso no existe') });
+  });
+  it('con no_es_repetido entra, y el efectivo va a su cuenta', async () => {
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: sanje([
+      { fecha: '2026-10-21', monto: 50_000_00, descripcion: 'Transfer a Bego', no_es_repetido: true },
+      { fecha: '2026-10-30', monto: 50_000_00, descripcion: 'Efvo Diego', cuenta_id: efectivo, no_es_repetido: true },
+    ]) });
+    expect(r.data, JSON.stringify(r.data)).toMatchObject({ escrito: true, repetidos: [] });
+    const movs = (await o(`/movimientos?proyecto_id=${p2}`)).data.filas ?? (await o(`/movimientos?proyecto_id=${p2}`)).data;
+    const efvo = movs.find((m: any) => m.descripcion === 'Efvo Diego');
+    const bego = movs.find((m: any) => m.descripcion === 'Transfer a Bego');
+    expect([efvo.cuenta_id, bego.cuenta_id]).toEqual([efectivo, cuenta]);
+    expect((await proyecto(p2)).cobrado_sin_iva).toBe(150_000_00);
+  });
+});
+
 /* 0.113.1 · Mike, 20-nov-2026: «Carga estas cuentas del proyecto SAP del
  * cliente USAI». Ni el proyecto ni el cliente estaban en dash. */
 describe('un proyecto nuevo de un cliente que tampoco existe', () => {
