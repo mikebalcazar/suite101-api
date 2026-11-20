@@ -11,7 +11,8 @@
  * volcado de sqlite_master) se trae en seco y luego de verdad, con sus
  * archivos, y se comprueba que el motor la vea. */
 
-import { SELF, env } from 'cloudflare:test';
+import { SELF, env, createExecutionContext } from 'cloudflare:test';
+import app from '../src/index';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Env } from '../src/entorno';
 import { correoDePuntos, sitioPeek } from '../src/quell/motor.js';
@@ -1467,6 +1468,53 @@ describe('el cronograma que se llena solo, con responsable y costo por fase, y l
     // El Excel lleva responsable y costo.
     const x = await pedir('mike', `/orgs/${ORG}/quell/projects/${obraA}/cronograma.xlsx`);
     expect(x.estado).toBe(200);
+  });
+
+  /* 0.114.0 · Mike, 20-nov-2026: «Borra de los datos todas las cuentas por
+   * pagar que hay hoy registradas en Forespot. Se va a hacer desde cero por
+   * proveedor». Se borran todas y el cronograma ya no las vuelve a crear. */
+  it('borrar todas las cuentas por pagar: el ensayo las cuenta, se borran, y el cronograma no las regresa', async () => {
+    const LLAVE = 'k'.repeat(48);
+    const interno = async (modo: string, carga: unknown) => {
+      const e = { ...(env as unknown as Env), LLAVE_CORRECCION: LLAVE };
+      const r = await app.fetch(new Request(`https://api.local/interno/${ORG}/carga-proyecto?modo=${modo}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Llave-Correccion': LLAVE }, body: JSON.stringify(carga),
+      }), e, createExecutionContext());
+      return (await r.json() as any).data;
+    };
+    const r0 = await q('mike', `/projects/${obraA}/cronograma`);
+    const con = await q('mike', `/projects/${obraA}/cronograma`, { method: 'PUT', json: { tareas: [...r0.tareas.map(entrada).filter((t: any) => !(t.element_id === puerta && t.etapa === 'instalacion')),
+      { element_id: puerta, seccion: '', etapa: 'instalacion', dias: 3, contratista_id: goyoId, costo: 900_00 }] } });
+    expect(con.estado, JSON.stringify(con)).toBe(200);
+    const aMano = await pedir('mike', `/orgs/${ORG}/partidas`, { method: 'POST', json: { proyecto_id: proyecto, proveedor_nombre: 'Herrería Ruiz', concepto: 'Barandal', monto_acordado: 4_000_00 }, app: 'dash101' });
+    expect(aMano.estado, JSON.stringify(aMano)).toBe(201);
+    const todas = (await pedir('mike', `/orgs/${ORG}/partidas`, { app: 'dash101' })).data.filas;
+    expect(todas.some((p: any) => p.tarea_id), 'hay una del cronograma').toBe(true);
+
+    const ensayo = await interno('ensayo', { buscar: '', conceptos: [], ingresos: [], partidas_por_pagar: { borrar: true, apagar_cronograma: true } });
+    expect(ensayo.partidas.lista).toHaveLength(todas.length);
+    expect(ensayo.partidas.del_cronograma).toBe(todas.filter((p: any) => p.tarea_id).length);
+    expect([ensayo.escrito, ensayo.partidas.borradas, ensayo.partidas.cronograma_apagado]).toEqual([false, 0, false]);
+    expect((await pedir('mike', `/orgs/${ORG}/partidas`, { app: 'dash101' })).data.filas, 'el ensayo no borra').toHaveLength(todas.length);
+
+    const sinBorrar = await interno('cargar', { buscar: '', conceptos: [], ingresos: [], partidas_por_pagar: {} });
+    expect(sinBorrar.motivo).toMatch(/borrar: true/);
+    const revuelto = await interno('cargar', { buscar: '', conceptos: [{ nombre: 'x', precio_unitario: 1 }], ingresos: [], partidas_por_pagar: { borrar: true } });
+    expect(revuelto.motivo).toMatch(/va solo/);
+
+    const hecho = await interno('cargar', { buscar: '', conceptos: [], ingresos: [], partidas_por_pagar: { borrar: true, apagar_cronograma: true } });
+    expect([hecho.escrito, hecho.partidas.borradas, hecho.partidas.cronograma_apagado]).toEqual([true, todas.length, true]);
+    expect((await pedir('mike', `/orgs/${ORG}/partidas`, { app: 'dash101' })).data.filas).toHaveLength(0);
+    expect(Number((await pedir('mike', `/orgs/${ORG}/proyectos/${proyecto}`, { app: 'dash101' })).data.compromiso), 'el proyecto ya no debe nada').toBe(0);
+
+    // Se vuelve a guardar el cronograma, con otro costo: ya no nace ninguna.
+    const r1 = await q('mike', `/projects/${obraA}/cronograma`);
+    const otra = await q('mike', `/projects/${obraA}/cronograma`, { method: 'PUT', json: { tareas: r1.tareas.map(entrada).map((t: any) => (t.element_id === puerta && t.etapa === 'instalacion' ? { ...t, costo: 1_500_00 } : t)) } });
+    expect(otra.estado, JSON.stringify(otra)).toBe(200);
+    expect(otra.tareas.find((t: any) => t.element_id === puerta && t.etapa === 'instalacion').costo, 'el costo se queda en el cronograma').toBe(1_500_00);
+    expect((await pedir('mike', `/orgs/${ORG}/partidas`, { app: 'dash101' })).data.filas, 'el cronograma ya no crea cuentas por pagar').toHaveLength(0);
+    // Y una nueva, a mano y por proveedor, sí entra.
+    expect((await pedir('mike', `/orgs/${ORG}/partidas`, { method: 'POST', json: { proyecto_id: proyecto, proveedor_nombre: 'Herrería Ruiz', concepto: 'Barandal', monto_acordado: 4_000_00 }, app: 'dash101' })).estado).toBe(201);
   });
 });
 
