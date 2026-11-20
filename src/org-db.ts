@@ -315,6 +315,10 @@ export interface CargaDeProyecto {
   /** 0.115.1 · Pasar a «activo» proyectos que están en planeando, por id (el
    *  de Aniceto Ortega NEW, que se aprobó antes de que aprobar activara). */
   activar_proyectos?: string[] | null;
+  /** 0.115.2 · Borrar proyectos por id con `borrarProyectoConTodo`: el ensayo
+   *  corre en seco; sin dinero ni historia se van con sus partidas e ítems
+   *  (Mike, 20-nov-2026: «Elimina ese proyecto», Aniceto Ortega PA). */
+  borrar_proyectos?: string[] | null;
   /** Ligar cada ingreso a su factura (por folio) al cargarlo. Sólo cuando
    *  hay exactamente una factura vigente con ese folio. */
   ligar?: boolean;
@@ -330,6 +334,8 @@ export interface ResultadoCargaDeProyecto {
   motivo: string | null;
   /** 0.113.1 · El cliente que se creó con `crear_cliente`. */
   cliente_creado?: { id: string; nombre: string; rfc: string | null } | null;
+  /** 0.115.2 · Proyectos que se borran (o se borrarían), con lo que se llevan. */
+  proyectos_borrados?: Array<{ id: string; nombre: string; resultado: unknown; problema: string | null }> | null;
   /** 0.115.1 · Los que se piden activar: cómo están y si se activaron. */
   activados?: Array<{ id: string; nombre: string; estado: string; activado: boolean; problema: string | null }> | null;
   /** 0.115.0 · Proyectos sin ingresos que pasan (o pasarían) a planeando. */
@@ -1533,8 +1539,16 @@ export class OrgDB extends DurableObject<Env> {
       cols.push('actualizado_at');
       datos.actualizado_at = ahora();
     }
+    /* 0.115.2 · Un pago que se muda de proyecto: el que lo pierde también se
+     * recalcula. Antes sólo el nuevo, y el viejo se quedaba con su cobrado
+     * (Mike, 20-nov-2026: «Aniceto Ortega PA» decía $50K cobrados sin ningún
+     * movimiento; el pago ya estaba en «Aniceto Ortega NEW»). */
+    const proyectoAntes = tabla === 'movimientos' && cols.includes('proyecto_id')
+      ? ((this.sql.exec(`SELECT proyecto_id FROM movimientos WHERE id = ?`, id).toArray()[0] as Fila | undefined)?.proyecto_id as string | null) ?? null
+      : null;
     const valores = cols.map((c) => this.adentro(def.cols[c], datos[c]));
     this.sql.exec(`UPDATE ${tabla} SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`, ...valores, id);
+    if (proyectoAntes && proyectoAntes !== (datos.proyecto_id ?? null)) this.recalcularProyecto(String(proyectoAntes));
 
     /* 0.104.0 · El nombre del proyecto, igual en toda la suite (Mike,
      * 19-oct-2026). Va aquí, en el único lugar por donde pasa cada cambio de
@@ -3972,6 +3986,27 @@ export class OrgDB extends DurableObject<Env> {
       const sinIvaHoy = Number((this.sql.exec(`SELECT cobrado_sin_iva FROM proyectos WHERE id = ?`, p.id).toArray()[0] as Fila | undefined)?.cobrado_sin_iva || 0);
       const precioDespues = res.conceptos_que_hay.reduce((t, c) => t + c.monto, 0) + precio;
       res.despues = { precio_venta: precioDespues, cobrado_sin_iva: sinIvaHoy + cobrado, saldo: precioDespues - sinIvaHoy - cobrado };
+    }
+    if (args.borrar_proyectos?.length) {
+      const ids = args.borrar_proyectos.slice(0, 20).map(String);
+      const nombre = (id: string) => String((this.sql.exec(`SELECT nombre FROM proyectos WHERE id = ?`, id).toArray()[0] as Fila | undefined)?.nombre ?? '');
+      const seco = ids.map((id) => {
+        const r = this.borrarProyectoConTodo(id, 'seco');
+        return { id, nombre: nombre(id), resultado: r, problema: 'error' in r ? `${r.error}${r.detalle ? ' ' + JSON.stringify(r.detalle) : ''}` : null };
+      });
+      res.proyectos_borrados = seco;
+      if (!args.escribir) return res;
+      if (seco.some((x) => x.problema)) { res.motivo = `uno no se puede borrar: ${JSON.stringify(seco.find((x) => x.problema))}`; return res; }
+      if (conceptos.length || ingresos.length || args.partidas_por_pagar || args.sin_ingresos_a_planeando || args.activar_proyectos?.length || args.crear_proyecto) {
+        res.motivo = 'borrar proyectos va solo, sin otra cosa en la misma carga';
+        return res;
+      }
+      res.proyectos_borrados = ids.map((id, k) => {
+        const r = this.borrarProyectoConTodo(id, 'borrar');
+        return { id, nombre: seco[k].nombre, resultado: r, problema: 'error' in r ? String(r.error) : null };
+      });
+      res.escrito = res.proyectos_borrados.every((x) => !x.problema);
+      return res;
     }
     if (args.activar_proyectos?.length) {
       res.activados = args.activar_proyectos.slice(0, 50).map((id) => {

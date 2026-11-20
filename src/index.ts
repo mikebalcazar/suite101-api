@@ -183,6 +183,7 @@ app.post('/interno/:o/carga-proyecto', async (c) => {
       estado: b.crear_proyecto.estado == null ? undefined : String(b.crear_proyecto.estado),
       descripcion: b.crear_proyecto.descripcion == null ? undefined : String(b.crear_proyecto.descripcion),
     } : null,
+    borrar_proyectos: Array.isArray(b.borrar_proyectos) ? b.borrar_proyectos.map((x: unknown) => String(x)) : null,
     activar_proyectos: Array.isArray(b.activar_proyectos) ? b.activar_proyectos.map((x: unknown) => String(x)) : null,
     sin_ingresos_a_planeando: b.sin_ingresos_a_planeando && typeof b.sin_ingresos_a_planeando === 'object' ? { marcar: b.sin_ingresos_a_planeando.marcar === true } : null,
     partidas_por_pagar: b.partidas_por_pagar && typeof b.partidas_por_pagar === 'object' ? {

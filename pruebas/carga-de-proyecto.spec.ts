@@ -257,6 +257,27 @@ describe('proyectos sin ingresos a planeando, y el primer cobro los activa', () 
     expect(r.data.escrito).toBe(true);
     expect((await proyecto(p)).estado).toBe('activo');
   });
+  /* 0.115.2 · Mike, 20-nov-2026: «Elimina ese proyecto» (Aniceto Ortega PA,
+   * que decía $50K cobrados aunque el pago ya estaba en otro proyecto). */
+  it('mover un pago recalcula los dos proyectos, y borrar por id no toca uno con dinero', async () => {
+    const pa = await crea('/proyectos', { nombre: 'Aniceto PA de prueba', cliente_id: cliente, estado: 'activo' });
+    const nuevo = await crea('/proyectos', { nombre: 'Aniceto NEW de prueba', cliente_id: cliente, estado: 'activo' });
+    const pago = await crea('/movimientos', { tipo: 'ingreso', monto: 50_000_00, fecha: '2026-11-20', cuenta_id: cuenta, proyecto_id: pa, descripcion: 'Anticipo' });
+    expect((await proyecto(pa)).cobrado).toBe(50_000_00);
+    const r = await o(`/movimientos/${pago}`, { method: 'PATCH', json: { proyecto_id: nuevo } });
+    expect(r.estado, JSON.stringify(r)).toBe(200);
+    expect([(await proyecto(pa)).cobrado, (await proyecto(nuevo)).cobrado], 'el que lo pierde baja a cero').toEqual([0, 50_000_00]);
+
+    const conDinero = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: { buscar: '', conceptos: [], ingresos: [], borrar_proyectos: [nuevo] } });
+    expect(conDinero.data).toMatchObject({ escrito: false, motivo: expect.stringContaining('tiene_dinero') });
+    const ensayo = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'ensayo', carga: { buscar: '', conceptos: [], ingresos: [], borrar_proyectos: [pa] } });
+    expect(ensayo.data.proyectos_borrados).toEqual([expect.objectContaining({ id: pa, nombre: 'Aniceto PA de prueba', problema: null })]);
+    expect((await o(`/proyectos/${pa}`)).estado, 'el ensayo no borra').toBe(200);
+    const hecho = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: { buscar: '', conceptos: [], ingresos: [], borrar_proyectos: [pa] } });
+    expect(hecho.data.escrito, JSON.stringify(hecho.data)).toBe(true);
+    expect((await o(`/proyectos/${pa}`)).estado).toBe(404);
+    expect((await proyecto(nuevo)).cobrado, 'el otro no se tocó').toBe(50_000_00);
+  });
   it('un proyecto pausado a mano no se activa con un cobro', async () => {
     const p = await crea('/proyectos', { nombre: 'Pausada a propósito', cliente_id: cliente, estado: 'pausado' });
     await crea('/movimientos', { tipo: 'ingreso', monto: 5_000_00, fecha: '2026-11-20', cuenta_id: cuenta, proyecto_id: p, descripcion: 'Pago' });
