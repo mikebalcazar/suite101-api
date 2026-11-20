@@ -37,6 +37,10 @@ on:
       - 'CLAUDE.md'
       # La medición de permisos sólo lee; no publica nada (11-oct-2026).
       - '.github/workflows/permisos.yml'
+      # Las cargas y correcciones a mano se corren con workflow_dispatch; cambiar
+      # cómo enseñan su resultado no publica nada (20-nov-2026).
+      - '.github/workflows/cargar-proyecto.yml'
+      - '.github/workflows/corregir-reparto.yml'
   workflow_dispatch:
 
 concurrency:
