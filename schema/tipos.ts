@@ -17,7 +17,14 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.112.2 (PATRON101 ES DE QUIEN PRESTA. Mike, 20-nov:
+ * Versión del contrato: 0.113.0 (LA ORDEN DICE DE QUÉ PROYECTO ES. Mike,
+ * 20-nov, pidiendo un reembolso en supply101: «no hay un lugar donde diga de
+ * qué proyecto es». El proyecto ya se guardaba al pedir (`proyecto_id`, para
+ * compras y reembolsos); ahora cada orden trae además `proyecto_nombre`
+ * (null si es gasto general) en GET /ordenes, /ordenes/buzon,
+ * /ordenes/pagadas y /ordenes/:id. Aditivo.)
+ *
+ * Antes, 0.112.2 (PATRON101 ES DE QUIEN PRESTA. Mike, 20-nov:
  * «hay que meter patron101 a dash también. Igual que bill101»; con botones:
  * «Mandarlo a dash101». Lo de quien dirige vive en dash101 → Préstamos; la
  * puerta de la suite y la lista de plataformas presentan patron101 como
@@ -1827,7 +1834,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.112.2';
+export const VERSION_CONTRATO = '0.113.0';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
