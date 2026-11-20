@@ -189,6 +189,7 @@ app.post('/interno/:o/carga-proyecto', async (c) => {
     ligar_existentes: Array.isArray(b.ligar_existentes) ? b.ligar_existentes.slice(0, 50) : undefined,
     conciliar: b.conciliar && typeof b.conciliar === 'object' ? { rfc: String(b.conciliar.rfc ?? '') } : null,
     corregir: Array.isArray(b.corregir) ? b.corregir.slice(0, 50) : undefined,
+    borrar: Array.isArray(b.borrar) ? b.borrar.slice(0, 50) : undefined,
   })) });
 });
 
