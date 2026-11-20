@@ -307,6 +307,11 @@ export interface CargaDeProyecto {
    *  «Borra de los datos todas las cuentas por pagar que hay hoy registradas
    *  en Forespot. Se va a hacer desde cero por proveedor»). */
   partidas_por_pagar?: { borrar?: boolean; apagar_cronograma?: boolean } | null;
+  /** 0.115.0 · Los proyectos sin ningún ingreso que no están en planeando ni
+   *  cerrados: el ensayo los enseña; con `marcar` pasan a «planeando» (Mike,
+   *  20-nov-2026: «todos los que están sin movimientos ahorita (ingresos)
+   *  márcalos como no activos»). Con su primer cobro vuelven a activo solos. */
+  sin_ingresos_a_planeando?: { marcar?: boolean } | null;
   /** Ligar cada ingreso a su factura (por folio) al cargarlo. Sólo cuando
    *  hay exactamente una factura vigente con ese folio. */
   ligar?: boolean;
@@ -322,6 +327,8 @@ export interface ResultadoCargaDeProyecto {
   motivo: string | null;
   /** 0.113.1 · El cliente que se creó con `crear_cliente`. */
   cliente_creado?: { id: string; nombre: string; rfc: string | null } | null;
+  /** 0.115.0 · Proyectos sin ingresos que pasan (o pasarían) a planeando. */
+  sin_ingresos?: { lista: Array<{ id: string; nombre: string; cliente: string | null; estado: string; precio_venta: number; n_conceptos: number }>; marcados: number } | null;
   /** 0.114.0 · Las cuentas por pagar (partidas) que hay, y si se borraron. */
   partidas?: {
     lista: Array<{ id: string; proyecto: string | null; proveedor: string; concepto: string; acordado: number; pagado: number; del_cronograma: boolean; movimientos: number; ordenes: number }>;
@@ -2072,6 +2079,14 @@ export class OrgDB extends DurableObject<Env> {
     // finiquito. No se toca si ya está cerrado: eso lo decide la oficina.
     let estado = String(p.estado);
     if (venta.n > 0 && venta.cerrados === venta.n && estado !== 'cerrado') estado = 'finiquito';
+    /* 0.115.0 · El primer cobro activa un proyecto que estaba planeando (Mike,
+     * 20-nov-2026: «que cuando haya un primer movimiento se marque como
+     * activo»). Sólo de «planeando»: pausado, finiquito y cerrado son
+     * decisiones de alguien y un pago no las deshace. */
+    if (estado === 'planeando') {
+      const ingresos = (this.sql.exec(`SELECT COUNT(*) AS n FROM movimientos WHERE proyecto_id = ? AND tipo = 'ingreso'`, proyecto_id).one() as { n: number }).n;
+      if (ingresos > 0) estado = 'activo';
+    }
 
     this.sql.exec(
       `UPDATE proyectos SET cobrado = ?, pagado_prov = ?, compromiso = ?, avance = ?, estado = ?, actualizado_at = ? WHERE id = ?`,
@@ -3947,6 +3962,32 @@ export class OrgDB extends DurableObject<Env> {
       const sinIvaHoy = Number((this.sql.exec(`SELECT cobrado_sin_iva FROM proyectos WHERE id = ?`, p.id).toArray()[0] as Fila | undefined)?.cobrado_sin_iva || 0);
       const precioDespues = res.conceptos_que_hay.reduce((t, c) => t + c.monto, 0) + precio;
       res.despues = { precio_venta: precioDespues, cobrado_sin_iva: sinIvaHoy + cobrado, saldo: precioDespues - sinIvaHoy - cobrado };
+    }
+    if (args.sin_ingresos_a_planeando) {
+      const lista = (this.sql.exec(
+        `SELECT p.id, p.nombre, c.nombre AS cliente, p.estado, p.precio_venta, COALESCE(p.n_conceptos, 0) AS n_conceptos
+           FROM proyectos p LEFT JOIN clientes c ON c.id = p.cliente_id
+          WHERE p.estado NOT IN ('planeando', 'cerrado')
+            AND NOT EXISTS (SELECT 1 FROM movimientos m WHERE m.proyecto_id = p.id AND m.tipo = 'ingreso')
+          ORDER BY p.nombre`,
+      ).toArray() as Fila[]).map((f) => ({
+        id: String(f.id), nombre: String(f.nombre ?? ''), cliente: f.cliente == null ? null : String(f.cliente), estado: String(f.estado ?? ''),
+        precio_venta: Number(f.precio_venta || 0), n_conceptos: Number(f.n_conceptos || 0),
+      }));
+      res.sin_ingresos = { lista, marcados: 0 };
+      if (!args.escribir) return res;
+      if (!args.sin_ingresos_a_planeando.marcar) { res.motivo = 'para marcarlos falta marcar: true'; return res; }
+      if (conceptos.length || ingresos.length || args.partidas_por_pagar || args.crear_proyecto) {
+        res.motivo = 'marcar los proyectos sin ingresos va solo, sin otra cosa en la misma carga';
+        return res;
+      }
+      const t = ahora();
+      this.ctx.storage.transactionSync(() => {
+        for (const x of lista) this.sql.exec(`UPDATE proyectos SET estado = 'planeando', actualizado_at = ? WHERE id = ?`, t, x.id);
+      });
+      res.escrito = true;
+      res.sin_ingresos.marcados = lista.length;
+      return res;
     }
     if (args.partidas_por_pagar) {
       const lista = (this.sql.exec(

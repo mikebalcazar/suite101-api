@@ -214,6 +214,44 @@ describe('un proyecto nuevo y las facturas por monto', () => {
   });
 });
 
+/* 0.115.0 · Mike, 20-nov-2026: «todos los que están sin movimientos ahorita
+ * (ingresos) márcalos como no activos», y «que cuando haya un primer
+ * movimiento se marque como activo». */
+describe('proyectos sin ingresos a planeando, y el primer cobro los activa', () => {
+  let vacio = '', pausado = '';
+  beforeAll(async () => {
+    vacio = await crea('/proyectos', { nombre: 'Obra sin cobros', cliente_id: cliente, estado: 'activo' });
+    pausado = await crea('/proyectos', { nombre: 'Obra pausada sin cobros', cliente_id: cliente, estado: 'pausado' });
+  });
+  it('el ensayo los enseña y no toca nada', async () => {
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'ensayo', carga: { buscar: '', conceptos: [], ingresos: [], sin_ingresos_a_planeando: { marcar: true } } });
+    const ids = r.data.sin_ingresos.lista.map((x: any) => x.id);
+    expect(ids).toEqual(expect.arrayContaining([vacio, pausado]));
+    expect(ids, 'uno con cobros no sale').not.toContain(obra);
+    expect((await proyecto(vacio)).estado).toBe('activo');
+  });
+  it('sin marcar: true no escribe', async () => {
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: { buscar: '', conceptos: [], ingresos: [], sin_ingresos_a_planeando: {} } });
+    expect(r.data.motivo).toMatch(/marcar: true/);
+  });
+  it('marcar los pasa a planeando, y el primer cobro activa uno', async () => {
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: { buscar: '', conceptos: [], ingresos: [], sin_ingresos_a_planeando: { marcar: true } } });
+    expect(r.data.escrito).toBe(true);
+    expect([(await proyecto(vacio)).estado, (await proyecto(pausado)).estado]).toEqual(['planeando', 'planeando']);
+    expect((await proyecto(obra)).estado, 'el que tiene cobros no se toca').not.toBe('planeando');
+    // Un gasto no lo activa; un cobro sí.
+    await crea('/movimientos', { tipo: 'egreso', monto: 1_000_00, fecha: '2026-11-20', cuenta_id: cuenta, proyecto_id: vacio, contraparte_tipo: 'otro', descripcion: 'material' });
+    expect((await proyecto(vacio)).estado).toBe('planeando');
+    await crea('/movimientos', { tipo: 'ingreso', monto: 10_000_00, fecha: '2026-11-20', cuenta_id: cuenta, proyecto_id: vacio, descripcion: 'Anticipo' });
+    expect((await proyecto(vacio)).estado).toBe('activo');
+  });
+  it('un proyecto pausado a mano no se activa con un cobro', async () => {
+    const p = await crea('/proyectos', { nombre: 'Pausada a propósito', cliente_id: cliente, estado: 'pausado' });
+    await crea('/movimientos', { tipo: 'ingreso', monto: 5_000_00, fecha: '2026-11-20', cuenta_id: cuenta, proyecto_id: p, descripcion: 'Pago' });
+    expect((await proyecto(p)).estado).toBe('pausado');
+  });
+});
+
 /* 0.114.1 · Mike, 20-nov-2026: Sanje CC37. La hoja trae efectivo y
  * transferencias, y un pago a Bego del 21-oct que se parece a otro de $50,000
  * del 20-oct ya cargado y es otro. */
