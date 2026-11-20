@@ -3084,7 +3084,23 @@ export class OrgDB extends DurableObject<Env> {
    *  pantalla; una pantalla que filtra es una pantalla que se puede saltar. */
   misOrdenes(usuario_id: string): Fila[] {
     const filas = this.sql.exec(`SELECT * FROM ordenes WHERE solicitante_usuario_id = ? ORDER BY creado_at DESC`, usuario_id).toArray() as Fila[];
-    return this.leerInternas('ordenes', filas);
+    return this.conProyecto_(this.leerInternas('ordenes', filas));
+  }
+
+  /** 0.113.0 · A cada orden, el NOMBRE de su proyecto (`proyecto_nombre`;
+   *  null si es gasto general o el proyecto ya no existe). Mike, 20-nov-2026:
+   *  «no hay un lugar donde diga de qué proyecto es». El proyecto ya se
+   *  guardaba al pedir (`proyecto_id`), pero ninguna pantalla lo podía
+   *  enseñar sin ir a buscar el catálogo entero: ahora viaja con la orden.
+   *  Una sola consulta para toda la lista. */
+  private conProyecto_(filas: Fila[]): Fila[] {
+    const ids = [...new Set(filas.map((f) => f.proyecto_id).filter((x): x is string => typeof x === 'string' && x !== ''))];
+    const nombres = new Map<string, string>();
+    if (ids.length) {
+      const dichos = this.sql.exec(`SELECT id, nombre FROM proyectos WHERE id IN (SELECT value FROM json_each(?))`, JSON.stringify(ids)).toArray() as Fila[];
+      for (const p of dichos) nombres.set(String(p.id), String(p.nombre ?? ''));
+    }
+    return filas.map((f) => ({ ...f, proyecto_nombre: f.proyecto_id ? (nombres.get(String(f.proyecto_id)) ?? null) : null }));
   }
 
   /** El buzón del contador: lo que vence primero, arriba. Las que ya vencieron
@@ -3101,10 +3117,10 @@ export class OrgDB extends DurableObject<Env> {
     const condiciones = [`estado = 'en_buzon'`];
     const valores: SqlStorageValue[] = [];
     if (tipo) { condiciones.push('tipo = ?'); valores.push(tipo); }
-    const filas = this.leerInternas('ordenes', this.sql.exec(
+    const filas = this.conProyecto_(this.leerInternas('ordenes', this.sql.exec(
       `SELECT * FROM ordenes WHERE ${condiciones.join(' AND ')}
        ORDER BY (fecha_maxima_pago IS NULL), fecha_maxima_pago ASC, creado_at ASC`, ...valores,
-    ).toArray() as Fila[]);
+    ).toArray() as Fila[]));
     const enOchoDias = new Date(Date.parse(`${dia}T00:00:00Z`) + 7 * 86400000).toISOString().slice(0, 10);
     let total = 0, semana = 0, vencidas = 0;
     for (const f of filas) {
@@ -3144,10 +3160,10 @@ export class OrgDB extends DurableObject<Env> {
     const condiciones = [`estado = 'pagada'`];
     const valores: SqlStorageValue[] = [];
     if (tipo) { condiciones.push('tipo = ?'); valores.push(tipo); }
-    const filas = this.leerInternas('ordenes', this.sql.exec(
+    const filas = this.conProyecto_(this.leerInternas('ordenes', this.sql.exec(
       `SELECT * FROM ordenes WHERE ${condiciones.join(' AND ')}
        ORDER BY pagada_at DESC, creado_at DESC LIMIT ?`, ...valores, Math.max(1, Math.min(5000, limite)),
-    ).toArray() as Fila[]);
+    ).toArray() as Fila[]));
     return { filas, total: filas.reduce((s, f) => s + Number(f.monto || 0), 0) };
   }
 
@@ -3244,8 +3260,9 @@ export class OrgDB extends DurableObject<Env> {
   }
 
   verOrden(id: string): { orden: Fila; eventos: Fila[]; archivos: Fila[]; proveedor: ProveedorDePago | null; reembolso_a: ReembolsoA | null } | null {
-    const orden = this.leerInterna('ordenes', id);
-    if (!orden) return null;
+    const cruda = this.leerInterna('ordenes', id);
+    if (!cruda) return null;
+    const orden = this.conProyecto_([cruda])[0];
     /* 0.92.0 · En un reembolso, a quién y a qué cuenta se le paga: lo que
      * quedó COPIADO en la orden al pedirla. Un reembolso de antes de la 0050
      * no trae cuenta; sale con `clabe: null` y la pantalla lo dice. En una

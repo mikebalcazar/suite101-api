@@ -663,6 +663,37 @@ describe('0.47.0 · reembolsos: la misma orden, de otro tipo', () => {
     expect(raro.error).toBe('tipo_invalido');
   });
 
+  /* 0.113.0 · Mike, 20-nov-2026, pidiendo un reembolso en supply101: «no
+   * hay un lugar donde diga de qué proyecto es». El proyecto ya se guardaba
+   * (`proyecto_id`); lo que faltaba era que la orden lo DIJERA: ahora viaja
+   * su nombre, en todas las vistas, para compras y para reembolsos. */
+  it('0.113.0 · la orden dice de qué proyecto es: `proyecto_nombre` en mis órdenes, el buzón, el detalle y lo pagado', async () => {
+    const con = await supply('ana', '/ordenes', { method: 'POST', json: {
+      negocio_id: negocio, tipo: 'reembolso', concepto: 'Tornillos para Casa Uno', monto: 300_00, con_factura: false, proyecto_id: proyecto,
+    } });
+    expect(con.estado, JSON.stringify(con)).toBe(201);
+    expect(con.data.proyecto_id).toBe(proyecto);
+
+    const mias = (await supply('ana', '/ordenes')).data.filas as Array<{ id: string; proyecto_nombre: string | null }>;
+    expect(mias.find((x) => x.id === con.data.id)?.proyecto_nombre, 'en «mis compras» de supply101').toBe('Casa Uno');
+    // El contrario: un gasto general no trae nombre, y no lo hereda de otra orden.
+    expect(mias.find((x) => x.id === re1)?.proyecto_nombre, 'el de gasolina es gasto general').toBeNull();
+
+    const detalle = await supply('ana', `/ordenes/${con.data.id}`);
+    expect(detalle.data.orden.proyecto_nombre, 'en el detalle').toBe('Casa Uno');
+    expect((await supply('ana', `/ordenes/${re1}`)).data.orden.proyecto_nombre).toBeNull();
+
+    const buzon = (await o('beto', '/ordenes/buzon?tipo=reembolso')).data.filas as Array<{ id: string; proyecto_nombre: string | null }>;
+    expect(buzon.find((x) => x.id === con.data.id)?.proyecto_nombre, 'en el buzón de quien paga').toBe('Casa Uno');
+    expect(buzon.find((x) => x.id === re1)?.proyecto_nombre).toBeNull();
+
+    // Se paga, y en el historial de lo pagado sigue diciendo de qué proyecto fue.
+    const pago = await o('beto', `/ordenes/${con.data.id}/pagar`, { method: 'POST', json: { cuenta_id: cuenta } });
+    expect(pago.estado, JSON.stringify(pago)).toBe(200);
+    const pagadas = (await o('beto', '/ordenes/pagadas?tipo=reembolso')).data.filas as Array<{ id: string; proyecto_nombre: string | null }>;
+    expect(pagadas.find((x) => x.id === con.data.id)?.proyecto_nombre, 'en lo pagado').toBe('Casa Uno');
+  });
+
   it('el buzón por pestaña: ?tipo=reembolso trae sólo reembolsos y suma sólo lo suyo; sin tipo, todo', async () => {
     const todo = await o('beto', '/ordenes/buzon');
     const re = await o('beto', '/ordenes/buzon?tipo=reembolso');
