@@ -214,6 +214,47 @@ describe('un proyecto nuevo y las facturas por monto', () => {
   });
 });
 
+/* 0.113.1 · Mike, 20-nov-2026: «Carga estas cuentas del proyecto SAP del
+ * cliente USAI». Ni el proyecto ni el cliente estaban en dash. */
+describe('un proyecto nuevo de un cliente que tampoco existe', () => {
+  const sap = (extra: Record<string, unknown> = {}) => ({
+    buscar: 'SAP Park Plaza', cuenta_id: cuenta,
+    crear_proyecto: { nombre: 'SAP Park Plaza 2' },
+    crear_cliente: { nombre: 'USAI SERVICIOS INDUSTRIALES', rfc: 'USI1004271D0' },
+    conceptos: [
+      { grupo: 'Presupuesto', nombre: 'Mobiliario Booths y Pantry', precio_unitario: 668_680_00 },
+      { grupo: 'Presupuesto', nombre: 'Puertas', precio_unitario: 581_050_00 },
+    ],
+    ingresos: [{ fecha: '2026-03-30', monto: 200_000_00, iva: 27_586_21, descripcion: 'Pago 3 finiquito 1' }],
+    ...extra,
+  });
+  it('un RFC sin forma de RFC no crea nada', async () => {
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: sap({ crear_cliente: { nombre: 'USAI', rfc: 'XYZ' } }) });
+    expect(r.data).toMatchObject({ escrito: false, motivo: expect.stringContaining('RFC') });
+  });
+  it('el ensayo no crea el cliente', async () => {
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'ensayo', carga: sap() });
+    expect(r.data.escrito).toBe(false);
+    const otra = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'ensayo', carga: sap({ buscar_cliente: 'USI1004271D0' }) });
+    expect(otra.data.clientes).toEqual([]);
+  });
+  it('crea el cliente con su RFC, el proyecto con él, y carga', async () => {
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: sap() });
+    expect(r.data, JSON.stringify(r.data)).toMatchObject({
+      escrito: true, cliente_creado: { nombre: 'USAI SERVICIOS INDUSTRIALES', rfc: 'USI1004271D0' },
+      proyecto: { nombre: 'SAP Park Plaza 2', cliente: 'USAI SERVICIOS INDUSTRIALES' },
+    });
+    expect(r.data.proyecto.cliente_id).toBe(r.data.cliente_creado.id);
+    expect(r.data.despues).toMatchObject({ precio_venta: 1_249_730_00, cobrado_sin_iva: 172_413_79, saldo: 1_249_730_00 - 172_413_79 });
+  });
+  it('otra vez: el cliente ya existe y no se crea otro', async () => {
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: sap({ crear_proyecto: { nombre: 'SAP otra obra' } }) });
+    expect(r.data).toMatchObject({ escrito: false, motivo: expect.stringContaining('ya hay un cliente así') });
+    const c = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'ensayo', carga: sap({ buscar_cliente: 'USI1004271D0' }) });
+    expect(c.data.clientes).toHaveLength(1);
+  });
+});
+
 /* 0.110.1 · Mike, 19-nov-2026: «la factura A762 es de APEX, no de Quálitas.
  * Hay que corregir ese pago», con botones: «Moverlo a APEX». */
 describe('traer un pago que quedó en otro proyecto', () => {

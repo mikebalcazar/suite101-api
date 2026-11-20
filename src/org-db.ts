@@ -255,7 +255,12 @@ export interface CargaDeProyecto {
   /** 0.110.1 · Si el proyecto todavía no existe: se crea con este nombre y
    *  cliente al escribir (Mike, 19-nov-2026: «un proyecto nuevo de IMA que se
    *  llama TATA E2»). */
-  crear_proyecto?: { nombre: string; cliente_id: string; estado?: string; descripcion?: string } | null;
+  crear_proyecto?: { nombre: string; cliente_id?: string | null; estado?: string; descripcion?: string } | null;
+  /** 0.113.1 · Si el cliente del proyecto nuevo tampoco existe: se crea con
+   *  este nombre y RFC, y el proyecto nuevo queda con él. No se crea si ya
+   *  hay uno con ese RFC o ese nombre (Mike, 20-nov-2026: SAP Park Plaza 2,
+   *  cliente USAI, que no estaba en dash). */
+  crear_cliente?: { nombre: string; rfc?: string | null } | null;
   /** Texto para enseñar los clientes que se le parecen. */
   buscar_cliente?: string;
   /** 0.110.1 · Ingresos que ya existen en OTRO proyecto y son de éste: se
@@ -304,6 +309,8 @@ export interface ResultadoCargaDeProyecto {
   escrito: boolean;
   /** Por qué no se escribió, si se pidió escribir. */
   motivo: string | null;
+  /** 0.113.1 · El cliente que se creó con `crear_cliente`. */
+  cliente_creado?: { id: string; nombre: string; rfc: string | null } | null;
   proyectos: Array<{ id: string; nombre: string; cliente: string | null; precio_venta: number; n_conceptos: number; cobrado: number; cobrado_sin_iva: number; ingresos: number }>;
   cuentas: Array<{ id: string; nombre: string; tipo: string | null }>;
   proyecto: { id: string; nombre: string; cliente_id: string | null; cliente: string | null } | null;
@@ -3916,10 +3923,16 @@ export class OrgDB extends DurableObject<Env> {
     if (!args.escribir) return res;
     const cuenta = args.cuenta_id ? cuentas.find((c) => c.id === String(args.cuenta_id)) : undefined;
     const nuevo = !p && args.crear_proyecto ? args.crear_proyecto : null;
-    const clienteNuevo = nuevo ? this.sql.exec(`SELECT id, nombre FROM clientes WHERE id = ?`, String(nuevo.cliente_id ?? '')).toArray()[0] as Fila | undefined : undefined;
+    let clienteNuevo = nuevo ? this.sql.exec(`SELECT id, nombre FROM clientes WHERE id = ?`, String(nuevo.cliente_id ?? '')).toArray()[0] as Fila | undefined : undefined;
+    const cc = nuevo && !clienteNuevo && args.crear_cliente ? args.crear_cliente : null;
+    const ccNombre = String(cc?.nombre ?? '').trim(), ccRfc = String(cc?.rfc ?? '').trim().toUpperCase();
+    const ccYa = cc ? this.sql.exec(`SELECT id, nombre FROM clientes WHERE (? <> '' AND UPPER(COALESCE(rfc,'')) = ?) OR COALESCE(nombre_norm,'') = ? LIMIT 1`, ccRfc, ccRfc, normalizar(ccNombre)).toArray()[0] as Fila | undefined : undefined;
     res.motivo = malo ? `un renglón no cuadra: ${JSON.stringify(malo)}`
       : nuevo && !String(nuevo.nombre ?? '').trim() ? 'falta el nombre del proyecto nuevo'
-      : nuevo && !clienteNuevo ? 'el cliente del proyecto nuevo no existe (cliente_id)'
+      : cc && !ccNombre ? 'falta el nombre del cliente nuevo'
+      : cc && ccRfc && !/^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/.test(ccRfc) ? 'el RFC del cliente nuevo no tiene forma de RFC'
+      : ccYa ? `ya hay un cliente así: usa su cliente_id (${String(ccYa.id)} · ${String(ccYa.nombre ?? '')})`
+      : nuevo && !clienteNuevo && !cc ? 'el cliente del proyecto nuevo no existe (cliente_id)'
       : nuevo && proyectos.some((x) => normalizar(x.nombre) === normalizar(String(nuevo.nombre))) ? 'ya hay un proyecto con ese nombre: usa su proyecto_id'
       : !p && !nuevo ? 'falta el proyecto exacto (proyecto_id) o crear_proyecto'
       : ingresos.find((i) => i.cfdi_id && !porId.has(i.cfdi_id)) ? 'una factura escogida (cfdi_id) no existe'
@@ -3952,6 +3965,11 @@ export class OrgDB extends DurableObject<Env> {
     }
     const creados: Array<{ id: string; folio: string; monto: number; cfdi_id?: string }> = [];
     this.ctx.storage.transactionSync(() => {
+      if (cc) {
+        const cl = this.crear('clientes', { nombre: ccNombre, ...(ccRfc ? { rfc: ccRfc } : {}) }, ctx);
+        clienteNuevo = { id: cl.id, nombre: cl.nombre };
+        res.cliente_creado = { id: String(cl.id), nombre: String(cl.nombre ?? ''), rfc: ccRfc || null };
+      }
       if (nuevo) {
         /* 0.111.5 · Una obra vieja nace cerrada (Mike, 19-nov-2026: «Sí, como
          * obras cerradas»). */
