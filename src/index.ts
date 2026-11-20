@@ -183,6 +183,9 @@ app.post('/interno/:o/carga-proyecto', async (c) => {
       estado: b.crear_proyecto.estado == null ? undefined : String(b.crear_proyecto.estado),
       descripcion: b.crear_proyecto.descripcion == null ? undefined : String(b.crear_proyecto.descripcion),
     } : null,
+    crear_cliente: b.crear_cliente && typeof b.crear_cliente === 'object' ? {
+      nombre: String(b.crear_cliente.nombre ?? ''), rfc: b.crear_cliente.rfc == null ? null : String(b.crear_cliente.rfc),
+    } : null,
     buscar_cliente: typeof b.buscar_cliente === 'string' ? b.buscar_cliente : undefined, escribir: c.req.query('modo') === 'cargar',
     traer: Array.isArray(b.traer) ? b.traer.slice(0, 50) : undefined,
     sin_ligar: b.sin_ligar && typeof b.sin_ligar === 'object' ? { rfc: String(b.sin_ligar.rfc ?? '') } : null,
