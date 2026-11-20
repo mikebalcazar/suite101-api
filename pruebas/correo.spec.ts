@@ -192,7 +192,8 @@ describe('la bienvenida trae la lista de plataformas con su dirección', () => {
   it('sin dominio propio: las direcciones generales, sólo de lo que tiene prendido', () => {
     const l = plataformasDe({ apps, dominio: null }, 'https://workshop.suite101.app');
     const por = Object.fromEntries(l.map((p) => [p.nombre, p]));
-    expect(l.map((p) => p.nombre)).toEqual(['suite101', 'workshop101', 'dash101', 'quell101', 'quote101', 'patron101', 'bill101', 'roster101', 'nest101']);
+    // 20-nov-2026 · bill101 no sale aunque la empresa lo tenga prendido: vive en dash101 → Fiscal.
+    expect(l.map((p) => p.nombre)).toEqual(['suite101', 'workshop101', 'dash101', 'quell101', 'quote101', 'patron101', 'roster101', 'nest101']);
     expect(por.quell101.url).toBe('https://quell.suite101.app');
     expect(por.quote101.url, 'cotizador101 se llama quote101').toBe('https://quote.suite101.app');
     expect(por.patron101.url, 'investor101 se llama patron101').toBe('https://patron.suite101.app');
@@ -211,7 +212,8 @@ describe('la bienvenida trae la lista de plataformas con su dirección', () => {
     expect(por.quote101.url).toBe('https://quote.acme.com');
     expect(por.roster101).toEqual(expect.objectContaining({ url: 'https://roster.acme.com/admin', general: 'https://roster.suite101.app/admin' }));
     // 10-oct · todas las apps tienen puerta en el dominio de la empresa.
-    expect(por.bill101).toEqual(expect.objectContaining({ url: 'https://bill.acme.com', general: 'https://bill.suite101.app' }));
+    expect(por.bill101, 'bill101 se mudó a dash101').toBeUndefined();
+    expect(por.dash101).toEqual(expect.objectContaining({ url: 'https://dash.acme.com', general: 'https://dash.suite101.app' }));
     expect(por.patron101.url).toBe('https://patron.acme.com');
     expect(por.nest101.url, 'la descarga sale de la puerta de la suite de la empresa').toBe('https://suite101.acme.com/descargar/nest101');
   });

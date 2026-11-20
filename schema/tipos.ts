@@ -17,7 +17,13 @@
  *      catálogo; Mike lo separó el 20-sep-2026.
  *   3. Las fechas son texto ISO 8601 en UTC, en toda la plataforma.
  *
- * Versión del contrato: 0.112.0 (BUSCAR LA FACTURA DE UN PAGO. Mike, 19-nov:
+ * Versión del contrato: 0.112.1 (BILL101 SALE DE LA PUERTA. Mike, 19-nov:
+ * «vamos a fusionar bill101 con dash101»; 20-nov, con botones: «Redirigirla
+ * hoy». La puerta de la suite y la lista de plataformas de la bienvenida ya
+ * no traen bill101; la tarjeta de dash101 dice que lo fiscal está ahí. Las
+ * rutas /fiscal/* y la llave `bill` no cambian.)
+ *
+ * Antes, 0.112.0 (BUSCAR LA FACTURA DE UN PAGO. Mike, 19-nov:
  * «agregar la opción de buscar factura y que revise en los CFDIs si alguno
  * coincide o está cerca y los sugiera». GET /fiscal/facturas-sugeridas
  * ?tipo&monto(centavos)&fecha&cliente_id&proyecto_id&movimiento_id →
@@ -1813,7 +1819,7 @@
  * de lo de 0.4.0 cambia)
  */
 
-export const VERSION_CONTRATO = '0.112.0';
+export const VERSION_CONTRATO = '0.112.1';
 
 /** 0.94.0 · Los pagos que pueden ser parte de una factura. */
 export interface PagosPosibles {
