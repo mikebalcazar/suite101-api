@@ -183,6 +183,9 @@ app.post('/interno/:o/carga-proyecto', async (c) => {
       estado: b.crear_proyecto.estado == null ? undefined : String(b.crear_proyecto.estado),
       descripcion: b.crear_proyecto.descripcion == null ? undefined : String(b.crear_proyecto.descripcion),
     } : null,
+    partidas_por_pagar: b.partidas_por_pagar && typeof b.partidas_por_pagar === 'object' ? {
+      borrar: b.partidas_por_pagar.borrar === true, apagar_cronograma: b.partidas_por_pagar.apagar_cronograma === true,
+    } : null,
     crear_cliente: b.crear_cliente && typeof b.crear_cliente === 'object' ? {
       nombre: String(b.crear_cliente.nombre ?? ''), rfc: b.crear_cliente.rfc == null ? null : String(b.crear_cliente.rfc),
     } : null,

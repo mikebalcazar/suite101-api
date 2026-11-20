@@ -296,6 +296,12 @@ export interface CargaDeProyecto {
    *  Probablemente hayan sido reembolsados (…) esos pagos no se han
    *  realizado»). */
   borrar?: Array<{ movimiento_id: string }>;
+  /** 0.114.0 · TODAS las cuentas por pagar (partidas) de la empresa: el
+   *  ensayo las enseña; con `borrar` se borran todas y, con `apagar_cronograma`,
+   *  el cronograma de quell ya no las vuelve a crear (Mike, 20-nov-2026:
+   *  «Borra de los datos todas las cuentas por pagar que hay hoy registradas
+   *  en Forespot. Se va a hacer desde cero por proveedor»). */
+  partidas_por_pagar?: { borrar?: boolean; apagar_cronograma?: boolean } | null;
   /** Ligar cada ingreso a su factura (por folio) al cargarlo. Sólo cuando
    *  hay exactamente una factura vigente con ese folio. */
   ligar?: boolean;
@@ -311,6 +317,12 @@ export interface ResultadoCargaDeProyecto {
   motivo: string | null;
   /** 0.113.1 · El cliente que se creó con `crear_cliente`. */
   cliente_creado?: { id: string; nombre: string; rfc: string | null } | null;
+  /** 0.114.0 · Las cuentas por pagar (partidas) que hay, y si se borraron. */
+  partidas?: {
+    lista: Array<{ id: string; proyecto: string | null; proveedor: string; concepto: string; acordado: number; pagado: number; del_cronograma: boolean; movimientos: number; ordenes: number }>;
+    acordado: number; pagado: number; pendiente: number; del_cronograma: number; con_pagos: number;
+    cronograma_apagado: boolean; borradas: number;
+  } | null;
   proyectos: Array<{ id: string; nombre: string; cliente: string | null; precio_venta: number; n_conceptos: number; cobrado: number; cobrado_sin_iva: number; ingresos: number }>;
   cuentas: Array<{ id: string; nombre: string; tipo: string | null }>;
   proyecto: { id: string; nombre: string; cliente_id: string | null; cliente: string | null } | null;
@@ -3659,6 +3671,15 @@ export class OrgDB extends DurableObject<Env> {
    *  llave de un solo uso. Primero se busca y se mide (escribir = false); se
    *  escribe sólo con el proyecto y la cuenta exactos y sin repetidos, todo o
    *  nada, con el mismo `crear` que usa el CRUD (cachés, saldos y avisos). */
+  /** 0.114.0 · Si el cronograma de quell ya no crea cuentas por pagar (se
+   *  apagó al borrarlas todas para capturarlas por proveedor). */
+  cronogramaSinPartidas(): boolean {
+    try {
+      const f = this.sql.exec(`SELECT valor FROM ajustes_internos WHERE clave = 'partidas_del_cronograma'`).toArray()[0] as Fila | undefined;
+      return String(f?.valor ?? '') === 'no';
+    } catch { return false; }
+  }
+
   cargaDeProyecto(args: CargaDeProyecto): ResultadoCargaDeProyecto {
     /* 0.111.5 · `*` enseña todos los proyectos, para saber cuáles ya existen
      * antes de dar de alta obras viejas (Mike, 19-nov-2026). */
@@ -3919,6 +3940,49 @@ export class OrgDB extends DurableObject<Env> {
       const sinIvaHoy = Number((this.sql.exec(`SELECT cobrado_sin_iva FROM proyectos WHERE id = ?`, p.id).toArray()[0] as Fila | undefined)?.cobrado_sin_iva || 0);
       const precioDespues = res.conceptos_que_hay.reduce((t, c) => t + c.monto, 0) + precio;
       res.despues = { precio_venta: precioDespues, cobrado_sin_iva: sinIvaHoy + cobrado, saldo: precioDespues - sinIvaHoy - cobrado };
+    }
+    if (args.partidas_por_pagar) {
+      const lista = (this.sql.exec(
+        `SELECT pa.id, p.nombre AS proyecto, COALESCE(pr.nombre, pa.proveedor_nombre, '') AS proveedor, pa.concepto, pa.monto_acordado, pa.monto_pagado, pa.tarea_id,
+                (SELECT COUNT(*) FROM movimientos m WHERE m.partida_id = pa.id) AS movs, (SELECT COUNT(*) FROM ordenes o WHERE o.partida_id = pa.id) AS ords
+           FROM partidas pa LEFT JOIN proyectos p ON p.id = pa.proyecto_id LEFT JOIN proveedores pr ON pr.id = pa.proveedor_id
+          ORDER BY p.nombre, pa.creado_at`,
+      ).toArray() as Fila[]).map((f) => ({
+        id: String(f.id), proyecto: f.proyecto == null ? null : String(f.proyecto), proveedor: String(f.proveedor ?? '').trim() || 'Sin nombre',
+        concepto: String(f.concepto ?? ''), acordado: Number(f.monto_acordado || 0), pagado: Number(f.monto_pagado || 0),
+        del_cronograma: !!f.tarea_id, movimientos: Number(f.movs || 0), ordenes: Number(f.ords || 0),
+      }));
+      res.partidas = {
+        lista, acordado: lista.reduce((t, x) => t + x.acordado, 0), pagado: lista.reduce((t, x) => t + x.pagado, 0),
+        pendiente: lista.reduce((t, x) => t + Math.max(0, x.acordado - x.pagado), 0),
+        del_cronograma: lista.filter((x) => x.del_cronograma).length, con_pagos: lista.filter((x) => x.pagado > 0 || x.movimientos > 0).length,
+        cronograma_apagado: this.cronogramaSinPartidas(), borradas: 0,
+      };
+      if (!args.escribir) return res;
+      if (!args.partidas_por_pagar.borrar) { res.motivo = 'para borrar las cuentas por pagar falta borrar: true'; return res; }
+      if (conceptos.length || ingresos.length || (args.borrar ?? []).length || (args.corregir ?? []).length || args.crear_proyecto) {
+        res.motivo = 'borrar las cuentas por pagar va solo: sin conceptos, ingresos ni otras correcciones en la misma carga';
+        return res;
+      }
+      const tocados = new Set(lista.map((x) => x.id));
+      const proyectosTocados = (this.sql.exec(`SELECT DISTINCT proyecto_id FROM partidas WHERE proyecto_id IS NOT NULL`).toArray() as Fila[]).map((f) => String(f.proyecto_id));
+      this.ctx.storage.transactionSync(() => {
+        this.sql.exec(`CREATE TABLE IF NOT EXISTS partidas_borradas (borrada_at TEXT NOT NULL, fila TEXT NOT NULL)`);
+        const t = ahora();
+        for (const f of this.sql.exec(`SELECT * FROM partidas`).toArray() as Fila[]) this.sql.exec(`INSERT INTO partidas_borradas VALUES (?, ?)`, t, JSON.stringify(f));
+        this.sql.exec(`UPDATE ordenes SET partida_id = NULL WHERE partida_id IS NOT NULL`);
+        this.sql.exec(`UPDATE movimientos SET partida_id = NULL WHERE partida_id IS NOT NULL`);
+        this.sql.exec(`DELETE FROM partidas`);
+        if (args.partidas_por_pagar!.apagar_cronograma) {
+          this.sql.exec(`CREATE TABLE IF NOT EXISTS ajustes_internos (clave TEXT PRIMARY KEY, valor TEXT NOT NULL)`);
+          this.sql.exec(`INSERT OR REPLACE INTO ajustes_internos VALUES ('partidas_del_cronograma', 'no')`);
+        }
+        for (const pid of proyectosTocados) this.recalcularProyecto(pid);
+      });
+      res.escrito = true;
+      res.partidas.borradas = tocados.size;
+      res.partidas.cronograma_apagado = this.cronogramaSinPartidas();
+      return res;
     }
     if (!args.escribir) return res;
     const cuenta = args.cuenta_id ? cuentas.find((c) => c.id === String(args.cuenta_id)) : undefined;

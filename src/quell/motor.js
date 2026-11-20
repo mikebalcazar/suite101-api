@@ -655,6 +655,12 @@ async function completarFases(env, pid) {
  * `tarea_id`: la fase manda, la partida la sigue; sin fase (o sin costo) la
  * partida se va. Las partidas capturadas a mano en dash101 no se tocan. */
 async function sincronizarPartidas(env, pid, c) {
+  /* 0.114.0 · Apagado: las cuentas por pagar se capturan por proveedor en
+   * dash101 y el cronograma ya no las crea ni las borra (Mike, 20-nov-2026). */
+  try {
+    const ajuste = await env.DB.prepare(`SELECT valor FROM ajustes_internos WHERE clave = 'partidas_del_cronograma'`).first();
+    if (ajuste && ajuste.valor === 'no') return;
+  } catch { /* sin la tabla, el cronograma manda como siempre */ }
   const { results: ligadas } = await env.DB.prepare(
     `SELECT e.id AS element_id, e.code, it.id AS item_id, it.proyecto_id FROM quell_elements e JOIN quell_plans pl ON pl.id = e.plan_id JOIN items it ON it.id = e.item_id
       WHERE pl.project_id = ? AND it.proyecto_id IS NOT NULL`).bind(pid).all();
