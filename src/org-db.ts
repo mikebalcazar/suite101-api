@@ -463,6 +463,25 @@ export function desglosarIva(venta: number, tasa: number, incluido: boolean): De
   const iva = incluido ? venta - subtotal : Math.round((venta * t) / 10000);
   return { subtotal, iva, total: subtotal + iva };
 }
+/** 0.116.0 · El estado de cuenta de un proveedor, como el del cliente pero al
+ *  revés: por proyecto, lo que se le va a pagar (sus cuentas por pagar, las
+ *  partidas) y lo que ya se le pagó (los egresos de esas partidas o a su
+ *  nombre en el proyecto). Centavos, montos como se capturaron. */
+export interface EstadoDeCuentaProveedor {
+  generado_at: string;
+  proveedor: Fila;
+  proyectos: Array<{
+    proyecto_id: string; nombre: string; estado: string; cliente_nombre: string | null;
+    acordado: number; pagado: number; saldo: number;
+    partidas: Array<{ id: string; concepto: string; monto_acordado: number; monto_pagado: number; estado: string; fecha_esperada: string | null; del_cronograma: boolean }>;
+    pagos: Array<{ id: string; fecha: string; monto: number; descripcion: string; cuenta: string | null; partida_id: string | null; facturado: boolean }>;
+  }>;
+  /** Pagos a su nombre que no son de ningún proyecto. */
+  sin_proyecto: { total: number; pagos: Array<{ id: string; fecha: string; monto: number; descripcion: string; cuenta: string | null; facturado: boolean }> };
+  totales: { acordado: number; pagado: number; saldo: number; sin_proyecto: number; proyectos: number };
+}
+/** 0.116.0 · El saldo de cada proveedor, para la lista. */
+export interface SaldoProveedor { proveedor_id: string; acordado: number; pagado: number; saldo: number; proyectos: number }
 /** 0.105.0 · `GET /orgs/:o/pagos-pendientes[?proyecto_id=]`: lo que se debe
  *  a cada contratista o proveedor, por proyecto (acordado − pagado de sus
  *  partidas, sólo lo que falta). Centavos. Son costos: owner, admin y socio. */
@@ -641,6 +660,8 @@ export interface ApiOrgDB {
   accionistasDeRoster(): Promise<Array<{ id: string; nombre: string; rfc: string; correo: string; puesto: string }>>;
   /** 0.105.0 · Lo que se les debe a contratistas y proveedores, por proyecto. */
   pagosPendientes(proyecto_id?: string | null): Promise<PagosPendientes>;
+  estadoDeCuentaProveedor(proveedor_id: string): Promise<EstadoDeCuentaProveedor | null>;
+  saldosDeProveedores(): Promise<SaldoProveedor[]>;
   pendientesDeOrdenes(): Promise<{ compras: { total: number; cuantas: number }; reembolsos: { total: number; cuantas: number } }>;
   verOrden(id: string): Promise<{ orden: Fila; eventos: Fila[]; archivos: Fila[]; proveedor: ProveedorDePago | null; reembolso_a: ReembolsoA | null } | null>;
   /** 0.56.1 · La orden que dejó ese egreso (o null): para que desde el movimiento se llegue a la orden con toda su historia y sus papeles. */
@@ -3295,6 +3316,78 @@ export class OrgDB extends DurableObject<Env> {
       proyectos,
       contratistas: [...contratistas.values()].sort((a, b) => b.pendiente - a.pendiente),
     };
+  }
+
+  /* ─────────────── el estado de cuenta del proveedor (0.116.0) ───────────────
+   *
+   * Mike, 21-nov-2026: «en la sección de proveedores, necesito que sea
+   * similar a la de proyectos, donde cada proveedor tiene un proyecto y
+   * conceptos que se le van a pagar y los pagos que se le van haciendo. Los
+   * conceptos que se le van a pagar son los que suman a compromisos por
+   * pagar (…) y los pagos que se le hacen son los movimientos que se marcan
+   * como pagos a proveedor».
+   *
+   * Por proyecto: lo acordado es la suma de sus partidas; lo pagado, los
+   * egresos del proyecto que son de una de sus partidas o que van a su nombre
+   * sin partida (la misma regla que el caché `monto_pagado`, pero contado una
+   * sola vez aunque tenga varias partidas en el proyecto). Un proyecto entra
+   * si tiene partidas suyas o pagos suyos. */
+  estadoDeCuentaProveedor(proveedor_id: string): EstadoDeCuentaProveedor | null {
+    const proveedor = this.obtener('proveedores', proveedor_id);
+    if (!proveedor) return null;
+    const partidas = this.sql.exec(
+      `SELECT pa.id, pa.proyecto_id, pa.concepto, pa.monto_acordado, pa.monto_pagado, pa.estado, pa.fecha_esperada, pa.tarea_id, pa.creado_at
+         FROM partidas pa WHERE pa.proveedor_id = ? ORDER BY COALESCE(pa.fecha_esperada, ''), pa.creado_at`, proveedor_id,
+    ).toArray() as Fila[];
+    const pagos = this.sql.exec(
+      `SELECT m.id, m.fecha, m.monto, m.descripcion, m.proyecto_id, m.partida_id, m.facturado, cu.nombre AS cuenta
+         FROM movimientos m LEFT JOIN cuentas cu ON cu.id = m.cuenta_id
+        WHERE m.tipo = 'egreso'
+          AND ((m.contraparte_tipo = 'proveedor' AND m.contraparte_id = ?)
+               OR m.partida_id IN (SELECT id FROM partidas WHERE proveedor_id = ?))
+        ORDER BY m.fecha, m.creado_at`, proveedor_id, proveedor_id,
+    ).toArray() as Fila[];
+    const ids = [...new Set([...partidas.map((x) => x.proyecto_id), ...pagos.map((x) => x.proyecto_id)].filter((x): x is string => typeof x === 'string' && x !== ''))];
+    const info = new Map<string, Fila>();
+    for (const id of ids) {
+      const f = this.sql.exec(`SELECT p.id, p.nombre, p.estado, c.nombre AS cliente_nombre FROM proyectos p LEFT JOIN clientes c ON c.id = p.cliente_id WHERE p.id = ?`, id).toArray()[0] as Fila | undefined;
+      if (f) info.set(id, f);
+    }
+    const pago = (m: Fila) => ({ id: String(m.id), fecha: String(m.fecha ?? '').slice(0, 10), monto: Number(m.monto || 0), descripcion: String(m.descripcion ?? ''), cuenta: m.cuenta == null ? null : String(m.cuenta), facturado: !!m.facturado });
+    const proyectos = ids.filter((id) => info.has(id)).map((id) => {
+      const p = info.get(id)!;
+      const suyas = partidas.filter((x) => x.proyecto_id === id);
+      const suyos = pagos.filter((x) => x.proyecto_id === id);
+      const acordado = suyas.reduce((t, x) => t + Number(x.monto_acordado || 0), 0);
+      const pagado = suyos.reduce((t, x) => t + Number(x.monto || 0), 0);
+      return {
+        proyecto_id: id, nombre: String(p.nombre ?? ''), estado: String(p.estado ?? ''), cliente_nombre: p.cliente_nombre == null ? null : String(p.cliente_nombre),
+        acordado, pagado, saldo: acordado - pagado,
+        partidas: suyas.map((x) => ({
+          id: String(x.id), concepto: String(x.concepto ?? ''), monto_acordado: Number(x.monto_acordado || 0), monto_pagado: Number(x.monto_pagado || 0),
+          estado: String(x.estado ?? 'pendiente'), fecha_esperada: x.fecha_esperada == null ? null : String(x.fecha_esperada), del_cronograma: !!x.tarea_id,
+        })),
+        pagos: suyos.map((m) => ({ ...pago(m), partida_id: m.partida_id == null ? null : String(m.partida_id) })),
+      };
+    }).sort((a, b) => b.saldo - a.saldo || a.nombre.localeCompare(b.nombre));
+    const sueltos = pagos.filter((x) => !x.proyecto_id || !info.has(String(x.proyecto_id))).map(pago);
+    const sinProyecto = sueltos.reduce((t, x) => t + x.monto, 0);
+    const acordado = proyectos.reduce((t, x) => t + x.acordado, 0), pagado = proyectos.reduce((t, x) => t + x.pagado, 0);
+    return {
+      generado_at: ahora(), proveedor, proyectos,
+      sin_proyecto: { total: sinProyecto, pagos: sueltos },
+      totales: { acordado, pagado, saldo: acordado - pagado, sin_proyecto: sinProyecto, proyectos: proyectos.length },
+    };
+  }
+
+  /** 0.116.0 · El saldo por pagar de cada proveedor, con la misma cuenta que
+   *  su estado de cuenta (lo pagado sin proyecto no resta de lo acordado). */
+  saldosDeProveedores(): SaldoProveedor[] {
+    const ids = (this.sql.exec(`SELECT id FROM proveedores ORDER BY nombre`).toArray() as Fila[]).map((f) => String(f.id));
+    return ids.map((id) => {
+      const e = this.estadoDeCuentaProveedor(id)!;
+      return { proveedor_id: id, acordado: e.totales.acordado, pagado: e.totales.pagado, saldo: e.totales.saldo, proyectos: e.totales.proyectos };
+    });
   }
 
   pendientesDeOrdenes(): { compras: { total: number; cuantas: number }; reembolsos: { total: number; cuantas: number } } {
@@ -7474,7 +7567,7 @@ export class OrgDB extends DurableObject<Env> {
     'rondas', 'verRonda', 'crearRonda', 'actualizarRonda', 'abrirRonda', 'terminarRonda', 'reabrirRonda', 'borrarRonda', 'rondaPara', 'rondasPara',
     'ofrecer', 'oferta', 'retirarOferta', 'rechazarOferta', 'aprobarOferta',
     'prestamos', 'prestamo', 'verPrestamo', 'crearPrestamo', 'actualizarPrestamo', 'marcarRecibido', 'cancelarPrestamo', 'editarTabla',
-    'pago', 'pagar', 'deshacerPago', 'pagosPendientes', 'pagosHechos', 'flujo', 'resumenAdmin', 'estadoDeCuenta',
+    'pago', 'pagar', 'deshacerPago', 'pagosPendientes', 'estadoDeCuentaProveedor', 'saldosDeProveedores', 'pagosHechos', 'flujo', 'resumenAdmin', 'estadoDeCuenta',
     'registrarArchivo', 'archivo', 'borrarArchivo',
   ]);
 
