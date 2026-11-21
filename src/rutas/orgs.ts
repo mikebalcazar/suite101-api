@@ -992,6 +992,26 @@ rutas.post('/:o/proyectos/:id/separar', async (c) => {
  *  debe a contratistas y proveedores, por proyecto (Mike, 18-nov-2026: «poner
  *  en dash los pagos pendientes de cada proyecto a cada contratista»). Son
  *  costos: los ve quien ve las partidas. */
+/** GET /orgs/:o/proveedores/saldos — 0.116.0 · lo que se le debe a cada
+ *  proveedor (acordado − pagado de sus proyectos), para la lista. Costos. */
+rutas.get('/:o/proveedores/saldos', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro' || !quien.ve_costos) return err(c, 'sin_permiso', 403, { motivo: 'lo que se les debe a los proveedores son costos: solo owner, admin y socio' });
+  return ok(c, { saldos: await stub(c).saldosDeProveedores() });
+});
+
+/** GET /orgs/:o/proveedores/:id/estado-de-cuenta — 0.116.0 · por proyecto,
+ *  sus cuentas por pagar (partidas) y los pagos que se le han hecho. Mike,
+ *  21-nov-2026: «similar a la de proyectos (…) solo que aquí es de
+ *  proveedores y proyectos y los conceptos son cuentas por pagar». */
+rutas.get('/:o/proveedores/:id/estado-de-cuenta', async (c) => {
+  const quien = c.get('quien');
+  if (quien.clase !== 'miembro' || !quien.ve_costos) return err(c, 'sin_permiso', 403, { motivo: 'lo que se le debe a un proveedor son costos: solo owner, admin y socio' });
+  const r = await stub(c).estadoDeCuentaProveedor(c.req.param('id'));
+  if (!r) return err(c, 'no_encontrado', 404, { que: 'proveedor', id: c.req.param('id') });
+  return ok(c, r);
+});
+
 rutas.get('/:o/pagos-pendientes', async (c) => {
   const quien = c.get('quien');
   if (quien.clase !== 'miembro' || !quien.ve_costos) return err(c, 'sin_permiso', 403, { motivo: 'lo que se les debe a los contratistas son costos: solo owner, admin y socio' });
