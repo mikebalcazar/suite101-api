@@ -201,6 +201,7 @@ app.post('/interno/:o/carga-proyecto', async (c) => {
     borrar_proyectos: Array.isArray(b.borrar_proyectos) ? b.borrar_proyectos.map((x: unknown) => String(x)) : null,
     activar_proyectos: Array.isArray(b.activar_proyectos) ? b.activar_proyectos.map((x: unknown) => String(x)) : null,
     sin_ingresos_a_planeando: b.sin_ingresos_a_planeando && typeof b.sin_ingresos_a_planeando === 'object' ? { marcar: b.sin_ingresos_a_planeando.marcar === true } : null,
+    quitar_por_facturar: b.quitar_por_facturar === true,
     partidas_por_pagar: b.partidas_por_pagar && typeof b.partidas_por_pagar === 'object' ? {
       borrar: b.partidas_por_pagar.borrar === true, apagar_cronograma: b.partidas_por_pagar.apagar_cronograma === true,
     } : null,
