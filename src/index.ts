@@ -175,6 +175,21 @@ app.post('/interno/:o/carga-proyecto', async (c) => {
   if (!b || !Array.isArray(b.conceptos) || !Array.isArray(b.ingresos)) return err(c, 'datos_invalidos', 400, { falta: ['conceptos', 'ingresos'] });
   if (b.conceptos.length > 500 || b.ingresos.length > 500) return err(c, 'datos_invalidos', 400, { regla: 'a lo más 500 de cada uno' });
   const stub = c.env.ORG.get(c.env.ORG.idFromName(org)) as unknown as ApiOrgDB;
+  /* 0.116.1 · Sólo LEER el estado de cuenta de un cliente, con la hoja de
+   * cada proyecto: lo mismo que piden `/clientes/:id/estado-de-cuenta` y
+   * `/proyectos/:id/estado`, para armar el PDF de dash fuera de una sesión
+   * (Mike, 24-nov-2026: «necesito el PDF del estado de cuenta general de IMA,
+   * pero deja afuera ahorita el proyecto Mondelez»). No escribe nada, ni con
+   * `?modo=cargar`. */
+  if (typeof b.estado_cliente === 'string' && b.estado_cliente.trim()) {
+    const cliente = await stub.estadoDeCuenta(b.estado_cliente.trim());
+    if (!cliente) return err(c, 'no_encontrado', 404, { que: 'cliente', id: b.estado_cliente });
+    const fuera = new Set(Array.isArray(b.sin_proyectos) ? b.sin_proyectos.map((x: unknown) => String(x)) : []);
+    const ids = (cliente.proyectos as Array<Record<string, unknown>>).map((p) => String(p.id)).filter((id) => !fuera.has(id));
+    const proyectos = [];
+    for (const id of ids) { const e = await stub.estadoDelProyecto(id); if (e) proyectos.push(e); }
+    return ok(c, { org, estado_cliente: { cliente, proyectos } });
+  }
   return ok(c, { org, ...(await stub.cargaDeProyecto({
     buscar: String(b.buscar ?? ''), proyecto_id: b.proyecto_id ?? null, cuenta_id: b.cuenta_id ?? null,
     conceptos: b.conceptos, ingresos: b.ingresos, ligar: b.ligar === true,

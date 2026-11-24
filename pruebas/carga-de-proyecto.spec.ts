@@ -634,3 +634,27 @@ describe('buscar la factura de un pago que se captura', () => {
     expect((await o('/fiscal/facturas-sugeridas?tipo=ingreso&monto=0')).estado).toBe(400);
   });
 });
+
+/* 0.116.1 · Mike, 24-nov-2026: «necesito el PDF del estado de cuenta general
+ * de IMA, pero deja afuera ahorita el proyecto Mondelez». La llave lee el
+ * estado de cuenta del cliente y la hoja de cada proyecto, sin escribir, y
+ * deja fuera los que se piden. */
+describe('leer el estado de cuenta de un cliente', () => {
+  it('trae el general y la hoja de cada proyecto, deja fuera el que se pide, y no escribe ni con modo cargar', async () => {
+    const antes = (await o('/movimientos?limite=5000')).data;
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: { conceptos: [], ingresos: [], estado_cliente: cliente, sin_proyectos: [otraObra] } });
+    expect(r.estado).toBe(200);
+    const e = r.data.estado_cliente;
+    expect(e.cliente.cliente.id).toBe(cliente);
+    expect(e.cliente.proyectos.map((p: any) => p.id)).toEqual(expect.arrayContaining([obra, otraObra]));
+    const hojas = e.proyectos.map((p: any) => p.proyecto.id);
+    expect(hojas).toContain(obra);
+    expect(hojas).not.toContain(otraObra);
+    expect(e.proyectos.find((p: any) => p.proyecto.id === obra).generado_at).toBeTruthy();
+    expect((await o('/movimientos?limite=5000')).data).toEqual(antes);
+  });
+  it('un cliente que no existe: 404', async () => {
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, carga: { conceptos: [], ingresos: [], estado_cliente: 'no-existe' } });
+    expect(r.estado).toBe(404);
+  });
+});

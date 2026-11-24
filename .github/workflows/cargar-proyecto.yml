@@ -97,6 +97,13 @@ jobs:
           done
           echo "HTTP $code (intento $i)"
           if [ "$code" != 200 ]; then head -c 800 /tmp/r.json; echo; exit 1; fi
+          # 0.116.1 · `estado_cliente`: sólo lectura. Los datos van al registro
+          # de la corrida (comprimidos), para armar el PDF de dash afuera; el
+          # comentario sólo dice qué proyectos trae.
+          if jq -e '.data.estado_cliente' /tmp/r.json >/dev/null 2>&1; then
+            jq -r '.data.estado_cliente | "ESTADO DEL CLIENTE (sólo lectura) · \(.cliente.cliente.nombre) · \(.proyectos | length) proyectos", (.proyectos[] | "  \(.proyecto.id) · \(.proyecto.nombre)")' /tmp/r.json
+            exit 0
+          fi
           jq -r '
             def p: (. / 100) as $v | ($v | floor) as $e | (($v - $e) * 100 | round) as $c
               | ($e | tostring | until(test("\\d{4}") | not; sub("(?<a>\\d)(?<b>\\d{3})(?<c>,|$)"; "\(.a),\(.b)\(.c)"))) as $miles
@@ -153,6 +160,15 @@ jobs:
                 ($d.conciliacion.ingresos[] | ["M", .id, .fecha, .monto, .sin_iva, .iva, (.proyecto // "-"), (.cuenta // "-"), (.facturas | join(",")), .descripcion[0:50]] | map(tostring) | join("\t")) else empty end),
               (if $d.si_se_ligan then "si se ligan: cobrado sin IVA \($d.si_se_ligan.cobrado_sin_iva | m) · IVA \($d.si_se_ligan.iva | m)" else empty end)
           ' /tmp/r.json
+      - name: Datos del estado del cliente (sólo al registro, no al comentario)
+        if: always()
+        run: |
+          set -u
+          if [ -f /tmp/r.json ] && jq -e '.data.estado_cliente' /tmp/r.json >/dev/null 2>&1; then
+            echo "INICIO-ESTADO"
+            jq -c '.data.estado_cliente' /tmp/r.json | gzip -9 | base64 -w 4000
+            echo "FIN-ESTADO"
+          fi
       - name: Borrar la llave
         if: always()
         run: |
