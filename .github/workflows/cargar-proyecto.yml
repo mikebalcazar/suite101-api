@@ -117,6 +117,8 @@ jobs:
               (if $d.activados then "== Proyectos que se activan ==", ($d.activados[] | "  \(.id) · \(.nombre) · \(.estado)\(if .activado then " · ACTIVADO" else "" end)\(if .problema then " · NO SE PUEDE: \(.problema)" else "" end)"), "" else empty end),
               (if $d.sin_ingresos then "== Proyectos sin ingresos (pasan a planeando) ==", "hay \($d.sin_ingresos.lista | length) · marcados: \($d.sin_ingresos.marcados)",
                 ($d.sin_ingresos.lista[] | "  \(.id) · \(.nombre) · cliente \(.cliente // "—") · estado \(.estado) · precio \(.precio_venta | m) · \(.n_conceptos) conceptos"), "" else empty end),
+              (if $d.por_facturar then "== Quitar «por facturar» de lo ya facturado ==", "hay \($d.por_facturar.lista | length) · cambiados: \($d.por_facturar.cambiados)",
+                ($d.por_facturar.lista[] | "  \(.id) · \(.fecha) \(.monto | m) · \(.proyecto // "—") · \(.facturas | join(", "))\n      «\(.antes)» → «\(.despues)»"), "" else empty end),
               (if $d.partidas then "== Cuentas por pagar (partidas) ==",
                 "hay \($d.partidas.lista | length) · acordado \($d.partidas.acordado | m) · pagado \($d.partidas.pagado | m) · pendiente \($d.partidas.pendiente | m)",
                 "del cronograma de quell: \($d.partidas.del_cronograma) · con pagos: \($d.partidas.con_pagos) · cronograma apagado: \(if $d.partidas.cronograma_apagado then "sí" else "no" end) · borradas: \($d.partidas.borradas)",

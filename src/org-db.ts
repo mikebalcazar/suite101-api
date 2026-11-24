@@ -307,6 +307,13 @@ export interface CargaDeProyecto {
    *  «Borra de los datos todas las cuentas por pagar que hay hoy registradas
    *  en Forespot. Se va a hacer desde cero por proveedor»). */
   partidas_por_pagar?: { borrar?: boolean; apagar_cronograma?: boolean } | null;
+  /** 0.116.2 · Quitar «por facturar» / «sin factura» de la descripción de los
+   *  ingresos que YA tienen factura ligada. Ese pedazo lo escribieron las
+   *  cargas, no Mike (24-nov-2026: «a pesar de que ya está facturado sigue
+   *  apareciendo la leyenda "por facturar" (…) eso se escribe en la plataforma,
+   *  no es la descripción manual del pago que hago yo. Esa no se toca»). Sólo
+   *  se quita un pedazo entre «·» que diga exactamente eso; lo demás se queda. */
+  quitar_por_facturar?: boolean;
   /** 0.115.0 · Los proyectos sin ningún ingreso que no están en planeando ni
    *  cerrados: el ensayo los enseña; con `marcar` pasan a «planeando» (Mike,
    *  20-nov-2026: «todos los que están sin movimientos ahorita (ingresos)
@@ -340,6 +347,8 @@ export interface ResultadoCargaDeProyecto {
   activados?: Array<{ id: string; nombre: string; estado: string; activado: boolean; problema: string | null }> | null;
   /** 0.115.0 · Proyectos sin ingresos que pasan (o pasarían) a planeando. */
   sin_ingresos?: { lista: Array<{ id: string; nombre: string; cliente: string | null; estado: string; precio_venta: number; n_conceptos: number }>; marcados: number } | null;
+  /** 0.116.2 · Ingresos facturados con «por facturar» en la descripción. */
+  por_facturar?: { lista: Array<{ id: string; fecha: string; monto: number; proyecto: string | null; facturas: string[]; antes: string; despues: string }>; cambiados: number } | null;
   /** 0.114.0 · Las cuentas por pagar (partidas) que hay, y si se borraron. */
   partidas?: {
     lista: Array<{ id: string; proyecto: string | null; proveedor: string; concepto: string; acordado: number; pagado: number; del_cronograma: boolean; movimientos: number; ordenes: number }>;
@@ -895,6 +904,15 @@ export interface Importacion {
   /** Cotizaciones que llegaron sin folio y se fueron con uno. La mudanza de
    *  quote101 trae muchas así: la app nunca les puso número. */
   folios_asignados: number;
+}
+
+/** 0.116.2 · Quita de una descripción el pedazo «por facturar» o «sin
+ *  factura» que escriben las cargas (entre «·»). Si no hay ese pedazo exacto,
+ *  la deja igual: una descripción escrita a mano no se toca. */
+export function sinPorFacturar(d: string): string {
+  const partes = d.split('·').map((x) => x.trim()).filter(Boolean);
+  const quedan = partes.filter((x) => !/^(por facturar|sin factura)$/i.test(x));
+  return quedan.length === partes.length ? d : (quedan.join(' · ') || 'Pago');
 }
 
 export class OrgDB extends DurableObject<Env> {
@@ -3747,6 +3765,11 @@ export class OrgDB extends DurableObject<Env> {
        * y dos parcialidades de un mismo CFDI cargaban el IVA dos veces (HOLCIM,
        * 8 y 13 de agosto: $9,916.80 de más en el IVA del mes). */
       this.repartirDesglose(args.movimiento_id);
+      /* 0.116.2 · Ya tiene factura: el «por facturar» que dejó una carga en
+       * la descripción ya no es cierto (Mike, 24-nov-2026). Sólo ese pedazo
+       * entre «·»; lo que escribió una persona se queda. */
+      const d = String(mov.descripcion ?? ''), limpia = sinPorFacturar(d);
+      if (limpia !== d) this.sql.exec(`UPDATE movimientos SET descripcion = ? WHERE id = ?`, limpia, args.movimiento_id);
     });
 
     const aplicado_total = (this.sql
@@ -4144,6 +4167,37 @@ export class OrgDB extends DurableObject<Env> {
       });
       res.escrito = true;
       res.sin_ingresos.marcados = lista.length;
+      return res;
+    }
+    if (args.quitar_por_facturar) {
+      const limpia = sinPorFacturar;
+      const lista = (this.sql.exec(
+        `SELECT m.id, m.fecha, m.monto, m.descripcion, p.nombre AS proyecto,
+                (SELECT GROUP_CONCAT(TRIM(COALESCE(k.serie,'') || '-' || COALESCE(k.folio,''), '-'), ', ')
+                   FROM cfdi_movimientos lm JOIN cfdi k ON k.id = lm.cfdi_id WHERE lm.movimiento_id = m.id) AS facturas
+           FROM movimientos m LEFT JOIN proyectos p ON p.id = m.proyecto_id
+          WHERE m.tipo = 'ingreso' AND EXISTS (SELECT 1 FROM cfdi_movimientos lm WHERE lm.movimiento_id = m.id)
+          ORDER BY m.fecha`,
+      ).toArray() as Fila[]).map((f) => ({
+        id: String(f.id), fecha: String(f.fecha ?? ''), monto: Number(f.monto || 0), proyecto: f.proyecto == null ? null : String(f.proyecto),
+        facturas: String(f.facturas ?? '').split(', ').filter(Boolean), antes: String(f.descripcion ?? ''), despues: limpia(String(f.descripcion ?? '')),
+      })).filter((x) => x.despues !== x.antes);
+      res.por_facturar = { lista, cambiados: 0 };
+      if (!args.escribir) return res;
+      if (conceptos.length || ingresos.length || args.partidas_por_pagar || args.crear_proyecto || (args.corregir ?? []).length || (args.borrar ?? []).length) {
+        res.motivo = 'quitar «por facturar» va solo, sin otra cosa en la misma carga';
+        return res;
+      }
+      const t = ahora();
+      this.ctx.storage.transactionSync(() => {
+        this.sql.exec(`CREATE TABLE IF NOT EXISTS descripciones_anteriores (cambiada_at TEXT NOT NULL, movimiento_id TEXT NOT NULL, antes TEXT NOT NULL)`);
+        for (const x of lista) {
+          this.sql.exec(`INSERT INTO descripciones_anteriores VALUES (?, ?, ?)`, t, x.id, x.antes);
+          this.sql.exec(`UPDATE movimientos SET descripcion = ? WHERE id = ?`, x.despues, x.id);
+        }
+      });
+      res.escrito = true;
+      res.por_facturar.cambiados = lista.length;
       return res;
     }
     if (args.partidas_por_pagar) {

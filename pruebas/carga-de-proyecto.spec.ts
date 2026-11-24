@@ -658,3 +658,42 @@ describe('leer el estado de cuenta de un cliente', () => {
     expect(r.estado).toBe(404);
   });
 });
+
+/* 0.116.2 · Mike, 24-nov-2026: «a pesar de que ya está facturado sigue
+ * apareciendo la leyenda "por facturar" (…) eso se escribe en la plataforma,
+ * no es la descripción manual del pago que hago yo. Esa no se toca». */
+describe('quitar «por facturar» de lo ya facturado', () => {
+  it('el ensayo enseña sólo los facturados con ese pedazo; cargar lo quita y deja lo demás', async () => {
+    const p = await crea('/proyectos', { cliente_id: cliente, nombre: 'Obra por facturar' });
+    const f = await crea('/movimientos', { tipo: 'ingreso', monto: 11_600_00, fecha: '2026-11-19', cuenta_id: cuenta, proyecto_id: p, cliente_id: cliente, descripcion: 'Pago · por facturar · en efectivo · IP-26720-3-014-6-11' });
+    const sinFactura = await crea('/movimientos', { tipo: 'ingreso', monto: 5_800_00, fecha: '2026-11-20', cuenta_id: cuenta, proyecto_id: p, cliente_id: cliente, descripcion: 'Pago 12 · por facturar · en efectivo' });
+    const manual = await crea('/movimientos', { tipo: 'ingreso', monto: 2_320_00, fecha: '2026-11-21', cuenta_id: cuenta, proyecto_id: p, cliente_id: cliente, descripcion: 'Anticipo, lo pagan cuando esté por facturar' });
+    const liga: Array<{ movimiento_id: string; cfdi_id: string }> = [];
+    for (const [mid, tot, n] of [[f, 11_600_00, '9001'], [manual, 2_320_00, '9002']] as const) {
+      const c = await o('/fiscal/cfdi', { method: 'POST', json: { tipo: 'ingreso', rfc: 'QCS931209G49', razon_social: 'Quálitas', uuid: `CCCCCCCC-0000-4000-8000-00000000${n}`, serie: 'A', folio: n, subtotal: tot, iva: Math.round(tot * 0.16), total: tot + Math.round(tot * 0.16), fecha: '2026-11-19' } });
+      expect(c.estado, JSON.stringify(c)).toBe(201);
+      liga.push({ movimiento_id: mid, cfdi_id: c.data.id });
+    }
+    const l = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: { buscar: 'Obra por facturar', proyecto_id: p, conceptos: [], ingresos: [], ligar_existentes: liga } });
+    expect(l.data.escrito, JSON.stringify(l.data.motivo)).toBe(true);
+    // Al ligar la factura, el «por facturar» de la carga se va solo; lo escrito a mano, no.
+    expect((await mov(f)).descripcion).toBe('Pago · en efectivo · IP-26720-3-014-6-11');
+    expect((await mov(manual)).descripcion).toBe('Anticipo, lo pagan cuando esté por facturar');
+    // Lo que se ligó antes de 0.116.2 se quedó con el pedazo: se pone a mano, como estaba.
+    const stub = (env as unknown as Env).ORG.get((env as unknown as Env).ORG.idFromName(ORG)) as unknown as DurableObjectStub;
+    const dentro = runInDurableObject as unknown as (s: unknown, fn: (x: any) => void) => Promise<void>;
+    await dentro(stub, (x: any) => { x.sql.exec(`UPDATE movimientos SET descripcion = ? WHERE id = ?`, 'Pago · por facturar · en efectivo · IP-26720-3-014-6-11', f); });
+    const e = await interno(ORG, { llave: LLAVE, dada: LLAVE, carga: { conceptos: [], ingresos: [], quitar_por_facturar: true } });
+    const ids = e.data.por_facturar.lista.map((x: any) => x.id);
+    expect(ids).toContain(f);
+    expect(ids).not.toContain(sinFactura);
+    expect(ids).not.toContain(manual);
+    expect(e.data.por_facturar.lista.find((x: any) => x.id === f).despues).toBe('Pago · en efectivo · IP-26720-3-014-6-11');
+    expect((await mov(f)).descripcion).toBe('Pago · por facturar · en efectivo · IP-26720-3-014-6-11');
+    const r = await interno(ORG, { llave: LLAVE, dada: LLAVE, modo: 'cargar', carga: { conceptos: [], ingresos: [], quitar_por_facturar: true } });
+    expect(r.data.escrito).toBe(true);
+    expect((await mov(f)).descripcion).toBe('Pago · en efectivo · IP-26720-3-014-6-11');
+    expect((await mov(sinFactura)).descripcion).toBe('Pago 12 · por facturar · en efectivo');
+    expect((await mov(manual)).descripcion).toBe('Anticipo, lo pagan cuando esté por facturar');
+  });
+});
